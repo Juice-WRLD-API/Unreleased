@@ -43,7 +43,6 @@ export default function ChatDevices({ userId }: { userId: number }): JSX.Element
 
 function LegacyDevices({ userId }: { userId: number }): JSX.Element {
   const [devices, setDevices] = useState<ChatDevice[] | null>(null)
-  const [keyedId, setKeyedId] = useState<number | null>(null)
   const [thisDevice, setThisDevice] = useState<string | null>(null)
   const [confirming, setConfirming] = useState<number | null>(null)
   const [busy, setBusy] = useState<number | null>(null)
@@ -53,7 +52,6 @@ function LegacyDevices({ userId }: { userId: number }): JSX.Element {
     try {
       const [list, m] = await Promise.all([api.listMyDevices(), e2e()])
       setDevices(list.sort((a, b) => (b.created_at ?? '').localeCompare(a.created_at ?? '')))
-      setKeyedId(m.primaryDevices(list)[0]?.id ?? null)
       setThisDevice(await m.localDeviceId(userId))
       setError(null)
     } catch (err) {
@@ -100,7 +98,6 @@ function LegacyDevices({ userId }: { userId: number }): JSX.Element {
                   {current && <span className="ml-2 text-[10px] font-semibold uppercase tracking-wide text-accent">This device</span>}
                 </p>
                 <p className="text-text-muted text-[11px] truncate">
-                  {d.id === keyedId ? 'Receives new keys · ' : ''}
                   {d.created_at ? `Added ${new Date(d.created_at).toLocaleString()}` : `Device #${d.id}`}
                 </p>
               </div>
@@ -130,8 +127,8 @@ function LegacyDevices({ userId }: { userId: number }): JSX.Element {
         )
       })}
       <p className="text-text-muted text-[11px] pt-2">
-        New conversation keys go to your oldest device only. Any other browser needs them exported from that device and imported,
-        below. Revoking the keyed device moves that role to the next oldest.
+        Every device here gets each conversation&apos;s current key. Messages from before a device joined need their keys exported
+        from a device that has them and imported, below. Revoke the devices you no longer use.
       </p>
       {error && <p className="text-red-400 text-[11px] pt-1">{error}</p>}
     </div>

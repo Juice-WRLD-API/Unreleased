@@ -11,6 +11,7 @@ import ViewSkeleton from './components/ViewSkeleton'
 import { ViewType } from './types'
 import { ADMIN_PATH_TABS } from './hooks/useAdminQueue'
 import { useAndroidBackButton } from './hooks/useAndroidBackButton'
+import ViewFade from './components/ViewFade'
 
 // Minimum gap between window-focus-triggered refetches (playlists, news) -
 // alt-tabbing back and forth shouldn't refire a request on every focus event.
@@ -55,7 +56,8 @@ function getViewFromPath(pathname: string): ViewType {
   if (pathname === '/statistics') return 'statistics'
   if (pathname === '/download') return 'download'
   if (pathname === '/thank-you') return 'thanks'
-  if (pathname === '/settings') return 'settings'
+  // Desktop shows Settings as a modal over Home (the store opens it from the URL).
+  if (pathname === '/settings') return isMobileViewport() ? 'settings' : 'home'
   if (pathname === '/chat' || pathname.startsWith('/chat/')) return 'chat'
   if (pathname === '/terminal') return 'terminal'
   if (pathname.startsWith('/shared/')) return 'shared-playlist'
@@ -74,6 +76,9 @@ import LastfmScrobbler from './components/LastfmScrobbler'
 import NowPlayingSharer from './components/NowPlayingSharer'
 import NewsNotifier from './components/NewsNotifier'
 import BroadcastNotifier from './components/BroadcastNotifier'
+import AppToastHost from './components/AppToastHost'
+import DebugRecordingPill from './components/DebugRecorder'
+import { useDebugLogViewer } from './lib/debugLog'
 import ChatNotificationBanner from './components/ChatNotificationBanner'
 import ReportModal from './components/ReportModal'
 import InstallPrompt from './components/InstallPrompt'
@@ -81,8 +86,7 @@ import CookieNotice from './components/CookieNotice'
 import DonationNotice from './components/DonationNotice'
 import Player from './components/Player'
 import NativeMediaSession from './components/NativeMediaSession'
-import NowPlaying from './components/NowPlaying'
-import QueuePanel from './components/QueuePanel'
+import SidePanels from './components/SidePanels'
 import ErrorBoundary from './components/ErrorBoundary'
 import { lazyOverlay, lazyView } from './lib/lazyView'
 import SandboxNotch from './components/SandboxNotch'
@@ -107,7 +111,10 @@ import { useChatBootstrap } from './hooks/useChatBootstrap'
 // shipped to every visitor in the startup bundle.
 import { UserCardHost } from './components/chat/UserCard'
 const UserAuthModal = lazyOverlay(() => import('./components/UserAuthModal'))
+const DebugLogViewer = lazyView(() => import('./components/DebugLogViewer'))
 const LoginApprovalPrompt = lazyView(() => import('./components/LoginApprovalPrompt'))
+// Donors and administrators only - fetched the first time it opens.
+const LyricsGenModal = lazyOverlay(() => import('./components/LyricsGenModal'))
 const BulkEditModal = lazyOverlay(() => import('./components/BulkEditModal'))
 const UploadManager = lazyOverlay(() => import('./components/UploadManager'))
 const GlobalSongInfoHost = lazyOverlay(async () => ({ default: (await import('./components/SongInfoModal')).GlobalSongInfoHost }))
@@ -135,8 +142,8 @@ export default function App(): JSX.Element {
     const interval = setInterval(() => { void scanLibrary() }, 15 * 60 * 1000)
     return () => { document.removeEventListener('visibilitychange', onVisible); clearInterval(interval) }
   }, [libraryAutoRefresh, libraryFolders, loadLibrary, scanLibrary])
-  const { showNowPlaying, showQueue, showDiagnostics, setShowDiagnostics, showUploadManager, setShowUploadManager, activeView, previousView, sidebarPosition, navStyle, autoHideNav, loadAccount, completeDiscordLogin, showUserAuth, setShowUserAuth, prefetchApiData, refreshPlaylists, heroBleedTop, navOrder, navVisibility, activeChannel, bulkEdit, infoSongId } = useStorePick(
-    'showNowPlaying', 'showQueue', 'showDiagnostics', 'setShowDiagnostics', 'showUploadManager', 'setShowUploadManager', 'activeView', 'previousView', 'sidebarPosition', 'navStyle', 'autoHideNav', 'loadAccount', 'completeDiscordLogin', 'showUserAuth', 'setShowUserAuth', 'prefetchApiData', 'refreshPlaylists', 'heroBleedTop', 'navOrder', 'navVisibility', 'activeChannel', 'bulkEdit', 'infoSongId')
+  const { showNowPlaying, showQueue, showSettings, setShowSettings, showDiagnostics, setShowDiagnostics, showUploadManager, setShowUploadManager, activeView, previousView, sidebarPosition, navStyle, autoHideNav, loadAccount, completeDiscordLogin, showUserAuth, setShowUserAuth, prefetchApiData, refreshPlaylists, heroBleedTop, navOrder, navVisibility, activeChannel, bulkEdit, infoSongId } = useStorePick(
+    'showNowPlaying', 'showQueue', 'showSettings', 'setShowSettings', 'showDiagnostics', 'setShowDiagnostics', 'showUploadManager', 'setShowUploadManager', 'activeView', 'previousView', 'sidebarPosition', 'navStyle', 'autoHideNav', 'loadAccount', 'completeDiscordLogin', 'showUserAuth', 'setShowUserAuth', 'prefetchApiData', 'refreshPlaylists', 'heroBleedTop', 'navOrder', 'navVisibility', 'activeChannel', 'bulkEdit', 'infoSongId')
   // What renders behind WRLD - WRLD is a full-screen overlay on top of
   // wherever you were (Spotify-style "now playing" sheet), not a real nav
   // destination, so dragging it down should reveal that page like a curtain
@@ -156,11 +163,8 @@ export default function App(): JSX.Element {
   }
   const heldView = heldViewRef.current
   const isMobile = useIsMobile()
-  // Keep the panel mounted after its first open instead of unmounting on
-  // close - unmounting destroyed every cover <img>, so reopening the queue
-  // made them all reload/re-decode from scratch instead of just reappearing.
-  const [queueEverOpened, setQueueEverOpened] = useState(showQueue)
-  useEffect(() => { if (showQueue) setQueueEverOpened(true) }, [showQueue])
+  const debugLogOpen = useDebugLogViewer((s) => s.log !== null)
+  const lyricsGenOpen = useStore((s) => s.lyricsGenModal !== null)
   useThemeEffects()
   useChatBootstrap()
   // Seed auth token from env in local dev only - import.meta.env.DEV is false in production
@@ -344,18 +348,20 @@ export default function App(): JSX.Element {
             {/* Holdable views live in their own keyed slots so toggling between
                 "shown" and "hidden under the terminal" never remounts them.
                 `contents` keeps the wrapper out of the flex layout. */}
+            {/* ViewFade: each view fades/lifts in as it comes on screen. */}
             {HOLD_UNDER_TERMINAL.map((v) => (bgView === v || heldView === v) && (
-              <div key={v} className={bgView === v ? 'contents' : 'hidden'}>
+              <ViewFade key={v} active={bgView === v}>
                 {v === 'editor' ? <EditorPage />
                   : v === 'contributor' ? <ContributorPage />
                   : v === 'albums-admin' ? <AlbumsAdminView />
                   : v === 'playlists' ? <PlaylistsView />
                   : v === 'settings' ? <Settings />
                   : <ChatView />}
-              </div>
+              </ViewFade>
             ))}
-            {HOLD_UNDER_TERMINAL.includes(bgView) ? null
-              : bgView === 'home' ? <HomeView />
+            {!HOLD_UNDER_TERMINAL.includes(bgView) && (
+            <ViewFade key={bgView} active>
+              {bgView === 'home' ? <HomeView />
               : bgView === 'api-tracker' ? <ApiTrackerView />
               : bgView === 'api-files' ? <ApiFilesView />
               : bgView === 'library' ? <LibraryTab />
@@ -378,6 +384,8 @@ export default function App(): JSX.Element {
               : bgView === 'terminal' ? <TerminalPage />
               : bgView === 'not-found' ? <NotFoundView />
               : <ApiTrackerView />}
+            </ViewFade>
+            )}
             </Suspense>
           </ErrorBoundary>
             {/* WRLD is a full-screen overlay on top of bgView above, not a
@@ -403,22 +411,7 @@ export default function App(): JSX.Element {
                 </Suspense>
               </ErrorBoundary>
             )}
-            {/* Desktop only - on mobile the WRLD tab is the only "now playing"
-                screen (the mini player expands straight into it), so this
-                would only ever be a redundant second one. Nothing on mobile
-                can actually open it (its trigger button lives in the
-                desktop-only bottom bar), but excluding it here is the real
-                guarantee rather than relying on that. */}
-            {!isMobile && showNowPlaying && activeView !== 'wrld' && <ErrorBoundary><NowPlaying /></ErrorBoundary>}
-            {queueEverOpened && (
-              <ErrorBoundary>
-                {/* flex so QueuePanel stretches to the full height; a plain
-                    block wrapper let it collapse to its content height. */}
-                <div className="flex shrink-0" style={showQueue && activeView !== 'wrld' ? undefined : { display: 'none' }}>
-                  <QueuePanel />
-                </div>
-              </ErrorBoundary>
-            )}
+            <SidePanels nowPlaying={!isMobile && showNowPlaying && activeView !== 'wrld'} queue={showQueue && activeView !== 'wrld'} />
           </div>
         </main>
       </div>
@@ -438,12 +431,24 @@ export default function App(): JSX.Element {
       <ErrorBoundary fallback={null}><NowPlayingSharer /></ErrorBoundary>
       <ErrorBoundary fallback={null}><NewsNotifier /></ErrorBoundary>
       <ErrorBoundary fallback={null}><BroadcastNotifier /></ErrorBoundary>
+      <ErrorBoundary fallback={null}><AppToastHost /></ErrorBoundary>
+      <ErrorBoundary fallback={null}><DebugRecordingPill /></ErrorBoundary>
       <ErrorBoundary fallback={null}><ChatNotificationBanner /></ErrorBoundary>
       <ErrorBoundary fallback={null}><BottomNav /></ErrorBoundary>
       <ErrorBoundary fallback={null}><MoreNavSheet /></ErrorBoundary>
+      {showSettings && !isMobile && (
+        <ErrorBoundary variant="overlay" onDismiss={() => setShowSettings(false)}>
+          <Suspense fallback={null}><Settings /></Suspense>
+        </ErrorBoundary>
+      )}
       {showDiagnostics && (
         <ErrorBoundary variant="overlay" onDismiss={() => setShowDiagnostics(false)}>
           <Suspense fallback={null}><DiagnosticsModal /></Suspense>
+        </ErrorBoundary>
+      )}
+      {debugLogOpen && (
+        <ErrorBoundary variant="overlay" onDismiss={() => useDebugLogViewer.getState().close()}>
+          <Suspense fallback={null}><DebugLogViewer /></Suspense>
         </ErrorBoundary>
       )}
       {showUploadManager && (
@@ -459,6 +464,11 @@ export default function App(): JSX.Element {
       <ErrorBoundary fallback={null}><Suspense fallback={null}><LoginApprovalPrompt /></Suspense></ErrorBoundary>
       <ErrorBoundary variant="overlay"><ReportModal /></ErrorBoundary>
       {bulkEdit && <ErrorBoundary variant="overlay"><BulkEditModal /></ErrorBoundary>}
+      {lyricsGenOpen && (
+        <ErrorBoundary variant="overlay" onDismiss={() => useStore.getState().closeLyricsGen()}>
+          <LyricsGenModal />
+        </ErrorBoundary>
+      )}
       <ErrorBoundary fallback={null}><InstallPrompt /></ErrorBoundary>
       <ErrorBoundary fallback={null}><CookieNotice /></ErrorBoundary>
       <ErrorBoundary fallback={null}><DonationNotice /></ErrorBoundary>

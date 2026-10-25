@@ -173,6 +173,22 @@ export function table(rows: string[][], max = 48): string {
   return rows.map((r) => r.map((cell, c) => (c === r.length - 1 ? cell : oneLine(cell, widths[c]).padEnd(widths[c] + 2))).join('')).join('\n')
 }
 
+// A name in printed output that opens that user's public profile when clicked.
+// The markers are private-use characters the scrollback turns into a button;
+// `plainOutput` drops them wherever the text is shown as-is.
+const PROFILE_OPEN = ''
+const PROFILE_SEP = ''
+const PROFILE_CLOSE = ''
+export const PROFILE_LINK_RE = /(\d+)([^]*)/g
+
+export const profileLink = (userId: number, name: string): string => `${PROFILE_OPEN}${userId}${PROFILE_SEP}${name}${PROFILE_CLOSE}`
+
+/** `name` padded to `width` like padEnd, wrapped as a profile link. */
+export const profileLinkPadded = (userId: number, name: string, width: number): string =>
+  profileLink(userId, name) + ' '.repeat(Math.max(0, width - name.length))
+
+export const plainOutput = (text: string): string => text.replace(PROFILE_LINK_RE, '$2')
+
 /** Validates an inline JSON argument (a body a command sends as-is). */
 export function parseJsonArg(text: string, usage: string): unknown {
   const t = text.trim()

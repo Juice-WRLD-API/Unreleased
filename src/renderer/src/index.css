@@ -95,13 +95,15 @@
 }
 
 /* ─── Palette cross-fade ─────────────────────────────────────────────────────────
-   Registering the palette vars as typed properties lets Chromium interpolate
-   the variables themselves, so every surface/text/border consuming them fades
-   in lockstep when a skin swap (or the Now Playing skin reacting to a new
-   song's cover art) writes new values onto <html>. The .theme-animate class
-   is added by useThemeEffects one frame after the first palette application,
-   so startup snaps straight to the persisted skin instead of fading in from
-   the first-paint fallback above. */
+   A skin swap (or the Now Playing skin reacting to a new song's cover art)
+   writes the new palette inside a view transition of type 'palette' - see
+   paintPalette in lib/themeEffects.ts. The browser cross-fades a snapshot of
+   the old frame into the live new one, so nothing restyles mid-fade. These
+   vars used to be transitioned directly, which restyled the whole app every
+   frame and made switching laggy.
+   The vars stay registered as typed properties: getComputedStyle readers
+   (syncThemeColorMeta, the visualizer, DesktopPicker) get them back in their
+   computed form. */
 @property --surface { syntax: '<color>'; inherits: true; initial-value: #ffffff; }
 @property --surface-raised { syntax: '<color>'; inherits: true; initial-value: #f5f5f5; }
 @property --surface-overlay { syntax: '<color>'; inherits: true; initial-value: #ebebeb; }
@@ -118,24 +120,20 @@
 @property --accent-rgb { syntax: '<number>+'; inherits: true; initial-value: 29 185 84; }
 @property --accent-hover-rgb { syntax: '<number>+'; inherits: true; initial-value: 30 215 96; }
 
-/* Accent vars fade faster so dragging the custom accent picker stays snappy. */
-html.theme-animate {
-  transition:
-    --surface 700ms ease,
-    --surface-raised 700ms ease,
-    --surface-overlay 700ms ease,
-    --surface-highest 700ms ease,
-    --sidebar 700ms ease,
-    --titlebar 700ms ease,
-    --text-primary 700ms ease,
-    --text-secondary 700ms ease,
-    --text-muted 700ms ease,
-    --border 700ms ease,
-    --scrollbar 700ms ease,
-    --accent 350ms ease,
-    --accent-rgb 350ms ease,
-    --accent-hover 350ms ease,
-    --accent-hover-rgb 350ms ease;
+/* Clicks and hovers pass through to the live page while the snapshot fades. */
+html:active-view-transition-type(palette)::view-transition { pointer-events: none; }
+html:active-view-transition-type(palette)::view-transition-old(root),
+html:active-view-transition-type(palette)::view-transition-new(root) {
+  animation-duration: 450ms;
+  animation-timing-function: cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+/* A dialog growing or shrinking (ModalOverlay's `expanded`) cross-fades the same way. */
+html:active-view-transition-type(panel-resize)::view-transition { pointer-events: none; }
+html:active-view-transition-type(panel-resize)::view-transition-old(root),
+html:active-view-transition-type(panel-resize)::view-transition-new(root) {
+  animation-duration: 450ms;
+  animation-timing-function: cubic-bezier(0.4, 0, 0.2, 1);
 }
 
 /* ─── Gradient surfaces ──────────────────────────────────────────────────────────
@@ -287,6 +285,15 @@ html.wrld-active #root {
 /* Hide scrollbar utility */
 .no-scrollbar::-webkit-scrollbar { display: none; }
 .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+
+/* Number inputs: drop the OS-drawn spin buttons, which render as light grey
+   arrows on the dark fields. Arrow keys and the wheel still step the value. */
+input[type='number']::-webkit-inner-spin-button,
+input[type='number']::-webkit-outer-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+input[type='number'] { -moz-appearance: textfield; appearance: textfield; }
 
 /* Range input */
 input[type='range'] {
@@ -513,19 +520,29 @@ input[type='range']:active::-moz-range-thumb {
   animation: slide-in-right 0.28s cubic-bezier(0.25, 1, 0.5, 1) both;
 }
 
-/* Track row stagger - cap delay at first 30 rows */
-.track-row { animation: fade-in 0.18s cubic-bezier(0.16, 1, 0.3, 1) both; }
-.track-row:nth-child(1)  { animation-delay:   0ms; }
-.track-row:nth-child(2)  { animation-delay:  20ms; }
-.track-row:nth-child(3)  { animation-delay:  35ms; }
-.track-row:nth-child(4)  { animation-delay:  50ms; }
-.track-row:nth-child(5)  { animation-delay:  65ms; }
-.track-row:nth-child(6)  { animation-delay:  80ms; }
-.track-row:nth-child(7)  { animation-delay:  92ms; }
-.track-row:nth-child(8)  { animation-delay: 104ms; }
-.track-row:nth-child(9)  { animation-delay: 114ms; }
-.track-row:nth-child(10) { animation-delay: 124ms; }
-.track-row:nth-child(n+11) { animation-delay: 130ms; }
+/* Track lists cascading in on arrival (hooks/useCascade puts .rows-cascade on
+   the rows' parent for a moment). Only the first couple of dozen rows - the
+   ones on screen - stagger; animating hundreds at once would just cost. */
+@keyframes row-in {
+  from { opacity: 0; transform: translateY(8px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+.rows-cascade > :nth-child(-n+24) { animation: row-in 0.36s cubic-bezier(0.33, 0, 0.15, 1) both; }
+.rows-cascade > :nth-child(2)  { animation-delay:  16ms; }
+.rows-cascade > :nth-child(3)  { animation-delay:  32ms; }
+.rows-cascade > :nth-child(4)  { animation-delay:  48ms; }
+.rows-cascade > :nth-child(5)  { animation-delay:  64ms; }
+.rows-cascade > :nth-child(6)  { animation-delay:  80ms; }
+.rows-cascade > :nth-child(7)  { animation-delay:  96ms; }
+.rows-cascade > :nth-child(8)  { animation-delay: 112ms; }
+.rows-cascade > :nth-child(9)  { animation-delay: 128ms; }
+.rows-cascade > :nth-child(10) { animation-delay: 144ms; }
+.rows-cascade > :nth-child(11) { animation-delay: 158ms; }
+.rows-cascade > :nth-child(12) { animation-delay: 172ms; }
+.rows-cascade > :nth-child(13) { animation-delay: 186ms; }
+.rows-cascade > :nth-child(14) { animation-delay: 198ms; }
+.rows-cascade > :nth-child(15) { animation-delay: 210ms; }
+.rows-cascade > :nth-child(n+16):nth-child(-n+24) { animation-delay: 220ms; }
 
 /* Art loading shimmer */
 .art-shimmer {
@@ -550,6 +567,127 @@ input[type='range']:active::-moz-range-thumb {
   animation: wrld-queue-in 0.38s cubic-bezier(0.16, 1, 0.3, 1) both;
 }
 
+/* ─── WRLD side panel (lyrics / queue / FM radio) ───────────────────────────────
+   The toolbar's panel toggle. The player column glides between centred and the
+   left half (a transform, run from WrldView - SPLIT_GLIDE_MS), while the panel
+   slides in from the right behind it. Closing keeps the panel mounted just long
+   enough for wrld-panel-out (PANEL_EXIT_MS) while the player glides back.
+   Curves here start gently and settle long rather than the expo-out used
+   elsewhere, which put most of the motion in the first ~100ms and read as a
+   snap. Only transform and opacity animate, and no text is scaled - scaled
+   text re-rasterises and shimmers. */
+@keyframes wrld-panel-in {
+  0%   { opacity: 0; transform: translateX(40px); }
+  55%  { opacity: 1; }
+  100% { opacity: 1; transform: translateX(0); }
+}
+@keyframes wrld-panel-out {
+  from { opacity: 1; transform: translateX(0); }
+  to   { opacity: 0; transform: translateX(32px); }
+}
+.animate-wrld-panel-in  { animation: wrld-panel-in 0.6s cubic-bezier(0.33, 0, 0.15, 1) 0.1s both; }
+.animate-wrld-panel-out { animation: wrld-panel-out 0.36s cubic-bezier(0.4, 0, 0.6, 1) both; pointer-events: none; }
+
+/* Swapping views inside the open panel (lyrics <-> queue, radio <-> lyrics) is
+   a crossfade: the old view lifts away, and the new one rises in once it has
+   mostly gone. Only on a swap - a view arriving with the panel itself doesn't
+   animate on its own (WrldPanelLayer). VIEW_EXIT_MS in WrldView matches
+   wrld-view-out. */
+@keyframes wrld-view-in {
+  from { opacity: 0; transform: translateY(10px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+@keyframes wrld-view-out {
+  from { opacity: 1; transform: translateY(0); }
+  to   { opacity: 0; transform: translateY(-6px); }
+}
+.animate-wrld-view-in  { animation: wrld-view-in 0.46s cubic-bezier(0.33, 0, 0.15, 1) 0.14s both; }
+.animate-wrld-view-out { animation: wrld-view-out 0.22s cubic-bezier(0.4, 0, 0.6, 1) both; pointer-events: none; }
+
+/* The toggle's own icon (lyrics / queue / radio) turns in when it changes. */
+@keyframes wrld-icon-swap {
+  from { opacity: 0; transform: scale(0.7) rotate(-30deg); }
+  to   { opacity: 1; transform: scale(1)   rotate(0); }
+}
+.animate-wrld-icon-swap { display: inline-flex; animation: wrld-icon-swap 0.38s cubic-bezier(0.3, 1.25, 0.5, 1) both; }
+
+/* ─── Sliding nav highlight ────────────────────────────────────────────────────
+   hooks/useSlidingIndicator: one highlight behind the nav items, moved onto the
+   active one. z-index -1 inside the nav's own stacking context (it's `isolate`)
+   sits it behind the items but over the nav's background. margin: 0 because a
+   space-y sibling rule would otherwise push it off by a gap. Size and position
+   are written inline; this is how they move. */
+.nav-indicator {
+  position: absolute;
+  top: 0;
+  left: 0;
+  margin: 0 !important;
+  z-index: -1;
+  pointer-events: none;
+  opacity: 0;
+  will-change: transform;
+  transition:
+    transform 0.38s cubic-bezier(0.4, 0, 0.2, 1),
+    width 0.38s cubic-bezier(0.4, 0, 0.2, 1),
+    height 0.38s cubic-bezier(0.4, 0, 0.2, 1),
+    opacity 0.2s ease;
+}
+
+/* ─── Playlist grid quick view ─────────────────────────────────────────────────
+   PlaylistsView's card grids. Row spacing is each item's bottom margin instead
+   of row-gap: the quick-view panel sits in a full-width row of its own, and a
+   row-gap would surround even an empty row - so opening one jumped everything
+   below by a gap before the panel had grown at all. The grid's negative margin
+   takes back the last row's, leaving the spacing after the grid as it was. */
+.pl-grid {
+  position: relative;
+  --pl-col-gap: 1rem;
+  --pl-row-gap: 1.5rem;
+  column-gap: var(--pl-col-gap);
+  row-gap: 0;
+  margin-bottom: calc(-1 * var(--pl-row-gap));
+}
+.pl-grid > * { margin-bottom: var(--pl-row-gap); }
+
+/* GridPanelSlot uses its natural height. Displaced tiles slide with
+   useListMotion; the panel itself only fades. */
+.pl-grid-panel {
+  overflow: hidden;
+  margin-top: calc(var(--pl-row-gap) * -0.5);
+}
+.pl-grid-panel-inner {
+  position: relative;
+  padding-top: 0.625rem;
+  opacity: 0;
+  transition: opacity 0.48s cubic-bezier(0.4, 0, 0.2, 1);
+}
+.pl-grid-panel-inner.is-open { opacity: 1; }
+.pl-grid-panel.is-closing .pl-grid-panel-inner { transition-duration: 0.24s; }
+.pl-grid-caret-track {
+  position: absolute;
+  z-index: 1;
+  top: calc(0.625rem - 7px);
+  left: 0;
+  width: 100%;
+  pointer-events: none;
+  transition: transform 0.48s cubic-bezier(0.4, 0, 0.2, 1);
+}
+/* A rotated square on top of the panel's top border: its own top/left borders
+   draw the notch and its fill hides the border line underneath. */
+.pl-grid-caret {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 14px;
+  height: 14px;
+  margin-left: -7px;
+  z-index: 1;
+  transform: rotate(45deg);
+  border-top: 1px solid var(--border);
+  border-left: 1px solid var(--border);
+  border-top-left-radius: 3px;
+}
+
 /* Per-row reveal, staggered - layered on top of the panel entrance so the
    list cascades in. `backwards` (not `both`) so the fill state is dropped
    once the animation ends, leaving the drag-reorder transforms free to apply. */
@@ -570,16 +708,87 @@ input[type='range']:active::-moz-range-thumb {
 .wrld-q-row:nth-child(10)  { animation-delay: 166ms; }
 .wrld-q-row:nth-child(n+11) { animation-delay: 172ms; }
 
-/* App-menu dropdown / submenu entrance - a quick, subtle scale-fade. The panel
-   sets transform-origin inline (top vs bottom) so it grows out of the trigger
-   whether it opens downward or flips above it (bottom nav bar). */
+/* Menu / flyout entrance, also used by Transfers. A fade keeps text crisp
+   and leaves anchored menus in place, including ones flipped above a trigger. */
 @keyframes menu-pop {
-  from { opacity: 0; transform: scale(0.96); }
-  to   { opacity: 1; transform: scale(1); }
+  from { opacity: 0; }
+  to   { opacity: 1; }
 }
 .animate-menu-pop {
-  animation: menu-pop 0.13s cubic-bezier(0.16, 1, 0.3, 1) both;
+  animation: menu-pop 0.45s cubic-bezier(0.4, 0, 0.2, 1) backwards;
 }
+
+/* Settings disclosures only arrive in response to expanding a section. */
+@keyframes disclosure-in {
+  from { opacity: 0; transform: translateY(-6px); }
+  to   { opacity: 1; transform: none; }
+}
+.animate-disclosure-in {
+  animation: disclosure-in 0.48s cubic-bezier(0.4, 0, 0.2, 1) backwards;
+}
+
+/* Shared switch thumbs, checkmarks, disclosure arrows and transfer progress.
+   Keep their motion off layout: no left/width or transition-all. */
+.control-motion {
+  transition-property: transform, opacity;
+  transition-duration: 0.45s;
+  transition-timing-function: cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+/* Glass menus - the look of the new-style WRLD player's own menu
+   (desktop/pages/player.css, #menu): a see-through pane blurring what's
+   behind it, a light rim, and rows as rounded pills inside a padded edge.
+   Mixed from the skin's colors so it reads on every theme. The 4px padding
+   matches placeFlyout's `ir.top - 4`, which lines a flyout's first row up
+   with the row that opened it. Rows take `menu-glass-row`. */
+.menu-glass {
+  --menu-glass-fill: color-mix(in srgb, var(--text-primary) 10%, transparent);
+  background: var(--surface);
+  background: color-mix(in srgb, var(--surface) 72%, transparent);
+  -webkit-backdrop-filter: blur(24px) saturate(1.6);
+  backdrop-filter: blur(24px) saturate(1.6);
+  border-radius: 12px;
+  padding: 4px;
+  box-shadow:
+    inset 0 0 0 1px color-mix(in srgb, var(--text-primary) 14%, transparent),
+    0 10px 28px rgb(0 0 0 / 0.35);
+}
+.menu-glass-row { border-radius: 8px; }
+.menu-glass-row:hover:not(:disabled),
+.menu-glass-row:focus-visible,
+.menu-glass-row.is-open {
+  background: var(--menu-glass-fill);
+  outline: none;
+}
+@media (prefers-reduced-transparency: reduce) {
+  .menu-glass {
+    background: var(--surface);
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+  }
+}
+
+/* The copy a closing modal or menu leaves behind to animate out on
+   (hooks/useExitGhost). Inert, and frozen in the state it closed in: as a
+   fresh element its own CSS entrances and transitions would start over - a
+   menu-pop restarting under the exit fade, say. Visible even inside a sandbox
+   slot that hid itself when its last panel left. */
+.exit-ghost { visibility: visible !important; }
+.exit-ghost, .exit-ghost * {
+  pointer-events: none !important;
+  animation: none !important;
+  transition: none !important;
+}
+
+/* Images that were still loading when they appeared: held invisible, then
+   faded in once loaded (lib/imageFade sets the attribute). The keyframe has no
+   `to`, so it lands on the image's own opacity, whatever that is. */
+@keyframes img-fade-in { from { opacity: 0; } }
+img[data-img-fade="pending"] { opacity: 0; }
+img[data-img-fade="in"] { animation: img-fade-in 0.42s cubic-bezier(0.33, 0, 0.15, 1); }
+
+/* Player cover art crossfading between songs (PlayerMotion's CoverFade). */
+.cover-fade { transition: opacity 0.34s cubic-bezier(0.33, 0, 0.15, 1); }
 
 /* Wordle: the row a rejected guess was typed into. The message under the board
    says what's wrong; this is what makes it land without being read. */
@@ -600,9 +809,15 @@ input[type='range']:active::-moz-range-thumb {
      animation entirely would leave it stuck at `from` (invisible, offset, or
      translated off-screen). A near-zero duration lands on `to` immediately. */
   .animate-wrld-queue-in,
+  .animate-wrld-panel-in,
+  .animate-wrld-panel-out,
+  .animate-wrld-view-in,
+  .animate-wrld-view-out,
+  .animate-wrld-icon-swap,
   .wrld-q-row,
   .animate-wordle-shake,
   .animate-menu-pop,
+  .animate-disclosure-in,
   .animate-fade-in,
   .animate-slide-in-right,
   .animate-slide-up,
@@ -612,7 +827,6 @@ input[type='range']:active::-moz-range-thumb {
   .animate-scrim-in,
   .animate-scrim-out,
   .animate-lyric-line-in,
-  .track-row,
   .view-enter { animation-duration: 0.01ms; animation-delay: 0ms; }
 
   /* Decorative loops with nothing to land on - just stop them. eq-bar keeps a
@@ -620,12 +834,16 @@ input[type='range']:active::-moz-range-thumb {
      The chat.* classes get the same treatment next to their own definitions
      in components/chat/chat.css, which loads after this file. */
   .eq-bar { animation: none; transform: scaleY(0.7); }
+  /* Outranks the per-row delays above; a row's resting state is just shown. */
+  .rows-cascade > * { animation: none !important; }
   .art-shimmer { animation: none; }
 
-  /* The palette cross-fade (see html.theme-animate above) is a transition, not
-     an animation, so it needs its own opt-out - a skin swap should land on the
-     new colours at once rather than sweeping every surface through 700ms. */
-  html.theme-animate { transition: none; }
+  .pl-grid-panel,
+  .pl-grid-panel-inner,
+  .pl-grid-caret-track,
+  .nav-indicator,
+  .control-motion,
+  .cover-fade { transition: none !important; }
 }
 
 /* Suspense fallback for a lazily-loaded view (components/ViewSkeleton).

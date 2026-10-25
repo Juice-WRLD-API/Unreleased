@@ -1,27 +1,29 @@
 ﻿import { create } from 'zustand'
 import { useShallow } from 'zustand/react/shallow'
-import { ViewType, Track, FullTrack, LibraryTrack, LocalPlaylist, GuestPlaylist, FollowedPlaylist, DonorPlaylist, OfflineTrackMeta, OfflinePlaylistEntry } from '../types'
-import { listDonorFiles } from '../lib/donorFilesApi'
-import type { DonorFile } from '../lib/donorFilesApi'
+import { ViewType, Track, FullTrack, LibraryTrack, LocalPlaylist, GuestPlaylist, FollowedPlaylist, DonorPlaylist, LyricsGenTarget, OfflineTrackMeta, OfflinePlaylistEntry } from '../types'
 import { clearDonorPlaybackCache } from '../lib/donorPlayback'
 import { clearDonorImageCache } from '../lib/donorImageCache'
 import { clearDonorCoverCache } from '../lib/donorCoverArt'
 import { APP_VERSION } from '../lib/appVersion'
 import { ls } from '../lib/persist'
 import * as userApi from '../lib/userApi'
+import { signInWithPasskey } from '../lib/passkeyApi'
+import { migrateDonorPlaylists } from '../lib/donorPlaylistEntries'
+import { playlistSongIds } from '../lib/playlistItems'
 import type { AccountUser, PlaylistSummary, UserSettings } from '../lib/userApi'
 import type { GifResult } from '../lib/gifApi'
 import * as preferencesApi from '../lib/preferencesApi'
 import * as profilePushApi from '../lib/profilePushApi'
-import { apiFetch, apiPeek, buildStreamUrl, buildImageUrl, parseDuration, resolvePrefCoverUrl, fetchChannels, getSongsByIds, songToTrack, peekTrackerCatalog, fetchTrackerCatalog, OMIT_BULK } from '../lib/juicewrldApi'
+import { apiFetch, apiPeek, getSongById, buildStreamUrl, buildImageUrl, parseDuration, overrideCoverUrl, fetchChannels, getSongsByIds, songToTrack, peekTrackerCatalog, fetchTrackerCatalog, OMIT_BULK } from '../lib/juicewrldApi'
 import type { JWApiSong, JWApiChannel } from '../lib/juicewrldApi'
+import { resolveSongFile } from '../lib/sessionEditsApi'
 import {
   emptySongPref, isEmptySongPref, normalizePrefText, setSongPrefsCache, normalizeSongPref, songPrefsMatchServer,
 } from '../lib/songPrefs'
 import type { SongPreference, SongPrefMap, SongPrefPatch, WireSongPreference } from '../lib/songPrefs'
-import { peekRotatedCover } from '../lib/coverRotation'
+import { getVersionGroup } from '../lib/versionsApi'
 import { advanceRotatedCover, resetCoverRotation } from '../lib/coverSuggestions'
-import { peekEraCover, setEraCoverRaw } from '../lib/eraCovers'
+import { setEraCoverRaw } from '../lib/eraCovers'
 import { setActiveChannelCache } from '../lib/activeChannelState'
 import {
   appendListeningPlay,
@@ -42,16 +44,17 @@ import { ADMIN_TAB_PATHS } from '../hooks/useAdminQueue'
 import type { AdminTab } from '../hooks/useAdminQueue'
 import { foldersMatchServer, newFolderId, normalizeFolderName, pruneFolders } from '../lib/playlistFolders'
 import type { PlaylistFolder, ServerPlaylistFolder } from '../lib/playlistFolders'
-import { createQueueSlice, QueueSlice } from './queueSlice'
+import { createQueueSlice, QueueSlice, withoutPlayHistory } from './queueSlice'
+import { createDesktopSlice, type DesktopSlice } from './desktopSlice'
 import { getSkin, setCustomSkinsCache, type Skin, type SkinId } from '../lib/skins'
-import { getFont } from '../lib/fonts'
+import { getFont, syncedFontId } from '../lib/fonts'
 import {
   sanitizeFieldKeys, DEFAULT_DETAIL_FIELDS, DEFAULT_MOBILE_DETAIL_FIELDS, DEFAULT_LIST_COLUMNS,
   MAX_DETAIL_FIELDS, MAX_MOBILE_DETAIL_FIELDS, MAX_LIST_COLUMNS, OPTIONAL_SONG_FIELDS,
 } from '../lib/trackerFields'
 import type { TrackerFieldKey } from '../lib/trackerFields'
-import { EQ_BANDS, EQ_PRESETS, FLAT_GAINS } from '../lib/audioEffects'
-import type { CommunityEdit } from '../lib/audioEffects'
+import { EQ_BANDS, EQ_PRESETS, FLAT_GAINS, DEFAULT_FX, USER_PRESET_PREFIX, USER_PRESET_NAME_MAX, sanitizeFx, sanitizeUserPresets } from '../lib/audioEffects'
+import type { AudioFx, CommunityEdit, EqPreset } from '../lib/audioEffects'
 import { HOTKEY_ACTIONS, effectiveBinding, effectiveGlobalBinding, defaultGlobalBinding } from '../lib/hotkeys'
 import { DEFAULT_NAV_ORDER, DEFAULT_NAV_VISIBILITY, DEFAULT_NAV_CONTROL_ORDER, DEFAULT_NAV_CONTROL_VISIBILITY } from '../lib/navItems'
 import { DEFAULT_HOME_SECTION_VISIBILITY } from '../lib/homeSections'
@@ -62,6 +65,9 @@ import * as localLibrary from '../lib/localLibrary'
 import { saveFile } from '../lib/fileSave'
 import { parseM3u, serializeM3u, pickM3uFile, nameFromFilename } from '../lib/m3u'
 import { getOfflineApi } from '../lib/offlineBackend'
+import { isMobileViewport } from '../hooks/useIsMobile'
+import { showAppToast } from '../lib/appToast'
+import { setNotificationsSignedIn } from '../lib/notificationSocket'
 
 // Lightweight localStorage persistence helper - see lib/persist.ts (it lives
 // there so queueSlice can share it without importing this module back).
@@ -128,57 +134,6 @@ export interface UploadItem {
   speedBps?: number
 }
 
-// ─── Staged comp file change (in-session) ────────────────────
-//
-// Drag-and-drop in the Files tab doesn't propose anything on drop - it parks
-// the intended change here, the Uploads panel lists what's queued, and one
-// "Propose" there submits the lot (see lib/compStagedChanges). Dragging is
-// cheap to do by accident, and a reorganize is usually several drags that
-// only make sense together, so proposing each one the instant it lands would
-// spam reviewers with half a move.
-export interface StagedFileChange {
-  id: string
-  /** The subset of comp proposal change types drag-and-drop can produce. */
-  changeType: 'move' | 'move_folder' | 'create_folder'
-  /** Source path - the file/folder being moved, or the folder to create. */
-  path: string
-  /** Full destination path; absent for create_folder. */
-  destination?: string
-  /** Channel slug the change belongs to, since the Files tab can switch
-   *  channels with changes still queued and each proposal carries its own. */
-  channel: string
-  /** Set when a propose attempt failed, so the row can show why and stay
-   *  queued for a retry. Cleared on the next attempt. */
-  error?: string
-}
-
-// ─── Staged song edit proposal (in-session) ──────────────────
-//
-// Same idea as StagedFileChange, applied to the Tracker's song editor, bulk
-// editor and "propose new song" modal: editing a song's metadata, proposing
-// its deletion, or proposing a brand new song doesn't submit anything on its
-// own - it parks the proposal here, the Uploads panel lists what's queued,
-// and one "Propose" there sends the lot (see lib/compStagedSongChanges).
-// Editing an *already-submitted* pending proposal (editingPropId set in
-// EditorPage) is a different action - that proposal already exists
-// server-side, so it's still updated immediately.
-export interface StagedSongChange {
-  id: string
-  /** Null for a 'create' change - a new song has no id yet. */
-  songId: number | null
-  changeType: 'update' | 'delete' | 'create'
-  /** Song title, for the queue row - not sent as part of proposed_data. */
-  title: string
-  proposedData: Record<string, unknown>
-  editorNotes: string
-  /** Channel slug the proposal belongs to. Absent lets the server pick a
-   *  default (the AddSongModal can be opened without one). */
-  channel?: string
-  /** Set when a propose attempt failed, so the row can show why and stay
-   *  queued for a retry. Cleared on the next attempt. */
-  error?: string
-}
-
 // Where the desktop nav menu sits - classic left sidebar, mirrored right, or a
 // horizontal bar above/below the content. Mobile always uses the bottom tab bar.
 export type SidebarPosition = 'left' | 'right' | 'top' | 'bottom'
@@ -188,7 +143,7 @@ export type NavStyle = 'classic' | 'pill'
 // The Settings dialog's tabs - the union Settings.tsx keys its content off, and
 // the target for a deep-link open (see settingsTab). Keep in sync with the
 // `tab` state there.
-export type SettingsTab = 'account' | 'appearance' | 'preferences' | 'playback' | 'library' | 'shortcuts' | 'app' | 'developer' | 'feedback' | 'about'
+export type SettingsTab = 'account' | 'appearance' | 'preferences' | 'playback' | 'library' | 'desktop' | 'shortcuts' | 'app' | 'developer' | 'feedback' | 'about'
 
 // ─── Non-queue state ──────────────────────────────────────────────────────────
 
@@ -208,6 +163,11 @@ interface AppState {
   eqMono: boolean
   // 1 = 100% (unity, off) .. EQ_BOOST_MAX = 200%.
   eqBoost: number
+  // Width, saturation, compressor, cut filter, echo, 8D and the EQ preamp -
+  // one object (see AudioFx) rather than a store key per knob.
+  audioFx: AudioFx
+  // Band curves the user saved by name; ids carry USER_PRESET_PREFIX.
+  eqUserPresets: EqPreset[]
   skipSilence: boolean
   // Reverb (convolution tail; see lib/audioEffects.ts) - independently
   // toggleable; mix/decay keep their values while off.
@@ -252,6 +212,8 @@ interface AppState {
   // "Keyboard shortcuts" → the Shortcuts tab). Settings applies it then clears
   // it back to null. Synced so it also reaches the pop-out Settings window.
   settingsTab: SettingsTab | null
+  /** Desktop Settings modal. Mobile widths still use the 'settings' view. */
+  showSettings: boolean
   showDiagnostics: boolean
   showQueue: boolean
   // The bottom nav's overflow sheet - its trigger button lives on Home now,
@@ -482,14 +444,17 @@ interface AppState {
   // `reportModal` is the open report dialog's target (null = closed).
   pendingReports: PendingReport[]
   reportModal: ReportTarget | null
+  // The open "Synced lyrics" dialog (null = closed) and the song it was
+  // opened on. See components/LyricsGenModal.
+  lyricsGenModal: LyricsGenTarget | null
   // Whether ErrorBoundary auto-submits a crash report the moment it catches
   // an error, through the same feedback pipeline (submitFeedback) the manual
   // "Report this error" button uses. On by default; Settings can turn it off
   // for anyone who'd rather report manually (or not at all).
   autoReportErrors: boolean
   // When on, downloading an MP3 song writes its lyrics and the user's own cover into the
-  // file's ID3 tag (see lib/lyricsEmbed). Per-device: not synced.
-  embedLyricsOnDownload: boolean
+  // file's ID3 tag (see lib/downloadEmbed). Per-device: not synced.
+  embedSongInfoOnDownload: boolean
 
   // Playlist folders - a local-first grouping over both synced and local
   // playlists (keyed by "api:<id>"/"local:<id>"). Persisted to localStorage and
@@ -598,7 +563,6 @@ interface AppState {
   // user_settings.donor_playlists. donorFiles is the resolved file list those
   // playlists point into (null until loaded).
   donorPlaylists: DonorPlaylist[]
-  donorFiles: DonorFile[] | null
 
   // Other people's playlists followed from a share link - see FollowedPlaylist.
   // Local-only (localStorage), so this list is per-device.
@@ -613,12 +577,6 @@ interface AppState {
   offlineSync: Record<string, { state: 'syncing' | 'done' | 'error'; current: number; total: number }>
   uploads: UploadItem[]
   showUploadManager: boolean
-  // Comp file changes staged by Files drag-and-drop, proposed as a batch from
-  // the Uploads panel (see lib/compStagedChanges).
-  stagedFileChanges: StagedFileChange[]
-  // Song edit/delete proposals staged by the Tracker's editors, proposed as a
-  // batch from the Uploads panel (see lib/compStagedSongChanges).
-  stagedSongChanges: StagedSongChange[]
 }
 
 interface AppActions {
@@ -634,6 +592,15 @@ interface AppActions {
   setEqBalance: (balance: number) => void
   setEqMono: (mono: boolean) => void
   setEqBoost: (boost: number) => void
+  setAudioFx: (patch: Partial<AudioFx>) => void
+  /** Saves the current band gains under `name` (replacing a saved preset of
+   *  the same name) and selects it. Returns the preset id. */
+  saveEqUserPreset: (name: string) => string
+  deleteEqUserPreset: (id: string) => void
+  /** Every sound-shaping control back to its default: flat bands, preamp,
+   *  balance, mono, boost, reverb, the AudioFx effects and speed. Leaves the
+   *  EQ's on/off, skip-silence, pitch-follows-speed and saved presets alone. */
+  resetSoundEffects: () => void
   setSkipSilence: (enabled: boolean) => void
   setReverbEnabled: (enabled: boolean) => void
   setReverbMix: (mix: number) => void
@@ -821,7 +788,7 @@ interface AppActions {
   openReport: (target: ReportTarget) => void
   closeReport: () => void
   setAutoReportErrors: (enabled: boolean) => void
-  setEmbedLyricsOnDownload: (enabled: boolean) => void
+  setEmbedSongInfoOnDownload: (enabled: boolean) => void
   /** Queues a general feedback report and tries to deliver it. `contact` is
    *  the optional reach-me field the endpoint accepts. `automated` flags a
    *  crash report ErrorBoundary sent on its own rather than one the user
@@ -833,7 +800,7 @@ interface AppActions {
   /** Queues a song issue report (wrong/missing info or lyrics) and tries to
    *  deliver it. `issues` is the set of checked problem types. Same delivered
    *  vs. still-queued resolution as `submitFeedback`. */
-  reportSong: (songId: number, songName: string, issues: SongIssueType[], message: string, contact?: string) => Promise<boolean>
+  reportSong: (songId: number, songName: string, issues: SongIssueType[], message: string, contact?: string, lyrics?: string) => Promise<boolean>
   /** Drops a queued report from the outbox (e.g. one stuck failing). */
   dismissReport: (id: string) => void
   /** Internal - appends a report to the outbox, kicks off delivery, and
@@ -877,6 +844,8 @@ interface AppActions {
   completeDiscordLogin: (code: string, state: string) => Promise<void>
   signupWithPassword: (username: string, password: string, displayName?: string) => Promise<void>
   loginWithPassword: (username: string, password: string, otpToken?: string) => Promise<void>
+  /** Signs in with a passkey. Resolves false if the user cancelled the prompt. */
+  loginWithPasskey: () => Promise<boolean>
   /** Finishes a login another signed-in device approved (the token comes from the approval poll). */
   completeApprovedLogin: (token: string, user: userApi.AccountUser) => Promise<void>
   logoutAccount: () => Promise<void>
@@ -897,6 +866,9 @@ interface AppActions {
   // submits one update proposal per song.
   openBulkEditor: (songs: JWApiSong[]) => void
   closeBulkEditor: () => void
+  /** Opens / closes the "Synced lyrics" dialog (hand sync, and Whisper for donors), optionally on a song. */
+  openLyricsGen: (target?: LyricsGenTarget) => void
+  closeLyricsGen: () => void
 
 
   setLibraryTracks: (tracks: LibraryTrack[]) => void
@@ -930,17 +902,7 @@ interface AppActions {
   // playlist's id so the caller can navigate straight to it.
   createGuestPlaylist: (name: string) => string
   deleteGuestPlaylist: (id: string) => void
-  loadDonorFiles: () => Promise<void>
-  setDonorFiles: (files: DonorFile[]) => void
-  createDonorPlaylist: (name: string, fileIds?: string[]) => string
-  deleteDonorPlaylist: (id: string) => void
-  renameDonorPlaylist: (id: string, name: string) => void
-  addToDonorPlaylist: (playlistId: string, fileId: string) => void
-  removeFromDonorPlaylist: (playlistId: string, fileId: string) => void
-  reorderDonorPlaylist: (playlistId: string, fileIds: string[]) => void
   _setDonorPlaylists: (next: DonorPlaylist[]) => void
-  /** Points playlist entries at a file's new id (tag re-upload), or drops them when newId is null (delete). */
-  replaceDonorFileId: (oldId: string, newId: string | null) => void
   renameGuestPlaylist: (id: string, name: string) => void
   addToGuestPlaylist: (playlistId: string, track: Track) => void
   removeFromGuestPlaylist: (playlistId: string, trackId: string) => void
@@ -978,25 +940,9 @@ interface AppActions {
   removeUpload: (id: string) => void
   clearCompletedUploads: () => void
   setShowUploadManager: (show: boolean) => void
-
-  /** Queues drag-and-drop file changes; ids are assigned here. Returns nothing
-   *  - the Uploads panel is where they're reviewed and proposed. */
-  stageFileChanges: (changes: Omit<StagedFileChange, 'id'>[]) => void
-  updateStagedFileChange: (id: string, updates: Partial<StagedFileChange>) => void
-  unstageFileChange: (id: string) => void
-  clearStagedFileChanges: () => void
-
-  /** Queues a song edit/delete proposal; ids are assigned here. Replaces any
-   *  queued change of the same type already staged for that song/channel, so
-   *  editing a song again before proposing it just updates the queued patch
-   *  rather than piling up duplicates. */
-  stageSongChanges: (changes: Omit<StagedSongChange, 'id'>[]) => void
-  updateStagedSongChange: (id: string, updates: Partial<StagedSongChange>) => void
-  unstageSongChange: (id: string) => void
-  clearStagedSongChanges: () => void
 }
 
-export type AppStore = QueueSlice & AppState & AppActions
+export type AppStore = QueueSlice & DesktopSlice & AppState & AppActions
 
 // ─── Store ────────────────────────────────────────────────────────────────────
 
@@ -1042,10 +988,7 @@ function applyPrefToTrack(track: Track, pref: SongPreference | undefined): Track
   // ever set while the rotate-covers setting is on), then an era cover
   // override (unreleased songs only - track.genre holds the API category for
   // jw- tracks), then the song's own art.
-  const songId = userApi.trackIdToSongId(track.id)
-  const coverUrl = resolvePrefCoverUrl(pref?.cover_url)
-    ?? (songId != null ? peekRotatedCover(songId) : undefined)
-    ?? (songId != null && track.genre !== 'released' ? resolvePrefCoverUrl(peekEraCover(track.era)) : undefined)
+  const coverUrl = overrideCoverUrl(userApi.trackIdToSongId(track.id), pref?.cover_url, track.genre, track.era)
   return {
     ...track,
     title: pref?.name || track.apiTitle || track.title,
@@ -1187,6 +1130,8 @@ function buildUserSettings(s: AppStore): UserSettings {
     eq_balance: s.eqBalance,
     eq_mono: s.eqMono,
     eq_boost: s.eqBoost,
+    audio_fx: s.audioFx,
+    eq_user_presets: s.eqUserPresets,
     skip_silence: s.skipSilence,
     reverb_enabled: s.reverbEnabled,
     reverb_mix: s.reverbMix,
@@ -1249,10 +1194,16 @@ function commitM3uImport(
 
 setActiveChannelCache(ls.get<string>('activeChannel') || '')
 
+// Pop-outs are an Electron feature; the web build never has one.
+export const IS_FLOAT_WINDOW = false
+
 export const useStore = create<AppStore>((set, get, store) => ({
   // ── Queue slice (all queue + playback logic) ───────────────────────────────
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   ...createQueueSlice(set, get, store as any),
+  // ── Desktop (the lyric styles, the edge light, the WRLD widgets) ──────────
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  ...createDesktopSlice(set, get, store as any),
 
   // ── Playback extras ───────────────────────────────────────────────────────
   currentTrackFull: null,
@@ -1294,7 +1245,7 @@ export const useStore = create<AppStore>((set, get, store) => ({
     get()._scheduleProfilePush(['userSettings'])
   },
   setEqPreset: (id) => {
-    const preset = EQ_PRESETS.find((p) => p.id === id)
+    const preset = EQ_PRESETS.find((p) => p.id === id) ?? get().eqUserPresets.find((p) => p.id === id)
     if (!preset) return
     const eqGains = [...preset.gains]
     set({ eqGains, eqPreset: id })
@@ -1304,6 +1255,44 @@ export const useStore = create<AppStore>((set, get, store) => ({
   setEqBalance: (eqBalance) => { set({ eqBalance }); ls.set('eqBalance', eqBalance); get()._scheduleProfilePush(['userSettings']) },
   setEqMono: (eqMono) => { set({ eqMono }); ls.set('eqMono', eqMono); get()._scheduleProfilePush(['userSettings']) },
   setEqBoost: (eqBoost) => { set({ eqBoost }); ls.set('eqBoost', eqBoost); get()._scheduleProfilePush(['userSettings']) },
+  audioFx: sanitizeFx(ls.get<Partial<AudioFx>>('audioFx')),
+  eqUserPresets: sanitizeUserPresets(ls.get<EqPreset[]>('eqUserPresets')),
+  setAudioFx: (patch) => {
+    const audioFx = sanitizeFx({ ...get().audioFx, ...patch })
+    set({ audioFx }); ls.set('audioFx', audioFx); get()._scheduleProfilePush(['userSettings'])
+  },
+  saveEqUserPreset: (rawName) => {
+    const name = rawName.trim().slice(0, USER_PRESET_NAME_MAX)
+    const { eqUserPresets, eqGains } = get()
+    const existing = eqUserPresets.find((p) => p.name.toLowerCase() === name.toLowerCase())
+    const id = existing?.id ?? `${USER_PRESET_PREFIX}${Date.now().toString(36)}`
+    const preset: EqPreset = { id, name, gains: [...eqGains] }
+    const next = existing ? eqUserPresets.map((p) => (p.id === id ? preset : p)) : [...eqUserPresets, preset]
+    set({ eqUserPresets: next, eqPreset: id })
+    ls.set('eqUserPresets', next); ls.set('eqPreset', id)
+    get()._scheduleProfilePush(['userSettings'])
+    return id
+  },
+  deleteEqUserPreset: (id) => {
+    const next = get().eqUserPresets.filter((p) => p.id !== id)
+    // The curve stays on the bands - it just stops having a name.
+    const eqPreset = get().eqPreset === id ? 'custom' : get().eqPreset
+    set({ eqUserPresets: next, eqPreset })
+    ls.set('eqUserPresets', next); ls.set('eqPreset', eqPreset)
+    get()._scheduleProfilePush(['userSettings'])
+  },
+  resetSoundEffects: () => {
+    const s = get()
+    s.setEqPreset('flat')
+    s.setEqBalance(0)
+    s.setEqMono(false)
+    s.setEqBoost(1)
+    s.setReverbEnabled(false)
+    s.setReverbMix(0.4)
+    s.setReverbDecay(3)
+    s.setAudioFx(DEFAULT_FX)
+    s.setPlaybackSpeed(1)
+  },
   setSkipSilence: (skipSilence) => { set({ skipSilence }); ls.set('skipSilence', skipSilence); get()._scheduleProfilePush(['userSettings']) },
   // 'slowedReverb' is the feature's short-lived bundled-toggle predecessor -
   // carry an existing on-state over so it doesn't silently switch off.
@@ -1345,14 +1334,16 @@ export const useStore = create<AppStore>((set, get, store) => ({
   clearAbLoop: () => set({ abLoopStart: null, abLoopEnd: null }),
   communityEdits: [],
   // A community edit is a real audio file, so playing one goes through the
-  // normal queue machinery as a single-track play - the effects chain, prefs,
-  // scrobbling etc. all apply to it like any other track.
+  // normal queue machinery - the effects chain, prefs, scrobbling etc. all
+  // apply to it like any other track. It's an edit of the song that's
+  // playing, so it takes that song's place the way "Change version" does,
+  // keeping the rest of the queue.
   playCommunityEdit: (edit) => {
     const track: Track = {
       id: `community-edit-${edit.id}`,
       path: edit.path,
       title: edit.name,
-      artist: edit.author ? `Community edit · ${edit.author}` : 'Community edit',
+      artist: edit.artist ?? (edit.author ? `Community edit · ${edit.author}` : 'Community edit'),
       album: '',
       albumArtist: '',
       year: null,
@@ -1363,7 +1354,9 @@ export const useStore = create<AppStore>((set, get, store) => ({
       streamUrl: buildStreamUrl(edit.path),
       imageUrl: edit.imageUrl ?? '',
     }
-    get().playTrack(track, [track])
+    const current = get().currentTrack
+    if (current) get().changeVersion(current, track)
+    else get().playTrack(track, [track])
   },
 
   // ── UI ────────────────────────────────────────────────────────────────────
@@ -1372,6 +1365,7 @@ export const useStore = create<AppStore>((set, get, store) => ({
   activeAdminTab: null,
   showNowPlaying: false,
   settingsTab: null,
+  showSettings: typeof window !== 'undefined' && window.location.pathname === '/settings' && !isMobileViewport(),
   showDiagnostics: false,
   showQueue: false,
   showMoreNav: false,
@@ -1455,7 +1449,7 @@ export const useStore = create<AppStore>((set, get, store) => ({
     // Returning to Playlists with a playlist already open (it stays selected
     // across tab switches - see playlistsSelectedId above) should restore its
     // ?id= too, not just land on the bare list. Same idea for Admin: land
-    // back on whichever section (Users, Security, ...) was last open there
+    // back on whichever section (Users, Logs, ...) was last open there
     // instead of always resetting to the base /admin.
     const selectedPlaylistId = get().playlistsSelectedId
     const activeAdminTab = get().activeAdminTab
@@ -1490,11 +1484,20 @@ export const useStore = create<AppStore>((set, get, store) => ({
   setRadioFmMatchedSong: (radioFmMatchedSong) => set({ radioFmMatchedSong }),
   setShowSettings: (show) => {
     const s = get()
+    // Desktop: a modal docked in the sandbox notch (see Modal.tsx), same as
+    // the app. Re-opening while it's already mounted wouldn't re-trigger the
+    // dock/expand in ModalOverlay's mount effect, so expand the notch here.
+    if (!isMobileViewport()) {
+      if (show) useSandboxStore.getState().expand()
+      set({ showSettings: show })
+      // Resized from phone width with the page open: leaving it means
+      // returning to whatever sat underneath.
+      if (!show && s.activeView === 'settings') s.setActiveView(s.previousView && s.previousView !== 'settings' ? s.previousView : 'home')
+      return
+    }
     if (show) { s.setActiveView('settings'); return }
-    // "Close" means go back to whatever was showing before Settings opened -
-    // there's no other view underneath anymore now that Settings is a real
-    // page in the same activeView slot as everything else, not an overlay
-    // sitting on top of it.
+    // Mobile: Settings is a real page in the activeView slot, so "close"
+    // means go back to whatever was showing before it opened.
     const fallback = s.previousView && s.previousView !== 'settings' ? s.previousView : 'api-tracker'
     s.setActiveView(fallback)
   },
@@ -1505,7 +1508,7 @@ export const useStore = create<AppStore>((set, get, store) => ({
   },
   toggleSettings: () => {
     const s = get()
-    s.setShowSettings(s.activeView !== 'settings')
+    s.setShowSettings(isMobileViewport() ? s.activeView !== 'settings' : !s.showSettings)
   },
   openProfile: () => {
     // Which profile view depends on the account's roles, not on the caller -
@@ -1841,6 +1844,7 @@ export const useStore = create<AppStore>((set, get, store) => ({
             : current.filter((id) => id !== trackId)
           set({ likedTrackIds: reverted })
           ls.set('likedTrackIds', reverted)
+          showAppToast(wasLiked ? "Couldn't unlike the song" : "Couldn't like the song")
         })
       }
     }
@@ -1934,8 +1938,11 @@ export const useStore = create<AppStore>((set, get, store) => ({
     }
     if (serverSettings.accent_color !== undefined && serverSettings.accent_color !== s.accentColor) s.setAccentColor(serverSettings.accent_color)
     if (serverSettings.app_text_scale !== undefined && serverSettings.app_text_scale !== s.appTextScale) s.setAppTextScale(serverSettings.app_text_scale)
-    if (serverSettings.app_font && serverSettings.app_font !== s.appFont) s.setAppFont(getFont(serverSettings.app_font).id)
-    if (serverSettings.lyrics_font && serverSettings.lyrics_font !== s.lyricsFont) s.setLyricsFont(getFont(serverSettings.lyrics_font).id)
+    // syncedFontId is null for an imported font file this device doesn't have.
+    const syncedApp = serverSettings.app_font ? syncedFontId(serverSettings.app_font) : null
+    const syncedLyrics = serverSettings.lyrics_font ? syncedFontId(serverSettings.lyrics_font) : null
+    if (syncedApp && syncedApp !== s.appFont) s.setAppFont(syncedApp)
+    if (syncedLyrics && syncedLyrics !== s.lyricsFont) s.setLyricsFont(syncedLyrics)
     if (serverSettings.lyrics_scale !== undefined && serverSettings.lyrics_scale !== s.lyricsScale) s.setLyricsScale(serverSettings.lyrics_scale)
     if (serverSettings.lyrics_align && serverSettings.lyrics_align !== s.lyricsAlign) s.setLyricsAlign(serverSettings.lyrics_align)
     if (serverSettings.lyrics_blur !== undefined && serverSettings.lyrics_blur !== s.lyricsBlur) s.setLyricsBlur(serverSettings.lyrics_blur)
@@ -2071,7 +2078,18 @@ export const useStore = create<AppStore>((set, get, store) => ({
   },
 
   setSongName: (songId, name) => get()._writeSongPref(songId, { name: normalizePrefText(name) }),
-  setSongCover: (songId, coverUrl) => get()._writeSongPref(songId, { cover_url: normalizePrefText(coverUrl) }),
+  setSongCover: (songId, coverUrl) => {
+    const cover = normalizePrefText(coverUrl)
+    get()._writeSongPref(songId, { cover_url: cover })
+    if (!cover) return
+    // The song's other versions pick the cover up too - unless they already
+    // have a personalized one of their own. Clearing never spreads.
+    void getVersionGroup(songId).then((siblings) => {
+      for (const { songId: id } of siblings) {
+        if (!get().songPrefs[id]?.cover_url) get()._writeSongPref(id, { cover_url: cover })
+      }
+    })
+  },
   setSongDefaultVersion: (songId, version) => get()._writeSongPref(songId, { default_version: normalizePrefText(version) }),
 
   setSongExcludedVersions: (songId, versions) => get()._writeSongPref(songId, { excluded_versions: versions }),
@@ -2176,8 +2194,8 @@ export const useStore = create<AppStore>((set, get, store) => ({
   reportModal: null,
   autoReportErrors: ls.get<boolean>('autoReportErrors') ?? true,
   setAutoReportErrors: (autoReportErrors) => { set({ autoReportErrors }); ls.set('autoReportErrors', autoReportErrors); get()._scheduleProfilePush(['userSettings']) },
-  embedLyricsOnDownload: ls.get<boolean>('embedLyricsOnDownload') ?? false,
-  setEmbedLyricsOnDownload: (embedLyricsOnDownload) => { set({ embedLyricsOnDownload }); ls.set('embedLyricsOnDownload', embedLyricsOnDownload) },
+  embedSongInfoOnDownload: ls.get<boolean>('embedSongInfoOnDownload') ?? true,
+  setEmbedSongInfoOnDownload: (embedSongInfoOnDownload) => { set({ embedSongInfoOnDownload }); ls.set('embedSongInfoOnDownload', embedSongInfoOnDownload) },
 
   openReport: (target) => set({ reportModal: target }),
   closeReport: () => set({ reportModal: null }),
@@ -2203,14 +2221,15 @@ export const useStore = create<AppStore>((set, get, store) => ({
     })
   },
 
-  reportSong: async (songId, songName, issues, message, contact) => {
-    // A report needs at least a flagged issue or a written note to be worth
-    // sending - the form enforces this too, but guard here so no empty report
-    // can reach the outbox.
-    if (issues.length === 0 && !message.trim()) return false
+  reportSong: async (songId, songName, issues, message, contact, lyrics) => {
+    // A report needs at least a flagged issue, a written note or pasted lyrics
+    // to be worth sending - the form enforces this too, but guard here so no
+    // empty report can reach the outbox.
+    if (issues.length === 0 && !message.trim() && !lyrics?.trim()) return false
     return get()._enqueueReport({
       id: newReportId(), kind: 'song', songId, songName,
       issues, message: message.trim(),
+      ...(lyrics?.trim() ? { lyrics: lyrics.trim() } : {}),
       contact: contact?.trim() || undefined,
       appVersion: APP_VERSION, createdAt: Date.now(), attempts: 0,
     })
@@ -2466,6 +2485,8 @@ export const useStore = create<AppStore>((set, get, store) => ({
       // with local state and push the result back, no extra requests needed.
       const profile = get().account
       await get().syncUserSettings(profile?.user_settings)
+      // Needs the synced donor_playlists from the line above.
+      void migrateDonorPlaylists()
       await get().syncSongPrefs(profile?.user_preferences)
       await get().syncListeningPlays(profile?.listening_plays)
       get()._backfillRecentTracks()
@@ -2541,6 +2562,18 @@ export const useStore = create<AppStore>((set, get, store) => ({
     await get().loadAccount()
   },
 
+  loginWithPasskey: async () => {
+    // Passkey sign-in already counts as two-factor, so there's no OTP step.
+    const res = await signInWithPasskey()
+    if (!res) return false
+    userApi.setToken(res.token)
+    set({ account: res.user })
+    // Signed in as of now: the modal closes on this return, while the likes,
+    // playlists and settings sync keeps running behind it.
+    void get().loadAccount()
+    return true
+  },
+
   completeApprovedLogin: async (token, user) => {
     userApi.setToken(token)
     set({ account: user })
@@ -2550,7 +2583,7 @@ export const useStore = create<AppStore>((set, get, store) => ({
   logoutAccount: async () => {
     await userApi.logout()
     const localLikes = ls.get<string[]>('likedTrackIds') ?? []
-    set({ account: null, playlists: [], likedTrackIds: localLikes, donorPlaylists: [], donorFiles: null })
+    set({ account: null, playlists: [], likedTrackIds: localLikes, donorPlaylists: [] })
     // Like play history, these belong to the account, not the machine.
     ls.set('donorPlaylists', [])
     clearDonorPlaybackCache()
@@ -2658,6 +2691,12 @@ export const useStore = create<AppStore>((set, get, store) => ({
   bulkEdit: null,
   openBulkEditor: (songs) => set({ bulkEdit: songs.length ? { kind: 'api', songs } : null }),
   closeBulkEditor: () => set({ bulkEdit: null }),
+  lyricsGenModal: null,
+  openLyricsGen: (target = {}) => {
+    useSandboxStore.getState().expand()
+    set({ lyricsGenModal: target })
+  },
+  closeLyricsGen: () => set({ lyricsGenModal: null }),
   setPendingCompProposal: (pendingCompProposal) => set({ pendingCompProposal }),
   setPendingEditorSongId: (pendingEditorSongId) => set({ pendingEditorSongId }),
   openSongEditor: (songId) => {
@@ -2682,7 +2721,6 @@ export const useStore = create<AppStore>((set, get, store) => ({
   activeLocalPlaylistId: null,
   guestPlaylists: ls.get<GuestPlaylist[]>('guestPlaylists') ?? [],
   donorPlaylists: ls.get<DonorPlaylist[]>('donorPlaylists') ?? [],
-  donorFiles: null,
   followedPlaylists: ls.get<FollowedPlaylist[]>('followedPlaylists') ?? [],
 
   setLibraryTracks: (libraryTracks) => set({ libraryTracks }),
@@ -2923,42 +2961,6 @@ export const useStore = create<AppStore>((set, get, store) => ({
     set({ guestPlaylists: next })
     ls.set('guestPlaylists', next)
     return id
-  },
-  loadDonorFiles: async () => {
-    if (!get().account?.is_donor) return
-    try {
-      const { files } = await listDonorFiles()
-      get().setDonorFiles(files)
-    } catch { /* keep whatever was loaded; the UI shows its own load error */ }
-  },
-  setDonorFiles: (files) => set({ donorFiles: files }),
-  createDonorPlaylist: (name, fileIds = []) => {
-    const id = `dp-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`
-    get()._setDonorPlaylists([...get().donorPlaylists, { id, name, fileIds, createdAt: Date.now() }])
-    return id
-  },
-  deleteDonorPlaylist: (id) => get()._setDonorPlaylists(get().donorPlaylists.filter((p) => p.id !== id)),
-  renameDonorPlaylist: (id, name) =>
-    get()._setDonorPlaylists(get().donorPlaylists.map((p) => p.id === id ? { ...p, name } : p)),
-  addToDonorPlaylist: (playlistId, fileId) =>
-    get()._setDonorPlaylists(get().donorPlaylists.map((p) =>
-      p.id === playlistId && !p.fileIds.includes(fileId) ? { ...p, fileIds: [...p.fileIds, fileId] } : p)),
-  removeFromDonorPlaylist: (playlistId, fileId) =>
-    get()._setDonorPlaylists(get().donorPlaylists.map((p) =>
-      p.id === playlistId ? { ...p, fileIds: p.fileIds.filter((f) => f !== fileId) } : p)),
-  reorderDonorPlaylist: (playlistId, fileIds) =>
-    get()._setDonorPlaylists(get().donorPlaylists.map((p) => p.id === playlistId ? { ...p, fileIds } : p)),
-  replaceDonorFileId: (oldId, newId) => {
-    const lists = get().donorPlaylists
-    if (!lists.some((p) => p.fileIds.includes(oldId))) return
-    get()._setDonorPlaylists(lists.map((p) => {
-      if (!p.fileIds.includes(oldId)) return p
-      // Re-uploaded copy (tag edit) keeps its slot; a deleted file just leaves.
-      const ids = newId
-        ? p.fileIds.map((id) => (id === oldId ? newId : id))
-        : p.fileIds.filter((id) => id !== oldId)
-      return { ...p, fileIds: ids }
-    }))
   },
   _setDonorPlaylists: (next) => {
     set({ donorPlaylists: next })
@@ -3345,7 +3347,7 @@ export const useStore = create<AppStore>((set, get, store) => ({
         try {
           const detail = await userApi.getPlaylist(Number(match[1]))
           if (!get().offlinePlaylists[key]) continue
-          await get().downloadPlaylistOffline(key, detail.name, detail.items.map((i) => i.song.id), { silent: true })
+          await get().downloadPlaylistOffline(key, detail.name, playlistSongIds(detail.items), { silent: true })
         } catch {
           // Offline, deleted, or no longer accessible — keep the existing cache as-is.
         }
@@ -3386,45 +3388,12 @@ export const useStore = create<AppStore>((set, get, store) => ({
     uploads: s.uploads.filter((d) => d.state === 'downloading'),
   })),
   setShowUploadManager: (show) => set({ showUploadManager: show }),
-
-  stagedFileChanges: [],
-  // One queued change per path: dragging an already-queued file somewhere else
-  // is a correction, not a second move, and proposing both would ask reviewers
-  // to send the same file to two places.
-  stageFileChanges: (changes) => set((s) => ({
-    stagedFileChanges: [
-      ...s.stagedFileChanges.filter((c) => !changes.some((n) => n.path === c.path && n.channel === c.channel)),
-      ...changes.map((c, i) => ({ ...c, id: `staged-${Date.now()}-${i}-${Math.random().toString(36).slice(2, 8)}` })),
-    ],
-  })),
-  updateStagedFileChange: (id, updates) => set((s) => ({
-    stagedFileChanges: s.stagedFileChanges.map((c) => c.id === id ? { ...c, ...updates } : c),
-  })),
-  unstageFileChange: (id) => set((s) => ({
-    stagedFileChanges: s.stagedFileChanges.filter((c) => c.id !== id),
-  })),
-  clearStagedFileChanges: () => set({ stagedFileChanges: [] }),
-
-  stagedSongChanges: [],
-  // One queued change per song/channel/type: editing a song again before it's
-  // proposed replaces the queued patch rather than piling up duplicates. A
-  // 'create' has no song id to key off of - each new-song draft is its own
-  // proposal, so those never collapse into each other.
-  stageSongChanges: (changes) => set((s) => ({
-    stagedSongChanges: [
-      ...s.stagedSongChanges.filter((c) => !changes.some((n) =>
-        n.songId != null && n.songId === c.songId && n.channel === c.channel && n.changeType === c.changeType)),
-      ...changes.map((c, i) => ({ ...c, id: `staged-song-${Date.now()}-${i}-${Math.random().toString(36).slice(2, 8)}` })),
-    ],
-  })),
-  updateStagedSongChange: (id, updates) => set((s) => ({
-    stagedSongChanges: s.stagedSongChanges.map((c) => c.id === id ? { ...c, ...updates } : c),
-  })),
-  unstageSongChange: (id) => set((s) => ({
-    stagedSongChanges: s.stagedSongChanges.filter((c) => c.id !== id),
-  })),
-  clearStagedSongChanges: () => set({ stagedSongChanges: [] }),
 }))
+
+// Notification-socket tickets wait for a confirmed account, not just a stored token.
+useStore.subscribe((s, prev) => {
+  if (s.account !== prev.account) setNotificationsSignedIn(!!s.account)
+})
 
 // Dev-only console handle for driving store state while debugging (e.g.
 // forcing auth-gated views to render without an account). Never set in

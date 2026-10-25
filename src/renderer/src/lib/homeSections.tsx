@@ -1,4 +1,4 @@
-import { Disc3, ListMusic, Gamepad2, Newspaper, Radio, Music2, Heart, Album, MessagesSquare } from 'lucide-react'
+import { Disc3, ListMusic, Gamepad2, Newspaper, Radio, Music2, Heart, Album, MessagesSquare, Wrench, CalendarDays } from 'lucide-react'
 import type { ReactNode } from 'react'
 
 // The Home dashboard's sections - each independently shown/hidden from
@@ -16,6 +16,7 @@ export interface HomeSectionDef {
 export const HOME_SECTIONS: HomeSectionDef[] = [
   { id: 'chat', label: 'Staff chat', icon: <MessagesSquare size={18} />, staffOnly: true },
   { id: 'recent', label: 'Recently played', icon: <Disc3 size={18} /> },
+  { id: 'onthisday', label: 'On this day', icon: <CalendarDays size={18} /> },
   { id: 'news', label: 'News', icon: <Newspaper size={18} /> },
   { id: 'playlists', label: 'Playlists', icon: <ListMusic size={18} /> },
   { id: 'albums', label: 'Albums', icon: <Album size={18} /> },
@@ -23,6 +24,7 @@ export const HOME_SECTIONS: HomeSectionDef[] = [
   { id: 'radio', label: '999 FM', icon: <Radio size={18} /> },
   { id: 'listening', label: 'Your listening', icon: <Music2 size={18} /> },
   { id: 'liked', label: 'Liked songs shortcut', icon: <Heart size={18} /> },
+  { id: 'tools', label: 'Tools', icon: <Wrench size={18} /> },
 ]
 
 // Everything ships on - a user opts out rather than in.

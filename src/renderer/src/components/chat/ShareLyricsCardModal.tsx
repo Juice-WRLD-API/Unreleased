@@ -1,3 +1,4 @@
+import { MotionOverlay } from '../MotionOverlay'
 import { useMemo, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { Check, Hash, Loader2, MessagesSquare, Search, X } from 'lucide-react'
@@ -88,11 +89,11 @@ export default function ShareLyricsCardModal({ file, title, artist, onClose }: P
   }
 
   return createPortal(
-    <div className="fixed inset-0 z-[180] flex items-end md:items-center justify-center md:p-4" onMouseDown={onClose}>
+    <MotionOverlay className="fixed inset-0 z-[180] flex items-end md:items-center justify-center md:p-4" onMouseDown={onClose}>
       <div className="absolute inset-0 bg-black/55 backdrop-blur-[2px]" />
       <div
         onMouseDown={(e) => e.stopPropagation()}
-        className="chat-sheet relative w-full max-w-md max-h-[80vh] flex flex-col rounded-t-2xl md:rounded-2xl border border-[var(--border)] bg-surface shadow-2xl"
+        className="relative w-full max-w-md max-h-[80vh] flex flex-col rounded-t-2xl md:rounded-2xl border border-[var(--border)] bg-surface shadow-2xl"
         style={{ paddingBottom: 'env(safe-area-inset-bottom, 0px)' }}
       >
         <header className="flex items-start gap-3 px-5 pt-5 pb-3">
@@ -172,7 +173,7 @@ export default function ShareLyricsCardModal({ file, title, artist, onClose }: P
           {error && <p className="px-2 text-sm text-red-400">{error}</p>}
         </div>
       </div>
-    </div>,
+    </MotionOverlay>,
     document.body,
   )
 }

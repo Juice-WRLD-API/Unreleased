@@ -6,6 +6,7 @@ import {
 } from 'lucide-react'
 import { useStore } from '../store/useStore'
 import { accountDisplayName, initial } from '../lib/format'
+import { CONTRIBUTOR_ENABLED } from '../lib/userApi'
 import ReportsTab from './ReportsTab'
 import CompProposalList, { CompFilterBar } from './CompProposalList'
 import RoleBadges from './RoleBadges'
@@ -114,6 +115,7 @@ export default function EditorProfileView(): JSX.Element {
     filteredProposals, handleDelete, handleResubmit, handleReview, reviewingId, canReviewProposals, tabCount, proposals,
     leaderboard, loadingLeaderboard, myEntry,
     loadingComp, compFilter, setCompFilter, withdrawingCompId, handleWithdrawComp,
+    reviewingCompId, handleReviewComp,
     compTabCount, filteredCompProposals,
     reports, reportStatus, setReportStatus, loadingReports,
     adminPreview, otpLocked, handleEdit,
@@ -365,10 +367,18 @@ export default function EditorProfileView(): JSX.Element {
                           </button>
                         )
                       })}
+                      <button
+                        onClick={() => setRefreshKey(k => k + 1)}
+                        disabled={refreshing}
+                        className="ml-auto p-1.5 rounded-lg text-text-muted hover:text-text-primary hover:bg-surface-overlay transition-colors disabled:opacity-40 shrink-0"
+                        title="Refresh"
+                      >
+                        <RefreshCw size={13} className={refreshing ? 'animate-spin' : ''} />
+                      </button>
                       {(account?.is_editor || account?.is_administrator) && (
                         <button
                           onClick={() => setShowAddSong(true)}
-                          className="ml-auto flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-accent/15 hover:bg-accent/25 text-accent text-xs font-semibold transition-colors shrink-0"
+                          className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-accent/15 hover:bg-accent/25 text-accent text-xs font-semibold transition-colors shrink-0"
                           title="Propose a new song"
                         >
                           <Plus size={12} /> New song
@@ -439,8 +449,16 @@ export default function EditorProfileView(): JSX.Element {
                         size="md"
                       />
                       <button
+                        onClick={() => setRefreshKey(k => k + 1)}
+                        disabled={refreshing}
+                        className="ml-auto p-1.5 rounded-lg text-text-muted hover:text-text-primary hover:bg-surface-overlay transition-colors disabled:opacity-40 shrink-0"
+                        title="Refresh"
+                      >
+                        <RefreshCw size={13} className={refreshing ? 'animate-spin' : ''} />
+                      </button>
+                      <button
                         onClick={() => go('contributor')}
-                        className="ml-auto flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-accent/15 hover:bg-accent/25 text-accent text-xs font-semibold transition-colors shrink-0"
+                        className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-accent/15 hover:bg-accent/25 text-accent text-xs font-semibold transition-colors shrink-0"
                         title="Propose a comp file change"
                       >
                         <Plus size={12} /> New comp proposal
@@ -454,6 +472,8 @@ export default function EditorProfileView(): JSX.Element {
                       onSelect={() => go('contributor')}
                       onWithdraw={handleWithdrawComp}
                       withdrawingId={withdrawingCompId}
+                      onReview={canReviewProposals ? handleReviewComp : undefined}
+                      reviewingId={reviewingCompId}
                       empty={compSearch.trim() ? `No comp files match "${compSearch.trim()}"` : undefined}
                     />
                   </div>
@@ -514,7 +534,7 @@ export default function EditorProfileView(): JSX.Element {
                         ever reach Song edits + Comp files (both open a
                         queue), so they never see a Stats group at all and
                         Queues just takes the full width on its own. Admins
-                        without 2FA only see the Security box (highlighted)
+                        without 2FA only see the 2FA box (highlighted)
                         so they can find and turn it on - every other
                         number/button here is an account-wide admin surface
                         and stays gated until then. */}
@@ -525,6 +545,7 @@ export default function EditorProfileView(): JSX.Element {
                           <>
                             <AdminStatBox label="Song edits" value={adminPreview?.pendingProposals} highlight={!!adminPreview?.pendingProposals} onClick={() => openAdmin('proposals')} />
                             <AdminStatBox label="Comp files" value={adminPreview?.pendingComp} highlight={!!adminPreview?.pendingComp} onClick={() => openAdmin('comp-proposals')} />
+                            {CONTRIBUTOR_ENABLED && <AdminStatBox label="Replace comp" value="Open" onClick={() => openAdmin('comp-replace')} />}
                           </>
                         )}
                         {isAdmin && !otpLocked && (
@@ -536,16 +557,16 @@ export default function EditorProfileView(): JSX.Element {
                             <AdminStatBox label="Channels" value={adminPreview?.totalChannels} onClick={() => openAdmin('channels')} />
                             <AdminStatBox label="Eras" value={adminPreview?.totalEras} onClick={() => openAdmin('eras')} />
                             <AdminStatBox label="CDN nodes" value={adminPreview?.pendingCdnNodes} highlight={!!adminPreview?.pendingCdnNodes} onClick={() => openAdmin('cdn-nodes')} />
+                            <AdminStatBox label="Lyrics" value="Open" onClick={() => openAdmin('lyrics')} />
+                            <AdminStatBox label="Logs" value="Open" onClick={() => openAdmin('logs')} />
                             <AdminStatBox label="Broadcast" value="Send" onClick={() => setShowBroadcast(true)} />
                           </>
                         )}
-                        {isAdmin && (
-                          <AdminStatBox
-                            label="Security"
-                            value={adminPreview ? (adminPreview.otpEnabled ? 'ON' : 'OFF') : undefined}
-                            highlight={adminPreview?.otpEnabled === false}
-                            onClick={() => openAdmin('security')}
-                          />
+                        {/* The 2FA status lives in Settings → Account; this box
+                            only appears while it's off. Admin opens on its
+                            setup gate. */}
+                        {otpLocked && (
+                          <AdminStatBox label="2FA" value="OFF" highlight onClick={() => openAdmin('proposals')} />
                         )}
                       </div>
                       {otpLocked && (

@@ -7,11 +7,13 @@ import { ADMIN_COMMANDS } from './admin'
 import { BIND_COMMANDS } from './bind'
 import { CDN_COMMANDS } from './cdn'
 import { BETA_COMMANDS } from './beta'
+import { LOG_COMMANDS } from './logs'
 import { ADMIN_EXTRA_COMMANDS } from './adminExtras'
 import { CATALOG_COMMANDS } from './catalog'
 import { CHAT_KEY_COMMANDS } from './chatKeys'
 import { CHAT_MANAGE_COMMANDS } from './chatManage'
 import { DONOR_COMMANDS } from './donor'
+import { LYRICS_GEN_COMMANDS } from './lyricsGen'
 import { GAME_COMMANDS } from './games'
 import { INTEGRATION_COMMANDS } from './integrations'
 import { COMMUNITY_COMMANDS } from './community'
@@ -19,13 +21,14 @@ import { EDITING_COMMANDS } from './editing'
 import { NEWS_COMMANDS } from './news'
 import { VERSION_COMMANDS } from './versions'
 import { APP_COMMANDS } from './app'
+import { DESKTOP_COMMANDS } from './desktop'
 import { FUN_COMMANDS } from './fun'
 import { HTTP_COMMANDS } from './http'
 import { MORE_COMMANDS } from './more'
 import { LIBRARY_COMMANDS } from './library'
 import { PLAYER_COMMANDS } from './player'
 import { SETTINGS_COMMANDS, searchSettings } from './settings'
-import type { TermCommand, TermGroup } from './types'
+import { profileLink, type TermCommand, type TermGroup } from './types'
 import { directory, matchUsers, USER_COMMANDS } from './users'
 
 export type { TermCommand, TermCtx, TermGroup, TermScreen, TermTone } from './types'
@@ -56,14 +59,14 @@ const LOOKUP: TermCommand = {
     ]
     const playlists = useStore.getState().playlists.filter((p) => norm(p.name).includes(ql)).map((p) => `${p.name}  (${p.track_count})   → playlist play ${p.name}`)
     const settings = searchSettings(q).map((s) => `${s.key} = ${s.value}   → set ${s.key} <value>`)
-    const all = [...FUN_COMMANDS, ...PLAYER_COMMANDS, ...LIBRARY_COMMANDS, ...SETTINGS_COMMANDS, ...BIND_COMMANDS, ...ADMIN_COMMANDS, ...CDN_COMMANDS, ...BETA_COMMANDS, ...APP_COMMANDS, ...HTTP_COMMANDS, ...ACCOUNT_COMMANDS, ...EDITING_COMMANDS, ...VERSION_COMMANDS, ...NEWS_COMMANDS, ...CATALOG_COMMANDS, ...COMMUNITY_COMMANDS, ...GAME_COMMANDS, ...DONOR_COMMANDS, ...INTEGRATION_COMMANDS, ...ADMIN_EXTRA_COMMANDS, ...CHAT_MANAGE_COMMANDS, ...CHAT_KEY_COMMANDS, ...USER_COMMANDS, LOOKUP].filter((c) => canRun(c))
+    const all = [...FUN_COMMANDS, ...PLAYER_COMMANDS, ...LIBRARY_COMMANDS, ...SETTINGS_COMMANDS, ...BIND_COMMANDS, ...ADMIN_COMMANDS, ...CDN_COMMANDS, ...BETA_COMMANDS, ...LOG_COMMANDS, ...APP_COMMANDS, ...DESKTOP_COMMANDS, ...HTTP_COMMANDS, ...ACCOUNT_COMMANDS, ...EDITING_COMMANDS, ...VERSION_COMMANDS, ...NEWS_COMMANDS, ...CATALOG_COMMANDS, ...COMMUNITY_COMMANDS, ...GAME_COMMANDS, ...DONOR_COMMANDS, ...LYRICS_GEN_COMMANDS, ...INTEGRATION_COMMANDS, ...ADMIN_EXTRA_COMMANDS, ...CHAT_MANAGE_COMMANDS, ...CHAT_KEY_COMMANDS, ...USER_COMMANDS, LOOKUP].filter((c) => canRun(c))
     const commands = [
       ...chatCommandsFor().filter((c) => c.name.includes(ql) || norm(c.description).includes(ql)).map((c) => `${c.usage}  - ${c.description}`),
       ...all.filter((c) => c.name.includes(ql) || c.aliases?.some((a) => a.includes(ql)) || norm(c.description).includes(ql)).map((c) => `${c.usage}  - ${c.description}`),
     ]
 
     const out = [
-      section('People', users.slice(0, 8).map((u) => `${u.username}${u.display && u.display !== u.username ? ` (${u.display})` : ''}  #${u.id}   → user ${u.username}`), users.length),
+      section('People', users.slice(0, 8).map((u) => `${profileLink(u.id, u.username)}${u.display && u.display !== u.username ? ` (${u.display})` : ''}  #${u.id}   → user ${u.username}`), users.length),
       section('Rooms', rooms.slice(0, 8), rooms.length),
       section('Playlists', playlists.slice(0, 8), playlists.length),
       section('Songs', songs.map((s, i) => `${s.name}  (${s.era?.name ?? s.category})   → find ${s.name}`).slice(0, 5)),
@@ -87,7 +90,9 @@ export const TERM_COMMANDS: TermCommand[] = [
   ...ADMIN_COMMANDS,
   ...CDN_COMMANDS,
   ...BETA_COMMANDS,
+  ...LOG_COMMANDS,
   ...APP_COMMANDS,
+  ...DESKTOP_COMMANDS,
   ...HTTP_COMMANDS,
   ...MORE_COMMANDS,
   ...ACCOUNT_COMMANDS,
@@ -98,6 +103,7 @@ export const TERM_COMMANDS: TermCommand[] = [
   ...COMMUNITY_COMMANDS,
   ...GAME_COMMANDS,
   ...DONOR_COMMANDS,
+  ...LYRICS_GEN_COMMANDS,
   ...INTEGRATION_COMMANDS,
   ...ADMIN_EXTRA_COMMANDS,
   ...CHAT_MANAGE_COMMANDS,

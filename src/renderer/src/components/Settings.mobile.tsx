@@ -6,16 +6,20 @@ import {
   Waves, RotateCcw, ExternalLink,
   ListOrdered, CloudUpload, Type, AlignCenter, Menu, Pencil, Upload,
   ScrollText, ShieldCheck, User, LogOut, LogIn, AlertCircle, GripVertical, Images, Search, X, Wrench, Bug, Disc, Lock, House, Heart, History, Bell, BellOff, Radio, Server, SlidersHorizontal,
+  Activity,
 } from 'lucide-react'
+import { DebugAnonymousToggle, DebugLogOpenButton, DebugRecordButton } from './DebugRecorder'
 import { useStore, useStorePick } from '../store/useStore'
 import { SKINS, getSkin } from '../lib/skins'
 import SkinEditorModal from './SkinEditorModal'
-import { FONTS } from '../lib/fonts'
+import { allFonts } from '../lib/fonts'
+import { useCustomFonts } from '../hooks/useCustomFonts'
 import { orderedNavItems, isNavItemVisible, DEFAULT_NAV_ORDER, DEFAULT_NAV_VISIBILITY } from '../lib/navItems'
 import { hasChatAccess, useChatStore } from '../store/chatStore'
 import ChatDevices from './chat/ChatDevices'
 import MyCdnNodes from './MyCdnNodes'
 import ApiKeys from './ApiKeys'
+import Passkeys from './Passkeys'
 import ChatKeyTransfer from './chat/ChatKeyTransfer'
 import { HOME_SECTIONS, DEFAULT_HOME_SECTION_VISIBILITY, isHomeSectionVisible } from '../lib/homeSections'
 import { getToken, CONTRIBUTOR_ENABLED, showStaffProfile, staffProfileLabel } from '../lib/userApi'
@@ -38,6 +42,8 @@ import { useDragReorder } from './mobile/useDragReorder'
 import type { ViewType } from '../types'
 import LegalModal, { type LegalDoc } from './LegalModal'
 import EraCoversSection from './EraCoversSection'
+import { useContentMotion } from '../hooks/useContentMotion'
+import { MotionDisclosure } from './MotionDisclosure'
 import { useSettingsAccount } from '../hooks/useSettingsAccount'
 import { useSettingsAppearance } from '../hooks/useSettingsAppearance'
 import { useLastfmConnect } from '../hooks/useLastfmConnect'
@@ -146,6 +152,7 @@ const SETTINGS_SEARCH_INDEX: { tab: Tab; label: string; sub?: string; devOnly?: 
   { tab: 'preferences', label: 'Home screen', sub: 'Choose which sections show on the Home tab' },
   // Playback
   { tab: 'playback', label: 'Audio output' },
+  { tab: 'playback', label: 'Remember queue and now playing', sub: 'Restore your queue, current track and position on this device when you reopen. Playback stays paused.' },
   { tab: 'playback', label: 'Lyrics sync', sub: 'Offset lyrics timing' },
   ...(CAN_SET_VOLUME ? [{ tab: 'playback' as const, label: 'Crossfade' }] : []),
   // Smooth fade when pausing is iOS-excluded further down (Safari ignores
@@ -172,8 +179,12 @@ const SETTINGS_SEARCH_INDEX: { tab: Tab; label: string; sub?: string; devOnly?: 
   // Feedback / About
   { tab: 'about', label: 'Feedback', sub: 'Report a bug or share an idea' },
   { tab: 'preferences', label: 'Auto-report app errors', sub: 'Automatically send a crash report when the app hits an unexpected error' },
+  { tab: 'about', label: 'Record debug log', sub: 'Record console messages and network requests to a file you can send us' },
+  { tab: 'about', label: 'Open debug log', sub: 'View a saved debug log file - requests, errors and console messages' },
   { tab: 'about', label: 'About', sub: 'Version, GitHub, Discord, API links' },
   { tab: 'account', label: 'My CDN nodes', sub: 'Nodes linked to your account' },
+  { tab: 'account', label: 'Two-factor authentication', sub: 'Whether sign-ins ask for an authenticator code' },
+  { tab: 'account', label: 'Passkeys', sub: 'Sign in with your face, fingerprint, PIN, a security key or your phone' },
   { tab: 'account', label: 'API keys', sub: 'Keys for scripts and integrations' },
   { tab: 'about', label: 'Auth Token', sub: 'View and copy your account token' },
   { tab: 'about', label: 'API Docs' },
@@ -562,6 +573,7 @@ export default function Settings(): JSX.Element {
     audioOutput, setAudioOutput,
     crossfadeEnabled, crossfadeDuration, setCrossfade,
     pauseFadeEnabled, setPauseFade,
+    rememberQueue, setRememberQueue,
     preferOgVersion, setPreferOgVersion,
     rotateSuggestedCovers, setRotateSuggestedCovers,
     mediaOverlayEnabled, setMediaOverlayEnabled,
@@ -584,8 +596,8 @@ export default function Settings(): JSX.Element {
     playlistHeroEnabledDark, playlistHeroEnabledLight, setPlaylistHeroEnabled,
     fullEraNames, setFullEraNames,
     autoReportErrors, setAutoReportErrors,
-    embedLyricsOnDownload, setEmbedLyricsOnDownload,
-  } = useStorePick('setShowSettings', 'setActiveView', 'openProfile', 'account', 'setShowUserAuth', 'logoutAccount', 'theme', 'setTheme', 'customSkins', 'saveCustomSkin', 'deleteCustomSkin', 'accentColor', 'setAccentColor', 'settingsTab', 'setSettingsTab', 'navOrder', 'setNavOrder', 'navVisibility', 'setNavItemVisible', 'homeSectionVisibility', 'setHomeSectionVisible', 'audioOutput', 'setAudioOutput', 'crossfadeEnabled', 'crossfadeDuration', 'setCrossfade', 'pauseFadeEnabled', 'setPauseFade', 'preferOgVersion', 'setPreferOgVersion', 'rotateSuggestedCovers', 'setRotateSuggestedCovers', 'mediaOverlayEnabled', 'setMediaOverlayEnabled', 'lyricsOffset', 'setLyricsOffset', 'sleepTimerEnd', 'setSleepTimer', 'developerMode', 'setDeveloperMode', 'lastfmUser', 'setLastfmUser', 'lastfmEnabled', 'setLastfmEnabled', 'appTextScale', 'setAppTextScale', 'lyricsScale', 'setLyricsScale', 'lyricsAlign', 'setLyricsAlign', 'lyricsBlur', 'setLyricsBlur', 'lyricsBlurAmount', 'setLyricsBlurAmount', 'lyricsColorActive', 'setLyricsColorActive', 'lyricsColorInactive', 'setLyricsColorInactive', 'appFont', 'setAppFont', 'lyricsFont', 'setLyricsFont', 'gradientsEnabled', 'setGradientsEnabled', 'surfaceGradientsEnabled', 'setSurfaceGradientsEnabled', 'wrldThemeBackground', 'setWrldThemeBackground', 'playlistHeroEnabledDark', 'playlistHeroEnabledLight', 'setPlaylistHeroEnabled', 'fullEraNames', 'setFullEraNames', 'autoReportErrors', 'setAutoReportErrors', 'embedLyricsOnDownload', 'setEmbedLyricsOnDownload')
+    embedSongInfoOnDownload, setEmbedSongInfoOnDownload,
+  } = useStorePick('setShowSettings', 'setActiveView', 'openProfile', 'account', 'setShowUserAuth', 'logoutAccount', 'theme', 'setTheme', 'customSkins', 'saveCustomSkin', 'deleteCustomSkin', 'accentColor', 'setAccentColor', 'settingsTab', 'setSettingsTab', 'navOrder', 'setNavOrder', 'navVisibility', 'setNavItemVisible', 'homeSectionVisibility', 'setHomeSectionVisible', 'audioOutput', 'setAudioOutput', 'crossfadeEnabled', 'crossfadeDuration', 'setCrossfade', 'pauseFadeEnabled', 'setPauseFade', 'rememberQueue', 'setRememberQueue', 'preferOgVersion', 'setPreferOgVersion', 'rotateSuggestedCovers', 'setRotateSuggestedCovers', 'mediaOverlayEnabled', 'setMediaOverlayEnabled', 'lyricsOffset', 'setLyricsOffset', 'sleepTimerEnd', 'setSleepTimer', 'developerMode', 'setDeveloperMode', 'lastfmUser', 'setLastfmUser', 'lastfmEnabled', 'setLastfmEnabled', 'appTextScale', 'setAppTextScale', 'lyricsScale', 'setLyricsScale', 'lyricsAlign', 'setLyricsAlign', 'lyricsBlur', 'setLyricsBlur', 'lyricsBlurAmount', 'setLyricsBlurAmount', 'lyricsColorActive', 'setLyricsColorActive', 'lyricsColorInactive', 'setLyricsColorInactive', 'appFont', 'setAppFont', 'lyricsFont', 'setLyricsFont', 'gradientsEnabled', 'setGradientsEnabled', 'surfaceGradientsEnabled', 'setSurfaceGradientsEnabled', 'wrldThemeBackground', 'setWrldThemeBackground', 'playlistHeroEnabledDark', 'playlistHeroEnabledLight', 'setPlaylistHeroEnabled', 'fullEraNames', 'setFullEraNames', 'autoReportErrors', 'setAutoReportErrors', 'embedSongInfoOnDownload', 'setEmbedSongInfoOnDownload')
 
   const avatarInputRef = useRef<HTMLInputElement>(null)
   const {
@@ -643,6 +655,7 @@ export default function Settings(): JSX.Element {
   // works off the defaults; only the editor for them is desktop-side now.
 
   const [tab, setTab] = useState<Tab>((settingsTab as Tab) ?? 'appearance')
+  const contentRef = useRef<HTMLDivElement>(null)
 
   // Settings is a two-level page: a category list that drills into one section
   // at a time. `inSection` = a section is open.
@@ -658,6 +671,7 @@ export default function Settings(): JSX.Element {
   // so a result never points at a tab that doesn't exist in this build.
   const [settingsQuery, setSettingsQuery] = useState('')
   const settingsQueryTrimmed = settingsQuery.trim().toLowerCase()
+  useContentMotion(contentRef, settingsQueryTrimmed ? 'search' : tab)
   const searchResults = settingsQueryTrimmed
     ? SETTINGS_SEARCH_INDEX.filter((r) =>
         (!r.devOnly || developerMode) &&
@@ -721,6 +735,8 @@ export default function Settings(): JSX.Element {
   // Each of these is the body of a picker sheet, summarised inline by a
   // PickerRow. The current value drives that row's preview.
   const currentSkin = getSkin(theme)
+  useCustomFonts()
+  const FONTS = allFonts()
   const currentAppFont = FONTS.find((f) => f.id === appFont) ?? FONTS[0]
   const currentLyricsFont = FONTS.find((f) => f.id === lyricsFont) ?? FONTS[0]
 
@@ -982,7 +998,7 @@ export default function Settings(): JSX.Element {
 
         {/* The drilled-into section - one category owns the whole screen. */}
         {inSection && (
-          <div key={tab} className="flex-1 min-h-0 overflow-y-auto overscroll-contain px-4 pt-3 pb-6">
+          <div key={tab} ref={contentRef} className="flex-1 min-h-0 overflow-y-auto overscroll-contain px-4 pt-3 pb-6">
 
             {/* ── Account ── */}
             {tab === 'account' && (
@@ -1113,6 +1129,30 @@ export default function Settings(): JSX.Element {
                     )}
                     <SettingsCard title="My CDN nodes">
                       <MyCdnNodes />
+                    </SettingsCard>
+                    {/* Setup is admin-only on the server (GET otp/setup/ answers
+                        "Administrator access required."), and Admin already
+                        parks an admin without 2FA on its setup panel. */}
+                    <SettingsCard title="Security">
+                      <Row
+                        icon={ShieldCheck}
+                        iconColor={account.otp_enabled ? '#059669' : '#6b7280'}
+                        label="Two-factor authentication"
+                        sub={account.otp_enabled
+                          ? 'Sign-ins ask for a code from your authenticator app'
+                          : account.is_administrator ? 'Required for admin tools' : 'Not turned on for this account'}
+                      >
+                        {account.otp_enabled ? (
+                          <span className="shrink-0 text-[11px] font-semibold text-emerald-500">On</span>
+                        ) : account.is_administrator ? (
+                          <button onClick={() => openMainView('admin')} className="shrink-0 text-[11px] font-semibold text-accent hover:underline">Set up</button>
+                        ) : (
+                          <span className="shrink-0 text-[11px] font-semibold text-text-muted">Off</span>
+                        )}
+                      </Row>
+                    </SettingsCard>
+                    <SettingsCard title="Passkeys">
+                      <Passkeys />
                     </SettingsCard>
                     <SettingsCard title="API keys">
                       <ApiKeys />
@@ -1423,10 +1463,10 @@ export default function Settings(): JSX.Element {
                   <Row
                     icon={ScrollText}
                     iconColor="#8b5cf6"
-                    label="Embed lyrics and cover in downloads"
-                    sub="When you download an MP3, write the song's lyrics (synced too, if it has them) and your own cover for it, if you set one, into the file's tags - your cover replaces the one in the file"
+                    label="Add song info to downloads"
+                    sub="When you download an MP3, write the song's name, artist, album, cover and lyrics (synced too, if it has them) into the file's tags - a cover you set for the song replaces the one in the file"
                   >
-                    <Toggle on={embedLyricsOnDownload} onClick={() => setEmbedLyricsOnDownload(!embedLyricsOnDownload)} />
+                    <Toggle on={embedSongInfoOnDownload} onClick={() => setEmbedSongInfoOnDownload(!embedSongInfoOnDownload)} />
                   </Row>
                   <Row
                     icon={Bug}
@@ -1524,7 +1564,7 @@ export default function Settings(): JSX.Element {
                     ) : undefined}
                   >
                     <div className="rounded-xl bg-[var(--surface-highest)] overflow-hidden">
-                      {HOME_SECTIONS.filter((section) => !section.staffOnly || hasChatAccess(account)).map((section) => {
+                      {HOME_SECTIONS.filter((section) => (!section.staffOnly || hasChatAccess(account))).map((section) => {
                         const shown = isHomeSectionVisible(section.id, homeSectionVisibility)
                         return (
                           <div
@@ -1600,6 +1640,14 @@ export default function Settings(): JSX.Element {
                       <Toggle on={pauseFadeEnabled} onClick={() => setPauseFade(!pauseFadeEnabled)} />
                     </Row>
                   )}
+                  <Row
+                    icon={ListOrdered}
+                    iconColor="#7c3aed"
+                    label="Remember queue and now playing"
+                    sub="Restore your queue, current track and position on this device when you reopen. Playback stays paused."
+                  >
+                    <Toggle on={rememberQueue} onClick={() => setRememberQueue(!rememberQueue)} />
+                  </Row>
                   <Row icon={FileText} iconColor="#059669" label="Prefer OG version">
                     <Toggle on={preferOgVersion} onClick={() => setPreferOgVersion(!preferOgVersion)} />
                   </Row>
@@ -1957,6 +2005,25 @@ export default function Settings(): JSX.Element {
                   <LinkRow icon={Globe} iconColor="#0891b2" label="API" href="https://juicewrldapi.com" />
                   <ActionRow icon={BookOpen} iconColor="#6366f1" label="API Docs" onClick={() => openMainView('docs')} />
                   <ActionRow icon={MessageCircle} iconColor="#db2777" label="Send Feedback" sub="Report a bug or share an idea" onClick={() => useStore.getState().openReport({ kind: 'feedback' })} />
+                  <Row
+                    icon={Activity}
+                    iconColor="#dc2626"
+                    label="Record debug log"
+                    sub="Records console messages and network requests while you reproduce a problem, then saves them to a file you can send us"
+                  >
+                    <div className="flex items-center gap-2 shrink-0">
+                      <DebugLogOpenButton />
+                      <DebugRecordButton size="lg" />
+                    </div>
+                  </Row>
+                  <Row
+                    icon={EyeOff}
+                    iconColor="#6b7280"
+                    label="Anonymous"
+                    sub="Leaves out device and browser details, and scrubs your username, email, IP and folder paths from the log"
+                  >
+                    <DebugAnonymousToggle />
+                  </Row>
                   <ActionRow icon={Heart} iconColor="#ec4899" label="Thank You" sub="Donors and contributors" onClick={() => openMainView('thanks')} />
                 </SettingsCard>
 
@@ -2002,23 +2069,22 @@ export default function Settings(): JSX.Element {
                     <div key={q} className="border-b border-[var(--border)] last:border-b-0">
                       <button
                         onClick={() => setOpenAbout(openAbout === q ? null : q)}
+                        aria-expanded={openAbout === q}
                         className="flex items-center justify-between gap-3 w-full py-3 min-h-[52px] text-left"
                       >
                         <span className="text-text-primary text-[15px]">{q}</span>
-                        <ChevronDown size={16} className={`text-text-muted transition-transform duration-150 shrink-0 ${openAbout === q ? 'rotate-180' : ''}`} />
+                        <ChevronDown size={16} className={`text-text-muted control-motion shrink-0 ${openAbout === q ? 'rotate-180' : ''}`} />
                       </button>
-                      {openAbout === q && (
-                        <div className="pb-3 -mt-1">
-                          <p className="text-text-muted text-[13px] leading-relaxed">{a}</p>
-                          {link && (
-                            <button
-                              onClick={() => openMainView('docs')}
-                              className="mt-2 inline-block text-[13px] text-accent">
-                              {link.text}
-                            </button>
-                          )}
-                        </div>
-                      )}
+                      <MotionDisclosure open={openAbout === q} className="pb-3 -mt-1">
+                        <p className="text-text-muted text-[13px] leading-relaxed">{a}</p>
+                        {link && (
+                          <button
+                            onClick={() => openMainView('docs')}
+                            className="mt-2 inline-block text-[13px] text-accent">
+                            {link.text}
+                          </button>
+                        )}
+                      </MotionDisclosure>
                     </div>
                   ))}
                 </SettingsCard>

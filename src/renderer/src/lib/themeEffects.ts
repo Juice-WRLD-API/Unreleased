@@ -1,7 +1,8 @@
-import { useEffect } from 'react'
+import { useEffect, useRef } from 'react'
 import { useStore, useStorePick } from '../store/useStore'
 import { buildImageUrl, smallCoverUrl } from './juicewrldApi'
 import { getFont } from './fonts'
+import { useCustomFonts } from '../hooks/useCustomFonts'
 import { getSkin, SKIN_OPTIONAL_VAR_KEYS, type Skin } from './skins'
 
 function hexToRgb(hex: string): [number, number, number] {
@@ -101,7 +102,12 @@ function applyVars(vars: Skin['vars']): void {
   syncThemeColorMeta()
 }
 
+// Accent currently written to <html>, so an effect rerun with the same value
+// doesn't start a cross-fade with nothing to fade.
+let appliedAccent: string | null = null
+
 function applyAccentVars(accent: string): void {
+  appliedAccent = accent
   const [r, g, b] = hexToRgb(accent)
   const hover = lightenHex(accent, 20)
   const [hr, hg, hb] = hexToRgb(hover)
@@ -111,6 +117,46 @@ function applyAccentVars(accent: string): void {
   root.style.setProperty('--accent-hover', hover)
   root.style.setProperty('--accent-hover-rgb', `${hr} ${hg} ${hb}`)
   syncThemeColorMeta()
+}
+
+// ── Palette cross-fade ───────────────────────────────────────────────────────
+// Skin and accent changes run through a view transition: Chromium snapshots
+// the old frame and cross-fades it into the live new one on the compositor
+// (index.css styles the 'palette' type), so the app restyles once. Animating
+// the palette vars on <html> instead restyled every element on every frame of
+// the fade, which is what made switching skins stutter.
+
+// Set after the persisted skin has painted once, so launch doesn't fade in
+// from the first-paint fallback palette.
+let fadeReady = false
+// Writes waiting for the pending transition's old-frame snapshot. Everything
+// painted in the same commit (skin vars, then the accent effect) joins it.
+let fadeQueue: Array<() => void> | null = null
+// While a fade is playing, further writes land straight in its live new
+// frame - that keeps an accent-picker drag from re-snapshotting the window on
+// every step.
+let fadeRunning = false
+
+const reducedMotion = (): boolean => window.matchMedia('(prefers-reduced-motion: reduce)').matches
+
+function paintPalette(write: () => void, fade = true): void {
+  if (fadeQueue) { fadeQueue.push(write); return }
+  if (!fade || fadeRunning || !fadeReady || !document.startViewTransition
+    || document.visibilityState === 'hidden' || reducedMotion()) {
+    write()
+    return
+  }
+  const queue = [write]
+  fadeQueue = queue
+  fadeRunning = true
+  const done = (): void => { fadeRunning = false }
+  document.startViewTransition({
+    update: () => {
+      fadeQueue = null
+      for (const w of queue) w()
+    },
+    types: ['palette'],
+  }).finished.then(done, done)
 }
 
 // ── "Now Playing" dynamic skin ───────────────────────────────────────────────
@@ -240,14 +286,20 @@ export function useThemeEffects(): void {
       : null,
   )
 
+  // Editing the active custom skin reruns the effect below with the same theme
+  // id; those repaints snap so the editor preview follows the picker.
+  const paintedTheme = useRef(theme)
+
   useEffect(() => {
     const root = document.documentElement
+    const fade = paintedTheme.current !== theme || skin.dynamic
+    paintedTheme.current = theme
     // `.dark` still drives Tailwind dark: variants and color-scheme; the
     // palette itself comes from the skin's vars (inline styles override the
     // :root/.dark fallback blocks in index.css). Every skin sets the same
     // set of keys, so switching skins never leaves stale values behind.
-    root.classList.toggle('dark', skin.dark)
     const restoreFallback = (): void => {
+      root.classList.toggle('dark', skin.dark)
       applyVars(skin.vars)
       if (songAccentActive) {
         songAccentActive = false
@@ -255,7 +307,7 @@ export function useThemeEffects(): void {
       }
     }
     if (!skin.dynamic || !songArt) {
-      restoreFallback()
+      paintPalette(restoreFallback, fade)
       return
     }
     // Keep whatever palette is showing until the new art resolves - no flash
@@ -263,17 +315,20 @@ export function useThemeEffects(): void {
     let cancelled = false
     extractSongPalette(songArt).then((palette) => {
       if (cancelled) return
-      if (!palette) { restoreFallback(); return }
-      applyVars(palette.vars)
-      applyAccentVars(palette.accent)
-      songAccentActive = true
+      paintPalette(() => {
+        if (!palette) { restoreFallback(); return }
+        root.classList.toggle('dark', skin.dark)
+        applyVars(palette.vars)
+        applyAccentVars(palette.accent)
+        songAccentActive = true
+      })
     })
     return () => { cancelled = true }
   }, [theme, songArt, customSkins])
 
   useEffect(() => {
-    if (songAccentActive) return
-    applyAccentVars(accentColor)
+    if (songAccentActive || appliedAccent === accentColor) return
+    paintPalette(() => applyAccentVars(accentColor))
   }, [accentColor, theme])
 
   // App-wide text size. Tailwind's type scale (and rem-based spacing) keys
@@ -287,11 +342,14 @@ export function useThemeEffects(): void {
   // Font stacks. --font-app backs Tailwind's font-sans (so it reaches every
   // screen through preflight's <html> rule); --font-lyrics is read by the
   // lyric panels only.
+  // customFonts: a choice can resolve to System until its list entry exists
+  // (another window just added it), so rerun when the list changes.
+  const customFonts = useCustomFonts()
   useEffect(() => {
     const root = document.documentElement
     root.style.setProperty('--font-app', getFont(appFont).stack)
     root.style.setProperty('--font-lyrics', getFont(lyricsFont).stack)
-  }, [appFont, lyricsFont])
+  }, [appFont, lyricsFont, customFonts])
 
   // Gradient surfaces - index.css keys the accent-tinted washes and the
   // accent-button sheen off this class. Purely cosmetic overlays on top of
@@ -308,16 +366,14 @@ export function useThemeEffects(): void {
     document.documentElement.classList.toggle('surface-gradients', surfaceGradientsEnabled)
   }, [surfaceGradientsEnabled])
 
-  // Palette cross-fades (index.css transitions the registered vars) switch on
-  // only after the persisted skin has painted once - two rAFs so the browser
-  // has committed a frame with the final startup values, otherwise launch
-  // would visibly fade from the first-paint fallback palette.
+  // Palette cross-fades switch on only after the persisted skin has painted
+  // once - two rAFs so the browser has committed a frame with the final
+  // startup values, otherwise launch would visibly fade from the first-paint
+  // fallback palette.
   useEffect(() => {
     let inner = 0
     const outer = requestAnimationFrame(() => {
-      inner = requestAnimationFrame(() =>
-        document.documentElement.classList.add('theme-animate'),
-      )
+      inner = requestAnimationFrame(() => { fadeReady = true })
     })
     return () => {
       cancelAnimationFrame(outer)

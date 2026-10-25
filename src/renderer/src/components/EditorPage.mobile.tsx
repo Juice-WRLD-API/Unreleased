@@ -5,7 +5,7 @@ import {
 } from 'lucide-react'
 import FilePickerModal from './FilePickerModal'
 import { useStore, useStorePick } from '../store/useStore'
-import { apiFetch, JWApiSong, JWApiEra, buildImageUrl, toSiteRelativeImageUrl, CATEGORY_LABELS } from '../lib/juicewrldApi'
+import { apiFetch, JWApiSong, JWApiEra, buildImageUrl, toSiteRelativeImageUrl, songToTrack, CATEGORY_LABELS } from '../lib/juicewrldApi'
 import * as userApi from '../lib/userApi'
 import { isPrimaryChannelSlug } from '../hooks/useChannelRoles'
 import { invalidateLyricsCache } from './Player'
@@ -24,7 +24,9 @@ import {
 import { useValueSuggestions, DatePickerButton, AppField } from './EditorPageParts'
 import { useEditorPageState } from '../hooks/useEditorPageState'
 import { clickable } from '../lib/a11y'
-import LyricsSyncTool from './LyricsSyncTool'
+import { SongSyncedLyricsTool } from './SyncedLyricsTool'
+import { lyricsToTime } from '../lib/lyricsGenApi'
+import type { SyncMode } from '../lib/syncedLyrics'
 
 type SubmitState = 'idle' | 'submitting' | 'submitted' | 'error'
 type LyricsTab = 'lyrics' | 'synced'
@@ -373,6 +375,32 @@ export default function EditorPage({ initialSongId = null }: {
     base, current, patch, changedCount, alreadySubmitted,
   } = useEditorPageState(initialSongId)
 
+  // Sync's "Auto-sync with Whisper": lyrics generation on this song, with
+  // these lyrics, its result handed back to this field. Only while the editor
+  // is still on the song the job was started from.
+  const songRef = useRef(song)
+  songRef.current = song
+  const openWhisper = (mode: SyncMode): void => {
+    if (!song) return
+    const id = song.id
+    useStore.getState().openLyricsGen({
+      track: songToTrack(song),
+      songId: id,
+      tab: 'create',
+      prefill: { mode: mode === 'words' ? 'word_synced' : 'synced', text: lyricsToTime(lyrics, synced) },
+      apply: {
+        label: 'Use in the song editor',
+        onApply: (lrc) => {
+          if (songRef.current?.id !== id) return false
+          setSynced(lrc)
+          setLyricsTab('synced')
+          setSyncTool(true)
+          return true
+        },
+      },
+    })
+  }
+
   /* ── Guards ──────────────────────────────────────────────────────────────── */
   if (!account) return (
     <div className="flex-1 flex flex-col items-center justify-center gap-5 px-6 text-center">
@@ -649,7 +677,7 @@ export default function EditorPage({ initialSongId = null }: {
                   {lyricsTab === 'synced' && (
                     <button
                       onClick={() => setSyncTool(v => !v)}
-                      title="Stamp each line's time while the song plays"
+                      title="The synced lyrics tool: time each line or word while the song plays"
                       className={`px-1.5 py-1 rounded-lg text-[10px] font-semibold transition-colors ${syncTool ? 'bg-accent/15 text-accent' : 'text-text-muted opacity-60 hover:opacity-100'}`}
                     >
                       Sync
@@ -707,7 +735,7 @@ export default function EditorPage({ initialSongId = null }: {
                   )}
                 </div>
               ) : syncTool ? (
-                <LyricsSyncTool value={synced} onChange={setSynced} plainLyrics={lyrics} song={song} />
+                <SongSyncedLyricsTool value={synced} onChange={setSynced} plainLyrics={lyrics} song={song} saved={String(base.synced_lyrics || '')} onWhisper={openWhisper} />
               ) : syncedTable ? (
                 <SyncedLyricsTable value={synced} onChange={setSynced} />
               ) : (
@@ -758,20 +786,20 @@ export default function EditorPage({ initialSongId = null }: {
             {submitState === 'submitting' && <Loader2 size={14} className="animate-spin" />}
             {submitState === 'submitted'  && <Check size={14} />}
             {submitState === 'error'      && <AlertCircle size={14} />}
-            {submitState === 'idle' && alreadySubmitted && (editingPropId != null ? 'Updated' : 'Staged')}
-            {submitState === 'idle' && !alreadySubmitted && (editingPropId != null ? 'Update proposal' : 'Stage proposal')}
-            {submitState === 'submitting' && (editingPropId != null ? 'Updating…' : 'Staging…')}
-            {submitState === 'submitted'  && (editingPropId != null ? 'Updated!' : 'Staged!')}
+            {submitState === 'idle' && alreadySubmitted && (editingPropId != null ? 'Updated' : 'Submitted')}
+            {submitState === 'idle' && !alreadySubmitted && (editingPropId != null ? 'Update proposal' : 'Submit proposal')}
+            {submitState === 'submitting' && (editingPropId != null ? 'Updating…' : 'Submitting…')}
+            {submitState === 'submitted'  && (editingPropId != null ? 'Updated!' : 'Submitted!')}
             {submitState === 'error'      && 'Try again'}
           </button>
 
-          {/* Stage deletion - only for an existing song, not a new-song draft or an in-progress edit proposal */}
+          {/* Delete proposal - only for an existing song, not a new-song draft or an in-progress edit proposal */}
           {song && !isNewSongDraft && editingPropId == null && (
             <button
               onClick={submitDeletion}
               onBlur={() => { if (deleteState === 'confirm') setDeleteState('idle') }}
               disabled={deleteState === 'submitting' || deleteState === 'submitted'}
-              title="Stage this song entry for deletion. Review it in the Uploads panel before it's proposed - admins review before it's removed."
+              title="Propose deleting this song entry - admins review before it's removed."
               className={`w-full py-2.5 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-1.5 ${
                 deleteState === 'submitted' ? 'bg-emerald-500/20 text-emerald-400' :
                 deleteState === 'error'     ? 'bg-red-500/20 text-red-400' :
@@ -782,10 +810,10 @@ export default function EditorPage({ initialSongId = null }: {
               {deleteState === 'submitted'  && <Check size={12} />}
               {(deleteState === 'idle' || deleteState === 'confirm') && <Trash2 size={12} />}
               {deleteState === 'error'      && <AlertCircle size={12} />}
-              {deleteState === 'idle'       && 'Stage deletion'}
+              {deleteState === 'idle'       && 'Delete song'}
               {deleteState === 'confirm'    && 'Tap again to confirm'}
-              {deleteState === 'submitting' && 'Staging…'}
-              {deleteState === 'submitted'  && 'Staged!'}
+              {deleteState === 'submitting' && 'Submitting…'}
+              {deleteState === 'submitted'  && 'Submitted!'}
               {deleteState === 'error'      && 'Try again'}
             </button>
           )}

@@ -1,4 +1,4 @@
-import { useState, memo, useEffect, useMemo } from 'react'
+import { useState, memo, useEffect, useMemo, useRef } from 'react'
 import {
   ChevronLeft, Users, Clock, CheckCircle, XCircle, ShieldCheck, BarChart2,
   Loader2, RefreshCw, FileEdit, KeyRound, Check, AlertCircle, RotateCcw,
@@ -17,10 +17,13 @@ import { relativeTime, shortDate, STATUS_STYLE, StatusChip, Avatar, Empty, AppSe
 import ReportsTab from './ReportsTab'
 import FeedbackTab from './FeedbackTab'
 import CompProposalsTab from './CompProposalsTab'
+import CompReplaceTab from './CompReplaceTab'
 import ChannelsTab from './ChannelsTab'
 import EraTab from './EraTab'
 import CdnNodesTab from './CdnNodesTab'
 import BetaTab from './BetaTab'
+import LogsTab from './LogsTab'
+import LyricsGenAdminTab from './LyricsGenAdminTab'
 import { useStaffRoles } from '../hooks/useStaffRoles'
 import { useAdminQueue, type AdminTab } from '../hooks/useAdminQueue'
 import { useOtpGate } from '../hooks/useOtpGate'
@@ -31,6 +34,10 @@ import { useAdminUsersList } from '../hooks/useAdminUsersList'
 import { useAdminStats } from '../hooks/useAdminStats'
 import { TEXTAREA_FIELDS, ALL_SONG_FIELDS, PROPOSAL_FILTERS, PROPOSAL_SORTS, PROPOSAL_PAGE } from '../lib/proposalRevise'
 import RoleBadges from './RoleBadges'
+import { showAppToast } from '../lib/appToast'
+import ThemedSelect from './ThemedSelect'
+import ThemedCheckbox from './ThemedCheckbox'
+import { useContentMotion } from '../hooks/useContentMotion'
 
 type Tab = AdminTab
 
@@ -83,9 +90,7 @@ export default function AdminPage({ embedded = false, initialTab, onExit }: {
     gateNonProposalTabs: true,
     activeChannel,
     initialTab: effectiveInitialTab ?? 'proposals',
-    // No Security tab for managers: it renders a flat "2FA is enabled", which
-    // the OTP gate below guarantees for admins and can't guarantee for them.
-    managerNavIds: ['proposals', 'comp-proposals'],
+    managerNavIds: ['proposals', 'comp-proposals', 'comp-replace'],
   })
 
   // No more overview grid - every section already has its own deep link
@@ -108,6 +113,8 @@ export default function AdminPage({ embedded = false, initialTab, onExit }: {
   // art) on every single switch, which for a list of any size fired hundreds
   // of redundant image requests for data that hadn't changed.
   const visited = useVisitedTabs(tab)
+  const contentRef = useRef<HTMLDivElement>(null)
+  useContentMotion(contentRef, tab)
 
   if (!canAccessStaff) return (
     <div className="flex-1 flex flex-col items-center justify-center gap-3 text-center">
@@ -135,7 +142,7 @@ export default function AdminPage({ embedded = false, initialTab, onExit }: {
   return (
     <div className="flex-1 flex flex-col h-full overflow-hidden">
       {/* Header */}
-      <div className={`shrink-0 flex items-center gap-3 py-1.5 ${nav.length > 1 ? '' : 'border-b border-[var(--border)]'} ${embedded ? 'px-4' : 'px-6'}`}>
+      <div className={`shrink-0 flex items-center gap-3 py-1.5 ${embedded ? 'px-4' : 'px-6'}`}>
         {embedded && onExit ? (
           <button onClick={onExit}
             className="flex items-center gap-1.5 p-1.5 -ml-1.5 rounded-lg hover:bg-surface-overlay transition-colors text-text-muted hover:text-text-primary text-xs font-semibold">
@@ -156,7 +163,7 @@ export default function AdminPage({ embedded = false, initialTab, onExit }: {
         {/* A tab's data loads once per visit (see the sig comment in
             useAdminQueue) rather than refetching every time it's reselected -
             this is the explicit way back to fresh data instead. */}
-        {tab !== 'comp-proposals' && tab !== 'channels' && tab !== 'eras' && tab !== 'cdn-nodes' && tab !== 'beta' && tab !== 'security' && (
+        {tab !== 'comp-proposals' && tab !== 'comp-replace' && tab !== 'channels' && tab !== 'eras' && tab !== 'cdn-nodes' && tab !== 'beta' && tab !== 'lyrics' && tab !== 'logs' && (
           <button onClick={() => refresh()} disabled={loading} title="Refresh"
             className="shrink-0 p-1.5 rounded-lg text-accent hover:bg-surface-overlay transition-colors disabled:opacity-40">
             <RefreshCw size={12} className={loading ? 'animate-spin' : ''} />
@@ -165,7 +172,7 @@ export default function AdminPage({ embedded = false, initialTab, onExit }: {
       </div>
 
       {nav.length > 1 && (
-        <div className={`shrink-0 flex items-center gap-1 overflow-x-auto border-b border-[var(--border)] scrollbar-none ${embedded ? 'px-4' : 'px-6'}`}>
+        <div className={`shrink-0 flex items-center gap-1 overflow-x-auto scrollbar-none ${embedded ? 'px-4' : 'px-6'}`}>
           {nav.map(item => (
             <button key={item.id} onClick={() => switchTab(item.id)}
               className={`shrink-0 flex items-center gap-1.5 px-2 py-1 my-0.5 rounded-lg text-[11px] font-semibold transition-colors ${
@@ -192,7 +199,7 @@ export default function AdminPage({ embedded = false, initialTab, onExit }: {
           filter chips and each tab's local state (selection, draft notes,
           cached song lookups) on every refetch. A translucent overlay signals
           the load without tearing the UI down. */}
-      <div className="flex-1 overflow-hidden relative">
+      <div ref={contentRef} className="flex-1 overflow-hidden relative">
         {loading && (
           <div className="absolute inset-0 z-10 flex items-center justify-center bg-[var(--bg)]/60 backdrop-blur-[1px]">
             <Loader2 size={20} className="animate-spin text-text-muted" />
@@ -216,6 +223,11 @@ export default function AdminPage({ embedded = false, initialTab, onExit }: {
         {visited.has('comp-proposals') && (
           <div className={tab === 'comp-proposals' ? 'h-full' : 'hidden'}>
             <CompProposalsTab embedded onChanged={() => refresh()} />
+          </div>
+        )}
+        {visited.has('comp-replace') && (
+          <div className={tab === 'comp-replace' ? 'h-full' : 'hidden'}>
+            <CompReplaceTab />
           </div>
         )}
         {visited.has('applications') && (
@@ -267,9 +279,14 @@ export default function AdminPage({ embedded = false, initialTab, onExit }: {
             <BetaTab />
           </div>
         )}
-        {visited.has('security') && (
-          <div className={tab === 'security' ? 'h-full' : 'hidden'}>
-            <SecurityTab />
+        {visited.has('lyrics') && (
+          <div className={tab === 'lyrics' ? 'h-full' : 'hidden'}>
+            <LyricsGenAdminTab />
+          </div>
+        )}
+        {visited.has('logs') && (
+          <div className={tab === 'logs' ? 'h-full' : 'hidden'}>
+            <LogsTab active={tab === 'logs'} />
           </div>
         )}
       </div>
@@ -294,7 +311,7 @@ function RevisePanel({ proposal, onClose, onDone, channel }: {
   return (
     <div className="flex-1 flex flex-col h-full overflow-hidden border-l-2 border-accent/30 bg-[var(--surface)]">
       {/* Panel header */}
-      <div className="shrink-0 flex items-center gap-2 px-4 py-3 border-b border-[var(--border)] bg-[var(--surface-raised)]">
+      <div className="shrink-0 flex items-center gap-2 px-4 py-3 bg-[var(--surface-raised)]">
         <Pencil size={13} className="text-accent" />
         <span className="text-text-primary text-xs font-semibold flex-1">Revise proposal</span>
         <button onClick={onClose} title="Close" className="p-1 rounded text-text-muted hover:text-text-primary transition-colors">
@@ -306,7 +323,7 @@ function RevisePanel({ proposal, onClose, onDone, channel }: {
         {/* Field editors */}
         {Object.entries(fields).map(([key, val]) => (
           <div key={key} className="rounded-xl border border-[var(--border)] overflow-hidden">
-            <div className="flex items-center gap-2 px-3 py-1.5 bg-[var(--surface-raised)] border-b border-[var(--border)]">
+            <div className="flex items-center gap-2 px-3 py-1.5 bg-[var(--surface-raised)]">
               <span className="font-mono text-[10px] text-text-muted flex-1">{key.replace(/_/g, ' ')}</span>
               <button onClick={() => removeField(key)} className="text-[10px] text-red-400 hover:text-red-300 transition-colors">
                 remove
@@ -332,25 +349,22 @@ function RevisePanel({ proposal, onClose, onDone, channel }: {
 
         {/* Add field */}
         <div className="rounded-xl border border-dashed border-[var(--border)] overflow-hidden">
-          <div className="flex items-center gap-2 px-3 py-1.5 bg-[var(--surface-raised)] border-b border-[var(--border)]">
+          <div className="flex items-center gap-2 px-3 py-1.5 bg-[var(--surface-raised)]">
             <Plus size={11} className="text-text-muted" />
             <span className="text-[10px] text-text-muted font-semibold">Add field</span>
           </div>
           <div className="flex gap-2 p-2">
-            <select
+            <ThemedSelect
               value={addKey}
-              onChange={e => setAddKey(e.target.value)}
-              className="flex-1 bg-[var(--surface)] text-text-primary text-xs px-2 py-1.5 rounded-lg border border-[var(--border)] focus:outline-none focus:border-accent/40"
-            >
-              <option value="">Choose a field…</option>
-              {available.map(k => (
-                <option key={k} value={k}>{k.replace(/_/g, ' ')}</option>
-              ))}
-              {/* Also allow snapshot fields not in the predefined list */}
-              {Object.keys(snap).filter(k => !ALL_SONG_FIELDS.includes(k) && !(k in fields)).map(k => (
-                <option key={k} value={k}>{k.replace(/_/g, ' ')}</option>
-              ))}
-            </select>
+              onChange={setAddKey}
+              placeholder="Choose a field…"
+              options={[
+                ...available,
+                // Also allow snapshot fields not in the predefined list
+                ...Object.keys(snap).filter(k => !ALL_SONG_FIELDS.includes(k) && !(k in fields)),
+              ].map(k => ({ value: k, label: k.replace(/_/g, ' ') }))}
+              className="flex-1 min-w-0 bg-[var(--surface)] text-text-primary text-xs px-2 py-1.5 rounded-lg border border-[var(--border)] focus:outline-none focus:border-accent/40"
+            />
             <button
               onClick={() => addField(addKey)}
               disabled={!addKey}
@@ -363,7 +377,7 @@ function RevisePanel({ proposal, onClose, onDone, channel }: {
 
         {/* Review note */}
         <div className="rounded-xl border border-[var(--border)] overflow-hidden">
-          <div className="flex items-center gap-2 px-3 py-1.5 bg-[var(--surface-raised)] border-b border-[var(--border)]">
+          <div className="flex items-center gap-2 px-3 py-1.5 bg-[var(--surface-raised)]">
             <MessageSquare size={11} className="text-text-muted" />
             <span className="text-[10px] text-text-muted font-semibold">Review note (optional)</span>
           </div>
@@ -384,7 +398,7 @@ function RevisePanel({ proposal, onClose, onDone, channel }: {
       </div>
 
       {/* Footer */}
-      <div className="shrink-0 flex items-center gap-2 px-4 py-3 border-t border-[var(--border)] bg-[var(--surface-raised)]">
+      <div className="shrink-0 flex items-center gap-2 px-4 py-3 bg-[var(--surface-raised)]">
         <button onClick={onClose} className="px-3 py-1.5 rounded-lg text-xs text-text-muted hover:text-text-primary transition-colors">
           Cancel
         </button>
@@ -424,7 +438,7 @@ const ProposalRow = memo(function ProposalRow({ item, active, showUserHeader, pe
   return (
     <div>
       {showUserHeader && (
-        <div className="flex items-center gap-2 px-3 py-1.5 bg-surface-overlay border-b border-[var(--border)] sticky top-0 z-[1]">
+        <div className="flex items-center gap-2 px-3 py-1.5 bg-surface-overlay sticky top-0 z-[1]">
           <span className="flex-1 min-w-0 truncate text-[10px] font-bold uppercase tracking-wider text-text-muted">
             {item.editor_username}
           </span>
@@ -445,7 +459,7 @@ const ProposalRow = memo(function ProposalRow({ item, active, showUserHeader, pe
         </div>
       )}
       <button onClick={() => onSelect(item)}
-        className={`w-full text-left px-3 py-3 border-b border-[var(--border)] border-l-2 ${ss.border} transition-colors ${
+        className={`w-full text-left px-3 py-3 border-l-2 ${ss.border} transition-colors ${
           active ? 'bg-accent/10' : 'hover:bg-surface-raised'
         }`}>
         <div className="flex items-center gap-1.5 mb-1">
@@ -540,7 +554,7 @@ function ProposalsTab({ proposals, status, setStatus, onChanged, onReviewed, cha
       onReviewed(updated)
       onChanged()
     }
-    catch {} finally { setActionId(null) }
+    catch { showAppToast(`Couldn't ${action} the proposal`) } finally { setActionId(null) }
   }
 
   const doReverse = async (id: number) => {
@@ -552,7 +566,7 @@ function ProposalsTab({ proposals, status, setStatus, onChanged, onReviewed, cha
       onReviewed(updated)
       onChanged()
     }
-    catch {} finally { setActionId(null) }
+    catch { showAppToast("Couldn't reverse the proposal") } finally { setActionId(null) }
   }
 
   // Keyed off the full (unfiltered-by-search) list so the group header's
@@ -566,24 +580,19 @@ function ProposalsTab({ proposals, status, setStatus, onChanged, onReviewed, cha
     return m
   }, [proposals])
 
-  // Approves every pending proposal from one editor in sequence (not
-  // parallel - these mutate the same song's data, and later ones may build
-  // on fields an earlier one just touched). Each success is applied via
-  // onReviewed as it lands, same as a single Approve; a per-item failure is
-  // swallowed so one bad row doesn't stop the rest of the batch.
+  // Reviews every pending proposal from one editor - parallel across songs,
+  // in order within a song (see adminReviewProposalsBatch). Each success is
+  // applied via onReviewed as it lands, same as a single Approve.
   const doReviewAllForUser = async (editorId: number, action: 'approve' | 'reject') => {
     const pending = proposals.filter(x => x.editor_id === editorId && x.status === 'pending')
     if (pending.length === 0) return
     if (!confirm(`${action === 'approve' ? 'Approve' : 'Deny'} all ${pending.length} pending proposal${pending.length !== 1 ? 's' : ''} from ${pending[0].editor_username} (#${editorId})?`)) return
     setAcceptingAllUser(editorId)
     try {
-      for (const item of pending) {
-        try {
-          const updated = await userApi.adminReviewProposal(item.id, { action, channel })
-          dropCache(item.id); setArchive(null)
-          onReviewed(updated)
-        } catch {}
-      }
+      await userApi.adminReviewProposalsBatch(pending, action, channel, (updated) => {
+        dropCache(updated.id); setArchive(null)
+        onReviewed(updated)
+      })
       onChanged()
     } finally {
       setAcceptingAllUser(null)
@@ -600,7 +609,7 @@ function ProposalsTab({ proposals, status, setStatus, onChanged, onReviewed, cha
       {/* Left: list */}
       <div className="w-80 shrink-0 border-r border-[var(--border)] flex flex-col overflow-hidden">
         {/* Filter bar */}
-        <div className="shrink-0 px-3 py-2.5 border-b border-[var(--border)] bg-surface-raised">
+        <div className="shrink-0 px-3 py-2.5 bg-surface-raised">
           <div className="flex gap-1 flex-wrap items-center">
             {FILTERS.map(f => (
               <button key={f.id || 'all'} onClick={() => setStatus(f.id)}
@@ -669,7 +678,7 @@ function ProposalsTab({ proposals, status, setStatus, onChanged, onReviewed, cha
         ) : (
           <div className="flex-1 flex flex-col overflow-hidden">
             {/* Detail header */}
-            <div className="shrink-0 px-6 py-4 border-b border-[var(--border)] bg-surface-raised">
+            <div className="shrink-0 px-6 py-4 bg-surface-raised">
               <div className="flex items-start gap-3">
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-2 flex-wrap mb-1.5">
@@ -807,7 +816,7 @@ function ProposalsTab({ proposals, status, setStatus, onChanged, onReviewed, cha
                   const isViewing = row.id === p.id
                   const open = expandedPast === row.id
                   return (
-                    <div key={row.id} className="border-b border-[var(--border)] last:border-b-0">
+                    <div key={row.id}>
                       <button onClick={() => setExpandedPast(open ? null : row.id)}
                         className={`w-full flex items-center gap-2 px-4 py-2 text-left transition-colors ${isViewing ? 'bg-accent/5' : 'hover:bg-surface-raised'}`}>
                         <StatusChip status={row.status} />
@@ -820,7 +829,7 @@ function ProposalsTab({ proposals, status, setStatus, onChanged, onReviewed, cha
                         {open ? <ChevronUp size={11} className="text-text-muted shrink-0" /> : <ChevronDown size={11} className="text-text-muted shrink-0" />}
                       </button>
                       {open && (
-                        <div className="bg-[var(--surface-raised)] border-t border-[var(--border)]">
+                        <div className="bg-[var(--surface-raised)]">
                           {row.review_notes && (
                             <p className="px-4 pt-3 text-[11px] text-text-muted italic">
                               {row.reviewer_username ? `${row.reviewer_username}: ` : ''}{row.review_notes}
@@ -865,7 +874,7 @@ function ApplicationsTab({ applications, onChanged, onReviewed }: { applications
       onReviewed(updated)
       onChanged()
     }
-    catch {} finally { setActionId(null) }
+    catch { showAppToast(`Couldn't ${action} the application`) } finally { setActionId(null) }
   }
 
   const pending  = applications.filter(a => a.status === 'pending')
@@ -885,7 +894,7 @@ function ApplicationsTab({ applications, onChanged, onReviewed }: { applications
           {applications.length === 0 && <Empty label="No applications" />}
           {pending.map(item => (
             <button key={item.id} onClick={() => setSelected(item)}
-              className={`w-full text-left px-3 py-3 border-b border-[var(--border)] border-l-2 border-l-amber-500/60 transition-colors text-text-primary ${selected?.id === item.id ? 'bg-accent/10' : 'hover:bg-surface-raised'}`}>
+              className={`w-full text-left px-3 py-3 border-l-2 border-l-amber-500/60 transition-colors text-text-primary ${selected?.id === item.id ? 'bg-accent/10' : 'hover:bg-surface-raised'}`}>
               <div className="flex items-center gap-2.5">
                 <Avatar src={item.discord_avatar} name={displayName(item)} size={8} />
                 <div className="min-w-0 flex-1">
@@ -903,7 +912,7 @@ function ApplicationsTab({ applications, onChanged, onReviewed }: { applications
           )}
           {reviewed.map(item => (
             <button key={item.id} onClick={() => setSelected(item)}
-              className={`w-full text-left px-3 py-3 border-b border-[var(--border)] border-l-2 ${STATUS_STYLE[item.status]?.border ?? 'border-l-transparent'} transition-colors text-text-primary opacity-60 ${selected?.id === item.id ? 'bg-accent/10 opacity-100' : 'hover:bg-surface-raised'}`}>
+              className={`w-full text-left px-3 py-3 border-l-2 ${STATUS_STYLE[item.status]?.border ?? 'border-l-transparent'} transition-colors text-text-primary opacity-60 ${selected?.id === item.id ? 'bg-accent/10 opacity-100' : 'hover:bg-surface-raised'}`}>
               <div className="flex items-center gap-2.5">
                 <Avatar src={item.discord_avatar} name={displayName(item)} size={7} />
                 <div className="min-w-0 flex-1">
@@ -1006,7 +1015,7 @@ function UsersTab({ users, onChanged, currentUserId }: { users: AdminUser[]; onC
     <div className="h-full flex overflow-hidden">
       {/* Roster rail */}
       <div className="w-[300px] shrink-0 border-r border-[var(--border)] flex flex-col overflow-hidden">
-        <div className="shrink-0 flex flex-col gap-2 p-3 border-b border-[var(--border)]">
+        <div className="shrink-0 flex flex-col gap-2 p-3">
           <div className="flex flex-wrap gap-1">
             {FILTERS.map(f => (
               <button key={f.id} onClick={() => setFilter(f.id)}
@@ -1024,7 +1033,7 @@ function UsersTab({ users, onChanged, currentUserId }: { users: AdminUser[]; onC
           {visible.length === 0 && <Empty label="No users" />}
           {visible.map(u => (
             <button key={u.user_id} onClick={() => setSelectedId(u.user_id)}
-              className={`w-full flex items-center gap-2.5 px-3 py-2.5 border-b border-[var(--border)] text-left transition-colors ${
+              className={`w-full flex items-center gap-2.5 px-3 py-2.5 text-left transition-colors ${
                 selectedId === u.user_id ? 'bg-accent/10' : 'hover:bg-surface-raised'
               }`}>
               <Avatar src={u.discord_avatar} name={discordHandle(u)} size={8} />
@@ -1104,17 +1113,15 @@ function UsersTab({ users, onChanged, currentUserId }: { users: AdminUser[]; onC
                     {selected.role === 'editor' && (
                       <label className="flex items-center justify-between gap-2 text-sm text-text-secondary cursor-pointer">
                         Song edit proposals
-                        <input type="checkbox" checked={selected.auto_approve_proposals}
-                          onChange={e => doUpdate(selected.user_id, { auto_approve_proposals: e.target.checked })}
-                          className="w-4 h-4 accent-[var(--accent)]" />
+                        <ThemedCheckbox variant="switch" checked={selected.auto_approve_proposals}
+                          onChange={v => doUpdate(selected.user_id, { auto_approve_proposals: v })} />
                       </label>
                     )}
                     {selected.contributor_enabled && (
                       <label className="flex items-center justify-between gap-2 text-sm text-text-secondary cursor-pointer">
                         Comp file proposals
-                        <input type="checkbox" checked={selected.auto_approve_comp_proposals}
-                          onChange={e => doUpdate(selected.user_id, { auto_approve_comp_proposals: e.target.checked })}
-                          className="w-4 h-4 accent-[var(--accent)]" />
+                        <ThemedCheckbox variant="switch" checked={selected.auto_approve_comp_proposals}
+                          onChange={v => doUpdate(selected.user_id, { auto_approve_comp_proposals: v })} />
                       </label>
                     )}
                   </div>
@@ -1132,9 +1139,8 @@ function UsersTab({ users, onChanged, currentUserId }: { users: AdminUser[]; onC
                     ] as const).map(([label, checked, payload]) => (
                       <label key={label} className="flex items-center justify-between gap-2 text-sm text-text-secondary cursor-pointer">
                         {label}
-                        <input type="checkbox" checked={checked}
-                          onChange={e => doUpdate(selected.user_id, payload(e.target.checked))}
-                          className="w-4 h-4 accent-[var(--accent)]" />
+                        <ThemedCheckbox variant="switch" checked={checked}
+                          onChange={v => doUpdate(selected.user_id, payload(v))} />
                       </label>
                     ))}
                   </div>
@@ -1212,24 +1218,6 @@ function StatsTab({ applications, proposals, users }: {
           </div>
         </div>
       )}
-    </div>
-  )
-}
-
-// ── Security ──────────────────────────────────────────────────────────────────
-
-function SecurityTab(): JSX.Element {
-  return (
-    <div className="p-6 max-w-md">
-      <div className="flex items-start gap-4 px-5 py-5 rounded-2xl bg-emerald-500/8 border border-emerald-500/20">
-        <div className="w-10 h-10 rounded-xl bg-emerald-500/15 flex items-center justify-center shrink-0">
-          <Check size={18} className="text-emerald-400" />
-        </div>
-        <div>
-          <p className="text-text-primary font-semibold">Two-factor authentication enabled</p>
-          <p className="text-text-muted text-sm mt-1">Your account is protected with 2FA.</p>
-        </div>
-      </div>
     </div>
   )
 }

@@ -37,6 +37,10 @@ let attempt = 0
 let pathIndex = 0
 let retryTimer: number | null = null
 let pingTimer: number | null = null
+// Set from the store once /me confirms the account. A token in localStorage
+// alone isn't enough: a stale one survives until loadAccount's 401 clears it,
+// and the socket usually opens before that.
+let signedIn = false
 
 // The socket is public until it sends a one-time ticket; after that it also
 // receives events addressed to this account (new-device alerts, key traffic).
@@ -44,7 +48,7 @@ let pingTimer: number | null = null
 export async function authenticateNotifications(): Promise<void> {
   const socket = ws
   const token = getToken()
-  if (!token || !socket || socket.readyState !== WebSocket.OPEN) return
+  if (!signedIn || !token || !socket || socket.readyState !== WebSocket.OPEN) return
   try {
     const { ticket } = await authedRequest<{ ticket: string }>(`${CHAT_API_BASE}/notifications/ws-ticket/`, { method: 'POST' }, token)
     if (ws === socket && socket.readyState === WebSocket.OPEN) socket.send(JSON.stringify({ type: 'auth', ticket }))
@@ -112,6 +116,19 @@ function close(): void {
   const socket = ws
   ws = null
   if (socket) try { socket.close() } catch {}
+}
+
+/** Track the account state. Signing in upgrades the open socket; signing out
+ *  reconnects it so the server stops sending this account's events. */
+export function setNotificationsSignedIn(value: boolean): void {
+  if (value === signedIn) return
+  signedIn = value
+  if (value) {
+    void authenticateNotifications()
+  } else if (ws) {
+    close()
+    if (listeners.size > 0 || openListeners.size > 0) open()
+  }
 }
 
 /** Subscribe to server notifications. The socket opens with the first

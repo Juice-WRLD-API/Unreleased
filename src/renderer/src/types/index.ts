@@ -73,6 +73,21 @@ export interface LibraryTrack {
   albumArt?: string | null    // base64 data URL
 }
 
+// What the "Synced lyrics" dialog opened on: a song to offer as the audio
+// (its stream, or its local file), and the tab to show first. Both optional -
+// opened from a menu with nothing playing, it starts empty.
+export interface LyricsGenTarget {
+  track?: Pick<Track, 'id' | 'title' | 'artist' | 'path' | 'streamUrl' | 'imageUrl'>
+  /** The API song behind `track`, whose lyrics can seed a sync job. */
+  songId?: number | null
+  tab?: 'sync' | 'create' | 'jobs' | 'admin'
+  /** Opens Generate on this mode and text, as a follow-up would. */
+  prefill?: { mode: 'plain' | 'synced' | 'word_synced'; text: string }
+  /** Hands finished synced lyrics back to whoever opened the dialog (the song
+   *  editor). `onApply` is false when it can't take them any more. */
+  apply?: { label: string; onApply: (lrc: string) => boolean }
+}
+
 export interface LocalPlaylist {
   id: string
   name: string
@@ -81,11 +96,9 @@ export interface LocalPlaylist {
   coverImage?: string | null  // base64 data URL or null
 }
 
-// A playlist of donor cloud files (see lib/donorFilesApi). Stored in the
-// account's `user_settings.donor_playlists`, so it syncs across devices.
-// Entries are donor file_ids rather than embedded tracks: the file list is the
-// source of truth for names/sizes, and a file that's since been deleted just
-// drops out of the resolved list.
+// The old donor-only playlist, stored in `user_settings.donor_playlists`.
+// Retired: donor files go in ordinary synced playlists now, and
+// lib/donorPlaylistEntries moves any of these that are left into them.
 export interface DonorPlaylist {
   id: string
   name: string

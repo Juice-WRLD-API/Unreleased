@@ -1,4 +1,4 @@
-import { useEffect, useState, ReactNode } from 'react'
+import { useEffect, useMemo, useState, ReactNode } from 'react'
 import { ModalOverlay, LockToggle } from './Modal'
 import {
   X, Music2, Pencil, Flag,
@@ -10,12 +10,14 @@ import {
 import { useStore, useStorePick } from '../store/useStore'
 import { useDragToDismiss } from '../hooks/useDragToDismiss'
 import { useCanEdit } from '../hooks/useChannelRoles'
-import { JWApiSong, CATEGORY_LABELS, buildImageUrl, parseDuration, apiFetch, getSongById, getSongsByIds, resolvePrefCoverUrl } from '../lib/juicewrldApi'
-import { versionsEnabled, getVersionGroup, SongVersionMeta } from '../lib/versionsApi'
-import { formatDuration } from '../lib/format'
+import { JWApiSong, CATEGORY_LABELS, buildImageUrl, parseDuration, getSongById, resolvePrefCoverUrl } from '../lib/juicewrldApi'
+import { versionsEnabled } from '../lib/versionsApi'
+import { useVersionEntries } from '../hooks/useSongVersions'
+import { formatDuration, displayDate } from '../lib/format'
 import { copyCoverImage, saveCoverImage } from '../lib/coverImage'
 import SongPrefsSection from './SongPrefsSection'
 import { ProgressiveCover } from './ProgressiveCover'
+import { showAppToast } from '../lib/appToast'
 
 const CATEGORY_COLORS: Record<string, string> = {
   released:          'bg-emerald-500/15 text-emerald-400 border-emerald-500/25',
@@ -99,9 +101,11 @@ export default function SongInfoModal({ song, onClose, onEdit }: Props): JSX.Ele
   // lib/versionsApi.ts), since that API has no concept of grouping e.g.
   // "Song (v1)" / "(v2)" / "(TV Mix)" together as the same underlying song.
   // Linking/unlinking only happens from the editor (Edit song → Versions) -
-  // this view is read-only.
-  const [versions, setVersions] = useState<{ song: JWApiSong; meta: SongVersionMeta }[]>([])
-  const [loadingVersions, setLoadingVersions] = useState(false)
+  // this view is read-only. Same list and cache as Change version
+  // (useVersionEntries), unplayable siblings included.
+  const versionEntries = useVersionEntries(versionsEnabled && displaySong ? displaySong.id : null)
+  const versions = useMemo(() => versionEntries.entries ?? [], [versionEntries.entries])
+  const loadingVersions = versionEntries.loading
 
   // Cover art actions (copy to clipboard / save to disk). `coverMsg` briefly
   // takes over the cover tile to report the outcome, since neither action
@@ -109,35 +113,11 @@ export default function SongInfoModal({ song, onClose, onEdit }: Props): JSX.Ele
   const [coverBusy, setCoverBusy] = useState<'copy' | 'save' | null>(null)
   const [coverMsg, setCoverMsg] = useState<string | null>(null)
 
-  const refreshVersions = (id: number): void => {
-    if (!versionsEnabled) return
-    setLoadingVersions(true)
-    getVersionGroup(id)
-      .then(async metas => {
-        const songs = await getSongsByIds(metas.map(m => m.songId))
-        const byId = new Map(songs.map(s => [s.id, s]))
-        return metas
-          .map((meta): { song: JWApiSong; meta: SongVersionMeta } | null => {
-            const song = byId.get(meta.songId)
-            return song ? { song, meta } : null
-          })
-          .filter((e): e is { song: JWApiSong; meta: SongVersionMeta } => !!e)
-      })
-      .then(entries => setVersions(entries))
-      .finally(() => setLoadingVersions(false))
-  }
-
-  useEffect(() => {
-    if (displaySong) refreshVersions(displaySong.id)
-    else setVersions([])
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [displaySong?.id])
-
   const handleViewVersion = async (id: number): Promise<void> => {
     try {
-      const s = await apiFetch<JWApiSong>(`/songs/${id}/`)
+      const s = await getSongById(id)
       setOverrideSong(s)
-    } catch {}
+    } catch { showAppToast("Couldn't load that version") }
   }
 
   // Swipe-down-to-dismiss on mobile, same curtain gesture as WRLD's full-
@@ -397,15 +377,15 @@ export default function SongInfoModal({ song, onClose, onEdit }: Props): JSX.Ele
 
           <TextSection icon={MapPin} label="Recording Location" value={displaySong.recording_locations} />
           <TextSection icon={Calendar} label="Record Date(s)" value={displaySong.record_dates} />
-          <TextSection icon={CalendarClock} label="Preview Date" value={displaySong.preview_date} />
-          <TextSection icon={CalendarDays} label="Release Date" value={displaySong.release_date} />
+          <TextSection icon={CalendarClock} label="Preview Date" value={displayDate(displaySong.preview_date)} />
+          <TextSection icon={CalendarDays} label="Release Date" value={displayDate(displaySong.release_date)} />
           <TextSection icon={CalendarDays} label="Other Date(s)" value={displaySong.dates} />
 
           {(displaySong.leak_type || displaySong.date_leaked) && (
             <Section icon={Droplets} label="Leak Info">
               <div className="space-y-0.5">
                 <SubVal label="Type" value={displaySong.leak_type} />
-                <SubVal label="Date leaked" value={displaySong.date_leaked} />
+                <SubVal label="Date leaked" value={displayDate(displaySong.date_leaked)} />
               </div>
             </Section>
           )}
@@ -484,7 +464,7 @@ export function GlobalSongInfoHost(): JSX.Element | null {
   useEffect(() => {
     if (infoSongId == null) { setSong(null); return }
     let stale = false
-    apiFetch<JWApiSong>(`/songs/${infoSongId}/`).then((s) => { if (!stale) setSong(s) }).catch(() => {})
+    getSongById(infoSongId).then((s) => { if (!stale) setSong(s) }).catch(() => {})
     return () => { stale = true }
   }, [infoSongId])
 

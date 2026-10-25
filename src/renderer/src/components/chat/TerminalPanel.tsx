@@ -1,10 +1,10 @@
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { X } from 'lucide-react'
 import { findChatCommand } from '../../lib/chatHelp'
 import { hasChatAccess } from '../../lib/chatAccess'
 import { canRun, chatCommandsFor, moderationChatCommandsFor, plainChatCommandsFor, juicesayText, directory, findTermCommand, resolveHandles, termUserName, TERM_COMMANDS, TERM_GROUPS, type TermCommand, type TermScreen } from '../../lib/terminal'
 import { termThemeVars, useTermTheme } from '../../lib/terminal/themeStore'
-import { catFile, diskUsage, grepFiles, headTailFile, locateName, treeView, wcFile } from '../../lib/terminalFileTools'
+import { plainOutput, PROFILE_LINK_RE } from '../../lib/terminal/types'
+import { catFile, diskUsage, grepFiles, headTailFile, locateName, searchTree, treeView, wcFile } from '../../lib/terminalFileTools'
 import { commandCardText } from '../../lib/commandCardText'
 import { encodeSongShare, type LocalNoticePayload } from '../../lib/chatShare'
 import { defaultFilesCwd, downloadPath, FILES_ROOT, filesPathString, formatListing, listDir, openTextFile, resolveDir, splitTyped, unquote, type FilesCwd } from '../../lib/terminalFiles'
@@ -43,7 +43,7 @@ function sessionFor(key: string): Session {
 // level so the position survives closing the terminal.
 const shell: { mode: 'chat' | 'files'; cwd: FilesCwd; prevRoom: RoomRef | null } = { mode: 'files', cwd: FILES_ROOT, prevRoom: null }
 
-const BUILTINS = ['cd', 'room', 'ls', 'get', 'nano', 'cat', 'head', 'tail', 'wc', 'grep', 'locate', 'tree', 'du', 'source', 'pwd', 'whoami', 'clear', 'exit', 'alias', 'unalias', 'man']
+const BUILTINS = ['cd', 'room', 'ls', 'get', 'nano', 'cat', 'head', 'tail', 'wc', 'grep', 'locate', 'search', 'tree', 'du', 'source', 'pwd', 'whoami', 'clear', 'exit', 'alias', 'unalias', 'man']
 // The ones that take a path in the file tree (Tab walks the folders); the
 // directory-only ones skip files.
 const PATH_WORDS = new Set(['cd', 'ls', 'get', 'nano', 'cat', 'head', 'tail', 'wc', 'tree', 'du', 'source'])
@@ -198,7 +198,7 @@ function stripMarkdown(text: string): string {
     .replace(/^- /gm, '  ')
 }
 
-const SHELL_NAMES = ['cd', 'room', 'ls', 'get', 'nano', 'cat', 'head', 'tail', 'wc', 'grep', 'locate', 'tree', 'du', 'source', 'pwd', 'whoami', 'clear', 'exit', 'alias', 'unalias', 'man']
+const SHELL_NAMES = ['cd', 'room', 'ls', 'get', 'nano', 'cat', 'head', 'tail', 'wc', 'grep', 'locate', 'search', 'tree', 'du', 'source', 'pwd', 'whoami', 'clear', 'exit', 'alias', 'unalias', 'man']
 
 // The chat commands' own usage/description mention `-s` (post the answer to the
 // room). It still works here, but it is chat noise in the terminal's help, so
@@ -264,6 +264,7 @@ const BUILTIN_HELP: Record<string, string> = {
   wc: 'wc <file>\n      File tree: lines, words and bytes of a text file. (After a pipe, wc counts lines.)',
   grep: 'grep [-s] [-r] [-l] <text> [folder | file]\n      File tree: search inside text files (current folder; -r goes into subfolders, -s is case-sensitive, -l lists names). After a pipe it filters output instead.',
   locate: 'locate <name> [folder]\n      File tree: find files and folders by name under here. * and ? are wildcards.',
+  search: 'search <query>\n      File tree: the Files tab\'s search under here - words in any order, "phrases", -exclude, ext:mp3,wav type:audio|image|video|archive|folder in:<folder> size:>10mb. Forgives typos when nothing matches exactly.',
   tree: 'tree [-L depth] [folder]\n      File tree: an indented tree of a folder (two levels by default).',
   du: 'du [folder]\n      File tree: how much is in each subfolder, and in total.',
   source: 'source [-y] [-k] <file>\n      File tree: run the commands in a text file, one per line (# comments and blank lines are skipped). Without -y it only lists what would run; -k keeps going after an error.',
@@ -309,6 +310,20 @@ const LINK = 'underline decoration-dotted underline-offset-2 cursor-pointer hove
 // command (or the handle) is a button that puts it on the prompt. It never runs
 // it - clicking is only a shortcut for typing.
 function linkLine(line: string, onPick: (command: string) => void): JSX.Element | string {
+  // A username a command marked with profileLink (lib/terminal/types): it opens
+  // their public profile. The text around it is handled as usual, piece by piece.
+  if (line.includes('')) {
+    const parts: (string | JSX.Element)[] = []
+    let last = 0
+    for (const m of line.matchAll(PROFILE_LINK_RE)) {
+      if (m.index > last) parts.push(linkLine(line.slice(last, m.index), onPick))
+      const userId = Number(m[1])
+      parts.push(<button type="button" className={LINK} title="Open their profile" onClick={() => useStore.getState().openPublicProfile(userId)}>{m[2]}</button>)
+      last = m.index + m[0].length
+    }
+    if (last < line.length) parts.push(linkLine(line.slice(last), onPick))
+    return <>{parts.map((p, i) => <Fragment key={i}>{p}</Fragment>)}</>
+  }
   // Structured output gets colour so the parts read apart: a leading [tag]
   // (levels have their own colours, any other tag takes the accent), a trailing
   // "- author, date" tail goes dim, and a "Heading:" line is bold. What is left
@@ -675,10 +690,10 @@ export default function TerminalPanel({ room, onClose }: { room: RoomRef; onClos
         if (name === 'grep') return printed(grepFiles(shell.cwd, arg))
         return printed(headTailFile(name as 'head' | 'tail', shell.cwd, arg))
       }
-      case 'locate': case 'tree': case 'du': {
+      case 'locate': case 'search': case 'tree': case 'du': {
         const name = word.toLowerCase()
         if (shell.mode !== 'files') { print(`${name}: only works in the file tree (try: cd files)`, 'error'); return true }
-        return printed(name === 'locate' ? locateName(shell.cwd, arg) : name === 'tree' ? treeView(shell.cwd, arg) : diskUsage(shell.cwd, arg))
+        return printed(name === 'locate' ? locateName(shell.cwd, arg) : name === 'search' ? searchTree(shell.cwd, arg) : name === 'tree' ? treeView(shell.cwd, arg) : diskUsage(shell.cwd, arg))
       }
       case 'source': case '.': return runSource(arg)
       case 'nano': case 'pico': {
@@ -776,7 +791,7 @@ export default function TerminalPanel({ room, onClose }: { room: RoomRef; onClos
   // What the watch screen shows: the command's output (errors included) as text.
   runCaptured.current = async (line: string): Promise<string> => {
     locked.current += 1
-    try { return (await withCapture(() => dispatch(line), true)).join('\n') || '(no output)' } finally { locked.current -= 1 }
+    try { return plainOutput((await withCapture(() => dispatch(line), true)).join('\n')) || '(no output)' } finally { locked.current -= 1 }
   }
 
   // Each command gets its own abort controller; Ctrl+C aborts it (see onKeyDown).
@@ -1074,15 +1089,12 @@ export default function TerminalPanel({ room, onClose }: { room: RoomRef; onClos
       aria-label="Terminal"
     >
       <header className="h-9 shrink-0 flex items-center gap-3 px-3 bg-[var(--t-bar)] border-b border-[color:var(--t-border)] text-[11px] text-[color:var(--t-dim)]">
-        <span className="flex gap-1.5" aria-hidden>
-          <span className="w-2.5 h-2.5 rounded-full bg-[#ff5f56]" />
-          <span className="w-2.5 h-2.5 rounded-full bg-[#ffbd2e]" />
-          <span className="w-2.5 h-2.5 rounded-full bg-[#27c93f]" />
-        </span>
-        <span className="flex-1 min-w-0 truncate text-center">{user}@unreleased: {path}</span>
-        <button onClick={onClose} title="Close terminal (exit)" aria-label="Close terminal" className="w-6 h-6 rounded flex items-center justify-center text-[color:var(--t-dim)] hover:text-[color:var(--t-fg)] hover:bg-[var(--t-border)]">
-          <X size={14} />
+        <button type="button" onClick={onClose} title="Close terminal (exit)" aria-label="Close terminal" className="h-6 flex items-center gap-1.5 rounded transition-opacity hover:opacity-80 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--t-fg)]">
+          <span aria-hidden className="w-2.5 h-2.5 rounded-full bg-[#ff5f56]" />
+          <span aria-hidden className="w-2.5 h-2.5 rounded-full bg-[#ffbd2e]" />
+          <span aria-hidden className="w-2.5 h-2.5 rounded-full bg-[#27c93f]" />
         </button>
+        <span className="flex-1 min-w-0 truncate text-center">{user}@unreleased: {path}</span>
       </header>
 
       {screen ? (

@@ -6,7 +6,7 @@ import { useBackToClose } from '../hooks/useBackToClose'
 import { useCdnNodesAdmin, formatMbps } from '../hooks/useCdnNodesAdmin'
 import CdnBinaryUpload from './CdnBinaryUpload'
 import CdnWorldMap from './CdnWorldMap'
-import { CdnBucketChip, CdnSyncBadge, CdnStatsStrip, CdnNodeNotices, CdnNodeFacts, CdnNodeActions, CdnCountryChips, countryFlag, nodeLocation } from './cdnNodesShared'
+import { CdnBucketChip, CdnSyncBadge, CdnStatsStrip, CdnNodeNotices, CdnNodeFacts, CdnNodeActions, CdnNodeEventHistory, CdnCountryChips, countryFlag, nodeLocation } from './cdnNodesShared'
 
 // Mobile layout for the CDN nodes admin tab - list, then a full-screen detail
 // on tap (same pattern as EraTab.mobile). Behavior lives in useCdnNodesAdmin.
@@ -46,6 +46,8 @@ function NodeDetail({ node, latestManifest, onRefresh, busy, actionError, onBack
         )}
         <hr className="border-[var(--border)]" />
         <CdnNodeFacts node={node} columns="grid-cols-2" />
+        <hr className="border-[var(--border)]" />
+        <CdnNodeEventHistory nodeId={node.node_id} />
       </div>
     </div>
   )

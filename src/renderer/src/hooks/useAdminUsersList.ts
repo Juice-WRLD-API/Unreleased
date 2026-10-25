@@ -5,6 +5,7 @@ import { useMemo, useState } from 'react'
 import * as userApi from '../lib/userApi'
 import type { AdminUser } from '../lib/userApi'
 import { buildHaystack, matchesHaystack } from '../components/adminShared'
+import { showAppToast } from '../lib/appToast'
 
 export type UsersFilter = 'all' | 'admins' | 'editors' | 'contributors' | 'managers' | 'applicants'
 
@@ -26,7 +27,7 @@ export function useAdminUsersList(users: AdminUser[], currentUserId: number | un
   const doUpdate = async (uid: number, payload: Parameters<typeof userApi.adminUpdateUser>[1]): Promise<void> => {
     setActionId(uid)
     try { await userApi.adminUpdateUser(uid, payload); onChanged() }
-    catch {} finally { setActionId(null) }
+    catch { showAppToast("Couldn't update the user") } finally { setActionId(null) }
   }
 
   const filters: { id: UsersFilter; label: string; count: number }[] = [

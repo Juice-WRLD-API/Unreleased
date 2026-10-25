@@ -2,6 +2,7 @@
 // by dragging them into rows, or by tap-to-select then tap-a-row on touch.
 // Unlike Heardle/Wordle there's no daily puzzle or score: it's a personal
 // ranking, persisted locally (see lib/tierlist) with no server round-trip.
+import { MotionOverlay } from './MotionOverlay'
 import { useId, useState } from 'react'
 import type { ReactNode } from 'react'
 import {
@@ -15,6 +16,7 @@ import type { Tier, DropPosition } from '../lib/tierlist'
 import { GameSwitcher, GameBackdrop } from './gameShell'
 import { useTierlistData, MAX_TIERS } from '../hooks/useTierlistData'
 import { ListsPanelBody, FiltersPanelBody, TierlistViewer } from './TierlistPanels'
+import { SearchHelpButton } from './SearchHelpPopover'
 
 // ─── Pieces ───────────────────────────────────────────────────────────────────
 
@@ -132,7 +134,7 @@ function TierEditPopover({ tier, canDelete, onChange, onDelete, onClose }: {
 }) {
   const colorLabelId = useId()
   return (
-    <div className="fixed inset-0 z-[210] flex items-center justify-center bg-black/60 p-4" onClick={onClose}>
+    <MotionOverlay className="fixed inset-0 z-[210] flex items-center justify-center bg-black/60 p-4" onClick={onClose}>
       <div
         className="w-full max-w-xs rounded-2xl border border-[var(--border)] bg-[var(--surface-raised)] p-4"
         onClick={(e) => e.stopPropagation()}
@@ -172,7 +174,7 @@ function TierEditPopover({ tier, canDelete, onChange, onDelete, onClose }: {
           </button>
         )}
       </div>
-    </div>
+    </MotionOverlay>
   )
 }
 
@@ -185,7 +187,7 @@ function Modal({ title, onClose, children, wide }: {
   wide?: boolean
 }) {
   return (
-    <div className="fixed inset-0 z-[200] flex items-center justify-center bg-black/60 p-4" onClick={onClose}>
+    <MotionOverlay className="fixed inset-0 z-[200] flex items-center justify-center bg-black/60 p-4" onClick={onClose}>
       <div
         className={`w-full ${wide ? 'max-w-md' : 'max-w-sm'} max-h-[85vh] overflow-y-auto rounded-2xl border border-[var(--border)] bg-[var(--surface-raised)] p-4`}
         onClick={(e) => e.stopPropagation()}
@@ -198,7 +200,7 @@ function Modal({ title, onClose, children, wide }: {
         </div>
         {children}
       </div>
-    </div>
+    </MotionOverlay>
   )
 }
 
@@ -397,23 +399,29 @@ export default function TierlistView(): JSX.Element {
                   <span className="truncate">{poolLabel}</span>
                 </button>
               )}
-              <div className="ml-auto relative w-40 sm:w-56">
-                <Search size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-text-muted" />
-                <input
-                  value={search}
-                  onChange={(e) => setSearch(e.target.value)}
-                  placeholder="Search songs or eras"
-                  className="w-full pl-7 pr-7 py-1.5 rounded-lg bg-[var(--surface-overlay)] border border-[var(--border)] text-xs text-text-primary focus:outline-none focus:border-accent/50"
+              <div className="ml-auto flex items-center gap-1.5">
+                <div className="relative w-40 sm:w-56">
+                  <Search size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-text-muted" />
+                  <input
+                    value={search}
+                    onChange={(e) => setSearch(e.target.value)}
+                    placeholder="Search songs or eras"
+                    className="w-full pl-7 pr-7 py-1.5 rounded-lg bg-[var(--surface-overlay)] border border-[var(--border)] text-xs text-text-primary focus:outline-none focus:border-accent/50"
+                  />
+                  {search && (
+                    <button
+                      onClick={() => setSearch('')}
+                      title="Clear search"
+                      className="absolute right-1.5 top-1/2 -translate-y-1/2 p-0.5 text-text-muted hover:text-text-primary"
+                    >
+                      <X size={12} />
+                    </button>
+                  )}
+                </div>
+                <SearchHelpButton
+                  size={13}
+                  className={(open) => `p-1.5 rounded-lg border border-[var(--border)] transition-colors ${open ? 'bg-accent/15 text-accent' : 'bg-[var(--surface-overlay)] text-text-muted hover:text-text-primary'}`}
                 />
-                {search && (
-                  <button
-                    onClick={() => setSearch('')}
-                    title="Clear search"
-                    className="absolute right-1.5 top-1/2 -translate-y-1/2 p-0.5 text-text-muted hover:text-text-primary"
-                  >
-                    <X size={12} />
-                  </button>
-                )}
               </div>
             </div>
             <div

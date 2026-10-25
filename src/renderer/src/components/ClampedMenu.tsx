@@ -32,10 +32,13 @@ export interface ClampedMenuProps extends Omit<React.HTMLAttributes<HTMLDivEleme
   // Numeric so dependants (flyouts) can stack relative to it; the z-50 class
   // is the fallback.
   zIndex?: number
+  // The see-through menu pane (.menu-glass in index.css) instead of the
+  // plain surface - for menus, not pickers.
+  glass?: boolean
 }
 
 export const ClampedMenu = forwardRef<HTMLDivElement, ClampedMenuProps>(
-  ({ x, y, className = '', children, onClick, onPositioned, anchor, zIndex, ...rest }, forwardedRef) => {
+  ({ x, y, className = '', children, onClick, onPositioned, anchor, zIndex, glass = false, ...rest }, forwardedRef) => {
     const ownRef = useRef<HTMLDivElement>(null)
     const [pos, setPos] = useState({ left: x, top: y })
     const [up, setUp] = useState(false)
@@ -44,8 +47,8 @@ export const ClampedMenu = forwardRef<HTMLDivElement, ClampedMenuProps>(
       const el = ownRef.current
       if (!el) return
       const clamp = (): void => {
-        // Layout size, not getBoundingClientRect: a menu mid scale-in animation
-        // would measure small and clamp a few px too far out.
+        // Layout size keeps any caller-supplied entrance transform from
+        // affecting the menu's final clamped position.
         const rect = { width: el.offsetWidth, height: el.offsetHeight }
         const left = Math.round(Math.max(8, Math.min(x, window.innerWidth - rect.width - 8)))
         let top = Math.round(Math.max(8, Math.min(y, window.innerHeight - rect.height - 8)))
@@ -72,7 +75,7 @@ export const ClampedMenu = forwardRef<HTMLDivElement, ClampedMenuProps>(
           if (typeof forwardedRef === 'function') forwardedRef(el)
           else if (forwardedRef) (forwardedRef as React.MutableRefObject<HTMLDivElement | null>).current = el
         }}
-        className={`fixed z-50 bg-surface border border-[var(--border)] rounded-xl shadow-2xl py-1 overflow-y-auto overflow-x-hidden ${className}`}
+        className={`fixed z-50 ${glass ? 'menu-glass' : 'bg-surface border border-[var(--border)] rounded-xl shadow-2xl py-1'} overflow-y-auto overflow-x-hidden ${className}`}
         style={{
           left: pos.left,
           top: pos.top,

@@ -4,6 +4,7 @@ import type { ElementType, ReactNode, RefObject } from 'react'
 import { Check, ChevronLeft, ChevronRight, Loader2 } from 'lucide-react'
 import { useIsMobile } from '../hooks/useIsMobile'
 import { useEscapeToClose } from '../hooks/useEscapeToClose'
+import { popOut, useExitGhost } from '../hooks/useExitGhost'
 import { placeFlyout } from '../lib/menuFlyout'
 import { ClampedMenu } from './ClampedMenu'
 import { Sheet, SheetItem, SheetDivider } from './mobile/Sheet'
@@ -27,6 +28,8 @@ export interface ContextMenuItem {
   onSelect?: () => void
   danger?: boolean
   disabled?: boolean
+  /** Tooltip - for a disabled row, the reason it's disabled. */
+  hint?: string
   /** Accent-tinted - a toggle that's currently on (Like). */
   active?: boolean
   /** Check mark: on the right, or in a left column when the menu has `checkColumn`. */
@@ -46,6 +49,8 @@ export interface ContextMenuItem {
   childrenFooter?: ReactNode
   /** Free-form next level. Only mounted while open. */
   panel?: (ctx: ContextMenuPanelCtx) => ReactNode
+  /** Runs when this item's next level opens - to load what it shows. */
+  onOpen?: () => void
   /** Leave the menu open after selecting - for toggles and copy-confirmations. */
   keepOpen?: boolean
 }
@@ -94,7 +99,7 @@ export interface ContextMenuProps {
   zIndex?: number
   /** Classes for flyouts (width, mostly). */
   flyoutClassName?: string
-  /** Entry animation on the menu and its flyouts. */
+  /** Entry animation on the menu and its flyouts - on unless turned off. */
   popAnimation?: boolean
   /** Reserve a left column for check marks instead of showing them on the right:
    *  `true` in every flyout, `'auto'` in any level (the root too) that has a
@@ -134,6 +139,8 @@ function inTriangle(p: Pt, a: Pt, b: Pt, c: Pt): boolean {
 // How long the pointer may sit still inside the safe-triangle before the menu
 // stops waiting for it to reach the flyout and switches to the row under it.
 const SAFE_TRIANGLE_STALL_MS = 150
+// How far the pointer must move after a menu opens before hovering a row opens its flyout.
+const HOVER_ARM_PX = 4
 // Used to predict, before a flyout exists, which side it will open on.
 const EST_FLYOUT_W = 240
 
@@ -153,7 +160,7 @@ const NO_DRAG = { WebkitAppRegion: 'no-drag' } as React.CSSProperties
 
 export default function ContextMenu({
   x, y, onClose, items: rawItems, title, subtitle, className = '', header, body, page, footer,
-  anchor, ignoreRef, zIndex = 50, flyoutClassName = 'min-w-[160px] max-w-[260px]', popAnimation = false, checkColumn = false, compact = false,
+  anchor, ignoreRef, zIndex = 50, flyoutClassName = 'min-w-[160px] max-w-[260px]', popAnimation = true, checkColumn = false, compact = false,
 }: ContextMenuProps): JSX.Element {
   const isMobile = useIsMobile()
   const items = normalize(rawItems)
@@ -166,6 +173,8 @@ export default function ContextMenu({
   const [, setMenuPos] = useState({ left: x, top: y })
 
   useEscapeToClose(onClose, !isMobile)
+  // Touch menus are a Sheet, which animates its own way out.
+  useExitGhost(menuRef, isMobile ? null : popOut)
 
   useEffect(() => {
     if (isMobile) return
@@ -217,7 +226,7 @@ export default function ContextMenu({
               trailing={hasNext(it)
                 ? <ChevronRight size={16} className="text-text-muted" />
                 : it.checked ? <Check size={16} className="text-accent" /> : it.trailing}
-              onClick={() => (hasNext(it) ? setTrail(t => [...t, i]) : select(it))}
+              onClick={() => (hasNext(it) ? (setTrail(t => [...t, i]), it.onOpen?.()) : select(it))}
             />
           </div>
         ))
@@ -278,6 +287,7 @@ export default function ContextMenu({
       zIndex={zIndex}
       role="menu"
       data-ctx-menu={menuId}
+      glass
       className={`min-w-[200px] max-w-[260px] ${popAnimation ? 'animate-menu-pop' : ''} ${className}`}
       onPositioned={setMenuPos}
       onContextMenu={(e) => e.preventDefault()}
@@ -294,7 +304,7 @@ export default function ContextMenu({
 
       {page ? (
         <>
-          <button onClick={page.onBack} className="w-full flex items-center gap-2 px-3 py-2 text-xs text-text-muted hover:text-text-primary transition-colors">
+          <button onClick={page.onBack} className="menu-glass-row w-full flex items-center gap-2 px-3 py-2 text-xs text-text-muted hover:text-text-primary transition-colors">
             <ChevronLeft size={12} /> Back
           </button>
           {page.note && <p className="px-3 pb-1 text-[10px] text-text-muted">{page.note}</p>}
@@ -352,18 +362,39 @@ function ItemList({ entries, containerRef, depth, cfg, onLeave, focusFirst }: {
     if (focusFirst) rowRefs.current.find(r => r && !r.disabled)?.focus()
   }, [focusFirst])
 
+  useEffect(() => {
+    const it = openSub !== null ? entries[openSub] : undefined
+    if (it && it !== 'divider') it.onOpen?.()
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [openSub])
+
   // Hover handling with a safe-triangle: moving from "Add to playlist" toward
   // its flyout cuts across the rows below it, and switching to each one as the
   // pointer passes would close the flyout before it arrives. While the pointer
   // is inside the triangle (where it last was on the owning row -> the
   // flyout's near edge) the current flyout stays open; leaving the triangle, or
   // stopping in it for SAFE_TRIANGLE_STALL_MS, switches to the row underneath.
+  // A menu opened from a click appears under the resting pointer, and the
+  // browser fires a mousemove for the row it lands on - which would pop that
+  // row's flyout open before the user has moved. The top level ignores hover
+  // until the pointer has actually travelled a few pixels.
+  const restRef = useRef<Pt | null>(null)
+  const armedRef = useRef(depth > 0)
   const onRowsMouseMove = (e: React.MouseEvent): void => {
+    if (!armedRef.current) {
+      const rest = restRef.current
+      if (!rest) { restRef.current = { x: e.clientX, y: e.clientY }; return }
+      if (Math.hypot(e.clientX - rest.x, e.clientY - rest.y) < HOVER_ARM_PX) return
+      armedRef.current = true
+    }
     const t = e.target as Node
     const hit = rowRefs.current.findIndex(r => r?.contains(t))
     if (hit < 0) return
     const pt = { x: e.clientX, y: e.clientY }
-    const target = hasNext(entries[hit]) ? hit : null
+    const hitItem = entries[hit]
+    // A disabled row with a hint still gets pointer events (for its tooltip),
+    // but mustn't open its flyout.
+    const target = hasNext(hitItem) && hitItem !== 'divider' && !hitItem.disabled ? hit : null
     if (hit === openSub) { aimRef.current = pt; cancelPending(); return }
     if (target === openSub) { cancelPending(); return }
 
@@ -493,6 +524,7 @@ function Flyout({ rowEl, parentRef, innerRef, z, menuId, className, onEnter, chi
   }
   const placeRef = useRef(place)
   placeRef.current = place
+  useExitGhost(innerRef, popOut)
 
   // After every render (the parent may have moved) and whenever the flyout's
   // own size changes (a list that finishes loading, a row that appears).
@@ -513,7 +545,7 @@ function Flyout({ rowEl, parentRef, innerRef, z, menuId, className, onEnter, chi
       onClick={e => e.stopPropagation()}
       onMouseEnter={onEnter}
       style={{ position: 'fixed', zIndex: z, top: 0, left: 0, maxHeight: 'calc(100vh - 16px)', ...NO_DRAG }}
-      className={`overflow-y-auto overflow-x-hidden bg-surface border border-[var(--border)] rounded-xl shadow-2xl py-1 ${className}`}
+      className={`menu-glass overflow-y-auto overflow-x-hidden ${className}`}
     >
       {children}
     </div>,
@@ -543,9 +575,9 @@ function Row({ it, depth, cfg, leftward, column, open, refCb, onClick }: {
         role="menuitem"
         disabled={it.disabled}
         onClick={onClick}
-        title={depth > 0 ? it.label : undefined}
-        className={`w-full flex items-center gap-2.5 px-3 ${dense ? 'py-1.5' : 'py-2'} text-left text-sm transition-colors hover:bg-surface-overlay focus:bg-surface-overlay focus:outline-none disabled:opacity-40 disabled:pointer-events-none ${
-          open ? 'bg-surface-overlay' : ''
+        title={it.hint ?? (depth > 0 ? it.label : undefined)}
+        className={`menu-glass-row w-full flex items-center gap-2.5 px-3 ${dense ? 'py-1.5' : 'py-2'} text-left text-sm transition-colors focus:outline-none disabled:opacity-40 ${it.hint ? '' : 'disabled:pointer-events-none'} ${
+          open ? 'is-open' : ''
         } ${it.danger ? 'text-red-400' : it.active ? 'text-accent' : 'text-text-primary'}`}
       >
         {next && leftward && <ChevronLeft size={13} className="text-text-muted shrink-0" />}

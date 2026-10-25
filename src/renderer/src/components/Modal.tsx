@@ -1,10 +1,11 @@
 import { CSSProperties, MouseEvent as ReactMouseEvent, ReactNode, useEffect, useId, useLayoutEffect, useRef, useState } from 'react'
-import { createPortal } from 'react-dom'
+import { createPortal, flushSync } from 'react-dom'
 import { create } from 'zustand'
 import { Lock, Unlock } from 'lucide-react'
 import { ls } from '../lib/persist'
 import { dimThemeColorMeta, syncThemeColorMeta } from '../lib/themeEffects'
 import { useEscapeToClose } from '../hooks/useEscapeToClose'
+import { useOverlayMotion } from '../hooks/useOverlayMotion'
 
 // Locked panels sit in their own z-index band, comfortably above anything
 // zCounter could reach in a real session - so "locked" always beats
@@ -95,6 +96,34 @@ export const useSandboxStore = create<SandboxState>((set) => ({
 export const sandboxSlotRef: { current: HTMLDivElement | null } = { current: null }
 
 interface Rect { left: number; top: number; width: number; height: number }
+
+/** A panel of this size, centred in the window. */
+function centred(r: { width: number; height: number }): Rect {
+  return {
+    left: clamp((window.innerWidth - r.width) / 2, 0, window.innerWidth - r.width),
+    top: clamp((window.innerHeight - r.height) / 2, 0, window.innerHeight - r.height),
+    width: r.width, height: r.height,
+  }
+}
+
+/** The gap an expanded panel leaves around itself. */
+const EXPAND_MARGIN = 24
+
+/** The window less the margin, up to `maxWidth` wide, centred. */
+function expandedRect(maxWidth: number): Rect {
+  const width = Math.min(window.innerWidth - EXPAND_MARGIN * 2, maxWidth)
+  return { left: (window.innerWidth - width) / 2, top: EXPAND_MARGIN, width, height: window.innerHeight - EXPAND_MARGIN * 2 }
+}
+
+/** A panel's size change as a short cross-fade, like a palette switch. */
+function morphPanel(update: () => void): void {
+  if (!document.startViewTransition || document.visibilityState === 'hidden'
+    || window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+    update()
+    return
+  }
+  document.startViewTransition({ update: () => flushSync(update), types: ['panel-resize'] })
+}
 
 // Live registry of every currently-dragged-or-resized-at-least-once panel's
 // rect, keyed by id - a plain mutable Map (not store state) since it's
@@ -222,6 +251,8 @@ export function ModalOverlay({
   minHeight = 320,
   dragY = 0,
   dragging = false,
+  expanded = false,
+  expandedMaxWidth = 1100,
   children,
 }: {
   onClose: () => void
@@ -250,6 +281,11 @@ export function ModalOverlay({
    *  dimmed rectangle trailing the panel down the screen. */
   dragY?: number
   dragging?: boolean
+  /** Fills the window, less a margin and up to `expandedMaxWidth` wide, while
+   *  true. Turning it off puts the panel back where it was (or, if it opened
+   *  expanded, at its own size, centred). Docked, the change cross-fades. */
+  expanded?: boolean
+  expandedMaxWidth?: number
   children: (drag: {
     onHandleMouseDown: (e: ReactMouseEvent) => void
     locked: boolean
@@ -300,12 +336,49 @@ export function ModalOverlay({
   const [rect, setRect] = useState<Rect | null>(null)
   const panelRef = useRef<HTMLDivElement>(null)
   const drag = useRef<{ mode: 'move' | 'resize'; startX: number; startY: number; base: Rect } | null>(null)
+  const expandedRef = useRef(expanded)
 
   const currentRect = (): Rect | null => {
     if (rect) return rect
     const r = panelRef.current?.getBoundingClientRect()
     return r ? { left: r.left, top: r.top, width: r.width, height: r.height } : null
   }
+
+  // Expanding: the panel's place and size before, to go back to. A panel that
+  // opened expanded has none, so it drops its explicit size, measures its own
+  // (from panelClassName) and centres on that.
+  const beforeExpand = useRef<Rect | null>(null)
+  const [remeasure, setRemeasure] = useState(0)
+  useEffect(() => {
+    if (expandedRef.current === expanded) return
+    expandedRef.current = expanded
+    if (floating || dockingOff) return
+    morphPanel(() => {
+      if (expanded) {
+        beforeExpand.current = currentRect()
+        setRect(expandedRect(expandedMaxWidth))
+      } else if (beforeExpand.current) {
+        setRect(beforeExpand.current)
+        beforeExpand.current = null
+      } else {
+        setRect(null)
+        setRemeasure((n) => n + 1)
+      }
+    })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [expanded])
+  useLayoutEffect(() => {
+    if (!remeasure) return
+    const r = panelRef.current?.getBoundingClientRect()
+    if (r) setRect(centred(r))
+  }, [remeasure])
+  // An expanded panel keeps filling the window as it's resized.
+  useEffect(() => {
+    if (!expanded || floating || dockingOff) return
+    const onResize = (): void => setRect(expandedRect(expandedMaxWidth))
+    window.addEventListener('resize', onResize)
+    return () => window.removeEventListener('resize', onResize)
+  }, [expanded, expandedMaxWidth, floating, dockingOff])
 
   // Modals dock physically under the sandbox pill (that's where their portal
   // target lives), but should still *open* centered in the viewport rather
@@ -330,13 +403,7 @@ export function ModalOverlay({
     if (floating || dockingOff) return
     dock(id)
     const r = panelRef.current?.getBoundingClientRect()
-    if (r) {
-      setRect({
-        left: clamp((window.innerWidth - r.width) / 2, 0, window.innerWidth - r.width),
-        top: clamp((window.innerHeight - r.height) / 2, 0, window.innerHeight - r.height),
-        width: r.width, height: r.height,
-      })
-    }
+    if (r) setRect(expandedRef.current ? expandedRect(expandedMaxWidth) : centred(r))
     return () => undock(id)
     // Deliberately once-per-mount only (plus whenever dockingOff itself
     // flips, e.g. the user toggling the sandbox off in Settings - that
@@ -345,6 +412,12 @@ export function ModalOverlay({
     // from the middle.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [floating, dockingOff])
+
+  // Opens with a fade and a lift, and closes the same way in reverse - after
+  // the centering above, so the panel rises into its centered spot. Not for a
+  // pop-out: that's a real OS window, which opens and closes on its own.
+  const rootRef = useRef<HTMLDivElement>(null)
+  useOverlayMotion(rootRef, !floating)
 
   // Keeps this panel available as a snap target for everyone else, and drops
   // it once it's no longer explicitly positioned (never dragged, or closed).
@@ -427,6 +500,7 @@ export function ModalOverlay({
     // or the user turned the sandbox off in Settings.
     return createPortal(
       <div
+        ref={rootRef}
         className={`fixed inset-0 ${zIndexClassName} flex items-end md:items-center justify-center bg-black/60 backdrop-blur-sm p-0 md:px-4`}
         onClick={(e) => { if (e.target === e.currentTarget) onClose() }}
         // Fades out (rather than translating) as the panel is dragged, so the
@@ -442,6 +516,12 @@ export function ModalOverlay({
           style={{
             transform: dragY ? `translateY(${dragY}px)` : undefined,
             transition: dragging ? 'none' : 'transform 0.25s ease-out',
+            ...(expanded ? {
+              width: `min(calc(100vw - ${EXPAND_MARGIN * 2}px), ${expandedMaxWidth}px)`,
+              height: `calc(100svh - ${EXPAND_MARGIN * 2}px)`,
+              maxWidth: 'none',
+              maxHeight: 'none',
+            } : {}),
           }}
         >
           {children({ onHandleMouseDown: () => {}, locked: false, toggleLock: () => {}, canLock: false })}
@@ -461,7 +541,7 @@ export function ModalOverlay({
     // multiple docked modals overlap - each panel's own tier class would
     // otherwise always win regardless of interaction order. `relative` is
     // required too - z-index does nothing on a statically positioned element.
-    <div className={`relative ${zIndexClassName}`} style={{ zIndex: z }} data-modal-id={id}>
+    <div ref={rootRef} className={`relative ${zIndexClassName}`} style={{ zIndex: z }} data-modal-id={id}>
       {/* panelClassName stays applied even after a drag/resize - its size
           classes (w-full max-w-*, h-[...]) just lose to panelStyle's explicit
           width/height/maxWidth/maxHeight via inline-style specificity, while

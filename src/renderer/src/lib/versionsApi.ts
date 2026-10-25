@@ -19,6 +19,7 @@
 import { routeUrl, apiFetch } from './juicewrldApi'
 import { authHeaders } from './apiClient'
 import { getToken } from './userApi'
+import { loadSessionSongIds } from './sessionEditsApi'
 
 /** Always true now that this is core juicewrldapi functionality rather than
  *  optional Supabase config - kept as an export so existing call sites that
@@ -33,6 +34,8 @@ interface VersionRow {
   title: string | null
   created_at: string
   created_by: string | null
+  /** Client-side: the row's song is a recording session (see fetchAllRows). */
+  is_session?: boolean
 }
 
 interface VersionsPage {
@@ -49,10 +52,14 @@ export interface SongVersionMeta {
   version: string | null
   versionTitle: string | null
   addedBy: string | null
+  /** The song is a recording session - it plays through its session edit, if
+   *  it has one, and counts as a "Session" version for preferences (see
+   *  lib/versionPrefs' prefLabel). */
+  isSession?: boolean
 }
 
 function toMeta(row: VersionRow): SongVersionMeta {
-  return { songId: row.song_id, groupId: row.group_id, version: row.version, versionTitle: row.title, addedBy: row.created_by }
+  return { songId: row.song_id, groupId: row.group_id, version: row.version, versionTitle: row.title, addedBy: row.created_by, isSession: row.is_session }
 }
 
 async function getRow(songId: number): Promise<VersionRow | null> {
@@ -116,7 +123,12 @@ function unifyByTitle(rows: VersionRow[]): VersionRow[] {
 }
 
 async function fetchAllRows(): Promise<VersionRow[]> {
-  return unifyByTitle(await apiFetch<VersionRow[]>('/versions/', { all: 'true' }))
+  // Fetched alongside, not after; no session data just means no session marks.
+  const [rows, sessionIds] = await Promise.all([
+    apiFetch<VersionRow[]>('/versions/', { all: 'true' }),
+    loadSessionSongIds().catch(() => new Set<number>()),
+  ])
+  return unifyByTitle(rows.map(r => (sessionIds.has(r.song_id) ? { ...r, is_session: true } : r)))
 }
 
 async function getAllRows(): Promise<VersionRow[]> {
@@ -214,6 +226,39 @@ export async function getVersionMetaForSongs(songIds: number[]): Promise<Map<num
   } catch {
     return new Map()
   }
+}
+
+/** Whole version groups for a known set of songs - unlike
+ *  getVersionMetaForSongs, each group carries *every* member (the songs
+ *  themselves included), not just the ones in `songIds`. Playlists' compact
+ *  view uses this to list a song's versions even when the playlist only holds
+ *  one of them. Untitled groups count too, and members are deduped by song
+ *  the same way getVersionGroup does. */
+export async function getVersionGroupsForSongs(songIds: number[]): Promise<{
+  groupOf: Map<number, number>
+  groups: Map<number, SongVersionMeta[]>
+}> {
+  const groupOf = new Map<number, number>()
+  const groups = new Map<number, SongVersionMeta[]>()
+  if (songIds.length === 0) return { groupOf, groups }
+  try {
+    const ids = new Set(songIds)
+    const all = await getAllRows()
+    for (const row of all) if (ids.has(row.song_id)) groupOf.set(row.song_id, row.group_id)
+    const wanted = new Set(groupOf.values())
+    const byGroup = new Map<number, Map<number, VersionRow>>()
+    for (const r of all) {
+      if (!wanted.has(r.group_id)) continue
+      if (!byGroup.has(r.group_id)) byGroup.set(r.group_id, new Map())
+      const members = byGroup.get(r.group_id)!
+      const existing = members.get(r.song_id)
+      if (!existing || r.created_at > existing.created_at) members.set(r.song_id, r)
+    }
+    for (const [groupId, members] of byGroup) groups.set(groupId, [...members.values()].map(toMeta))
+  } catch {
+    // Same as the other bulk lookups - no version data just means no groups.
+  }
+  return { groupOf, groups }
 }
 
 /** Groups two songs as versions of each other. If one is already in a group,

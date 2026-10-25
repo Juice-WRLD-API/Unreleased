@@ -1,6 +1,16 @@
 import { saveFile, reportSaveError } from './fileSave'
 import { useEffect, useState } from 'react'
-import { SyncedLyricLine } from '../types'
+import { FullTrack, SyncedLyricLine, Track } from '../types'
+
+/**
+ * True while the playing track's lyrics aren't known yet: Player hasn't built
+ * its FullTrack (queue actions reset currentTrackFull to null on every track
+ * change), or it has and the /songs/ fetch is still out. Pass as
+ * useLyricsVisible's `pending`.
+ */
+export function lyricsLoading(track: Track | null, full: FullTrack | null): boolean {
+  return !!track && (full?.id !== track.id || !!full.lyricsPending)
+}
 
 /**
  * Whether a lyrics section should be shown, debounced against the
@@ -10,10 +20,21 @@ import { SyncedLyricLine } from '../types'
  * reopen on every track change. Expanding is instant (nothing to hide);
  * collapsing waits a beat in case lyrics show up before it commits to "no
  * lyrics."
+ *
+ * Flipping `override` is the user toggling lyrics, though, not lyrics loading
+ * in - that applies at once, even mid-load. Debouncing it too left WRLD's
+ * queue -> off toggle showing the lyrics column for the 250ms collapse delay.
  */
 export function useLyricsVisible(hasLyricsNatural: boolean, override: boolean, pending = false): boolean {
   const wantVisible = hasLyricsNatural !== override
   const [visible, setVisible] = useState(wantVisible)
+  // Adjusted during render (not in the effect) so no frame ever commits with
+  // the pre-toggle value.
+  const [seenOverride, setSeenOverride] = useState(override)
+  if (override !== seenOverride) {
+    setSeenOverride(override)
+    setVisible(wantVisible)
+  }
 
   useEffect(() => {
     // Lyrics are still being fetched for the current track - hold whatever

@@ -1,3 +1,4 @@
+import { TOAST_MOTION, useListMotion } from '../../hooks/useListMotion'
 import { createContext, useCallback, useContext, useEffect, useRef, useState, type ReactNode } from 'react'
 import { AlertCircle, CheckCircle2, Hash, Lock, Music2, X } from 'lucide-react'
 import { createPortal } from 'react-dom'
@@ -207,6 +208,8 @@ export function useChatToast(): (text: string, tone?: 'error' | 'ok') => void {
 export function ToastHost({ children }: { children: ReactNode }): JSX.Element {
   const [toasts, setToasts] = useState<Toast[]>([])
   const nextId = useRef(1)
+  const stackRef = useRef<HTMLDivElement>(null)
+  useListMotion(stackRef, TOAST_MOTION)
   const push = useCallback((text: string, tone: 'error' | 'ok' = 'error') => {
     const id = nextId.current++
     setToasts((t) => [...t.slice(-2), { id, text, tone }])
@@ -221,13 +224,14 @@ export function ToastHost({ children }: { children: ReactNode }): JSX.Element {
            Polite rather than assertive even for the error tone: these report a
            failed send or copy, which shouldn't cut off whatever is being read. */
         <div
+          ref={stackRef}
           role="status"
           aria-live="polite"
-          className="fixed left-1/2 -translate-x-1/2 z-[200] flex flex-col items-center gap-2 pointer-events-none"
+          className="fixed inset-x-0 z-[200] flex flex-col items-center gap-2 pointer-events-none"
           style={{ bottom: 'calc(var(--bottom-nav-height, 0px) + 96px)' }}
         >
           {toasts.map((t) => (
-            <div key={t.id} className="chat-pop pointer-events-auto flex items-center gap-2.5 pl-3 pr-2 py-2 rounded-xl border border-[var(--border)] bg-surface shadow-2xl text-sm text-text-primary max-w-[90vw]">
+            <div key={t.id} data-flip-key={t.id} className="pointer-events-auto flex items-center gap-2.5 pl-3 pr-2 py-2 rounded-xl border border-[var(--border)] bg-surface shadow-2xl text-sm text-text-primary max-w-[90vw]">
               {t.tone === 'error' ? <AlertCircle size={16} className="text-red-400 shrink-0" /> : <CheckCircle2 size={16} className="text-accent shrink-0" />}
               <span className="min-w-0">{t.text}</span>
               <button onClick={() => setToasts((x) => x.filter((y) => y.id !== t.id))} title="Dismiss" className="p-1 rounded-md text-text-muted hover:text-text-primary">

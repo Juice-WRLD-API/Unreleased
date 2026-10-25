@@ -3,6 +3,7 @@ import { getMyProposals, withdrawProposal, resubmitProposal, adminReviewProposal
 import type { SongEditProposal } from '../lib/userApi'
 import { proposalSearchText, type ProposalFilterTab } from '../lib/proposalSearch'
 import { useStrictModeSafeEffect } from './useStrictModeSafeEffect'
+import { showAppToast } from '../lib/appToast'
 
 // Owns the "my proposals" list + filter/search/edit/resubmit/withdraw logic
 // shared by EditorProfileView.desktop.tsx and .mobile.tsx. `refreshKey` is
@@ -36,7 +37,7 @@ export function useMyProposals(activeChannel: string, refreshKey: number) {
     try {
       await withdrawProposal(id)
       setProposals(prev => prev.filter(p => p.id !== id))
-    } catch (e) { console.error('withdraw failed:', e) }
+    } catch (e) { console.error('withdraw failed:', e); showAppToast("Couldn't withdraw the proposal") }
     finally { setDeletingId(null) }
   }
 
@@ -45,7 +46,7 @@ export function useMyProposals(activeChannel: string, refreshKey: number) {
     try {
       const fresh = await resubmitProposal(p)
       setProposals(prev => [fresh, ...prev.filter(x => x.id !== p.id)])
-    } catch (e) { console.error('resubmit failed:', e) }
+    } catch (e) { console.error('resubmit failed:', e); showAppToast("Couldn't resubmit the proposal") }
     finally { setResubmittingId(null) }
   }
 
@@ -57,7 +58,7 @@ export function useMyProposals(activeChannel: string, refreshKey: number) {
     try {
       const updated = await adminReviewProposal(p.id, { action, channel: activeChannel })
       setProposals(prev => prev.map(x => x.id === p.id ? updated : x))
-    } catch (e) { console.error('review failed:', e) }
+    } catch (e) { console.error('review failed:', e); showAppToast(`Couldn't ${action} the proposal`) }
     finally { setReviewingId(null) }
   }
 

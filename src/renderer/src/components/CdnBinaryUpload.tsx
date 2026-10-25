@@ -4,6 +4,7 @@ import { useStrictModeSafeEffect } from '../hooks/useStrictModeSafeEffect'
 import { CDN_BINARY_PLATFORMS, fetchCdnBinaries, uploadCdnBinary, type CdnNodeBinary } from '../lib/cdnAdminApi'
 import { errorMessage, formatBytes } from '../lib/format'
 import { shortDate } from './adminShared'
+import ThemedSelect from './ThemedSelect'
 
 // Admin panel for publishing jwa-cdn-node builds (POST /cdn/binary/). Shows the
 // latest binary per platform and uploads a new platform+version. Shared by the
@@ -74,9 +75,8 @@ export default function CdnBinaryUpload({ compact = false }: { compact?: boolean
           )}
 
           <div className="grid grid-cols-2 gap-2">
-            <select value={platform} onChange={(e) => setPlatform(e.target.value)} className={field}>
-              {CDN_BINARY_PLATFORMS.map((p) => <option key={p} value={p}>{p}</option>)}
-            </select>
+            <ThemedSelect value={platform} onChange={setPlatform} className={`${field} min-w-0`}
+              options={CDN_BINARY_PLATFORMS.map((p) => ({ value: p, label: p }))} />
             <input value={version} onChange={(e) => setVersion(e.target.value)} placeholder="Version (1.3.0)" className={field} />
           </div>
 

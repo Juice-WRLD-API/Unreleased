@@ -141,6 +141,11 @@ export default defineConfig({
     outDir: resolve(__dirname, 'dist'),
     emptyOutDir: true,
     rollupOptions: {
+      input: {
+        main: resolve(__dirname, 'src/renderer/index.html'),
+        ...Object.fromEntries(['host', 'light', 'player', 'playlist', 'clock', 'curtain']
+          .map((name) => [`desktop-${name}`, resolve(__dirname, `src/renderer/desktop/${name}.html`)])),
+      },
       output: {
         manualChunks: iconChunk,
       },

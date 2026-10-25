@@ -2,9 +2,12 @@ import { useEffect, useMemo, useState } from 'react'
 import { X, ImageIcon, RotateCcw, Star, Music2, Play, Sparkles } from 'lucide-react'
 import { useStore } from '../store/useStore'
 import { useShallow } from 'zustand/react/shallow'
-import { JWApiSong, resolvePrefCoverUrl, smallCoverUrl } from '../lib/juicewrldApi'
+import { resolvePrefCoverUrl, smallCoverUrl } from '../lib/juicewrldApi'
 import { getOwnVersionMeta, SongVersionMeta } from '../lib/versionsApi'
 import CoverEditor from './CoverEditor'
+import { useVersionPrefToggles } from '../hooks/useVersionPrefToggles'
+import { prefLabel } from '../lib/versionPrefs'
+import type { SongVersionEntry } from '../lib/songVersions'
 
 // The "Personalize" editor shown inside SongInfoModal - the one place a user
 // sets the per-song overrides in lib/songPrefs (custom name, custom cover,
@@ -13,7 +16,6 @@ import CoverEditor from './CoverEditor'
 // logged out; the changes propagate to every surface that builds a Track from
 // this song (player, queue, lists) on the next render.
 
-interface VersionEntry { song: JWApiSong; meta: SongVersionMeta }
 
 function GroupLabel({ children }: { children: string }): JSX.Element {
   return (
@@ -40,18 +42,16 @@ export default function SongPrefsSection({
    *  version picker below since defaulting to one would leave nothing to play. */
   ownHasFile: boolean
   /** Linked version siblings, already fetched by the modal. */
-  versions: VersionEntry[]
+  versions: SongVersionEntry[]
   /** This song's other known titles - widens the cover picker's search so
    *  covers filed under an alt name still surface. */
   altTitles?: string[]
 }): JSX.Element {
-  const { pref, songPrefs, setSongName, setSongCover, setSongDefaultVersion, clearSongPref, account } = useStore(
+  const { pref, setSongName, setSongCover, clearSongPref, account } = useStore(
     useShallow((s) => ({
       pref: s.songPrefs[songId],
-      songPrefs: s.songPrefs,
       setSongName: s.setSongName,
       setSongCover: s.setSongCover,
-      setSongDefaultVersion: s.setSongDefaultVersion,
       clearSongPref: s.clearSongPref,
       account: s.account,
     }))
@@ -82,7 +82,7 @@ export default function SongPrefsSection({
   // One entry per distinct version label across the whole group (this song +
   // siblings). Storing the label (not a song id) is what lets a default set
   // here govern the group no matter which member is played - see queueSlice's
-  // groupDefaultVersion.
+  // groupPreferredVersions.
   const versionChoices = useMemo(() => {
     const out: { label: string; title: string }[] = []
     const seen = new Set<string>()
@@ -92,43 +92,20 @@ export default function SongPrefsSection({
       seen.add(label.toLowerCase())
       out.push({ label, title })
     }
-    push(ownMeta?.version, apiTitle, ownHasFile)
-    for (const v of versions) push(v.meta.version, v.song.name, !!v.song.path)
+    push(prefLabel(ownMeta), apiTitle, ownHasFile)
+    for (const v of versions) push(prefLabel(v.meta), v.song.name, v.playable)
     return out
   }, [ownMeta, versions, apiTitle, ownHasFile])
 
-  // The group's effective default - own row wins if set, else the first
-  // sibling that has one - mirrors queueSlice's groupDefaultVersion so this
-  // picker highlights the same choice playback will actually resolve to, even
-  // when the default was set while viewing a *different* version of this song.
-  const groupDefaultVersion = useMemo(() => {
-    if (pref?.default_version) return pref.default_version
-    for (const v of versions) {
-      const d = songPrefs[v.song.id]?.default_version
-      if (d) return d
-    }
-    return null
-  }, [pref, versions, songPrefs])
-
-  // Setting a label always writes to this song's own row (it wins per the
-  // resolution above). Clearing has to reach wherever the label actually
-  // lives - own row or an inherited sibling's - or "unstarring" an inherited
-  // default would silently do nothing and the star would stay lit.
-  const clearDefaultVersionLabel = (label: string): void => {
-    if (pref?.default_version?.toLowerCase() === label.toLowerCase()) setSongDefaultVersion(songId, null)
-    for (const v of versions) {
-      if (songPrefs[v.song.id]?.default_version?.toLowerCase() === label.toLowerCase()) setSongDefaultVersion(v.song.id, null)
-    }
-  }
-
-  // "As selected" means no forced default anywhere in the group, not just on
-  // this song's own row.
-  const clearGroupDefaultVersion = (): void => {
-    if (pref?.default_version) setSongDefaultVersion(songId, null)
-    for (const v of versions) {
-      if (songPrefs[v.song.id]?.default_version) setSongDefaultVersion(v.song.id, null)
-    }
-  }
+  // Preferred versions are a group-wide union (see lib/versionPrefs), so the
+  // toggles need every member - this song plus its siblings.
+  const prefMembers = useMemo(
+    () => [{ songId, version: prefLabel(ownMeta) }, ...versions.map(v => ({ songId: v.song.id, version: prefLabel(v.meta) }))],
+    [songId, ownMeta, versions]
+  )
+  const { preferred, isPreferred, togglePreferred, clearPreferred } = useVersionPrefToggles(prefMembers)
+  const memberWithLabel = (label: string) =>
+    prefMembers.find(m => m.version?.trim().toLowerCase() === label.toLowerCase()) ?? { songId, version: label }
 
   // ── Cover ──────────────────────────────────────────────────────────────────
   const [coverOpen, setCoverOpen] = useState(false)
@@ -249,25 +226,25 @@ export default function SongPrefsSection({
           choose between - a single-version song has nothing to default to. */}
       {versionChoices.length > 1 && (
         <>
-          <GroupLabel>Default version</GroupLabel>
+          <GroupLabel>Preferred versions</GroupLabel>
           <p className="text-[10px] text-text-muted -mt-1 mb-1.5">
-            Play this version whenever you pick any version of this song.
+            Play one of these whenever you pick any version of this song - picked at random if there are several.
           </p>
           <div className="flex flex-wrap gap-1.5">
             <button
-              onClick={clearGroupDefaultVersion}
-              className={`px-2.5 py-1 rounded-full text-xs border transition-colors ${!groupDefaultVersion
+              onClick={clearPreferred}
+              className={`px-2.5 py-1 rounded-full text-xs border transition-colors ${preferred.size === 0
                 ? 'bg-accent/15 text-accent border-accent/40'
                 : 'text-text-secondary border-[var(--border)] hover:bg-surface'}`}
             >
               As selected
             </button>
             {versionChoices.map((c) => {
-              const active = groupDefaultVersion?.toLowerCase() === c.label.toLowerCase()
+              const active = isPreferred(c.label)
               return (
                 <button
                   key={c.label}
-                  onClick={() => (active ? clearDefaultVersionLabel(c.label) : setSongDefaultVersion(songId, c.label))}
+                  onClick={() => togglePreferred(memberWithLabel(c.label))}
                   title={c.title}
                   className={`flex items-center gap-1 px-2.5 py-1 rounded-full text-xs border transition-colors ${active
                     ? 'bg-accent/15 text-accent border-accent/40'

@@ -1,3 +1,4 @@
+import { MotionOverlay } from './MotionOverlay'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Check, Loader2, Music2, Pause, Play, Search, SkipForward, Swords, Trophy, Volume2, X } from 'lucide-react'
 import { useStorePick } from '../store/useStore'
@@ -402,11 +403,11 @@ export default function HeardleVersusPanel({ embedded, onClose }: Props): JSX.El
   const shell = (content: JSX.Element): JSX.Element => {
     if (embedded) return content
     return (
-      <div className="fixed inset-0 z-[200] flex items-center justify-center bg-black/60 p-4" onClick={onClose}>
+      <MotionOverlay className="fixed inset-0 z-[200] flex items-center justify-center bg-black/60 p-4" onClick={onClose}>
         <div className="w-full max-w-md rounded-2xl border border-[var(--border)] bg-[var(--surface-raised)] p-5" onClick={(e) => e.stopPropagation()}>
           {content}
         </div>
-      </div>
+      </MotionOverlay>
     )
   }
 

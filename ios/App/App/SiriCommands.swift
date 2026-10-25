@@ -55,6 +55,26 @@ final class SiriCommandCenter {
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) { self.pingWhenReady(attempt: attempt + 1) }
     }
 
+    // unreleased://<action>[?song=<query>] - the route that survives
+    // sideloading. Sideloadly re-signs under a different bundle ID, which
+    // leaves App Intents unregistered; a URL scheme doesn't care, and
+    // Shortcuts' "Open URL" action (named for Siri) reaches it.
+    private static let urlActions: [String: String] = [
+        "play": "play", "resume": "play", "pause": "pause",
+        "next": "next", "previous": "previous", "prev": "previous",
+        "shuffle": "toggleShuffle", "like": "like", "song": "playSong",
+    ]
+
+    func handle(urls: [URL]) {
+        for url in urls where url.scheme?.lowercased() == "unreleased" {
+            guard let action = SiriCommandCenter.urlActions[(url.host ?? "").lowercased()] else { continue }
+            let query = URLComponents(url: url, resolvingAgainstBaseURL: false)?
+                .queryItems?.first(where: { $0.name == "song" || $0.name == "q" })?.value
+            if action == "playSong" && (query ?? "").isEmpty { continue }
+            send(action, query: query)
+        }
+    }
+
     func drain() -> [SiriCommand] {
         lock.lock()
         defer { lock.unlock() }

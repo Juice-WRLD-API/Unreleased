@@ -121,8 +121,6 @@ async function runOne(job: QueuedDonorUpload): Promise<void> {
   try {
     const res = await promise
     useStore.getState().updateUpload(job.id, { state: 'done', percent: 100, speedBps: undefined })
-    const s = useStore.getState()
-    s.setDonorFiles([res.file, ...(s.donorFiles ?? [])])
     window.dispatchEvent(new CustomEvent(DONOR_UPLOADS_CHANGED, { detail: res }))
   } catch (e) {
     const msg = errorMessage(e, 'Upload failed')

@@ -6,6 +6,7 @@ import {
   updateNowPlaying, updatePrivacySettings, updateUserSettings, discordRedirectUri, type AccountUser,
   API_KEY_SCOPES, createApiKey, isManagerAnywhere, deleteApiKey, listApiKeys, updateApiKey, type ApiKeyScope, type UserApiKey,
 } from '../userApi'
+import { addPasskey, deletePasskey, getPasskeySupport, listPasskeys, renamePasskey, type Passkey } from '../passkeyApi'
 import { relativeTime } from '../../components/adminShared'
 import { pickLocalFile } from './pick'
 import { songFromArg, completeSongs } from './player'
@@ -48,10 +49,17 @@ async function passwordSignIn(username: string, ctx: TermCtx): Promise<void> {
     await st().loginWithPassword(username, password)
   } catch (err) {
     if (!/otp/i.test((err as Error)?.message ?? '')) throw err
-    // Staff accounts have a second factor: a code, or a nod from another device.
-    const answer = (await ctx.ask('2FA code (or "approve" to approve it on another device): ')).trim()
+    // Staff accounts have a second factor: a code, or a nod from another
+    // device. A passkey counts as two-factor on its own, so it skips this step.
+    const passkey = (await getPasskeySupport()).ceremonies
+    const answer = (await ctx.ask(passkey
+      ? '2FA code ("approve" to approve it on another device, "passkey" to use a passkey instead): '
+      : '2FA code (or "approve" to approve it on another device): ')).trim()
     if (answer.toLowerCase() === 'approve') await loginByApproval(username, password, ctx)
-    else await st().loginWithPassword(username, password, answer)
+    else if (passkey && answer.toLowerCase() === 'passkey') {
+      ctx.print('Opening the passkey prompt…', 'dim')
+      if (!(await st().loginWithPasskey())) fail('cancelled')
+    } else await st().loginWithPassword(username, password, answer)
   }
 }
 
@@ -94,6 +102,23 @@ async function findApiKey(ref: string | undefined): Promise<UserApiKey> {
   return fail(pool.length ? `${ref} matches ${pool.length} keys - use more of the id` : `no API key matches ${ref}`)
 }
 
+// A passkey by full id, id prefix or exact name.
+async function findPasskey(ref: string | undefined): Promise<Passkey> {
+  if (!ref) return fail('which passkey? (id, prefix or name - see passkeys)')
+  const all = await listPasskeys()
+  const lower = ref.toLowerCase()
+  const hits = all.filter((p) => p.id === ref || p.name.toLowerCase() === lower)
+  const pool = hits.length ? hits : all.filter((p) => p.id.startsWith(lower))
+  if (pool.length === 1) return pool[0]
+  return fail(pool.length ? `${ref} matches ${pool.length} passkeys - use more of the id` : `no passkey matches ${ref}`)
+}
+
+const passkeyLine = (p: Passkey): string[] => [
+  p.id.slice(0, 8), p.name, p.transports.join(',') || '-', p.backed_up ? 'synced' : 'device-bound',
+  p.created_at ? `added ${relativeTime(p.created_at)}` : '-',
+  p.last_used_at ? `used ${relativeTime(p.last_used_at)}` : 'never used',
+]
+
 const apiKeyLine = (k: UserApiKey): string[] => [
   k.id.slice(0, 8), k.name, `${k.key_prefix}…`, k.scopes.join(','), k.is_active ? 'active' : 'revoked',
   k.last_used_at ? `used ${relativeTime(k.last_used_at)}` : 'never used',
@@ -105,13 +130,21 @@ const PRIVACY_KEYS: Record<string, 'public_play_history' | 'public_playlists' | 
 
 export const ACCOUNT_COMMANDS: TermCommand[] = [
   {
-    name: 'login', aliases: ['signin'], group: 'Account', usage: 'login [username] | login discord [pasted callback url]',
-    description: 'Sign in (asks for the password, then a 2FA code or a nod from another device if the account needs one). `login discord` opens Discord sign-in',
-    covers: ['userApi.passwordLogin', 'userApi.requestLoginApproval', 'userApi.pollLoginApproval', 'userApi.getDiscordAuthUrl', 'userApi.exchangeDiscord', 'userApi.discordRedirectUri', 'userApi.setToken'],
-    complete: (before, partial) => (before.length === 0 && 'discord'.startsWith(partial.toLowerCase()) ? ['discord'] : []),
+    name: 'login', aliases: ['signin'], group: 'Account', usage: 'login [username] | login discord [pasted callback url] | login passkey',
+    description: 'Sign in (asks for the password, then a 2FA code or a nod from another device if the account needs one). `login discord` opens Discord sign-in; `login passkey` opens the passkey prompt (website or Windows app)',
+    covers: ['userApi.passwordLogin', 'userApi.requestLoginApproval', 'userApi.pollLoginApproval', 'userApi.getDiscordAuthUrl', 'userApi.exchangeDiscord', 'userApi.discordRedirectUri', 'userApi.setToken', 'passkeyApi.signInWithPasskey', 'passkeyApi.startPasskeySignIn', 'passkeyApi.finishPasskeySignIn'],
+    complete: (before, partial) => (before.length === 0 ? ['discord', 'passkey'].filter((v) => v.startsWith(partial.toLowerCase())) : []),
     run: async (args, ctx) => {
       const { rest } = parseArgs(args)
       if (st().account) fail(`already signed in as ${who(st().account as AccountUser)} (logout first)`)
+      if (rest[0]?.toLowerCase() === 'passkey') {
+        const support = await getPasskeySupport()
+        if (!support.ceremonies) fail(support.reason ?? 'passkeys are not available here')
+        ctx.print('Opening the passkey prompt…', 'dim')
+        if (!(await st().loginWithPasskey())) { ctx.print('cancelled', 'dim'); return }
+        ctx.print(`signed in as ${who(signedIn())}`, 'ok')
+        return
+      }
       if (rest[0]?.toLowerCase() === 'discord') {
         const pasted = rest[1]
         if (!pasted) {
@@ -319,6 +352,50 @@ export const ACCOUNT_COMMANDS: TermCommand[] = [
         return
       }
       fail('usage: apikeys [ls | new | rename | scopes | revoke | restore | rm]')
+    },
+  },
+  {
+    name: 'passkeys', aliases: ['passkey'], group: 'Account',
+    usage: 'passkeys [ls] [--json] | add [name] | rename <passkey> <name> | rm <passkey> [-y]',
+    description: 'Passkeys for signing in without a password. `add` opens the passkey prompt (website or Windows app). <passkey> is an id, id prefix or name',
+    covers: ['passkeyApi.listPasskeys', 'passkeyApi.addPasskey', 'passkeyApi.startPasskeyRegistration', 'passkeyApi.finishPasskeyRegistration', 'passkeyApi.renamePasskey', 'passkeyApi.deletePasskey'],
+    complete: (before, partial) => (before.length === 0 ? ['ls', 'add', 'rename', 'rm'].filter((v) => v.startsWith(partial.toLowerCase())) : []),
+    run: async (args, ctx) => {
+      signedIn()
+      const { rest, bool } = parseArgs(args)
+      const sub = (rest.shift() ?? 'ls').toLowerCase()
+      if (sub === 'ls' || sub === 'list') {
+        const all = await listPasskeys()
+        if (asJson(ctx, bool.has('json'), all)) return
+        if (all.length === 0) { ctx.print('no passkeys yet (passkeys add <name>)', 'dim'); return }
+        ctx.print(table(all.map(passkeyLine)))
+        return
+      }
+      if (sub === 'add' || sub === 'new') {
+        const support = await getPasskeySupport()
+        if (!support.ceremonies) fail(support.reason ?? 'passkeys are not available here')
+        ctx.print('Opening the passkey prompt…', 'dim')
+        const p = await addPasskey(rest.join(' ').trim() || undefined)
+        if (!p) { ctx.print('cancelled', 'dim'); return }
+        ctx.print(`added ${p.name}`, 'ok')
+        return
+      }
+      if (sub === 'rename') {
+        const p = await findPasskey(rest.shift())
+        const name = rest.join(' ').trim()
+        if (!name) fail('usage: passkeys rename <passkey> <name>')
+        await renamePasskey(p.id, name)
+        ctx.print(`renamed ${p.name} to ${name}`, 'ok')
+        return
+      }
+      if (sub === 'rm' || sub === 'remove' || sub === 'delete') {
+        const p = await findPasskey(rest.join(' '))
+        if (!confirmAction(ctx, `Remove passkey ${p.name}? You won't be able to sign in with it any more.`, bool.has('y'))) return
+        await deletePasskey(p.id)
+        ctx.print(`removed ${p.name}`, 'ok')
+        return
+      }
+      fail('usage: passkeys [ls | add | rename | rm]')
     },
   },
   {

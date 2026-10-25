@@ -3,11 +3,11 @@
 // of the original two files were NOT extracted here because they genuinely
 // diverge in behavior, not just layout - see each hook's own comment for
 // what's covered and what deliberately isn't.
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import type { AccountUser } from '../lib/userApi'
 import type { Track, FullTrack } from '../types'
 import type { RadioTrack, RadioVote } from '../lib/radioLive'
-import { buildImageUrl, apiFetch, songToTrack } from '../lib/juicewrldApi'
+import { buildImageUrl, getSongById, songToTrack, smallCoverUrl } from '../lib/juicewrldApi'
 import type { JWApiSong } from '../lib/juicewrldApi'
 import * as userApi from '../lib/userApi'
 import { getActiveRadioClient } from '../lib/radioSocketService'
@@ -15,6 +15,8 @@ import { searchRadioLibrary } from '../lib/radioLibrary'
 import type { RadioLibraryTrack } from '../lib/radioLibrary'
 import { isLrcFormat, parseLrc } from '../lib/lyrics'
 import { resumeEffectsContext } from '../lib/audioEffects'
+import { useStore } from '../store/useStore'
+import { showAppToast } from '../lib/appToast'
 
 type RadioFmMatchedSong = {
   songId: number | null
@@ -88,7 +90,8 @@ export function useArtTextContrast(
       } catch { setTextIsDark(false) }
     }
     img.onerror = () => setTextIsDark(false)
-    img.src = artSrc
+    // Averaged over 50x50, so the degraded copy reads the same as the original.
+    img.src = smallCoverUrl(artSrc) ?? artSrc
   }, [artSrc, artError, isDarkSkin, radioFmActive, override])
   return textIsDark
 }
@@ -106,8 +109,25 @@ export function useWrldLyricsSource(
     : (currentTrackFull?.syncedLyrics || currentTrackFull?.lyrics || null)
   const isSynced = rawLyrics ? isLrcFormat(rawLyrics) : false
   const isEditor = !!(account?.is_editor || account?.is_administrator)
-  const syncedLines = rawLyrics && isSynced ? parseLrc(rawLyrics) : []
+  // The same lines until the lyrics change: a new array every render set the lyric styles and the lyrics list going
+  // again each time WRLD re-rendered (every 999 FM broadcast, among others).
+  const syncedLines = useMemo(() => (rawLyrics && isSynced ? parseLrc(rawLyrics) : []), [rawLyrics, isSynced])
   return { rawLyrics, isSynced, isEditor, syncedLines }
+}
+
+/** 999 FM on or off: tuning in pauses the song playing. WRLD's FM button and
+ * the desktop player's (lib/desktopBridge). */
+export function toggleRadioFm(): void {
+  const { radioFmActive, setRadioFmActive, setIsPlaying } = useStore.getState()
+  const next = !radioFmActive
+  if (next) {
+    setIsPlaying(false)
+    resumeEffectsContext()
+    void getActiveRadioClient()?.startListening()?.catch(() => setRadioFmActive(false))
+  } else {
+    getActiveRadioClient()?.stopListening()
+  }
+  setRadioFmActive(next)
 }
 
 /** Now-playing title/artist/album (FM-or-track), the transport-disabled
@@ -117,8 +137,6 @@ export function useWrldNowPlaying(
   radioFmIsLive: boolean | null,
   radioFmNowPlaying: RadioTrack | null,
   currentTrack: Track | null,
-  setRadioFmActive: (v: boolean) => void,
-  setIsPlaying: (v: boolean) => void,
 ): {
   displayTitle: string | undefined
   displayArtist: string | undefined
@@ -135,32 +153,22 @@ export function useWrldNowPlaying(
   // look interactive when there's no track loaded (and FM isn't filling in).
   const noTrack = !radioFmActive && !currentTrack
 
-  const toggleFm = (): void => {
-    const next = !radioFmActive
-    if (next) {
-      setIsPlaying(false)
-      resumeEffectsContext()
-      void getActiveRadioClient()?.startListening()?.catch(() => setRadioFmActive(false))
-    } else {
-      getActiveRadioClient()?.stopListening()
-    }
-    setRadioFmActive(next)
-  }
-
-  return { displayTitle, displayArtist, displayAlbum, fmDisabled, noTrack, toggleFm }
+  return { displayTitle, displayArtist, displayAlbum, fmDisabled, noTrack, toggleFm: toggleRadioFm }
 }
 
 /** Play a sibling version of the current song from the version-notch menu.
- * Byte-identical in both views - fetching songVersions itself is NOT shared,
- * since desktop gates playability via resolveSessionEditSource(song).path
- * while mobile only checks song.path, a genuine behavioral difference. */
-export function usePlayVersion(playTrack: (t: Track, context?: Track[]) => void): (songId: number) => Promise<void> {
+ * The list itself comes from useSongVersions (shared with Change version),
+ * which already fetched each song, so getSongById is normally a cache hit. */
+export function usePlayVersion(): (songId: number) => Promise<void> {
   return async (songId: number): Promise<void> => {
     try {
-      const song = await apiFetch<JWApiSong>(`/songs/${songId}/`)
+      const song = await getSongById(songId)
       const track = songToTrack(song)
-      playTrack(track, [track])
-    } catch {}
+      // Swap in place so the rest of the queue survives the version change.
+      const { currentTrack, changeVersion, playTrack } = useStore.getState()
+      if (currentTrack) changeVersion(currentTrack, track)
+      else playTrack(track, [track])
+    } catch { showAppToast("Couldn't switch to that version") }
   }
 }
 

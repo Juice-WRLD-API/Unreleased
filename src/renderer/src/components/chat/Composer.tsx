@@ -5,7 +5,7 @@ import { MAX_CHAT_UPLOAD_BYTES, type CardCommand, type ChatUserBrief } from '../
 import { buildBranch, CHANGELOG_MAX, fetchChangelogStatus } from '../../lib/appVersion'
 import { BROADCAST_LEVELS, BROADCAST_MAX_MESSAGE, fetchBroadcastHistory, sendBroadcast } from '../../lib/broadcastApi'
 import { BROADCAST_HISTORY_DEFAULT, BROADCAST_HISTORY_MAX, CHAT_COMMANDS, currentParamIndex, parseBroadcastArgs, parseChangelogArgs, parseChatCommand, parseNpArgs, parsePurgeArgs, PURGE_MAX, splitShareFlag, resolveAutoApproveFlag, resolveSiteRole, type AutoApproveFlag, type ChatCommandInfo, type ParsedChatCommand, type SiteRole } from '../../lib/chatCommands'
-import { adminGetUser, adminUpdateUser, getNowPlaying, getPublicProfile, type AdminUser } from '../../lib/userApi'
+import { adminGetUser, adminUpdateUser, getNowPlaying, getPublicProfile, trackIdToSongId, type AdminUser } from '../../lib/userApi'
 import { relativeTime } from '../adminShared'
 import { splitForwardRef } from '../../lib/chatForwardRef'
 import { encodeReplyRef, splitReplyRef } from '../../lib/chatReplyRef'
@@ -373,9 +373,9 @@ const Composer = forwardRef<ComposerHandle, {
     const track = useStore.getState().currentTrack
     if (!track) { toast('Nothing is playing right now'); return }
     if (sink.current) { toast(`Now playing: ${track.title}${track.artist ? ` - ${track.artist}` : ''}`, 'ok'); return }
-    const match = track.id.match(/^jw-(\d+)$/)
-    if (!match) { toast("The current track isn't from the song library, so it can't be shared"); return }
-    await send(room, { text: encodeSongShare(Number(match[1])), files: [] })
+    const songId = trackIdToSongId(track.id)
+    if (songId == null) { toast("The current track isn't from the song library, so it can't be shared"); return }
+    await send(room, { text: encodeSongShare(songId), files: [] })
   }
 
   // Shares whatever skin is currently active (built-in or custom) - the card

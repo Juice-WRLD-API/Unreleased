@@ -163,7 +163,7 @@ export default function CompProposalsTab({ embedded = false, onChanged }: { embe
       )}
       <div className="flex-1 min-w-0 flex overflow-hidden">
       <div className="w-72 shrink-0 border-r border-[var(--border)] flex flex-col">
-        <div className="shrink-0 p-3 border-b border-[var(--border)] flex flex-col gap-2">
+        <div className="shrink-0 p-3 flex flex-col gap-2">
           {/* Wraps: five chips don't fit the 18rem column, and the last one
               ("all") was running off the edge. */}
           <div className="flex flex-wrap gap-1">
@@ -183,7 +183,7 @@ export default function CompProposalsTab({ embedded = false, onChanged }: { embe
           {!loading && proposals.length > 0 && visible.length === 0 && <Empty label="No matches" />}
           {visible.map(item => (
             <button key={item.id} onClick={() => { setSelected(item); setReviewNotes(''); setError(null) }}
-              className={`w-full text-left px-3 py-3 border-b border-[var(--border)] transition-colors ${selected?.id === item.id ? 'bg-accent/10' : 'hover:bg-surface-raised'}`}>
+              className={`w-full text-left px-3 py-3 transition-colors ${selected?.id === item.id ? 'bg-accent/10' : 'hover:bg-surface-raised'}`}>
               <div className="flex items-center gap-1.5 mb-1">
                 <StatusChip status={item.status} />
                 <span className="text-[9px] text-text-muted bg-surface-raised px-1.5 py-0.5 rounded">{userApi.compChangeTypeLabel(item.change_type)}</span>
@@ -204,7 +204,7 @@ export default function CompProposalsTab({ embedded = false, onChanged }: { embe
           <Empty label="Select a comp proposal" />
         ) : (
           <>
-            <div className="shrink-0 px-6 py-4 border-b border-[var(--border)]">
+            <div className="shrink-0 px-6 py-4">
               <div className="flex items-start gap-3">
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-2 flex-wrap mb-1.5">

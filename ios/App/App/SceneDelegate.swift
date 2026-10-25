@@ -15,10 +15,14 @@ class SceneDelegate: UIResponder, UIWindowSceneDelegate {
             SiriCommandCenter.shared.send("play999Fm")
         }
 
+        // Cold launch from an unreleased:// URL (Shortcuts "Open URL").
+        SiriCommandCenter.shared.handle(urls: connectionOptions.urlContexts.map { $0.url })
+
         SceneDelegateProxy.shared.scene(scene, willConnectTo: session, options: connectionOptions)
     }
 
     func scene(_ scene: UIScene, openURLContexts URLContexts: Set<UIOpenURLContext>) {
+        SiriCommandCenter.shared.handle(urls: URLContexts.map { $0.url })
         SceneDelegateProxy.shared.scene(scene, openURLContexts: URLContexts)
     }
 

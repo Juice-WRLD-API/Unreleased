@@ -3,7 +3,9 @@
 // composite both views already use for playlist multi-select.
 import { useCallback, useState } from 'react'
 import * as userApi from '../lib/userApi'
+import { addPlaylistInBackground } from '../lib/optimisticPlaylist'
 import type { LocalPlaylist } from '../types'
+import { showAppToast } from '../lib/appToast'
 
 export function usePlaylistBulkDeletePlaylists(
   refreshPlaylists: () => Promise<void>,
@@ -22,7 +24,9 @@ export function usePlaylistBulkDeletePlaylists(
     const apiIds = keys.filter(k => k.startsWith('api:')).map(k => Number(k.slice(4)))
     const localIds = keys.filter(k => k.startsWith('local:')).map(k => k.slice(6))
     try {
-      await Promise.all(apiIds.map(id => userApi.deletePlaylist(id).catch(() => {})))
+      const results = await Promise.all(apiIds.map(id => userApi.deletePlaylist(id).then(() => true, () => false)))
+      const failed = results.filter(ok => !ok).length
+      if (failed > 0) showAppToast(failed === 1 && apiIds.length === 1 ? "Couldn't delete the playlist" : `Couldn't delete ${failed} of ${apiIds.length} playlists`)
     } finally {
       localIds.forEach(id => deleteLocalPlaylist(id))
       if (selectedId != null && apiIds.includes(selectedId)) setSelectedId(null)
@@ -50,12 +54,7 @@ export function usePlaylistBulkAddPlaylistsTo(
     try {
       if (target.kind === 'api') {
         const srcIds = keys.filter(k => k.startsWith('api:')).map(k => Number(k.slice(4))).filter(id => id !== target.id)
-        for (const srcId of srcIds) {
-          const srcDetail = await userApi.getPlaylist(srcId).catch(() => null)
-          if (!srcDetail) continue
-          await Promise.all(srcDetail.items.map(item => userApi.addToPlaylist(target.id, item.song.id).catch(() => {})))
-        }
-        await refreshPlaylists()
+        for (const srcId of srcIds) await addPlaylistInBackground(srcId, target.id)
       } else {
         const srcIds = keys.filter(k => k.startsWith('local:')).map(k => k.slice(6)).filter(id => id !== target.id)
         const targetPl = localPlaylists.find(p => p.id === target.id)

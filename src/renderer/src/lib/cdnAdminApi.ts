@@ -113,7 +113,41 @@ export function wasAutoDisabled(n: CdnAdminNode): boolean {
   return n.trust_score <= 0 || n.hash_violations >= VIOLATION_LIMIT
 }
 
-export type PropagationState = 'propagated' | 'propagating' | 'offline'
+export type CdnNodeEventType =
+  | 'registered' | 'approved' | 'revoked' | 'enabled' | 'disabled'
+  | 'trust_reset' | 'violation' | 'auto_disabled' | 'deleted' | 'restored'
+  | 'settings_changed'
+
+export interface CdnNodeEvent {
+  id: number
+  node_id_ext: string
+  event_type: CdnNodeEventType
+  actor_username: string | null
+  actor_ip: string | null
+  detail: Record<string, unknown>
+  created_at: string
+}
+
+export interface CdnNodeEventsPage {
+  events: CdnNodeEvent[]
+  count: number
+  page: number
+  has_next: boolean
+}
+
+export async function fetchNodeEvents(
+  nodeId: string,
+  page = 1,
+  types?: CdnNodeEventType[],
+): Promise<CdnNodeEventsPage> {
+  const params = new URLSearchParams({ page: String(page) })
+  if (types?.length) params.set('type', types.join(','))
+  return request(`${CDN_ADMIN_BASE}/nodes/${encodeURIComponent(nodeId)}/events/?${params}`, { method: 'GET' })
+}
+
+export type PropagationState = 'propagated' | 'propagating' | 'offline' | 'skipped'
+
+export type PropagationSkipReason = '' | 'channel' | 'folder' | 'storage'
 
 export interface PropagationServer {
   host: string
@@ -132,6 +166,7 @@ export interface PropagationNode {
   longitude: number | null
   online: boolean
   state: PropagationState
+  skip_reason?: PropagationSkipReason
 }
 
 export interface ProposalPropagation {
@@ -141,6 +176,7 @@ export interface ProposalPropagation {
     status: string
     change_type: string
     file_path: string
+    channel_slug?: string
   }
   nodes: PropagationNode[]
 }

@@ -4,7 +4,7 @@ import { Empty, QueueSearch } from './adminShared'
 import { useCdnNodesAdmin, formatMbps } from '../hooks/useCdnNodesAdmin'
 import CdnBinaryUpload from './CdnBinaryUpload'
 import CdnWorldMap from './CdnWorldMap'
-import { CdnBucketChip, CdnSyncBadge, CdnStatsStrip, CdnNodeNotices, CdnNodeFacts, CdnNodeActions, CdnCountryChips, countryFlag, nodeLocation } from './cdnNodesShared'
+import { CdnBucketChip, CdnSyncBadge, CdnStatsStrip, CdnNodeNotices, CdnNodeFacts, CdnNodeActions, CdnNodeEventHistory, CdnCountryChips, countryFlag, nodeLocation } from './cdnNodesShared'
 
 // Admin-only roster of distributed-CDN nodes (the volunteer machines running
 // jwa-cdn-node). Nodes register anonymously and serve nothing until approved
@@ -41,7 +41,7 @@ export default function CdnNodesTab(): JSX.Element {
 
   return (
     <div className="h-full flex flex-col overflow-hidden">
-      <div className="shrink-0 px-6 py-3 border-b border-[var(--border)] flex items-start gap-3">
+      <div className="shrink-0 px-6 py-3 flex items-start gap-3">
         <div className="flex-1 min-w-0">
           {stats && <CdnStatsStrip stats={stats} columns="grid-cols-6" />}
         </div>
@@ -59,7 +59,7 @@ export default function CdnNodesTab(): JSX.Element {
 
       <div className="flex-1 flex overflow-hidden">
         <div className="w-[300px] shrink-0 border-r border-[var(--border)] flex flex-col overflow-hidden">
-          <div className="shrink-0 flex flex-col gap-2 p-3 border-b border-[var(--border)]">
+          <div className="shrink-0 flex flex-col gap-2 p-3">
             <div className="flex flex-wrap gap-1">
               {filters.map((f) => (
                 <button key={f.id} onClick={() => setFilter(f.id)}
@@ -78,7 +78,7 @@ export default function CdnNodesTab(): JSX.Element {
             {visible.length === 0 && <Empty label={nodes.length === 0 ? 'No nodes registered' : 'No nodes'} />}
             {visible.map((n) => (
               <button key={n.node_id} onClick={() => setSelectedId(n.node_id)}
-                className={`w-full text-left px-3 py-2.5 border-b border-[var(--border)] transition-colors ${
+                className={`w-full text-left px-3 py-2.5 transition-colors ${
                   selectedId === n.node_id ? 'bg-accent/10' : 'hover:bg-surface-raised'
                 }`}>
                 <div className="flex items-center gap-2 mb-0.5">
@@ -130,6 +130,10 @@ export default function CdnNodesTab(): JSX.Element {
               <hr className="border-[var(--border)]" />
 
               <CdnNodeFacts node={selected} columns="grid-cols-3" />
+
+              <hr className="border-[var(--border)]" />
+
+              <CdnNodeEventHistory nodeId={selected.node_id} />
             </div>
           )}
         </div>

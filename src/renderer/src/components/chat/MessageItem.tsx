@@ -1,3 +1,4 @@
+import { MotionOverlay } from '../MotionOverlay'
 import { memo, useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import {
@@ -276,17 +277,17 @@ function InlineEditor({ initial, people, meId, onSave, onCancel }: {
 
 function ActionSheet({ onClose, children }: { onClose: () => void; children: React.ReactNode }): JSX.Element {
   return createPortal(
-    <div className="fixed inset-0 z-[150] flex items-end" onClick={onClose}>
+    <MotionOverlay className="fixed inset-0 z-[150] flex items-end" onClick={onClose}>
       <div className="absolute inset-0 bg-black/50" />
       <div
         onClick={(e) => e.stopPropagation()}
-        className="chat-sheet relative w-full rounded-t-2xl bg-surface border-t border-[var(--border)] p-3 space-y-1"
+        className="relative w-full rounded-t-2xl bg-surface border-t border-[var(--border)] p-3 space-y-1"
         style={{ paddingBottom: 'calc(env(safe-area-inset-bottom, 0px) + 12px)' }}
       >
         <div className="mx-auto mb-2 h-1 w-10 rounded-full bg-[var(--border)]" />
         {children}
       </div>
-    </div>,
+    </MotionOverlay>,
     document.body,
   )
 }
@@ -772,9 +773,9 @@ export function ConfirmDialog({ title, body, confirmLabel, onConfirm, onCancel, 
     return () => window.removeEventListener('keydown', onKey)
   }, [onCancel, onConfirm])
   return createPortal(
-    <div className="fixed inset-0 z-[160] flex items-center justify-center p-4" onClick={onCancel}>
+    <MotionOverlay className="fixed inset-0 z-[160] flex items-center justify-center p-4" onClick={onCancel}>
       <div className="absolute inset-0 bg-black/55 backdrop-blur-[2px]" />
-      <div onClick={(e) => e.stopPropagation()} className="chat-pop relative w-full max-w-sm rounded-2xl border border-[var(--border)] bg-surface shadow-2xl p-5">
+      <div onClick={(e) => e.stopPropagation()} className="relative w-full max-w-sm rounded-2xl border border-[var(--border)] bg-surface shadow-2xl p-5">
         <h3 className="text-base font-bold text-text-primary">{title}</h3>
         <div className="mt-1.5 text-sm text-text-secondary leading-relaxed">{body}</div>
         <div className="mt-5 flex justify-end gap-2">
@@ -788,7 +789,7 @@ export function ConfirmDialog({ title, body, confirmLabel, onConfirm, onCancel, 
           </button>
         </div>
       </div>
-    </div>,
+    </MotionOverlay>,
     document.body,
   )
 }

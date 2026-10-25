@@ -1,3 +1,4 @@
+import { playlistSongIds } from '../lib/playlistItems'
 import { useState, useEffect, useCallback, useRef, useMemo, memo, Suspense } from 'react'
 import {
   Search, Loader2, Music2, X, Check, ListPlus, ChevronDown, ChevronLeft,
@@ -23,14 +24,19 @@ import {
 import { openZipTarget, saveItems } from '../lib/clientZip'
 import { Track } from '../types'
 import * as userApi from '../lib/userApi'
-import { useCanEdit } from '../hooks/useChannelRoles'
+import { addSongsInBackground } from '../lib/optimisticPlaylist'
+import { useCanEdit, isPrimaryChannelSlug } from '../hooks/useChannelRoles'
+import { resolveSongFile } from '../lib/sessionEditsApi'
+import { triggerDownload } from '../lib/apiFilesShared'
 import { versionsEnabled, linkSongVersion, getOwnVersionMeta, setGroupVersionTitle } from '../lib/versionsApi'
 import { fetchAllCompactGroups, filterCompactGroups, invalidateCompactGroupsCache, subscribeCompactGroupsInvalidation } from '../lib/compactGroups'
 import type { CompactGroup } from '../lib/compactGroups'
-import { parseSearchQuery, matchesFieldFilters, filterApiFields } from '../lib/trackerSearch'
+import { parseSearchQuery, matchesFieldFilters, filterApiFields, textMatches } from '../lib/trackerSearch'
+import { displaySongName } from '../lib/songPrefs'
+import { SearchHelpButton } from './SearchHelpPopover'
 import { useVirtualWindow } from '../hooks/useVirtualWindow'
 import { runLog } from '../lib/runLog'
-import { formatDuration } from '../lib/format'
+import { formatDuration, dateSortValue, compareDates } from '../lib/format'
 import { registerBackHandler } from '../lib/backHandlers'
 import { loadEraFullNames, eraLabel, listEras } from '../lib/eras'
 import { useBackToClose } from '../hooks/useBackToClose'
@@ -65,7 +71,7 @@ const StatisticsPanel = lazyView(() => import('./StatisticsPanel.mobile'))
 // mobile mode and is shared with Liked Songs, Playlists, the Player and WRLD, so
 // it belongs to whichever pass rewrites those.
 
-type OrderField = 'name' | 'credited_artists' | 'era__name' | 'category' | 'length'
+type OrderField = 'name' | 'credited_artists' | 'era__name' | 'category' | 'length' | 'date_leaked'
 type SheetKind = 'filters' | 'sort' | 'view' | 'fields' | 'bulk' | null
 
 const CATEGORY_COLORS: Record<string, string> = {
@@ -91,6 +97,7 @@ const SORT_OPTIONS: { field: OrderField; label: string }[] = [
   { field: 'era__name', label: 'Era' },
   { field: 'category', label: 'Category' },
   { field: 'length', label: 'Length' },
+  { field: 'date_leaked', label: 'Date leaked' },
 ]
 
 const CATEGORY_OPTIONS: { key: Exclude<Category, ''>; label: string }[] = [
@@ -683,7 +690,7 @@ export default function ApiTrackerView(): JSX.Element {
     focusApiTrackerSearch, setFocusApiTrackerSearch,
     setActiveView, setApiFilesPath, setPendingEditorSongId,
     playlists, refreshPlaylists, setShowUserAuth, likedTrackIds, toggleLike,
-    openBulkEditor, currentTrack, isPlaying, fullEraNames,
+    openBulkEditor, currentTrack, isPlaying, fullEraNames, activeChannel, channels, setActiveChannel,
   } = useStore(useShallow(s => ({
     playTrack: s.playTrack, startRadio: s.startRadio, addToQueue: s.addToQueue,
     account: s.account, shuffle: s.shuffle,
@@ -698,6 +705,7 @@ export default function ApiTrackerView(): JSX.Element {
     openBulkEditor: s.openBulkEditor,
     currentTrack: s.currentTrack, isPlaying: s.isPlaying,
     fullEraNames: s.fullEraNames,
+    activeChannel: s.activeChannel, channels: s.channels, setActiveChannel: s.setActiveChannel,
   })))
 
   const canEdit = useCanEdit()
@@ -723,6 +731,9 @@ export default function ApiTrackerView(): JSX.Element {
 
   const [selectedSong, setSelectedSong] = useState<JWApiSong | null>(null)
   const [contextMenu, setContextMenu] = useState<{ song: JWApiSong; x: number; y: number } | null>(null)
+  // Title sort goes by the name the row shows - a personal rename included -
+  // so a renamed song moves to where its new name belongs.
+  const songPrefs = useStore((s) => s.songPrefs)
 
   // Multi-select
   const [selectMode, setSelectMode] = useState(false)
@@ -832,8 +843,9 @@ export default function ApiTrackerView(): JSX.Element {
   })
   const setViewMode = (v: ViewMode): void => { setViewModeState(v); localStorage.setItem(LS_TRACKER_VIEW, v) }
 
-  const [orderField, setOrderField] = useState<OrderField | null>(null)
-  const [orderDir, setOrderDir] = useState<'asc' | 'desc'>('asc')
+  // Default: Date Leaked, newest first (matches the desktop tracker).
+  const [orderField, setOrderField] = useState<OrderField | null>('date_leaked')
+  const [orderDir, setOrderDir] = useState<'asc' | 'desc'>('desc')
   // A new search/filter starts the list back at the top. The list itself
   // re-derives (filters) or refetches (search) on its own.
   const resetSongs = useCallback((): void => {
@@ -892,6 +904,7 @@ export default function ApiTrackerView(): JSX.Element {
   const bulkOmit = useTrackerOmit([
     ...(viewMode === 'detail' ? apiFieldsFor(mobileDetailFields) : []),
     ...filterApiFields(parsedSearch.filters),
+    ...(orderField === 'date_leaked' ? ['date_leaked'] : []),
   ])
 
   useEffect(() => {
@@ -1108,21 +1121,46 @@ export default function ApiTrackerView(): JSX.Element {
     return () => ctl.abort()
   }, [parsedSearch.freeText, bulkOmit, reloadToken])
 
+  // Renames only change what a search matches, so the search memos re-run on
+  // a rename only while there's a query - not on every playcount bump.
+  const searchPrefs = parsedSearch.freeText || parsedSearch.filters.length ? songPrefs : null
+  // The server searches the API's own names, so a song renamed to something
+  // the query matches is pulled in from the unfiltered catalogue instead.
+  const renamedHits = useMemo(() => {
+    const q = parsedSearch.freeText
+    if (!q || !searchPrefs) return []
+    const have = new Set(catalog.map((s) => s.id))
+    const ids = new Set(Object.values(searchPrefs)
+      .filter((p) => p.name && !have.has(p.song) && textMatches(p.name, q))
+      .map((p) => p.song))
+    return ids.size ? (peekTrackerCatalog('') ?? []).filter((s) => ids.has(s.id)) : []
+  }, [catalog, parsedSearch.freeText, searchPrefs])
+
   const songs = useMemo(
-    () => catalog.filter((s) => matchesFilters(s) && matchesSearch(s)),
-    [catalog, matchesFilters, matchesSearch],
+    () => (renamedHits.length ? [...catalog, ...renamedHits] : catalog)
+      .filter((s) => matchesFilters(s) && matchesSearch(s)),
+    // searchPrefs: a title:"..." filter matches renames too.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [catalog, renamedHits, matchesFilters, matchesSearch, searchPrefs],
   )
   const count = songs.length
 
+  // Only the title sort reads the prefs, so other sorts don't re-run on every
+  // playcount bump.
+  const namePrefs = orderField === 'name' ? songPrefs : null
   // Client-side sort over accumulated songs (sort mode only)
   const sortedSongs = useMemo(() => {
     if (!orderField) return songs
+    if (orderField === 'date_leaked') {
+      const t = new Map(songs.map((s) => [s.id, dateSortValue(s.date_leaked)]))
+      return [...songs].sort((a, b) => compareDates(t.get(a.id) ?? null, t.get(b.id) ?? null, orderDir))
+    }
     return [...songs].sort((a, b) => {
       let av: string | number, bv: string | number
       switch (orderField) {
         case 'name':
-          av = a.name.toLowerCase()
-          bv = b.name.toLowerCase()
+          av = (namePrefs?.[a.id]?.name || a.name).toLowerCase()
+          bv = (namePrefs?.[b.id]?.name || b.name).toLowerCase()
           break
         case 'credited_artists':
           av = (a.credited_artists || '').toLowerCase()
@@ -1143,7 +1181,7 @@ export default function ApiTrackerView(): JSX.Element {
       const cmp = typeof av === 'number' ? av - (bv as number) : (av as string).localeCompare(bv as string)
       return orderDir === 'desc' ? -cmp : cmp
     })
-  }, [songs, orderField, orderDir])
+  }, [songs, orderField, orderDir, namePrefs])
 
   // fetchAllCompactGroups is independent of the search box (it fetches every
   // group app-wide), so the query has to be applied client-side or typing while
@@ -1151,7 +1189,7 @@ export default function ApiTrackerView(): JSX.Element {
   // list's server-side `searchall` field coverage as it reasonably can.
   const filteredCompactGroups = useMemo(() => {
     let filtered = filterCompactGroups(compactGroups, parsedSearch.freeText, s => [
-      s.track_titles?.join(' '), s.name, s.credited_artists, s.producers, s.engineers,
+      s.track_titles?.join(' '), displaySongName(s), s.name, s.credited_artists, s.producers, s.engineers,
       s.era?.name, s.notes, s.additional_information, s.session_titles, s.original_key,
     ].filter(Boolean).join(' '))
     // Field-qualified tokens (artists:"...", etc.) aren't handled by
@@ -1179,7 +1217,9 @@ export default function ApiTrackerView(): JSX.Element {
       sorted.sort((a, b) => a.title.localeCompare(b.title) * dir)
     }
     return sorted
-  }, [compactGroups, parsedSearch, orderField, orderDir, categoryFilter, eraFilter, matchesFilters])
+    // searchPrefs: the haystack's displaySongName reads renames.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [compactGroups, parsedSearch, orderField, orderDir, categoryFilter, eraFilter, matchesFilters, searchPrefs])
 
   const handlePlay = useCallback((song: JWApiSong) => {
     const track = songToTrack(song)
@@ -1243,7 +1283,7 @@ export default function ApiTrackerView(): JSX.Element {
       playlists.map(p =>
         userApi.getPlaylist(p.id)
           .then(d => {
-            const memberIds = new Set((d.items ?? []).map(it => it.song.id))
+            const memberIds = new Set(playlistSongIds(d.items ?? []))
             return { id: p.id, allIn: ids.every(id => memberIds.has(id)) }
           })
           .catch(() => ({ id: p.id, allIn: false }))
@@ -1259,9 +1299,10 @@ export default function ApiTrackerView(): JSX.Element {
     exitSelectMode()
   }
 
-  const bulkAddToPlaylist = async (playlistId: number): Promise<void> => {
-    await Promise.all(selectedSongs.map(s => userApi.addToPlaylist(playlistId, s.id).catch(() => {})))
-    await refreshPlaylists()
+  // Optimistic: select mode closes right away and the adds run in the
+  // background (failures toast).
+  const bulkAddToPlaylist = (playlistId: number): void => {
+    void addSongsInBackground(playlistId, selectedSongs.map(s => s.id))
     exitSelectMode()
   }
 
@@ -1269,7 +1310,15 @@ export default function ApiTrackerView(): JSX.Element {
   // (lib/clientZip). Songs whose file fails to fetch are counted with the
   // ones that have no file at all.
   const bulkDownloadZip = async (): Promise<void> => {
-    const paths = selectedSongs.map(s => s.path).filter(Boolean) as string[]
+    // Sessions download the file they play, which may be in another comp.
+    const files = (await Promise.all(selectedSongs.map(async s => {
+      const f = s.category === 'recording_session'
+        ? await resolveSongFile(s).catch(() => null)
+        : s.path ? { path: s.path, url: buildStreamUrl(s.path, activeChannel || undefined), channel: activeChannel || undefined } : null
+      return f && { ...f, songId: s.id }
+    })))
+      .filter(<T,>(f: T | null): f is T => f != null)
+    const paths = files.map(f => f.path)
     let skipped = selectedSongs.length - paths.length
     if (paths.length === 0) {
       setBulkZipSkipped(skipped)
@@ -1281,10 +1330,11 @@ export default function ApiTrackerView(): JSX.Element {
     if (!target) return
     setBulkZipStatus('zipping')
     try {
-      const { failed, cancelled } = await saveItems(target, paths.map(path => ({
-        name: path.split('/').pop() || path,
-        url: buildStreamUrl(path),
-        cdnPath: path,
+      const { failed, cancelled } = await saveItems(target, files.map(f => ({
+        name: f.path.split('/').pop() || f.path,
+        url: f.url,
+        cdnPath: (f.channel ?? '') === (activeChannel ?? '') ? f.path : undefined,
+        songId: f.songId,
       })), setBulkZipProgress)
       setBulkZipProgress(null)
       if (cancelled) { setBulkZipStatus('idle'); return }
@@ -1319,12 +1369,22 @@ export default function ApiTrackerView(): JSX.Element {
     setTimeout(() => setBulkLinkStatus('idle'), 3000)
   }
 
-  const handleShowInFiles = useCallback((song: JWApiSong): void => {
+  const handleShowInFiles = useCallback(async (song: JWApiSong): Promise<void> => {
     if (!song.path) return
-    const parts = song.path.split('/')
-    setApiFilesPath(parts.slice(0, -1).join('/'))
+    // A session's file may not be looked up yet, or may live in another comp.
+    let path = song.path
+    if (song.category === 'recording_session') {
+      try {
+        const f = await resolveSongFile(song)
+        path = f.path
+        if (f.channel && f.channel !== activeChannel) setActiveChannel(f.channel)
+      } catch { return }
+    }
+    const parts = path.split('/')
+    const folderPath = parts.slice(0, -1).join('/')
+    setApiFilesPath(folderPath)
     setActiveView('api-files')
-  }, [setApiFilesPath, setActiveView])
+  }, [setApiFilesPath, setActiveView, activeChannel, setActiveChannel])
 
   // Hardware back, innermost first. Registered once through a ref: handlers run
   // last-registered-first, so re-registering on state changes would keep moving
@@ -1523,14 +1583,22 @@ export default function ApiTrackerView(): JSX.Element {
                   autoCorrect="off"
                   autoCapitalize="off"
                   spellCheck={false}
-                  className="w-full h-11 bg-surface-overlay rounded-full pl-10 pr-10 text-[15px] text-text-primary placeholder:text-text-muted focus:outline-none focus:ring-1 focus:ring-accent/50 [&::-webkit-search-cancel-button]:hidden"
+                  className={`w-full h-11 bg-surface-overlay rounded-full pl-10 ${trackerTab === 'songs' ? (search ? 'pr-20' : 'pr-10') : 'pr-10'} text-[15px] text-text-primary placeholder:text-text-muted focus:outline-none focus:ring-1 focus:ring-accent/50 [&::-webkit-search-cancel-button]:hidden`}
                 />
                 {(trackerTab === 'songs' ? search : lyricsQuery) && (
                   <button
                     onClick={() => trackerTab === 'songs' ? setSearch('') : setLyricsQuery('')}
-                    className="absolute right-1 w-9 h-9 flex items-center justify-center rounded-full text-text-muted active:text-text-primary"
+                    className={`absolute ${trackerTab === 'songs' ? 'right-10' : 'right-1'} w-9 h-9 flex items-center justify-center rounded-full text-text-muted active:text-text-primary`}
                     aria-label="Clear search"
                   ><X size={16} /></button>
+                )}
+                {trackerTab === 'songs' && (
+                  <span className="absolute right-1 w-9 h-9 flex items-center justify-center">
+                    <SearchHelpButton
+                      size={16}
+                      className={(open) => `flex transition-colors ${open ? 'text-accent' : 'text-text-muted active:text-text-primary'}`}
+                    />
+                  </span>
                 )}
               </div>
             </div>
@@ -1941,7 +2009,7 @@ export default function ApiTrackerView(): JSX.Element {
               sub={!orderField ? 'Loads the full catalog first' : undefined}
               active={orderField === opt.field}
               trailing={orderField === opt.field ? <Check size={17} className="text-accent shrink-0" /> : undefined}
-              onClick={() => setOrderField(opt.field)}
+              onClick={() => { if (orderField !== opt.field) setOrderDir(opt.field === 'date_leaked' ? 'desc' : 'asc'); setOrderField(opt.field) }}
             />
           ))}
           {orderField && (

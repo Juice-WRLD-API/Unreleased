@@ -201,6 +201,13 @@ export function cleanTitleForSearch(title: string): string {
   return title.replace(/\s*[[(].*$/, '').trim()
 }
 
+/** A title as-is, then without "<3"/"</3" hearts - file names can't hold "<"
+ *  or "/", so "My Fault </3" is filed as plain "My Fault". */
+export function titleVariants(title: string): string[] {
+  const noHearts = title.replace(/\s*<\/?3+/g, ' ').replace(/\s+/g, ' ').trim()
+  return noHearts && noHearts !== title ? [title, noHearts] : [title]
+}
+
 function escapeRegExp(s: string): string {
   return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 }
@@ -631,20 +638,29 @@ export function buildImageUrl(imageUrl: string | null | undefined): string | und
   // API resolves to a placeholder that visibly reads "null".
   if (!imageUrl || imageUrl === 'null') return undefined
   if (imageUrl.startsWith('http') || imageUrl.startsWith('data:') || imageUrl.startsWith('blob:')) return imageUrl
-  // Relative path - ensure single leading slash
-  const rel = imageUrl.startsWith('/') ? imageUrl : '/' + imageUrl
-  return `https://${JWAPI_HOST}${rel}`
+  // Leading slash - a site-relative asset ("/assets/wod.jpg")
+  if (imageUrl.startsWith('/')) return `https://${JWAPI_HOST}${imageUrl}`
+  // Anything else is a raw file-storage path ("Compilation/4. Cover Art/…png"),
+  // the shape the editor's file picker stores
+  return buildStreamUrl(imageUrl)
 }
 
-/** The inverse of buildImageUrl: strips the API host off an absolute URL so
- *  it's stored site-relative ("/juicewrld/files/download/?path=…"), the same
- *  shape a song's own `image_url` uses ("/assets/wod.jpg"). URLs on any other
+/** The inverse of buildImageUrl for a file-picker selection: a download URL
+ *  for a primary-channel file collapses to its raw storage path
+ *  ("Compilation/4. Cover Art/…png"), the same shape a song's `path` uses.
+ *  Other URLs on the API host are stored site-relative ("/juicewrld/…") -
+ *  a non-primary channel can't be expressed by a bare path. URLs on any other
  *  host (a custom server override included) stay absolute, since
  *  buildImageUrl would otherwise resolve them against the wrong host. */
 export function toSiteRelativeImageUrl(url: string): string {
   try {
     const u = new URL(url)
-    if (u.protocol === 'https:' && u.hostname === JWAPI_HOST) return u.pathname + u.search
+    if (u.protocol === 'https:' && u.hostname === JWAPI_HOST) {
+      const path = u.searchParams.get('path')
+      const channel = u.searchParams.get('channel')
+      if (u.pathname.endsWith('/files/download/') && path && (!channel || channel === 'comp')) return path
+      return u.pathname + u.search
+    }
   } catch {}
   return url
 }
@@ -660,11 +676,19 @@ export function toSiteRelativeImageUrl(url: string): string {
  *  through the cover-art endpoint. Worth re-checking against the real column
  *  once /library/preferences/ ships - this is the one place that has to know. */
 export function resolvePrefCoverUrl(coverUrl: string | null | undefined): string | undefined {
-  if (!coverUrl) return undefined
+  if (!coverUrl || coverUrl === 'null') return undefined
   if (/^(https?:|data:|blob:)/.test(coverUrl)) return coverUrl
   if (coverUrl.startsWith('/')) return buildImageUrl(coverUrl)
+  // A bare path to an image file is the cover itself - the shape the file
+  // pickers now store ("Compilation/4. Cover Art/…png"). /files/cover-art/
+  // only extracts art embedded in audio and 404s on a plain image.
+  if (IMAGE_PATH_RE.test(coverUrl)) return buildStreamUrl(coverUrl)
   return buildCoverArtUrl(coverUrl)
 }
+
+// Local rather than lib/fileTypes' getMediaType - that module imports the
+// store, which already imports this one.
+const IMAGE_PATH_RE = /\.(png|jpe?g|webp|gif|avif|bmp)$/i
 
 // Discord's classic (local IPC) Rich Presence only reliably applies a
 // `large_url` up to roughly this many characters - longer ones get silently
@@ -878,7 +902,7 @@ export function resolveSessionEditSource(song: { id: number; category: string; p
   if (song.category !== 'recording_session') return { path: song.path, length: song.length, channel: undefined }
   const channel = peekActiveChannel()
   const override = peekSessionEditOverride(song.id, channel)
-  if (override) return { path: override.path, length: override.duration ?? song.length, channel }
+  if (override) return { path: override.path, length: override.duration ?? song.length, channel: override.channel ?? channel }
   if (song.path && !isSessionEditPlaceholder(song.path)) return { path: song.path, length: song.length, channel }
   const link = peekSessionEditLink(song.id, channel)
   if (link) return { path: link.path, length: link.duration ?? song.length, channel }
@@ -886,16 +910,36 @@ export function resolveSessionEditSource(song: { id: number; category: string; p
   return { path: sessionEditPlaceholder(song.id), length: song.length, channel: undefined }
 }
 
+/** "Session Edits/5. BDM (Sessions)/My Fault (Sessions).mp3" → "My Fault (Sessions)". */
+export function fileStem(path: string): string {
+  return path.slice(path.lastIndexOf('/') + 1).replace(/\.[^.]+$/, '')
+}
+
+/** The cover a song shows instead of its own API art, if any. A user-set
+ *  cover always wins; a rotated suggestion fills in next; an era cover
+ *  override fills in after that - and only for songs that aren't released,
+ *  since released songs have their own real art JWA already shows. Undefined
+ *  = show the song's own art. Every song→display path (songToTrack,
+ *  liteSongToTrack, the store's applyPrefToTrack, Tier List) goes through
+ *  this so they can't drift. `songId` null (a non-library track) gets only
+ *  its user cover; `eraCoverOf` lets a reactive caller pass its own map. */
+export function overrideCoverUrl(
+  songId: number | null,
+  prefCover: string | null | undefined,
+  category: string | null | undefined,
+  era: string | null | undefined,
+  eraCoverOf: (era: string | null | undefined) => string | undefined = peekEraCover,
+): string | undefined {
+  return resolvePrefCoverUrl(prefCover)
+    ?? (songId != null ? peekRotatedCover(songId) : undefined)
+    ?? (songId != null && category !== 'released' && era ? resolvePrefCoverUrl(eraCoverOf(era)) : undefined)
+}
+
 export function songToTrack(song: JWApiSong): Track {
   const apiTitle = song.name
   const apiImageUrl = buildImageUrl(song.image_url)
   const pref = peekSongPref(song.id)
-  // A user-set cover always wins; a rotated suggestion fills in next; an era
-  // cover override fills in after that - and only for songs that aren't
-  // released, since released songs have their own real art JWA already shows.
-  const coverUrl = resolvePrefCoverUrl(pref?.cover_url)
-    ?? peekRotatedCover(song.id)
-    ?? (song.category !== 'released' ? resolvePrefCoverUrl(peekEraCover(song.era?.name)) : undefined)
+  const coverUrl = overrideCoverUrl(song.id, pref?.cover_url, song.category, song.era?.name)
   const { path: resolvedPath, length: resolvedLength, channel: streamChannel } = resolveSessionEditSource(song)
   return {
     id: `jw-${song.id}`,
@@ -905,7 +949,11 @@ export function songToTrack(song: JWApiSong): Track {
     title: pref?.name || apiTitle,
     apiTitle,
     apiImageUrl,
-    artist: song.credited_artists || 'Juice WRLD',
+    // A session plays a file, so the file it plays stands in for the artist
+    // line (filled in by the Player once a not-yet-looked-up one resolves).
+    artist: song.category === 'recording_session' && resolvedPath && !isSessionEditPlaceholder(resolvedPath)
+      ? fileStem(resolvedPath)
+      : song.credited_artists || 'Juice WRLD',
     album: song.album || song.era?.name || '',
     era: song.era?.name || undefined,
     albumArtist: 'Juice WRLD',

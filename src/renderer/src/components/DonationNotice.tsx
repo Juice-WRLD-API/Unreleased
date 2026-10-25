@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { Heart, Copy, Check, X as XIcon } from 'lucide-react'
 import { COOKIE_NOTICE_ACK_EVENT } from './CookieNotice'
 import { useStorePick } from '../store/useStore'
+import { PopLayer } from './PopLayer'
 
 const STORAGE_KEY = 'donation-notice-dismissed'
 const COOKIE_STORAGE_KEY = 'cookie-notice-ack'
@@ -79,7 +80,7 @@ export default function DonationNotice(): JSX.Element | null {
   if (dismissed || !cookieNoticeClear) return null
 
   return (
-    <div className="fixed inset-x-0 bottom-0 z-[9500] flex justify-center px-3 pb-3 pointer-events-none">
+    <PopLayer className="fixed inset-x-0 bottom-0 z-[9500] flex justify-center px-3 pb-3 pointer-events-none animate-menu-pop">
       <div className="pointer-events-auto w-full max-w-[420px] rounded-2xl border border-[var(--border)] bg-surface shadow-2xl px-4 py-3.5">
         <div className="flex items-start gap-3">
           <div className="shrink-0 mt-0.5 text-accent">
@@ -108,6 +109,6 @@ export default function DonationNotice(): JSX.Element | null {
           </button>
         </div>
       </div>
-    </div>
+    </PopLayer>
   )
 }

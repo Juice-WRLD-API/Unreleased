@@ -230,35 +230,24 @@ export function forgetPendingKeyFetches(conversationId: number): void {
 
 // --- v1 distribution (until the identity phase is on) ------------------------------------
 
-// Exactly one device per person is keyed automatically: the oldest one they
-// registered, which every participant derives the same way from the shared
-// device list. Their other browsers get keys by export/import instead, so a
-// room key is never sealed to more devices than it has to be. Revoking the
-// oldest device promotes the next one.
-export function primaryDevices(devices: ChatDevice[]): ChatDevice[] {
-  const best = new Map<ChatDevice['owner'], ChatDevice>()
-  for (const d of devices) {
-    const cur = best.get(d.owner)
-    if (!cur || olderDevice(d, cur)) best.set(d.owner, d)
-  }
-  return [...best.values()]
-}
-
-function olderDevice(a: ChatDevice, b: ChatDevice): boolean {
-  if (a.created_at && b.created_at && a.created_at !== b.created_at) return a.created_at < b.created_at
-  return a.id < b.id
-}
-
-async function sealForDevices(conversationId: number, version: number, key: Uint8Array): Promise<void> {
-  const { results } = await api.listConversationDevices(conversationId)
-  const targets = primaryDevices(results)
+// Every active device of every participant gets the key. Keys used to go to
+// each person's oldest device only, which left any newer browser or app
+// waiting for a key that was never coming.
+async function postV1Envelopes(conversationId: number, version: number, key: Uint8Array, targets: ChatDevice[]): Promise<void> {
   if (targets.length === 0) return
   const envelopes = await Promise.all(targets.map(async (d) => ({
     recipient_device: d.id,
     key_version: version,
     encrypted_key: await sealRoomKey(key, d.public_key),
   })))
-  await api.postEnvelopes(conversationId, envelopes)
+  for (let i = 0; i < envelopes.length; i += 100) {
+    await api.postEnvelopes(conversationId, envelopes.slice(i, i + 100))
+  }
+}
+
+async function sealForDevices(conversationId: number, version: number, key: Uint8Array): Promise<void> {
+  const { results } = await api.listConversationDevices(conversationId)
+  await postV1Envelopes(conversationId, version, key, results)
 }
 
 // Generates and distributes a fresh key for the conversation's current version.
@@ -433,13 +422,69 @@ export async function shareKeyWithUser(userId: number, conversation: Conversatio
   }
   if (status === 'needs-link') return
   const { results } = await api.listConversationDevices(conversation.id)
-  const target = primaryDevices(results).find((d) => deviceOwnerId(d) === targetUserId)
-  if (!target || target.id === device.serverId) return
-  await api.postEnvelopes(conversation.id, [{
-    recipient_device: target.id,
-    key_version: version,
-    encrypted_key: await sealRoomKey(key, target.public_key),
-  }])
+  await postV1Envelopes(conversation.id, version, key, results.filter((d) => deviceOwnerId(d) === targetUserId && d.id !== device.serverId))
+}
+
+// --- asking for a missing key -------------------------------------------------------------
+
+// The others in a conversation share its key when we come online or one of
+// our devices registers, so a device that opens while everyone is already
+// online never hears back. Registering this device again (the server keeps
+// the same row) sends device.added to every conversation we're in, and each
+// participant online with a current key seals it to all our devices. One ask
+// covers every conversation, so it's rate limited.
+const ASK_EVERY_MS = 10 * 60_000
+const ASK_AGAIN_MS = 15_000
+let lastAsk = 0
+
+export async function askForRoomKeys(userId: number, opts: { force?: boolean } = {}): Promise<boolean> {
+  const now = Date.now()
+  if (now - lastAsk < (opts.force ? ASK_AGAIN_MS : ASK_EVERY_MS)) return false
+  const previous = lastAsk
+  lastAsk = now
+  try {
+    // Nobody accepts an unlinked device's keys, so there's no one to ask.
+    if (await identityStatus(userId) === 'needs-link') return false
+    const device = await ensureDevice(userId)
+    await api.registerDevice({
+      device_id: device.deviceId,
+      public_key: await toB64(device.identity.publicKey),
+      sign_pub: await b64(device.signing.publicKey),
+      algorithm: 'x25519',
+      label: deviceLabel(),
+    })
+    return true
+  } catch (err) {
+    lastAsk = previous
+    throw err
+  }
+}
+
+// --- starting over ------------------------------------------------------------------------
+
+// For when nobody has the current key any more: move the conversation to a
+// new version with a fresh key for every participant's devices. What was
+// said under the old key stays unreadable on devices that never had it.
+export async function resetRoomKey(userId: number, conversation: Conversation): Promise<KeyResolution> {
+  const status = await identityStatus(userId)
+  if (status === 'needs-link') return { state: 'waiting', reason: 'needs-link' }
+  const info = await api.listConversationDevices(conversation.id)
+  forgetPendingKeyFetches(conversation.id)
+  if (status === 'ready') {
+    // Compare-and-set: a 409 means someone else moved it on just now, and
+    // resolving takes their key instead.
+    await api.rotateKey(conversation.id, info.current_key_version)
+    pendingRotation.delete(conversation.id)
+    return resolveV2(userId, conversation, false, false)
+  }
+  // v1: envelopes above the current version move the conversation onto it,
+  // and the server only announces that once they're stored, so nobody looks
+  // for the new key before it exists. Our own device gets one too.
+  const version = info.current_key_version + 1
+  const key = await generateRoomKey()
+  await postV1Envelopes(conversation.id, version, key, info.results)
+  await storeRoomKey(userId, conversation.id, version, key)
+  return { state: 'ready', key, version }
 }
 
 // A member published a new device list. Their new devices get keys: from our

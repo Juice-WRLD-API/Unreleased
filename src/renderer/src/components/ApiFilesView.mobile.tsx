@@ -5,7 +5,7 @@ import {
   ImageIcon, Video, Download, ArrowUp, ArrowDown, Link, Check, Info, ListPlus,
   Heart, X, Pencil, PackageOpen, Search, Filter, MoreVertical, Clipboard, Plus,
   ListMusic, Replace, Trash2, LayoutGrid, LayoutList, FileQuestion, Home,
-  CheckCircle2, Circle, SlidersHorizontal, Radio,
+  CheckCircle2, Circle, SlidersHorizontal, Radio, Sparkles,
 } from 'lucide-react'
 import { useStore, useStorePick } from '../store/useStore'
 import * as userApi from '../lib/userApi'
@@ -30,6 +30,7 @@ import {
 } from '../lib/apiFilesShared'
 import { startCdnFileDownload } from '../hooks/useCdnFileDownload'
 import { CdnDownloadToastMobile } from './CdnDownloadToast'
+import { SearchHelpButton } from './SearchHelpPopover'
 import { useApiFilesBrowse } from '../hooks/useApiFilesBrowse'
 import { useApiFilesZip } from '../hooks/useApiFilesZip'
 import { useTrackerMatches } from '../hooks/useTrackerMatches'
@@ -226,7 +227,8 @@ export default function ApiFilesView(): JSX.Element {
   const onNavigateStart = useCallback(() => { scrollRef.current?.scrollTo({ top: 0 }) }, [])
   const {
     currentPath, entries, loading, error, history, setHistory, navigate, goBack, goHome, onChannelChange,
-    search, setSearch, debouncedSearch, setDebouncedSearch, searchResults, searchLoading, isSearching,
+    search, setSearch, debouncedSearch, setDebouncedSearch, searchResults, searchTotal, searchFuzzy, prefetchSearchIndex,
+    searchLoading, isSearching, searchInFolder, setSearchInFolder,
   } = useApiFilesBrowse({
     activeChannel, setActiveChannel, channels, loadChannels,
     apiFilesPath, setApiFilesPath, apiFilesLastPath, setApiFilesLastPath,
@@ -238,11 +240,12 @@ export default function ApiFilesView(): JSX.Element {
   // actions can be hidden for files with no match instead of doing nothing.
   // undefined = not looked up yet, null = looked up, no match.
   const { trackerMatches, resolveTrackerMatch } = useTrackerMatches()
-  const { playlistBusyId, playlistDoneId, addToPlaylist, resetPlaylistDone } = useAddFileToPlaylist(refreshPlaylists)
+  const { playlistDoneId, addToPlaylist, resetPlaylistDone } = useAddFileToPlaylist()
   const { playing, handlePlay } = usePlayFileEntry(entries, playTrack)
   const { lightboxItems, lightboxIndex, setLightboxIndex, openLightbox } = useFileLightbox({ entries, searchResults, isSearching, activeChannel })
   const { zipStatus, zipProgress, resetZip, downloadZip, downloadFolder } = useApiFilesZip({
     activeChannel,
+    useCdn: isPrimary,
     getSelectedEntries: () => filteredEntries.filter((e) => selectedPaths.has(e.path)),
   })
 
@@ -412,7 +415,9 @@ export default function ApiFilesView(): JSX.Element {
 
   const channelDescription = channels.find((c) => c.slug === activeChannel)?.description?.trim() || ''
   const subtitle = isSearching
-    ? searchLoading ? 'Searching…' : `${searchResults.length} result${searchResults.length === 1 ? '' : 's'}`
+    ? searchLoading ? 'Searching…' : (searchTotal > searchResults.length
+        ? `First ${searchResults.length.toLocaleString()} of ${searchTotal.toLocaleString()}`
+        : `${searchTotal} ${searchFuzzy ? (searchTotal === 1 ? 'close match' : 'close matches') : (searchTotal === 1 ? 'result' : 'results')}`)
     : busy ? 'Loading…'
     : `${filteredEntries.length} item${filteredEntries.length === 1 ? '' : 's'}`
 
@@ -631,7 +636,8 @@ export default function ApiFilesView(): JSX.Element {
               >{viewMode === 'list' ? <LayoutGrid size={19} /> : <LayoutList size={19} />}</button>
             </div>
 
-            {/* Search - recursive across the whole tree, not the current folder. */}
+            {/* Search - recursive across the whole tree, or (with the folder
+                toggle on) just the folder being browsed and its subfolders. */}
             <div className="px-4 pt-2 pb-2">
               <div className="relative flex items-center">
                 <Search size={16} className="absolute left-3.5 text-text-muted pointer-events-none" />
@@ -639,20 +645,38 @@ export default function ApiFilesView(): JSX.Element {
                   type="search"
                   value={search}
                   onChange={(e) => setSearch(e.target.value)}
-                  placeholder="Search all files"
+                  onFocus={prefetchSearchIndex}
+                  placeholder={searchInFolder && currentPath ? `Search in ${currentPath.slice(currentPath.lastIndexOf('/') + 1)}` : 'Search all files'}
                   enterKeyHint="search"
                   autoCorrect="off"
                   autoCapitalize="off"
                   spellCheck={false}
-                  className="w-full h-11 bg-surface-overlay rounded-full pl-10 pr-10 text-[15px] text-text-primary placeholder:text-text-muted focus:outline-none focus:ring-1 focus:ring-accent/50 [&::-webkit-search-cancel-button]:hidden"
+                  className={`w-full h-11 bg-surface-overlay rounded-full pl-10 ${currentPath ? 'pr-28' : 'pr-20'} text-[15px] text-text-primary placeholder:text-text-muted focus:outline-none focus:ring-1 focus:ring-accent/50 [&::-webkit-search-cancel-button]:hidden`}
                 />
-                {search && (
-                  <button
-                    onClick={() => { setSearch(''); setDebouncedSearch('') }}
-                    className="absolute right-1 w-9 h-9 flex items-center justify-center rounded-full text-text-muted active:text-text-primary"
-                    aria-label="Clear search"
-                  ><X size={16} /></button>
-                )}
+                <div className="absolute right-1 flex items-center">
+                  {search && (
+                    <button
+                      onClick={() => { setSearch(''); setDebouncedSearch('') }}
+                      className="w-9 h-9 flex items-center justify-center rounded-full text-text-muted active:text-text-primary"
+                      aria-label="Clear search"
+                    ><X size={16} /></button>
+                  )}
+                  {currentPath && (
+                    <button
+                      onClick={() => setSearchInFolder(!searchInFolder)}
+                      className={`w-9 h-9 flex items-center justify-center rounded-full transition-colors ${searchInFolder ? 'text-accent' : 'text-text-muted active:text-text-primary'}`}
+                      aria-label={searchInFolder ? 'Search all files' : 'Search this folder only'}
+                      aria-pressed={searchInFolder}
+                    ><Folder size={16} /></button>
+                  )}
+                  <span className="w-9 h-9 flex items-center justify-center">
+                    <SearchHelpButton
+                      kind="files"
+                      size={16}
+                      className={(open) => `flex transition-colors ${open ? 'text-accent' : 'text-text-muted active:text-text-primary'}`}
+                    />
+                  </span>
+                </div>
               </div>
             </div>
 
@@ -958,13 +982,8 @@ export default function ApiFilesView(): JSX.Element {
                   key={p.id}
                   icon={ListMusic}
                   label={p.name}
-                  disabled={playlistBusyId === p.id}
-                  trailing={
-                    playlistBusyId === p.id ? <Loader2 size={16} className="animate-spin text-text-muted shrink-0" />
-                      : playlistDoneId === p.id ? <Check size={17} className="text-accent shrink-0" />
-                      : undefined
-                  }
-                  onClick={() => { if (sheetTrackerId != null) addToPlaylist(p.id, sheetTrackerId) }}
+                  trailing={playlistDoneId === p.id ? <Check size={17} className="text-accent shrink-0" /> : undefined}
+                  onClick={() => { if (sheetEntry) addToPlaylist(p.id, sheetTrackerId != null ? { songId: sheetTrackerId } : { path: sheetEntry.path, channel: activeChannel || undefined }) }}
                 />
               ))
             )
@@ -974,7 +993,7 @@ export default function ApiFilesView(): JSX.Element {
                 <>
                   <SheetItem icon={Play} label="Play" onClick={() => { handlePlay(sheetEntry); closeSheet() }} />
                   <SheetItem icon={ListPlus} label="Add to queue" onClick={async () => { const e = sheetEntry; closeSheet(); addToQueue(fileToTrack(e, (await resolveTrackChannel()) ?? activeChannel)); showToast('Added to queue') }} />
-                  {sheetTrackerId != null && (
+                  {sheetIsAudio && (
                     <SheetItem
                       icon={Plus}
                       label="Add to playlist"
@@ -988,6 +1007,15 @@ export default function ApiFilesView(): JSX.Element {
                     disabled={!channelsReady}
                     onClick={() => { toggleApiFileLike(sheetEntry.path); closeSheet() }}
                   />
+                  {(
+                    <SheetItem icon={Sparkles} label="Synced lyrics" onClick={async () => {
+                      const entry = sheetEntry
+                      const songId = sheetTrackerId ?? null
+                      closeSheet()
+                      const channel = (await resolveTrackChannel()) ?? activeChannel
+                      useStore.getState().openLyricsGen({ track: fileToTrack(entry, channel), songId, tab: account?.is_donor ? 'create' : 'sync' })
+                    }} />
+                  )}
                   {sheetTrackerId != null && (
                     <SheetItem icon={Info} label="Find in Tracker" onClick={() => { openSongInfo(sheetEntry); closeSheet() }} />
                   )}

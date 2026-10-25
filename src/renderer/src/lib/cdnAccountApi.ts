@@ -26,6 +26,8 @@ export interface CdnOwnedNode {
   file_count?: number
   current_storage_bytes?: number
   max_storage_bytes?: number
+  selected_channels?: string[]
+  selected_folders?: string[]
   upload_speed_mbps?: number
   /** Median of the last 20 listener-reported transfer speeds. */
   observed_download_speed_mbps?: number | null

@@ -5,8 +5,9 @@ import { useShallow } from 'zustand/react/shallow'
 import { useStore } from '../store/useStore'
 import {
   SongEditProposal, adminProposalCounts, adminCompProposalCounts, adminListApplications,
-  adminListUsers, updateDisplayName, updateAvatar, compressImageFile,
+  adminListUsers, updateDisplayName, updateAvatar, compressImageFile, withProposalData,
 } from '../lib/userApi'
+import { showAppToast } from '../lib/appToast'
 import { accountDisplayName } from '../lib/format'
 import * as reportsApi from '../lib/reportsApi'
 import { fetchEraList } from '../lib/erasApi'
@@ -107,6 +108,8 @@ export function useEditorProfileView(): {
   setCompFilter: ReturnType<typeof useMyCompProposals>['setFilter']
   withdrawingCompId: ReturnType<typeof useMyCompProposals>['withdrawingId']
   handleWithdrawComp: ReturnType<typeof useMyCompProposals>['handleWithdraw']
+  reviewingCompId: ReturnType<typeof useMyCompProposals>['reviewingId']
+  handleReviewComp: ReturnType<typeof useMyCompProposals>['handleReview']
   compTabCount: (tab: CompFilterTab) => number
   filteredCompProposals: ReturnType<typeof filterCompProposals>
   reports: ReturnType<typeof useReportsQueue>['reports']
@@ -234,6 +237,7 @@ export function useEditorProfileView(): {
   const {
     compProposals, loading: loadingComp, filter: compFilter, setFilter: setCompFilter,
     withdrawingId: withdrawingCompId, handleWithdraw: handleWithdrawComp,
+    reviewingId: reviewingCompId, handleReview: handleReviewComp,
   } = useMyCompProposals(isContributor, activeChannel, refreshKey, () => setRefreshKey(k => k + 1))
 
   const compTabCount = (tab: CompFilterTab): number => filterCompProposals(compProposals, tab).length
@@ -311,16 +315,26 @@ export function useEditorProfileView(): {
   }, [canReviewStaff, isAdmin, activeChannel, refreshKey, account?.otp_enabled])
 
   // Admins without 2FA get everything in the Admin tile hidden except the
-  // Security box itself, so a compromised (password-only) admin account
+  // 2FA box itself, so a compromised (password-only) admin account
   // can't be used to browse or act on admin-only data from this dashboard.
   const otpLocked = isAdmin && adminPreview?.otpEnabled === false
   const canReviewProposals = canReviewStaff && !otpLocked
 
-  const handleEdit = (p: SongEditProposal): void => {
+  const handleEdit = async (p: SongEditProposal): Promise<void> => {
+    // List rows are summaries without proposed_data, so read the proposal
+    // in full before handing it to the editor.
+    let full: Awaited<ReturnType<typeof withProposalData>>
+    try {
+      full = await withProposalData(p)
+    } catch (e) {
+      console.error('load proposal failed:', e)
+      showAppToast("Couldn't open the proposal")
+      return
+    }
     // p.song is null for 'create' proposals (new song, no backing record yet) -
     // EditorPage handles that case, so don't block it here.
-    setPendingEditProposal({ id: p.id, songId: p.song, proposedData: p.proposed_data, editorNotes: p.editor_notes || '' })
-    setPendingEditorSongId(p.song)
+    setPendingEditProposal({ id: full.id, songId: full.song, proposedData: full.proposed_data, editorNotes: full.editor_notes || '' })
+    setPendingEditorSongId(full.song)
     setActiveView('editor')
   }
 
@@ -335,6 +349,7 @@ export function useEditorProfileView(): {
     filteredProposals, handleDelete, handleResubmit, handleReview, reviewingId, canReviewProposals, tabCount,
     leaderboard, loadingLeaderboard, myEntry,
     compProposals, loadingComp, compFilter, setCompFilter, withdrawingCompId, handleWithdrawComp,
+    reviewingCompId, handleReviewComp,
     compTabCount, filteredCompProposals,
     reports, reportStatus, setReportStatus, loadingReports,
     adminPreview, otpLocked, handleEdit,

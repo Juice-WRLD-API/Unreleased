@@ -1,18 +1,18 @@
 import { Track, ViewType, DonorPlaylist } from '../types'
-import { routeUrl, buildStreamUrl, buildImageUrl, parseDuration, resolvePrefCoverUrl } from './juicewrldApi'
+import { routeUrl, buildStreamUrl, buildImageUrl, buildCoverArtUrl, parseDuration, overrideCoverUrl, resolveSessionEditSource, fileStem } from './juicewrldApi'
+import { isSessionEditPlaceholder } from './sessionEditLinksMirror'
 import type { JWApiSong } from './juicewrldApi'
 import { peekSongPref } from './songPrefs'
 import type { WireSongPreference } from './songPrefs'
-import { peekRotatedCover } from './coverRotation'
-import { peekEraCover } from './eraCovers'
 import type { ListeningPlayEvent } from './listeningPlays'
 import type { ServerPlaylistFolder } from './playlistFolders'
-import { apiRequest, authedRequest, authHeaders, cacheDelete } from './apiClient'
+import { apiRequest, authedRequest, authHeaders, cacheDelete, defaultParseError } from './apiClient'
 import { IS_NATIVE_APP, shareOrigin } from './platform'
 import { cacheGet, cacheSet } from './apiCache'
 import type { Skin } from './skins'
 import type { GifResult } from './gifApi'
 import type { TierlistSummary } from './tierlistApi'
+import type { AudioFx, EqPreset } from './audioEffects'
 
 const ACCOUNT_BASE = routeUrl('/accounts')
 const LIBRARY_BASE = routeUrl('/library')
@@ -127,6 +127,10 @@ export interface UserSettings {
   eq_balance?: number
   eq_mono?: boolean
   eq_boost?: number
+  // Width, saturation, compressor, cut filter, echo, 8D and the EQ preamp
+  // (see AudioFx); partial blobs from other builds are filled from defaults.
+  audio_fx?: Partial<AudioFx>
+  eq_user_presets?: EqPreset[]
   skip_silence?: boolean
   reverb_enabled?: boolean
   reverb_mix?: number
@@ -238,24 +242,52 @@ export interface PlaylistSummary {
   description: string | null
   track_count: number
   is_public: boolean
+  /** False while the playlist holds donor or local files, which can't be
+   *  public. Absent on older servers, where every playlist could be. */
+  can_be_public?: boolean
   cover_image_url?: string | null
   cover_image?: string | null
   created_at: string
   updated_at: string
 }
 
+/** What a playlist entry points at: a catalogue song, a file in one of the
+ *  comp channels, one of the user's donor uploads, or a file on the device
+ *  that added it. See lib/playlistItems for turning each into a Track. */
+export type PlaylistItemSource = 'song' | 'comp' | 'donor' | 'local'
+
 export interface PlaylistItemEntry {
   id: number
-  song: ApiSongLite
+  /** Absent on servers from before mixed-source playlists: read as 'song'. */
+  source?: PlaylistItemSource
+  /** Set only for 'song' entries. */
+  song: ApiSongLite | null
+  /** 'comp': channel slug and path inside that channel's tree. */
+  channel?: string | null
+  filepath?: string
+  /** 'donor': the upload, owned by the playlist's owner. */
+  donor_file?: { file_id: string; filename: string; mime_type: string; size: number } | null
+  /** 'local': the LibraryTrack id on the device that added it. */
+  local_id?: string
+  /** Display name for non-song entries (the server fills in the file name). */
+  title?: string
   position: number
   added_at: string
 }
+
+/** Body for POST /library/playlists/{id}/items/ - one of the four sources. */
+export type PlaylistEntryInput =
+  | { source?: 'song'; song_id: number }
+  | { source: 'comp'; path: string; channel?: string; title?: string }
+  | { source: 'donor'; file_id: string; title?: string }
+  | { source: 'local'; local_id: string; title?: string }
 
 export interface PlaylistDetail {
   id: number
   name: string
   description: string | null
   is_public: boolean
+  can_be_public?: boolean
   cover_image_url?: string | null
   cover_image?: string | null
   items: PlaylistItemEntry[]
@@ -322,26 +354,27 @@ export function liteSongToTrack(song: ApiSongLite): Track {
   const apiTitle = song.name
   const apiImageUrl = buildImageUrl(song.image_url)
   const pref = peekSongPref(song.id)
-  // Same precedence as songToTrack: user cover, then a rotated suggestion,
-  // then an era cover override (unreleased songs only).
-  const coverUrl = resolvePrefCoverUrl(pref?.cover_url)
-    ?? peekRotatedCover(song.id)
-    ?? (song.category !== 'released' ? resolvePrefCoverUrl(peekEraCover(song.era?.name)) : undefined)
+  // Same precedence as songToTrack (overrideCoverUrl).
+  const coverUrl = overrideCoverUrl(song.id, pref?.cover_url, song.category, song.era?.name)
+  // Sessions play their linked/looked-up session edit file, as in songToTrack.
+  const { path: resolvedPath, length: resolvedLength, channel: streamChannel } = resolveSessionEditSource(song)
   return {
     id: `jw-${song.id}`,
-    path: song.path,
-    streamUrl: buildStreamUrl(song.path),
+    path: resolvedPath,
+    streamUrl: isSessionEditPlaceholder(resolvedPath) ? resolvedPath : buildStreamUrl(resolvedPath, streamChannel),
     imageUrl: coverUrl ?? apiImageUrl,
     title: pref?.name || apiTitle,
     apiTitle,
     apiImageUrl,
-    artist: song.credited_artists || 'Juice WRLD',
+    artist: song.category === 'recording_session' && resolvedPath && !isSessionEditPlaceholder(resolvedPath)
+      ? fileStem(resolvedPath)
+      : song.credited_artists || 'Juice WRLD',
     album: song.album || song.era?.name || '',
     era: song.era?.name || undefined,
     albumArtist: 'Juice WRLD',
     year: null,
     trackNumber: null,
-    duration: parseDuration(song.length),
+    duration: parseDuration(resolvedLength),
     genre: song.category,
     hasAlbumArt: !!song.image_url || !!coverUrl,
   }
@@ -608,6 +641,11 @@ export async function getFavorites(): Promise<FavoriteEntry[]> {
   return request(url, { method: 'GET' }, true, url)
 }
 
+/** The last favorites response getFavorites cached, for an instant first paint. */
+export function peekFavorites(): FavoriteEntry[] | undefined {
+  return cacheGet<FavoriteEntry[]>(`${LIBRARY_BASE}/favorites/`)
+}
+
 export async function addFavorite(songId: number): Promise<FavoriteEntry> {
   return request(`${LIBRARY_BASE}/favorites/`, {
     method: 'POST',
@@ -633,17 +671,50 @@ export async function getPlaylists(): Promise<PlaylistSummary[]> {
     if (Array.isArray(items)) {
       const detail = { ...summary, items } as unknown as PlaylistDetail
       playlistDetailCache.set(row.id, detail)
-      playlistCoverCache.set(row.id, {
-        cover_image_url: buildImageUrl(row.cover_image_url) ?? null,
-        cover_image: buildImageUrl(row.cover_image) ?? null,
-        trackImages: items.slice(0, 4).map(it => buildImageUrl(it.song.image_url)).filter(Boolean) as string[],
-      })
+      const trackImages = playlistTrackImages(items)
+      if (coverFieldsKnown(row)) {
+        playlistCoverCache.set(row.id, {
+          cover_image_url: buildImageUrl(row.cover_image_url) ?? null,
+          cover_image: buildImageUrl(row.cover_image) ?? null,
+          trackImages,
+        })
+      } else {
+        // The row may have a custom cover we can't see - keep whatever cover
+        // is already cached (e.g. one just uploaded) rather than blanking it,
+        // and leave an uncached one for getPlaylistCover's full fetch.
+        const prev = playlistCoverCache.get(row.id)
+        if (prev) playlistCoverCache.set(row.id, { ...prev, trackImages })
+      }
     }
     return summary
   })
 }
 
 type PlaylistCoverEntry = { cover_image_url?: string | null; cover_image?: string | null; trackImages: string[] }
+
+// The first four entries with a cover, for the grid's mosaic. Donor and local
+// entries have none the server can point at, so they're skipped.
+function playlistTrackImages(items: PlaylistItemEntry[]): string[] {
+  const out: string[] = []
+  for (const it of items) {
+    if (out.length === 4) break
+    const url = it.song
+      ? buildImageUrl(it.song.image_url)
+      : it.source === 'comp' && it.filepath ? buildCoverArtUrl(it.filepath, true, it.channel ?? undefined) : null
+    if (url) out.push(url)
+  }
+  return out
+}
+
+// omit_cover_image drops cover_image from the response, and the server reports
+// cover_image_url as null whenever a custom cover exists. So an omitted
+// response with a null cover_image_url can't tell "custom cover" from "no
+// cover" - only a present cover_image or a non-null cover_image_url is
+// trustworthy. Seeding the cache from the ambiguous case is what made a
+// freshly added cover vanish after a reload.
+function coverFieldsKnown(d: { cover_image?: string | null; cover_image_url?: string | null }): boolean {
+  return 'cover_image' in d || !!d.cover_image_url
+}
 
 // In-memory cache so re-opening a playlist (or re-rendering the playlists
 // grid after switching tabs) shows its cover instantly instead of re-hitting
@@ -667,12 +738,12 @@ export async function getPlaylistCover(id: number): Promise<PlaylistCoverEntry> 
   // getPlaylist too, so the Playlists grid's cover loader and the startup
   // prefetch share one fetch instead of racing a full + an omit_cover_image
   // request for every playlist. Only falls back to the full fetch if that
-  // response genuinely lacks the cover fields.
+  // response can't settle the cover (see coverFieldsKnown).
   const detail = peekPlaylistDetail(id) ?? await getPlaylist(id)
-  const d = 'cover_image_url' in detail || 'cover_image' in detail
+  const d = coverFieldsKnown(detail)
     ? detail
     : await request<PlaylistDetail>(`${LIBRARY_BASE}/playlists/${id}/`)
-  const trackImages = (d.items ?? []).slice(0, 4).map(it => buildImageUrl(it.song.image_url)).filter(Boolean) as string[]
+  const trackImages = playlistTrackImages(d.items ?? [])
   // cover_image_url/cover_image can be a site-relative pointer (the same
   // "/assets/x.jpg" shape a song's image_url uses, e.g. for era-linked
   // covers) rather than an absolute URL - resolve it here so every caller
@@ -788,7 +859,7 @@ export async function getPublicPlaylistCover(id: number): Promise<PlaylistCoverE
   const cached = playlistCoverCache.get(id)
   if (cached) return cached
   const d = await request<PlaylistDetail>(`${LIBRARY_BASE}/playlists/public/${id}/`)
-  const trackImages = (d.items ?? []).slice(0, 4).map(it => buildImageUrl(it.song.image_url)).filter(Boolean) as string[]
+  const trackImages = playlistTrackImages(d.items ?? [])
   const entry: PlaylistCoverEntry = { cover_image_url: d.cover_image_url, cover_image: d.cover_image, trackImages }
   playlistCoverCache.set(id, entry)
   return entry
@@ -835,16 +906,6 @@ export async function setPlaylistCoverBase64(id: number, b64: string): Promise<v
   })
 }
 
-export async function reorderPlaylist(id: number, songIds: number[]): Promise<PlaylistDetail> {
-  const result = await request<PlaylistDetail>(`${LIBRARY_BASE}/playlists/${id}/`, {
-    method: 'PATCH',
-    body: JSON.stringify({ order: songIds }),
-  })
-  playlistDetailCache.set(id, result)
-  cacheSet(playlistDetailUrl(id), result)
-  return result
-}
-
 export async function deletePlaylist(id: number): Promise<void> {
   await request(`${LIBRARY_BASE}/playlists/${id}/`, { method: 'DELETE' })
   playlistDetailCache.delete(id)
@@ -863,11 +924,48 @@ export async function addToPlaylist(id: number, songId: number): Promise<Playlis
   return result
 }
 
+/** Add any kind of entry (song, comp file, donor file, local file). Resolves
+ *  to the updated detail, or to the cached one when the server says it was
+ *  already there. */
+export async function addPlaylistEntry(id: number, entry: PlaylistEntryInput): Promise<PlaylistDetail> {
+  const result = await request<PlaylistDetail | { detail: string }>(`${LIBRARY_BASE}/playlists/${id}/items/`, {
+    method: 'POST',
+    body: JSON.stringify(entry),
+  })
+  if (!('items' in result)) return playlistDetailCache.get(id) ?? getPlaylist(id)
+  playlistDetailCache.set(id, result)
+  cacheSet(playlistDetailUrl(id), result)
+  return result
+}
+
+/** Remove one entry by its own id - the only way to remove a non-song entry. */
+export async function removePlaylistEntry(id: number, itemId: number): Promise<void> {
+  await request(`${LIBRARY_BASE}/playlists/${id}/entries/${itemId}/`, { method: 'DELETE' })
+  const cached = playlistDetailCache.get(id)
+  if (cached) {
+    const updated = { ...cached, items: cached.items.filter(it => it.id !== itemId) }
+    playlistDetailCache.set(id, updated)
+    cacheSet(playlistDetailUrl(id), updated)
+  }
+}
+
+/** Reorder by entry id, which places every source (`order` only knows song
+ *  ids). Entries left out keep their relative order at the end. */
+export async function reorderPlaylistItems(id: number, itemIds: number[]): Promise<PlaylistDetail> {
+  const result = await request<PlaylistDetail>(`${LIBRARY_BASE}/playlists/${id}/`, {
+    method: 'PATCH',
+    body: JSON.stringify({ item_order: itemIds }),
+  })
+  playlistDetailCache.set(id, result)
+  cacheSet(playlistDetailUrl(id), result)
+  return result
+}
+
 export async function removeFromPlaylist(id: number, songId: number): Promise<void> {
   await request(`${LIBRARY_BASE}/playlists/${id}/items/${songId}/`, { method: 'DELETE' })
   const cached = playlistDetailCache.get(id)
   if (cached) {
-    const updated = { ...cached, items: cached.items.filter(it => it.song.id !== songId) }
+    const updated = { ...cached, items: cached.items.filter(it => it.song?.id !== songId) }
     playlistDetailCache.set(id, updated)
     cacheSet(playlistDetailUrl(id), updated)
   }
@@ -946,11 +1044,14 @@ export interface SongEditProposal {
   song_public_id: number | null
   change_type: ProposalChangeType
   title: string
-  proposed_data: Record<string, unknown>
-  original_proposed_data: Record<string, unknown>
-  applied_data: Record<string, unknown>
+  // The four data fields are missing from the "my proposals" list, which
+  // returns summaries with changed_fields instead. getProposal has them all.
+  proposed_data?: Record<string, unknown>
+  original_proposed_data?: Record<string, unknown>
+  applied_data?: Record<string, unknown>
   revised_by_admin: boolean
-  original_snapshot: Record<string, unknown>
+  original_snapshot?: Record<string, unknown>
+  changed_fields?: string[]
   editor_notes: string
   status: ProposalStatus
   reviewer_username: string | null
@@ -1056,18 +1157,44 @@ export async function submitApplication(payload: {
   })
 }
 
-function myProposalsUrl(channel?: string): string {
+function myProposalsUrl(channel?: string, offset = 0): string {
   const url = new URL(`${ACCOUNT_BASE}/editor/proposals/`)
   if (channel) url.searchParams.set('channel', channel)
+  if (offset) url.searchParams.set('offset', String(offset))
   return url.toString()
 }
 
+const MY_PROPOSALS_PAGE = 200
+
 // Cached (offline-fallback) like the other "list my stuff" reads - this is
 // the tab a signed-in editor lands on, and it shouldn't go blank just because
-// the request raced a flaky connection.
+// the request raced a flaky connection. The server pages this list (50 by
+// default, 200 at most) and returns summaries without proposed_data, so walk
+// every page and fetch one with getProposal before reading its data.
 export async function getMyProposals(channel?: string): Promise<SongEditProposal[]> {
-  const url = myProposalsUrl(channel)
-  return request(url, { method: 'GET' }, true, url)
+  const all: SongEditProposal[] = []
+  for (;;) {
+    // The cache key leaves out limit so withdrawProposal's cacheDelete still matches.
+    const key = myProposalsUrl(channel, all.length)
+    const url = new URL(key)
+    url.searchParams.set('limit', String(MY_PROPOSALS_PAGE))
+    const data = await request<SongEditProposal[] | { count?: number; results?: SongEditProposal[] }>(url.toString(), { method: 'GET' }, true, key)
+    if (Array.isArray(data)) return data
+    const page = Array.isArray(data?.results) ? data.results : []
+    all.push(...page)
+    if (page.length === 0 || all.length >= (data?.count ?? 0)) return all
+  }
+}
+
+/** One of your proposals in full, with proposed_data and original_snapshot. */
+export async function getProposal(id: number): Promise<SongEditProposal> {
+  return request(`${ACCOUNT_BASE}/editor/proposals/${id}/`, { method: 'GET' })
+}
+
+/** `p` itself when it already carries proposed_data, otherwise the full proposal. */
+export async function withProposalData(p: SongEditProposal): Promise<SongEditProposal & { proposed_data: Record<string, unknown> }> {
+  const full = p.proposed_data ? p : await getProposal(p.id)
+  return { ...full, proposed_data: full.proposed_data ?? {} }
 }
 
 export async function createProposal(payload: {
@@ -1104,14 +1231,17 @@ export async function withdrawProposal(id: number): Promise<void> {
 
 // Withdraws a proposal and immediately re-creates it with the same data -
 // useful when a pending proposal is stuck/stale and needs a fresh review cycle.
+// Reads the full proposal before withdrawing: a list row is a summary, and
+// resubmitting it as-is would send an empty proposed_data.
 export async function resubmitProposal(p: SongEditProposal): Promise<SongEditProposal> {
+  const full = await withProposalData(p)
   await withdrawProposal(p.id)
   return createProposal({
-    song: p.song,
-    change_type: p.change_type,
-    title: p.title,
-    proposed_data: p.proposed_data,
-    editor_notes: p.editor_notes,
+    song: full.song,
+    change_type: full.change_type,
+    title: full.title,
+    proposed_data: full.proposed_data,
+    editor_notes: full.editor_notes,
   })
 }
 
@@ -1160,6 +1290,36 @@ export async function adminReviewProposal(id: number, payload: {
     method: 'POST',
     body: JSON.stringify(payload),
   })
+}
+
+// Reviews a batch of proposals with the same action. Proposals targeting the
+// same song stay sequential (oldest first - a later edit can build on fields
+// an earlier one touched); different songs run in parallel, capped so a big
+// batch doesn't flood the API. A per-item failure is swallowed so one bad row
+// doesn't stop the rest; onEach fires as each success lands.
+export async function adminReviewProposalsBatch(
+  proposals: SongEditProposal[],
+  action: 'approve' | 'reject',
+  channel: string | undefined,
+  onEach?: (updated: SongEditProposal) => void,
+  concurrency = 6,
+): Promise<void> {
+  const lanes = new Map<string, SongEditProposal[]>()
+  for (const p of [...proposals].sort((a, b) => a.id - b.id)) {
+    // New-song proposals have no target yet, so each gets its own lane.
+    const key = p.song != null ? `s${p.song}` : `p${p.id}`
+    const lane = lanes.get(key)
+    if (lane) lane.push(p); else lanes.set(key, [p])
+  }
+  const queue = [...lanes.values()]
+  const worker = async (): Promise<void> => {
+    for (let lane = queue.shift(); lane; lane = queue.shift()) {
+      for (const p of lane) {
+        try { onEach?.(await adminReviewProposal(p.id, { action, channel })) } catch {}
+      }
+    }
+  }
+  await Promise.all(Array.from({ length: Math.min(concurrency, queue.length) }, worker))
 }
 
 export async function adminReverseProposal(id: number, channel?: string): Promise<SongEditProposal> {
@@ -1466,4 +1626,56 @@ export async function adminCompFileHistory(filepath: string, channel?: string): 
   const url = new URL(`${ACCOUNT_BASE}/admin/comp-files/${encoded}/history/`)
   if (channel) url.searchParams.set('channel', channel)
   return request(url.toString(), { method: 'GET' })
+}
+
+/** One file of a replacement comp: new bytes (`upload_id`) or a file the comp
+ *  already has (`from_path`, at the same or a new path). */
+export type CompReplaceFile = { file_path: string; upload_id: string } | { file_path: string; from_path: string }
+
+export interface CompReplaceRequest {
+  channel?: string
+  files: CompReplaceFile[]
+  /** Only needed for folders that hold no files. */
+  folders?: string[]
+  notes?: string
+}
+
+export interface CompReplaceResult {
+  commit_id: string
+  files: number
+  folders: number
+  added: number
+  changed: number
+  removed: number
+  unchanged: number
+}
+
+// A 400 lists every bad entry by index; name them by path instead, a few at most.
+function compReplaceErrorParser(body: CompReplaceRequest) {
+  return async (res: Response): Promise<string> => {
+    try {
+      const data = await res.clone().json() as { detail?: string; errors?: { field: string; index: number; detail: string }[] }
+      if (Array.isArray(data.errors) && data.errors.length) {
+        const lines = data.errors.slice(0, 5).map((e) => {
+          const name = e.field === 'files' ? body.files[e.index]?.file_path : body.folders?.[e.index]
+          return `${name ?? `${e.field}[${e.index}]`}: ${e.detail}`
+        })
+        if (data.errors.length > 5) lines.push(`…and ${data.errors.length - 5} more`)
+        return `${data.detail ?? 'Some entries are invalid.'}\n${lines.join('\n')}`
+      }
+    } catch { /* fall through */ }
+    return defaultParseError(res)
+  }
+}
+
+/** Swaps a channel's whole comp for the given layout in one step (manager or
+ *  admin of the channel). Anything in the current comp that isn't listed is
+ *  removed. Resolves once the new comp is live, which can take a while. */
+export async function adminReplaceComp(body: CompReplaceRequest): Promise<CompReplaceResult> {
+  assertContributorApi()
+  return authedRequest(`${ACCOUNT_BASE}/admin/comp-replace/`, {
+    method: 'POST',
+    body: JSON.stringify(body),
+    parseError: compReplaceErrorParser(body),
+  }, getToken())
 }

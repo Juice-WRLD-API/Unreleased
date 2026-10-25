@@ -7,6 +7,7 @@ import {
 import { errorMessage } from '../lib/format'
 import { relativeTime } from './adminShared'
 import { useStore } from '../store/useStore'
+import ThemedCheckbox from './ThemedCheckbox'
 
 const SCOPE_HINT: Record<ApiKeyScope, string> = {
   read: 'GET requests only',
@@ -28,7 +29,7 @@ function ScopePicker({ value, onChange, staff }: { value: ApiKeyScope[]; onChang
     <div className="space-y-1">
       {offered.map((s) => (
         <label key={s} className="flex items-start gap-2 cursor-pointer select-none">
-          <input type="checkbox" checked={value.includes(s)} onChange={() => toggle(s)} className="mt-0.5 accent-[var(--accent)]" />
+          <ThemedCheckbox checked={value.includes(s)} onChange={() => toggle(s)} className="mt-0.5" />
           <span className="text-xs">
             <span className="text-text-primary font-semibold">{s}</span>
             <span className="text-text-muted"> · {SCOPE_HINT[s]}</span>
@@ -90,7 +91,7 @@ function NewKeyReveal({ created, onDone }: { created: UserApiKeyCreated; onDone:
       </button>
       <div className="flex items-center justify-between gap-3 pt-2">
         <label className="flex items-center gap-2 text-xs text-text-secondary cursor-pointer select-none">
-          <input type="checkbox" checked={stored} onChange={(e) => setStored(e.target.checked)} className="accent-[var(--accent)]" />
+          <ThemedCheckbox checked={stored} onChange={setStored} />
           I’ve stored this key somewhere safe
         </label>
         <button

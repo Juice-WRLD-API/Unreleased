@@ -42,7 +42,7 @@ export async function startCdnFileDownload(
   filename: string,
   streamUrl: string,
   onProgress?: (p: CdnDownloadProgress) => void,
-  /** Song id, so the "embed lyrics on download" setting can apply. */
+  /** Song id, so the "Add song info to downloads" setting can apply. */
   songId?: number | null
 ): Promise<boolean> {
   // CDN off: downloadFileSmart goes straight to the browser download.

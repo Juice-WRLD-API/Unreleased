@@ -2,7 +2,7 @@ import { useMemo, useRef } from 'react'
 import { CATEGORY_LABELS, parseDuration, OMIT_BULK } from './juicewrldApi'
 import type { JWApiSong } from './juicewrldApi'
 import { eraLabel } from './eras'
-import { formatDuration } from './format'
+import { formatDuration, displayDate } from './format'
 
 // ─── Customizable Tracker fields ──────────────────────────────────────────────
 // The Detailed view's metadata grid and the List view's columns used to be a
@@ -39,10 +39,10 @@ export const TRACKER_FIELDS: TrackerField[] = [
   { key: 'recording_locations', label: 'Recording Locations', get: (s) => str(s.recording_locations) },
   { key: 'record_dates', label: 'Record Dates', get: (s) => str(s.record_dates) },
   { key: 'leak_type', label: 'Leak Type', get: (s) => str(s.leak_type) },
-  { key: 'date_leaked', label: 'Date Leaked', get: (s) => str(s.date_leaked) },
+  { key: 'date_leaked', label: 'Date Leaked', get: (s) => displayDate(s.date_leaked) },
   { key: 'bitrate', label: 'Bitrate', get: (s) => str(s.bitrate) },
-  { key: 'release_date', label: 'Release Date', get: (s) => str(s.release_date) },
-  { key: 'preview_date', label: 'Preview Date', get: (s) => str(s.preview_date) },
+  { key: 'release_date', label: 'Release Date', get: (s) => displayDate(s.release_date) },
+  { key: 'preview_date', label: 'Preview Date', get: (s) => displayDate(s.preview_date) },
   { key: 'dates', label: 'Dates', get: (s) => str(s.dates) },
   { key: 'file_names', label: 'File Names', get: (s) => str(s.file_names) },
   // `original_key` is the source-JSON key (a name), not a musical key.

@@ -1,10 +1,11 @@
 import { getFileExt, TEXT_EXTS } from './fileTypes'
 import { formatBytes } from './format'
 import { normalizeForSearch } from './juicewrldApi'
+import { runFileSearch } from './fileSearch'
 import { fetchEntryText, listDir, listSubtreeFlat, lookupEntry, resolveDir, unquote, type FilesCwd, type FsEntry } from './terminalFiles'
 
 // Read-only shell tools for the file tree (cat, head, tail, wc, grep, locate,
-// tree, du). Like `ls` and `get` they work on what /files/browse/ serves and
+// search, tree, du). Like `ls` and `get` they work on what /files/browse/ serves and
 // stream URLs download. The ones that walk folders ask /files/list-all/?path=
 // for the whole subtree in one request; only if that isn't available do they
 // fall back to listing a level at a time, with hard caps they say so about.
@@ -138,6 +139,26 @@ export async function locateName(cwd: FilesCwd, arg: string): Promise<string> {
   if (hits.length === 0) return `nothing named "${unquote(m[1])}" under ${start.channel}/${start.dir.join('/')}${MORE(truncated)}`
   const shown = hits.slice(0, 200).map((h) => h.rel.join('/') + (h.entry.type === 'directory' ? '/' : ''))
   return [...shown, ...(hits.length > shown.length ? [`… ${hits.length - shown.length} more`] : [])].join('\n') + MORE(truncated)
+}
+
+/** `search <query>`: the Files tab's search box under here - any-order words,
+ *  "phrases", -exclusions, ext: type: in: size: filters and the typo fallback
+ *  (fileSearch.ts). */
+export async function searchTree(cwd: FilesCwd, arg: string): Promise<string> {
+  if (!arg.trim()) throw new Error('usage: search <query>   e.g. search lucid ext:zip -remix')
+  const start = await startDir(cwd, '', 'search')
+  const base = start.dir.join('/')
+  const r = await runFileSearch(arg, start.channel ?? '', base || undefined)
+  const where = `${start.channel}/${base}`
+  if (r.total === 0) return `nothing matches "${arg.trim()}" under ${where}`
+  const prefix = base ? `${base}/` : ''
+  const rel = (p: string): string => (p.toLowerCase().startsWith(prefix.toLowerCase()) ? p.slice(prefix.length) : p)
+  const shown = r.entries.slice(0, 200).map((e) => rel(e.path) + (e.type === 'directory' ? '/' : ''))
+  return [
+    ...(r.fuzzy ? ['(nothing matched exactly - close matches)'] : []),
+    ...shown,
+    ...(r.total > shown.length ? [`… ${r.total - shown.length} more`] : []),
+  ].join('\n')
 }
 
 /** `tree [-L depth] [folder]`: the folder as an indented tree, two levels by default. */

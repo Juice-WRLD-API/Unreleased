@@ -6,6 +6,7 @@
     "dev": "vite --port 3018 --strictPort --host",
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview",
+    "terminal:check-coverage": "node scripts/check-terminal-coverage.mjs",
     "ios:sync": "npm run build && cap sync ios && node scripts/normalize-ios-spm.cjs"
   },
   "keywords": [],

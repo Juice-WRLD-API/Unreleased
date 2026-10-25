@@ -1,5 +1,5 @@
-import { useState } from 'react'
-import { ChevronRight, Play, ListMusic, Gamepad2, Flame, Music2, Disc3, User, Newspaper, Radio, Heart, Search, MoreHorizontal, Album, Music } from 'lucide-react'
+import { useRef, useState } from 'react'
+import { ChevronRight, Play, ListMusic, Gamepad2, Flame, Music2, Disc3, User, Newspaper, Radio, Heart, Search, MoreHorizontal, Album, Music, Wrench, MicVocal } from 'lucide-react'
 import { AlbumArtThumbnail } from './AlbumArtThumbnail'
 import { ProgressiveCover } from './ProgressiveCover'
 import { Tile } from './Tile'
@@ -15,8 +15,10 @@ import { orderedNavItems, isNavItemVisible } from '../lib/navItems'
 import type { NewsItem } from '../lib/newsApi'
 import type { Track, ViewType } from '../types'
 import { hasChatAccess } from '../lib/chatAccess'
+import OnThisDayTile from './OnThisDayTile'
 import { lazyOverlay } from '../lib/lazyView'
 import { PlaylistCoverThumb } from '../lib/homeViewShared'
+import { AnchoredContextMenu } from './ContextMenu'
 
 // Staff-only, and it reads the chat store - loading it lazily keeps the chat
 // client out of Home's chunk for everyone else.
@@ -280,6 +282,30 @@ function GamesCard({ games, onOpen }: {
   )
 }
 
+// ─── Main column foot: Tools ─────────────────────────────────────────────────
+
+interface HomeTool {
+  id: string
+  icon: JSX.Element
+  title: string
+  subtitle: string
+  onClick: () => void
+}
+
+// Shortcuts into the app's tool dialogs. Cards keep a readable width and wrap
+// onto more rows as tools are added, rather than stretching one across the page.
+function ToolsTile({ tools, span }: { tools: HomeTool[]; span: string }): JSX.Element {
+  return (
+    <Tile title="Tools" icon={<Wrench size={15} />} span={span}>
+      <div className="grid gap-3 grid-cols-[repeat(auto-fill,minmax(240px,1fr))]">
+        {tools.map((tool) => (
+          <ShortcutCard key={tool.id} icon={tool.icon} title={tool.title} subtitle={tool.subtitle} onClick={tool.onClick} />
+        ))}
+      </div>
+    </Tile>
+  )
+}
+
 // ─── Hero ────────────────────────────────────────────────────────────────────
 
 function greeting(): string {
@@ -306,32 +332,36 @@ function Stat({ value, label }: { value: string; label: string }): JSX.Element {
 // see `defaultHidden` in navItems.tsx): still one click away without having
 // to turn them on in Settings first, just like mobile's sheet lets you reach
 // an overflowed tab without adding it to the bar.
-function MoreMenu({ open, onClose, items, onSelect }: {
-  open: boolean
+function MoreMenu({ anchorRef, onClose, items, onSelect }: {
+  anchorRef: React.RefObject<HTMLElement>
   onClose: () => void
   items: { view: ViewType; label: string; icon: React.ReactNode }[]
   onSelect: (view: ViewType) => void
-}): JSX.Element | null {
-  if (!open) return null
+}): JSX.Element {
   return (
-    <>
-      <div className="fixed inset-0 z-10" onClick={onClose} />
-      <div className="absolute right-0 top-full mt-2 z-20 min-w-[190px] rounded-xl border border-[var(--border)] bg-surface py-1 shadow-2xl">
-        {items.length === 0 ? (
-          <p className="px-3.5 py-2.5 text-xs text-text-muted whitespace-nowrap">Nothing else to show</p>
-        ) : items.map((item) => (
-          <button
-            key={item.view}
-            onClick={() => { onSelect(item.view); onClose() }}
-            className="flex w-full items-center gap-2.5 px-3.5 py-2 text-left text-sm text-text-primary transition-colors hover:bg-[var(--surface-overlay)]"
-          >
-            <span className="flex items-center justify-center text-text-muted [&_svg]:w-4 [&_svg]:h-4">{item.icon}</span>
-            <span className="flex-1 truncate">{item.label}</span>
-          </button>
-        ))}
-      </div>
-    </>
+    <AnchoredContextMenu
+      anchorRef={anchorRef}
+      onClose={onClose}
+      className="min-w-[190px]"
+      items={items.map((item) => ({ label: item.label, icon: navMenuIcon(item.view, item.icon), onSelect: () => onSelect(item.view) }))}
+      body={items.length === 0 ? <p className="px-3 py-2 text-xs text-text-muted whitespace-nowrap">Nothing else to show</p> : undefined}
+    />
   )
+}
+
+// The nav registry's icons are elements sized for the side menu; the menu
+// wants a component it sizes and tints itself. One per view, so a row's icon
+// keeps its identity across renders.
+const navMenuIcons = new Map<ViewType, React.ElementType>()
+function navMenuIcon(view: ViewType, node: React.ReactNode): React.ElementType {
+  let icon = navMenuIcons.get(view)
+  if (!icon) {
+    icon = function NavMenuIcon({ className = '' }: { className?: string }): JSX.Element {
+      return <span className={`flex items-center justify-center [&_svg]:w-3.5 [&_svg]:h-3.5 ${className}`}>{node}</span>
+    }
+    navMenuIcons.set(view, icon)
+  }
+  return icon
 }
 
 export default function HomeViewDesktop(): JSX.Element {
@@ -343,6 +373,7 @@ export default function HomeViewDesktop(): JSX.Element {
   const { navOrder, navVisibility, playTrack, playNext } = useStorePick('navOrder', 'navVisibility', 'playTrack', 'playNext')
   const canEdit = useCanEdit()
   const [showMore, setShowMore] = useState(false)
+  const moreBtnRef = useRef<HTMLButtonElement>(null)
   const [ctxMenu, setCtxMenu] = useState<SongContextMenuState | null>(null)
   const [playlistMenu, setPlaylistMenu] = useState<PlaylistContextMenuState | null>(null)
   const [newsMenu, setNewsMenu] = useState<NewsMenuState | null>(null)
@@ -352,6 +383,7 @@ export default function HomeViewDesktop(): JSX.Element {
   )
 
   const showRecent = showSection('recent') && recent.length > 0
+  const showOnThisDay = showSection('onthisday')
   const showNews = showSection('news') && newsItems.length > 0
   const showPlaylists = showSection('playlists')
   // TEMP: albums hidden on the home page
@@ -361,8 +393,16 @@ export default function HomeViewDesktop(): JSX.Element {
   const showGames = showSection('games')
   const showListening = showSection('listening')
   const showChat = showSection('chat') && hasChatAccess(account)
+  const tools: HomeTool[] = [{
+    id: 'lyrics-gen',
+    icon: <MicVocal size={18} className="text-accent" />,
+    title: 'Synced lyrics',
+    subtitle: "Time a song's lyrics by the line or the word",
+    onClick: () => useStore.getState().openLyricsGen(),
+  }]
+  const showTools = showSection('tools')
 
-  const mainShown = showRecent || showPlaylists || showAlbums
+  const mainShown = showRecent || showOnThisDay || showPlaylists || showAlbums || showTools
   const sideShown = showChat || showNews || showRadio || showLiked || showGames
 
   return (
@@ -400,6 +440,7 @@ export default function HomeViewDesktop(): JSX.Element {
           </button>
           <div className="relative shrink-0">
             <button
+              ref={moreBtnRef}
               onClick={() => setShowMore((v) => !v)}
               aria-label="More"
               title="More"
@@ -407,12 +448,14 @@ export default function HomeViewDesktop(): JSX.Element {
             >
               <MoreHorizontal size={19} />
             </button>
-            <MoreMenu
-              open={showMore}
-              onClose={() => setShowMore(false)}
-              items={hiddenNavItems}
-              onSelect={setActiveView}
-            />
+            {showMore && (
+              <MoreMenu
+                anchorRef={moreBtnRef}
+                onClose={() => setShowMore(false)}
+                items={hiddenNavItems}
+                onSelect={setActiveView}
+              />
+            )}
           </div>
           {showListening && (
             <div className="ml-auto flex items-center gap-4 min-w-0">
@@ -447,7 +490,7 @@ export default function HomeViewDesktop(): JSX.Element {
           )}
         </div>
 
-        {/* ── Main: recently played + playlists stacked, full width ──
+        {/* ── Main: recently played + playlists (+ tools) stacked, full width ──
             ── Side rail: news, 999 FM, liked, games - compact, narrow ── */}
         {(mainShown || sideShown) && (
           <div className="flex-1 min-h-0 flex gap-4">
@@ -457,6 +500,12 @@ export default function HomeViewDesktop(): JSX.Element {
                   <RecentTile
                     tracks={recent}
                     onPlay={openTrack}
+                    onContextMenu={(track, e) => setCtxMenu({ track, songId: userApi.trackIdToSongId(track.id), x: e.clientX, y: e.clientY })}
+                    span="shrink-0"
+                  />
+                )}
+                {showOnThisDay && (
+                  <OnThisDayTile
                     onContextMenu={(track, e) => setCtxMenu({ track, songId: userApi.trackIdToSongId(track.id), x: e.clientX, y: e.clientY })}
                     span="shrink-0"
                   />
@@ -476,6 +525,7 @@ export default function HomeViewDesktop(): JSX.Element {
                     span="shrink-0"
                   />
                 )}
+                {showTools && <ToolsTile tools={tools} span="shrink-0" />}
               </div>
             )}
 

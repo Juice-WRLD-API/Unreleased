@@ -10,9 +10,8 @@ import { saveFile } from './fileSave'
 // archive streams straight to disk, so memory stays flat however big it
 // gets. Elsewhere (Firefox, Safari, mobile) it streams through the service
 // worker (public/sw.js) as a normal browser download, which is just as flat.
-// Only if neither is available is it assembled in memory as a Blob, capped at
-// MEMORY_ZIP_LIMIT; past that the caller gets ZipTooLargeError and should
-// fall back to downloading files one at a time.
+// Only if neither is available is it assembled in memory, cut into parts of at
+// most MEMORY_ZIP_LIMIT ("Name (part 2).zip"), each saved as soon as it fills.
 //
 // Two-step API because showSaveFilePicker needs transient user activation:
 // call openZipTarget() first thing in the click handler, before any await
@@ -20,8 +19,10 @@ import { saveFile } from './fileSave'
 // list is known.
 import { downloadZip } from 'client-zip'
 import cdnService from './cdn'
+import { embedForDownload, embedSafe } from './downloadEmbed'
 import { triggerDownload } from './apiFilesShared'
 import { errorMessage } from './format'
+import { showAppToast } from './appToast'
 import { useStore } from '../store/useStore'
 import { isMobileViewport } from '../hooks/useIsMobile'
 
@@ -32,23 +33,21 @@ export interface ZipItem {
   /** Library path to try the distributed CDN with first (primary channel only). */
   cdnPath?: string
   size?: number | null
+  /** The song this file is, for the "Add song info to downloads" setting. */
+  songId?: number | null
 }
 
 /** `bytes`/`totalBytes` are set by saveItems so views can show a real
  *  progress bar - a folder of a few big files sits on one file count for ages. */
 export interface ZipProgress { done: number; total: number; bytes?: number; totalBytes?: number }
-export interface ZipResult { saved: number; failed: number; cancelled?: boolean }
+export interface ZipResult { saved: number; failed: number; cancelled?: boolean; /** ZIPs saved, when split into parts. */ parts?: number }
 
 export type ZipTarget =
   | { kind: 'disk'; handle: FileSystemFileHandle; filename: string }
   | { kind: 'stream'; filename: string }
   | { kind: 'memory'; filename: string }
 
-export class ZipTooLargeError extends Error {
-  constructor() { super('ZIP too large to build in memory') }
-}
-
-// In-memory fallback ceiling - well under what a desktop tab can hold, and
+// Largest in-memory ZIP part - well under what a desktop tab can hold, and
 // mobile Safari tends to kill tabs not far past it.
 const MEMORY_ZIP_LIMIT = (IS_NATIVE_APP ? 64 : 1024) * 1024 * 1024
 // Files fetched ahead of the one being written. Keeps the pipe full without
@@ -134,29 +133,29 @@ async function openStreamSink(filename: string): Promise<WritableStream<Uint8Arr
   })
 }
 
-/** Fetches every item into one ZIP and saves it to `target`. Items that fail
- *  to fetch are left out and counted in `failed`. Throws ZipTooLargeError
- *  (before writing anything, when sizes are known up front) if a memory
- *  target would exceed the cap, and AbortError if `signal` fires. */
-export async function writeZip(
-  target: ZipTarget,
-  items: ZipItem[],
-  opts: { signal?: AbortSignal; onProgress?: (p: ZipProgress) => void; onBytes?: (bytes: number) => void } = {}
-): Promise<ZipResult> {
+interface WriteZipOpts {
+  signal?: AbortSignal
+  onProgress?: (p: ZipProgress) => void
+  onBytes?: (bytes: number) => void
+  /** A memory target filled one part and started part `part` (2, 3...). */
+  onPart?: (part: number) => void
+}
+
+/** Fetches every item into one ZIP (several, for a big memory target) and
+ *  saves it to `target`. Items that fail to fetch are left out and counted
+ *  in `failed`. Throws AbortError if `signal` fires. */
+export async function writeZip(target: ZipTarget, items: ZipItem[], opts: WriteZipOpts = {}): Promise<ZipResult> {
   const { signal, onProgress, onBytes } = opts
   let sink: WritableStream<Uint8Array> | null = null
   if (target.kind === 'stream') {
     try { sink = await openStreamSink(target.filename) } catch { target = { kind: 'memory', filename: target.filename } }
-  }
-  if (target.kind === 'memory') {
-    const known = items.reduce((sum, i) => sum + (i.size ?? 0), 0)
-    if (known > MEMORY_ZIP_LIMIT) throw new ZipTooLargeError()
   }
 
   const result: ZipResult = { saved: 0, failed: 0 }
   const total = items.length
   onProgress?.({ done: 0, total })
   const entries = zipEntries(dedupeNames(items), result, (done) => onProgress?.({ done, total }), signal)
+  if (target.kind === 'memory') return writeMemoryParts(target.filename, entries, result, opts)
   const zip = downloadZip(entries).body
   if (!zip) throw new Error('ZIP stream unavailable')
 
@@ -169,31 +168,64 @@ export async function writeZip(
     },
   }))
 
-  if (sink || target.kind === 'disk') {
-    // On failure or abort pipeTo aborts the writable, which discards the
-    // partial file.
-    const dest = sink ?? await (target as Extract<ZipTarget, { kind: 'disk' }>).handle.createWritable()
-    await body.pipeTo(dest, { signal })
-    return result
+  // On failure or abort pipeTo aborts the writable, which discards the
+  // partial file.
+  const dest = sink ?? await (target as Extract<ZipTarget, { kind: 'disk' }>).handle.createWritable()
+  await body.pipeTo(dest, { signal })
+  return result
+}
+
+/** The in-memory target: files are collected as Blobs and zipped a part at a
+ *  time, each part saved once the next file wouldn't fit. A lone file over
+ *  the limit is saved by itself, unzipped. One part keeps the plain name. */
+async function writeMemoryParts(
+  filename: string,
+  entries: AsyncGenerator<{ name: string; input: Response | Blob }>,
+  result: ZipResult,
+  opts: WriteZipOpts
+): Promise<ZipResult> {
+  const { onBytes, onPart } = opts
+  const stem = filename.replace(/\.zip$/i, '')
+  let part: { name: string; input: Blob }[] = []
+  let partBytes = 0
+  let parts = 0
+  let bytes = 0
+
+  const flush = async (last: boolean): Promise<void> => {
+    if (part.length === 0) return
+    parts++
+    const zip = await downloadZip(part).blob()
+    part = []
+    partBytes = 0
+    await saveBlob(zip, last && parts === 1 ? filename : `${stem} (part ${parts}).zip`)
+    if (!last) onPart?.(parts + 1)
   }
 
-  const chunks: Uint8Array[] = []
-  const reader = body.getReader()
-  for (;;) {
-    if (signal?.aborted) {
-      await reader.cancel()
-      throw new DOMException('Cancelled', 'AbortError')
+  for await (const { name, input } of entries) {
+    const baseName = name.split('/').pop() || name
+    const length = input instanceof Blob ? input.size : Number(input.headers.get('content-length')) || 0
+    if (length > MEMORY_ZIP_LIMIT) {
+      // Too big for any part: let the browser download it straight from the
+      // server rather than pulling it into memory first.
+      if (input instanceof Blob) await saveBlob(input, baseName)
+      else { void input.body?.cancel(); await triggerDownload(input.url, baseName) }
+      bytes += length
+      onBytes?.(bytes)
+      continue
     }
-    const { done, value } = await reader.read()
-    if (done) break
-    if (bytes > MEMORY_ZIP_LIMIT) {
-      await reader.cancel()
-      throw new ZipTooLargeError()
-    }
-    chunks.push(value)
+    const blob = input instanceof Blob ? input : await input.blob()
+    bytes += blob.size
+    onBytes?.(bytes)
+    if (partBytes + blob.size > MEMORY_ZIP_LIMIT) await flush(false)
+    part.push({ name, input: blob })
+    partBytes += blob.size
   }
-  await saveFile(target.filename, new Blob(chunks as BlobPart[], { type: 'application/zip' }))
-  return result
+  await flush(true)
+  return parts > 1 ? { ...result, parts } : result
+}
+
+async function saveBlob(blob: Blob, filename: string): Promise<void> {
+  await saveFile(filename, blob)
 }
 
 const zipAborts = new Map<string, AbortController>()
@@ -207,9 +239,8 @@ export function cancelZipTask(id: string): void {
 }
 
 /** The usual entry point for a bulk "Download": writeZip, tracked as a task
- *  in the Uploads panel (progress, size, speed, cancel), falling back to
- *  individual downloads when an in-memory ZIP would be too large. A
- *  cancelled ZIP resolves with `cancelled: true` rather than throwing. */
+ *  in the Uploads panel (progress, size, speed, cancel). A cancelled ZIP
+ *  resolves with `cancelled: true` rather than throwing. */
 export async function saveItems(
   target: ZipTarget,
   items: ZipItem[],
@@ -228,6 +259,7 @@ export async function saveItems(
   const fileCount = items.length
   let done = 0
   let bytes = 0
+  let part = 1
   let sample = { bytes: 0, time: Date.now() }
   let lastPush = 0
   let lastView = 0
@@ -246,7 +278,7 @@ export async function saveItems(
       percent: Math.min(99, Math.round(fraction * 100)),
       received: bytes,
       bytesReceived: bytes,
-      detail: `${done} / ${fileCount} file${fileCount === 1 ? '' : 's'}`,
+      detail: `${done} / ${fileCount} file${fileCount === 1 ? '' : 's'}${part > 1 ? ` Â· part ${part}` : ''}`,
       ...(speedBps !== undefined ? { speedBps } : {}),
     })
   }
@@ -272,22 +304,22 @@ export async function saveItems(
         }
         push()
       },
+      onPart: (n) => {
+        // The panel is easy to miss, and mobile never opens it.
+        if (n === 2) showAppToast('This ZIP is over 1 GB, so it will download in parts', { tone: 'info' })
+        part = n
+        push(true)
+      },
     })
     updateUpload(id, {
       state: result.saved > 0 ? 'done' : 'error',
       percent: 100,
       speedBps: undefined,
-      detail: `${result.saved} file${result.saved === 1 ? '' : 's'}${result.failed ? ` · ${result.failed} failed` : ''}`,
+      detail: `${result.saved} file${result.saved === 1 ? '' : 's'}${result.parts ? ` in ${result.parts} ZIPs` : ''}${result.failed ? ` Â· ${result.failed} failed` : ''}`,
       error: result.saved > 0 ? undefined : 'No files could be downloaded',
     })
     return result
   } catch (err) {
-    if (err instanceof ZipTooLargeError) {
-      updateUpload(id, { state: 'downloading', percent: 0, speedBps: undefined, detail: 'Too big to zip here - downloading files separately' })
-      await downloadItemsIndividually(items)
-      updateUpload(id, { state: 'done', percent: 100, detail: `${fileCount} separate download${fileCount === 1 ? '' : 's'}` })
-      return { saved: fileCount, failed: 0 }
-    }
     if (ctrl.signal.aborted) {
       updateUpload(id, { state: 'cancelled', speedBps: undefined, error: 'Cancelled' })
       return { saved: 0, failed: 0, cancelled: true }
@@ -296,15 +328,6 @@ export async function saveItems(
     throw err
   } finally {
     zipAborts.delete(id)
-  }
-}
-
-/** The per-file fallback - what every bulk download did before client-side
- *  ZIPs. Spaced out so Chrome doesn't block it as a download flood. */
-export async function downloadItemsIndividually(items: ZipItem[]): Promise<void> {
-  for (const item of items) {
-    await triggerDownload(item.url, item.name.split('/').pop() || item.name)
-    await new Promise((r) => setTimeout(r, 350))
   }
 }
 
@@ -337,6 +360,19 @@ async function* zipEntries(
 }
 
 async function fetchItem(item: ZipItem, signal?: AbortSignal): Promise<Response | Blob | null> {
+  const embedPromise = embedForDownload(item.songId, item.name)
+  const input = await fetchItemRaw(item, signal)
+  const embed = await embedPromise
+  if (!input || !embed) return input
+  try {
+    const blob = input instanceof Blob ? input : await input.blob()
+    return await embedSafe(blob, embed)
+  } catch {
+    return null
+  }
+}
+
+async function fetchItemRaw(item: ZipItem, signal?: AbortSignal): Promise<Response | Blob | null> {
   if (item.cdnPath) {
     const cdn = await cdnService.tryDownload(item.cdnPath).catch(() => null)
     if (cdn) return cdn.blob

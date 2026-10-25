@@ -1,4 +1,5 @@
 ﻿import { useEffect, useState, useRef, useId } from 'react'
+import ThemedCheckbox from './ThemedCheckbox'
 import {
   Loader2, Check, AlertCircle, LogIn, Clock, XCircle, Upload, Replace, Trash2,
   FolderOpen, ChevronLeft, RefreshCw, FileUp, ArrowRight, FolderSearch, ArrowUpFromLine, X, FolderPlus,
@@ -7,6 +8,7 @@ import {
 import { useStorePick } from '../store/useStore'
 import * as userApi from '../lib/userApi'
 import { isPrimaryChannelSlug } from '../hooks/useChannelRoles'
+import { useStaffRoles } from '../hooks/useStaffRoles'
 import { CONTRIBUTOR_ENABLED } from '../lib/userApi'
 import type { CompFileProposal, CompProposalChangeType, EditorApplication } from '../lib/userApi'
 import type { ViewType } from '../types'
@@ -144,6 +146,7 @@ export default function ContributorPage(): JSX.Element {
   const [submitError, setSubmitError] = useState<string | null>(null)
   const [withdrawingId, setWithdrawingId] = useState<number | null>(null)
   const [togglingLeakId, setTogglingLeakId] = useState<number | null>(null)
+  const [reviewingId, setReviewingId] = useState<number | null>(null)
   const [picker, setPicker] = useState<PickerTarget | null>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
   // React state lags a render behind, so `submitState` alone can't stop a
@@ -153,6 +156,7 @@ export default function ContributorPage(): JSX.Element {
   const submitLatch = useRef(false)
 
   const isContributor = userApi.isChannelContributor(account, activeChannel, isPrimaryChannelSlug(channels, activeChannel))
+  const { canReviewProposals } = useStaffRoles(account, activeChannel, channels)
 
   // Where "back" goes. Prefer the profile the user actually arrived from -
   // an editor-contributor reaches this page from the editor profile, and
@@ -389,6 +393,21 @@ export default function ContributorPage(): JSX.Element {
     }
   }
 
+  // Staff approving/denying their own proposal in place - same endpoint as
+  // the admin Comp queue.
+  const review = async (p: CompFileProposal, action: 'approve' | 'reject'): Promise<void> => {
+    setReviewingId(p.id)
+    setSubmitError(null)
+    try {
+      const updated = await userApi.adminReviewCompProposal(p.id, { action, channel: activeChannel })
+      setProposals(prev => prev.map(x => (x.id === p.id ? updated : x)))
+    } catch (e) {
+      setSubmitError(errorMessage(e, `Could not ${action} that proposal`))
+    } finally {
+      setReviewingId(null)
+    }
+  }
+
   const toggleNewLeak = async (p: CompFileProposal): Promise<void> => {
     setTogglingLeakId(p.id)
     setSubmitError(null)
@@ -446,7 +465,7 @@ export default function ContributorPage(): JSX.Element {
 
   return (
     <div className="flex-1 min-w-0 h-full flex flex-col overflow-hidden">
-      <div className="shrink-0 flex items-center gap-3 px-5 py-4 border-b border-[var(--border)]">
+      <div className="shrink-0 flex items-center gap-3 px-5 py-4">
         <button onClick={() => setActiveView(backView)} title="Back to your profile"
           className="p-1.5 rounded-lg text-text-muted hover:text-text-primary hover:bg-surface-raised transition-colors">
           <ChevronLeft size={18} />
@@ -629,8 +648,7 @@ export default function ContributorPage(): JSX.Element {
                   </p>
                 )}
                 <label className="mt-3 flex items-center gap-2 text-xs text-text-secondary cursor-pointer select-none">
-                  <input type="checkbox" checked={isNewLeak} onChange={e => setIsNewLeak(e.target.checked)}
-                    className="accent-[var(--accent)]" />
+                  <ThemedCheckbox checked={isNewLeak} onChange={setIsNewLeak} />
                   New leak
                   {isBatch && <span className="text-text-muted">- applies to every file in this batch</span>}
                 </label>
@@ -691,6 +709,8 @@ export default function ContributorPage(): JSX.Element {
               withdrawingId={withdrawingId}
               onToggleNewLeak={toggleNewLeak}
               togglingLeakId={togglingLeakId}
+              onReview={canReviewProposals ? review : undefined}
+              reviewingId={reviewingId}
               empty="No proposals yet."
             />
           </section>
