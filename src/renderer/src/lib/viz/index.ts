@@ -14,6 +14,11 @@ export interface VisualizerOption {
   engine: "2d" | "gl";
 }
 
+/** The Edge lights were visualizers of their own once, with ids of "edge-" and the light's id (desktop/light/looks.ts).
+ *  They're the separate Edge light now (vizStore's vizEdgeOverlay); a saved one of these is read back as Off with that
+ *  light round it. */
+export const EDGE_PREFIX = "edge-";
+
 export const VISUALIZERS: VisualizerOption[] = [
   { id: "none", name: "Off", group: "ambient", engine: "2d" },
   { id: "aurora", name: "Aurora", group: "ambient", engine: "2d" },
@@ -32,9 +37,29 @@ export const VISUALIZERS: VisualizerOption[] = [
   { id: "corona", name: "Corona", group: "shader", engine: "gl" },
   { id: "ripples", name: "Ripples", group: "shader", engine: "gl" },
   { id: "lightning", name: "Lightning", group: "shader", engine: "gl" },
+  { id: "rain", name: "Rain", group: "shader", engine: "gl" },
+  { id: "fireworks", name: "Fireworks", group: "shader", engine: "gl" },
+  { id: "sonar", name: "Sonar", group: "shader", engine: "gl" },
+  { id: "embers", name: "Embers", group: "shader", engine: "gl" },
+  { id: "warp", name: "Warp", group: "shader", engine: "gl" },
+  { id: "lasers", name: "Lasers", group: "shader", engine: "gl" },
+  { id: "synthwave", name: "Synthwave", group: "shader", engine: "gl" },
+  { id: "outrun", name: "Outrun", group: "shader", engine: "gl" },
+  { id: "city", name: "Neon City", group: "shader", engine: "gl" },
+  { id: "terrain", name: "Terrain", group: "shader", engine: "gl" },
+  { id: "tunnel", name: "Grid Tunnel", group: "shader", engine: "gl" },
+  { id: "planet", name: "Retro Planet", group: "shader", engine: "gl" },
+  { id: "beach", name: "Sunset Beach", group: "shader", engine: "gl" },
+  { id: "vapor", name: "Vaporwave", group: "shader", engine: "gl" },
+  { id: "pixel", name: "8-Bit", group: "shader", engine: "gl" },
+  { id: "nightdrive", name: "Night Drive", group: "shader", engine: "gl" },
+  { id: "blackhole", name: "Black Hole", group: "shader", engine: "gl" },
   { id: "vortex", name: "Vortex", group: "shader", engine: "gl" },
   { id: "gooey", name: "Gooey", group: "shader", engine: "gl" },
 ];
+
+/** Whether a visualizer can only draw with WebGL. */
+export const needsWebGL = (v: VisualizerOption | undefined): boolean => v?.engine === "gl";
 
 /** Maps retired/unknown ids onto a current mode. */
 export function normalizeMode(id: string): string {
@@ -44,7 +69,7 @@ export function normalizeMode(id: string): string {
 
 const LAYOUT_REFRESH_MS = 100;
 const GL_RESTORE_TIMEOUT_MS = 3000;
-/** Beats remembered for the Ripples and Lightning shaders (matches the u_rip array size). */
+/** Beats remembered for the beat-driven shaders (matches the u_rip array size). */
 const RIPPLE_SLOTS = 8;
 /** Seconds a ripple is kept; the shader has faded it out well before this. */
 const RIPPLE_LIFE = 4;
@@ -60,9 +85,17 @@ export class Visualizer {
   private quality: Quality = "medium";
   private playing = false;
   private running = false;
+  /** Covered (a picker open over WRLD): nothing drawn, the last frame left up. */
+  private held = false;
   private raf = 0;
   private lastFrame = 0;
   private time = 0;
+  /**
+   * A clock that runs faster when the music is louder. Shaders only see one
+   * frame, so a speed that follows the audio has to be integrated here:
+   * scaling time by the energy instead would jump things back and forth.
+   */
+  private flow = 0;
 
   private accentPal: RGB[] = paletteFromAccent({ r: 224, g: 89, b: 47 });
   private artPal: RGB[] | null = null;
@@ -73,6 +106,14 @@ export class Visualizer {
   private layoutProvider: (() => VizLayout) | null = null;
   private layout: VizLayout = { focus: null, protect: [], intensity: 1 };
   private layoutAt = 0;
+  /**
+   * The canvases' box: where it is, read with the layout, and its size, told by
+   * a ResizeObserver. Reading either every frame forced the page to lay itself
+   * out early whenever something else had changed it.
+   */
+  private box: DOMRect | null = null;
+  private size = { w: 0, h: 0 };
+  private sizer: ResizeObserver | null = null;
 
   private prevBeat = 0;
   private drops: { born: number; angle: number; dist: number; strength: number }[] = [];
@@ -82,6 +123,16 @@ export class Visualizer {
     this.c2d = new Canvas2DRenderer(canvas2d);
     this.gl = new GLRenderer(canvasGl);
     this.showEngine(null);
+    // Both canvases fill the host.
+    const host = canvas2d.parentElement;
+    if (host) {
+      this.size = { w: host.clientWidth, h: host.clientHeight };
+      this.sizer = new ResizeObserver(([entry]) => {
+        this.size = { w: entry.contentRect.width, h: entry.contentRect.height };
+        this.box = null;
+      });
+      this.sizer.observe(host);
+    }
   }
 
   get glSupported(): boolean {
@@ -111,7 +162,7 @@ export class Visualizer {
    * would freeze at whatever they were last time.
    */
   pumpAudio(dt: number) {
-    if (this.running && !document.hidden && this.mode !== "none") return; // loop is doing it
+    if (this.running && !this.held && !document.hidden && this.mode !== "none") return; // loop is doing it
     if (this.audio.active) this.audio.analyze(dt, this.playing);
   }
 
@@ -173,6 +224,16 @@ export class Visualizer {
     this.running = true;
     this.lastFrame = performance.now();
     this.layoutAt = 0;
+    if (!this.held) this.raf = requestAnimationFrame(this.loop);
+  }
+
+  /** Holds the picture still while something covers it, and lets it go on again. */
+  setHeld(held: boolean) {
+    if (held === this.held) return;
+    this.held = held;
+    cancelAnimationFrame(this.raf);
+    if (held || !this.running) return;
+    this.lastFrame = performance.now();
     this.raf = requestAnimationFrame(this.loop);
   }
 
@@ -189,6 +250,7 @@ export class Visualizer {
     this.stop();
     this.audio.disable();
     this.layoutProvider = null;
+    this.sizer?.disconnect();
     this.gl.dispose();
   }
 
@@ -219,7 +281,7 @@ export class Visualizer {
   }
 
   private loop = (now: number) => {
-    if (!this.running) return;
+    if (!this.running || this.held) return;
     this.raf = requestAnimationFrame(this.loop);
 
     const q = QUALITY[this.quality];
@@ -231,28 +293,35 @@ export class Visualizer {
     const dt = Math.min(0.05, elapsed / 1000); // clamp after stalls
     this.time += dt;
     const frame = this.audio.analyze(dt, this.playing);
+    this.flow += dt * (0.4 + frame.energy * 1.1 + frame.beat * 0.8);
     this.trackRipples(frame);
     this.stepPalette(dt);
 
-    if (this.layoutProvider && now - this.layoutAt > LAYOUT_REFRESH_MS) {
-      this.layout = this.layoutProvider();
+    const host = this.c2d.canvas.parentElement;
+    if (!host) return;
+    if (now - this.layoutAt > LAYOUT_REFRESH_MS) {
+      if (this.layoutProvider) this.layout = this.layoutProvider();
+      this.box = host.getBoundingClientRect();
       this.layoutAt = now;
     }
+    const box = (this.box ??= host.getBoundingClientRect());
 
     const opt = VISUALIZERS.find((v) => v.id === this.mode)!;
     // If the browser hasn't restored a lost context, replace the canvas: a
     // lost context is dead for good, but a fresh <canvas> gets a new one.
     if (this.gl.lostAt && now - this.gl.lostAt > GL_RESTORE_TIMEOUT_MS) this.recreateGl();
-    const useGl = opt.engine === "gl" && this.gl.supports(this.mode);
-    const host = this.c2d.canvas.parentElement;
-    if (!host) return;
-    const box = host.getBoundingClientRect();
+    const program = opt.engine === "gl" ? this.gl.status(this.mode) : "failed";
+    // A shader still building: the last frame stays up until it can draw,
+    // rather than a fallback flashing in for a moment.
+    if (program === "building") return;
+    // One that failed draws Aurora instead (below).
+    const useGl = program === "ready";
     const dpr = window.devicePixelRatio || 1;
 
     if (useGl) {
       this.showEngine("gl");
       const scale = Math.min(dpr, 2) * q.glScale;
-      if (!this.gl.resize(scale)) return;
+      if (!this.gl.resize(this.size.w, this.size.h, scale)) return;
       const H = this.gl.canvas.height;
       const focus = this.focusPx(box, scale, this.gl.canvas.width, H);
       this.gl.render({
@@ -260,6 +329,7 @@ export class Visualizer {
         frame,
         pal: this.pal,
         time: this.time,
+        flow: this.flow,
         focus: { x: focus.x, y: H - focus.y, r: focus.r }, // GL origin is bottom-left
         protect: this.rectsPx(box, scale).map((r) => ({
           rect: [r.x, H - (r.y + r.h), r.x + r.w, H - r.y],
@@ -273,7 +343,7 @@ export class Visualizer {
     } else {
       this.showEngine("2d");
       const scale = Math.min(dpr, q.dpr);
-      if (!this.c2d.resize(scale)) return;
+      if (!this.c2d.resize(this.size.w, this.size.h, scale)) return;
       this.c2d.render({
         // A shader mode whose program failed falls back to something that works.
         mode: opt.engine === "gl" ? "aurora" : this.mode,
@@ -292,7 +362,7 @@ export class Visualizer {
   };
 
   /**
-   * Remembers recent beats for the Ripples and Lightning shaders, which only see
+   * Remembers recent beats for Ripples, Lightning, Fireworks and Sonar, which only see
    * the current frame. Each onset drops a ring at a random spot around the focus; spots are
    * kept relative to it (angle, distance in focus radii) so rings follow the
    * layout if it moves.

@@ -1,8 +1,10 @@
 import React, { useEffect, useRef, useMemo, useState } from 'react'
-import { Download } from 'lucide-react'
+import { Download, Sparkles } from 'lucide-react'
 import { useShallow } from 'zustand/react/shallow'
 import { parseLrc, getCurrentLineIndex, isLrcFormat, downloadSyncedLyrics, splitAdLibs, splitColorWords, ADLIB_OPACITY } from '../lib/lyrics'
-import { useStore } from '../store/useStore'
+import { useStore, IS_FLOAT_WINDOW } from '../store/useStore'
+import { trackIdToSongId } from '../lib/userApi'
+import { isDonorStreamUrl } from '../lib/donorPlayback'
 import { seekAudio, getAudioCurrentTime } from './Player'
 import ContextMenu from './ContextMenu'
 
@@ -87,6 +89,10 @@ export default function LyricsDisplay({ getTime, onSeek, compact, override }: Ly
 
   const [menuPos, setMenuPos] = useState<{ x: number; y: number } | null>(null)
   const isEditor = account?.is_editor || account?.is_administrator
+  // Donors can have Whisper write them. Not in a pop-out (no dialog there) or
+  // over 999 FM's lyrics, which aren't the playing track's.
+  const canGenerate = !!account?.is_donor && !IS_FLOAT_WINDOW && !override && !!currentTrackFull && !currentTrackFull.lyricsPending
+    && !!currentTrackFull.streamUrl && (!!currentTrackFull.path || isDonorStreamUrl(currentTrackFull.streamUrl))
 
   // Right-click → "Download synced lyrics" - only offered for LRC-format
   // lyrics (the .lrc file needs the timestamps; plain unsynced text has
@@ -118,6 +124,14 @@ export default function LyricsDisplay({ getTime, onSeek, compact, override }: Ly
           <p className="text-text-muted text-xs">
             Right-click a track → "Edit info & lyrics" to add lyrics
           </p>
+        )}
+        {canGenerate && (
+          <button
+            onClick={() => useStore.getState().openLyricsGen({ track: currentTrackFull, songId: trackIdToSongId(currentTrackFull.id), tab: 'create' })}
+            className="mt-1 inline-flex items-center gap-1.5 h-8 px-3.5 rounded-full text-xs font-semibold bg-accent/15 text-accent hover:bg-accent/25 transition-colors"
+          >
+            <Sparkles size={13} /> Generate lyrics
+          </button>
         )}
       </div>
     )

@@ -1,9 +1,10 @@
 import { Loader2, Music } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import type { SharedSongInfoPayload } from '../../lib/chatShare'
-import { buildImageUrl, CATEGORY_COLORS, CATEGORY_LABELS, getSongById, type JWApiSong } from '../../lib/juicewrldApi'
+import { buildImageUrl, CATEGORY_COLORS, CATEGORY_LABELS, getSongById, smallCoverUrl, type JWApiSong } from '../../lib/juicewrldApi'
 import { useStore } from '../../store/useStore'
 import { clickable } from '../../lib/a11y'
+import { displayDate } from '../../lib/format'
 
 // The message only ever carries a songId (see chatShare.ts) - every field
 // shown here comes from a fresh lookup, never from whatever text the
@@ -44,7 +45,7 @@ export default function SongInfoCard({ info }: { info: SharedSongInfoPayload }):
   const rows: [string, string][] = [
     ...(song.credited_artists ? [['Artists', song.credited_artists] as [string, string]] : []),
     ...(song.producers ? [['Producers', song.producers] as [string, string]] : []),
-    ...(song.release_date ? [['Released', song.release_date] as [string, string]] : (song.date_leaked ? [['Leaked', song.date_leaked] as [string, string]] : [])),
+    ...(song.release_date ? [['Released', displayDate(song.release_date)] as [string, string]] : (song.date_leaked ? [['Leaked', displayDate(song.date_leaked)] as [string, string]] : [])),
   ]
   return (
     <div
@@ -52,7 +53,7 @@ export default function SongInfoCard({ info }: { info: SharedSongInfoPayload }):
       className="flex gap-3 w-full max-w-sm rounded-xl border border-[var(--border)] bg-surface-raised/60 px-3 py-2.5 cursor-pointer hover:border-text-muted transition-colors"
     >
       <span className="relative w-14 h-14 rounded-lg overflow-hidden bg-surface-highest shrink-0 flex items-center justify-center">
-        {imageUrl ? <img src={imageUrl} alt="" className="w-full h-full object-cover" /> : <Music size={18} className="text-text-muted" />}
+        {imageUrl ? <img src={smallCoverUrl(imageUrl)} alt="" className="w-full h-full object-cover" /> : <Music size={18} className="text-text-muted" />}
       </span>
       <div className="flex-1 min-w-0">
         <p className="text-sm font-semibold text-text-primary truncate">{song.name}</p>

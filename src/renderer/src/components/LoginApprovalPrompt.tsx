@@ -1,3 +1,4 @@
+import { MotionOverlay } from './MotionOverlay'
 import { useCallback, useEffect, useState } from 'react'
 import { ShieldCheck, Loader2 } from 'lucide-react'
 import { useStore } from '../store/useStore'
@@ -42,7 +43,7 @@ export default function LoginApprovalPrompt(): JSX.Element | null {
   if (!signedIn || !req) return null
 
   return (
-    <div className="fixed inset-0 z-[60] flex items-end md:items-center justify-center bg-black/50 p-0 md:p-4">
+    <MotionOverlay className="fixed inset-0 z-[60] flex items-end md:items-center justify-center bg-black/50 p-0 md:p-4">
       <div className="w-full md:max-w-sm bg-surface border border-[var(--border)] rounded-t-2xl md:rounded-2xl shadow-2xl p-5 space-y-4">
         <div className="flex items-center gap-2 text-text-primary text-sm font-semibold">
           <ShieldCheck size={18} className="text-accent" /> Approve this login?
@@ -72,6 +73,6 @@ export default function LoginApprovalPrompt(): JSX.Element | null {
           </button>
         </div>
       </div>
-    </div>
+    </MotionOverlay>
   )
 }

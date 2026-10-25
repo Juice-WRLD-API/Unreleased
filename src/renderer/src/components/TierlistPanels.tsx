@@ -12,6 +12,7 @@ import type { Tierlist } from '../lib/tierlist'
 import { smallCoverUrl } from '../lib/juicewrldApi'
 import type { Album } from '../lib/albumsApi'
 import type { TierlistData } from '../hooks/useTierlistData'
+import ThemedSelect from './ThemedSelect'
 
 function filterSummary(l: Tierlist, albums: Album[]): string {
   if (l.filters.albumId !== null) {
@@ -32,18 +33,15 @@ function AlbumSelect({ albums, value, onChange, touch, emptyLabel }: {
   emptyLabel: string
 }): JSX.Element {
   return (
-    <select
-      value={value ?? ''}
-      onChange={(e) => onChange(e.target.value ? Number(e.target.value) : null)}
+    <ThemedSelect
+      value={value == null ? '' : String(value)}
+      onChange={(v) => onChange(v ? Number(v) : null)}
+      options={[
+        { value: '', label: emptyLabel },
+        ...albums.map((a) => ({ value: String(a.id), label: `${a.title}${a.release_date ? ` (${a.release_date.slice(0, 4)})` : ''}` })),
+      ]}
       className={`${inputCls} ${touch ? 'h-11' : 'py-1.5'}`}
-    >
-      <option value="">{emptyLabel}</option>
-      {albums.map((a) => (
-        <option key={a.id} value={a.id}>
-          {a.title}{a.release_date ? ` (${a.release_date.slice(0, 4)})` : ''}
-        </option>
-      ))}
-    </select>
+    />
   )
 }
 

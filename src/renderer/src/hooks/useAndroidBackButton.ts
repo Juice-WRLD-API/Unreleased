@@ -32,6 +32,7 @@ export function useAndroidBackButton(): void {
       // Innermost first: transient modals sit above the panels, which sit
       // above the page. Each closer is a no-op when that layer isn't open.
       const s = useStore.getState()
+      if (s.lyricsGenModal)    { s.closeLyricsGen(); return }
       if (s.reportModal)       { s.closeReport(); return }
       if (s.bulkEdit)          { s.closeBulkEditor(); return }
       if (s.infoSongId != null) { s.setInfoSongId(null); return }
@@ -40,6 +41,7 @@ export function useAndroidBackButton(): void {
       if (s.showMoreNav)       { s.setShowMoreNav(false); return }
       if (s.showEqPanel)       { s.setShowEqPanel(false); return }
       if (s.showDiagnostics)   { s.setShowDiagnostics(false); return }
+      if (s.showSettings)      { s.setShowSettings(false); return }
       if (s.showQueue)         { s.setShowQueue(false); return }
       if (s.showNowPlaying)    { s.setShowNowPlaying(false); return }
 

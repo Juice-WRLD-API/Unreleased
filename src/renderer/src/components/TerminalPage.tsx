@@ -29,12 +29,14 @@ export default function TerminalPage(): JSX.Element {
   const people = useRoomPeople(active)
   const full = useTermFullscreen()
 
-  // Closing the terminal leaves fullscreen so the rest of the site isn't stuck
-  // in it; the flag stays set, so reopening re-enters it (the hotkey that
-  // reopens the page is the gesture the browser needs).
+  // WRLD can take over fullscreen on return. Other destinations leave it;
+  // the terminal preference stays set for the next open.
   useEffect(() => {
     if (getTermFullscreen()) syncBrowserFullscreen(true)
-    return () => syncBrowserFullscreen(false)
+    return () => {
+      if (useStore.getState().activeView === 'wrld' && getTermFullscreen()) return
+      syncBrowserFullscreen(false)
+    }
   }, [])
   // Esc (or F11) leaving browser fullscreen should drop the in-page one too.
   useEffect(() => {

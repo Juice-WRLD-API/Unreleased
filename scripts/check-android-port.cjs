@@ -94,3 +94,50 @@ test('media listener cleanup handles unmount before async registration completes
   await new Promise((resolve) => setImmediate(resolve))
   assert.equal(removals, 1)
 })
+
+test('mixed playlists keep catalogue songs available for offline download', () => {
+  const api = load('lib/playlistItems.ts', {
+    './userApi': {}, './juicewrldApi': {}, './donorPlayback': {}, './fileTypes': {},
+    '../hooks/useChannelRoles': {}, '../store/useStore': {},
+  })
+  const ids = api.playlistSongIds([
+    { source: 'song', song: { id: 42 } },
+    { source: 'comp', song: null, filepath: 'Comp/file.mp3' },
+    { source: 'donor', song: null },
+    { source: 'local', song: null },
+    { source: 'song', song: null },
+    { song: { id: 99 } },
+  ])
+  assert.deepEqual(Array.from(ids), [42, 99])
+})
+
+test('native ZIP exports wait for the device save and reject failed writes', async () => {
+  let finishSave
+  let savedName
+  let rejectSave = false
+  const api = load('lib/clientZip.ts', {
+    './platform': { IS_NATIVE_APP: true },
+    './fileSave': { saveFile: (name) => {
+      savedName = name
+      if (rejectSave) return Promise.reject(new Error('Disk full'))
+      return new Promise(resolve => { finishSave = resolve })
+    } },
+    'client-zip': { downloadZip: () => ({ blob: async () => new Blob(['zip']) }) },
+    './cdn': { default: {} },
+    './downloadEmbed': { embedForDownload: async () => null },
+    './apiFilesShared': {}, './format': {}, './appToast': {},
+    '../store/useStore': {}, '../hooks/useIsMobile': {},
+  }, { fetch: async () => new Response('audio'), Response })
+  const target = await api.openZipTarget('Playlist')
+  assert.equal(target.kind, 'memory')
+  let settled = false
+  const items = [{ name: 'song.mp3', url: 'https://example.test/song.mp3' }]
+  const writing = api.writeZip(target, items).then(result => { settled = true; return result })
+  await new Promise(resolve => setImmediate(resolve))
+  assert.equal(savedName, 'Playlist.zip')
+  assert.equal(settled, false)
+  finishSave()
+  assert.equal((await writing).saved, 1)
+  rejectSave = true
+  await assert.rejects(api.writeZip(target, items), /Disk full/)
+})

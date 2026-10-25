@@ -121,7 +121,7 @@ const dailyCommand: TermCommand = {
 }
 
 const fmCommand: TermCommand = {
-  name: 'fm', aliases: ['radio'], group: 'Content', usage: 'fm [live] · library [era] · search <text>',
+  name: 'fm', aliases: ['radio'], group: 'Content', usage: 'fm [live] · library [era] · search <text | field:"value">',
   description: '999 FM: what is on air now, and the tracks the station can play',
   covers: ['radioLive.fetchRadioLive', 'radioLibrary.fetchRadioLibrary', 'radioLibrary.searchRadioLibrary'],
   complete: (before, partial) => (before.length === 0 ? ['live', 'library', 'search'].filter((v) => v.startsWith(partial.toLowerCase())) : []),
@@ -148,7 +148,7 @@ const fmCommand: TermCommand = {
       ctx.print(`${table(shown.slice(0, 60).map((t) => [t.id, t.title, t.era]))}\n${shown.length} track${shown.length === 1 ? '' : 's'}${shown.length > 60 ? ' (60 shown - add an era to narrow it)' : ''}`)
     } else if (sub === 'search') {
       const q = rest.join(' ')
-      if (!q) fail('usage: fm search <text>')
+      if (!q) fail('usage: fm search <text> - field:"value" tokens work like the Tracker search, e.g. producers:"Nick Mira"')
       const found = await searchRadioLibrary(q, 20)
       ctx.print(found.length ? table(found.map((t) => [t.id, t.title, t.artist, t.era])) : `nothing on the station matches "${q}"`, found.length ? 'plain' : 'dim')
     } else fail('usage: fm [live | library | search]')

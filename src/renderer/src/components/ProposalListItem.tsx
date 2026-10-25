@@ -1,5 +1,6 @@
+import { useEffect, useState } from 'react'
 import { Loader2, Pencil, RefreshCw, Trash2, ChevronDown, ChevronUp, MessageSquare, Check, X } from 'lucide-react'
-import type { SongEditProposal } from '../lib/userApi'
+import { getProposal, type SongEditProposal } from '../lib/userApi'
 import { STATUS_STYLES, formatDate, changeTypeLabel } from '../lib/proposalSearch'
 import { ProposalDiff } from './adminShared'
 import { clickable } from '../lib/a11y'
@@ -42,11 +43,23 @@ export default function ProposalListItem({
   // own - this is the only way to see what it actually changed. Pending
   // proposals skip this: their data is already on screen via the Edit
   // button, and it's still a live draft rather than a settled diff.
-  // No fetch here on purpose: the list response this row came from already
-  // carries the whole proposal (proposed_data, original_snapshot, review
-  // notes), and a submitted proposal's diff is immutable, so there's nothing
-  // fresher to go get. Expanding is pure render.
+  // The list response this row came from is a summary without
+  // proposed_data/original_snapshot, so the first expand fetches the full
+  // proposal. A decided proposal's diff is immutable, so it's fetched once.
   const viewable = p.status !== 'pending'
+  const [full, setFull] = useState<SongEditProposal | null>(null)
+  const [loadFailed, setLoadFailed] = useState(false)
+  const needsFull = expanded && viewable && !p.proposed_data && full?.id !== p.id
+  useEffect(() => {
+    if (!needsFull) return
+    let cancelled = false
+    setLoadFailed(false)
+    getProposal(p.id)
+      .then((data) => { if (!cancelled) setFull(data) })
+      .catch(() => { if (!cancelled) setLoadFailed(true) })
+    return () => { cancelled = true }
+  }, [needsFull, p.id])
+  const diffProposal = p.proposed_data ? p : full?.id === p.id ? full : null
 
   const toggleExpanded = (): void => {
     if (!viewable) return
@@ -140,7 +153,11 @@ export default function ProposalListItem({
               {p.editor_notes}
             </p>
           )}
-          <ProposalDiff proposal={p} stacked={isMobile} />
+          {diffProposal
+            ? <ProposalDiff proposal={diffProposal} stacked={isMobile} />
+            : loadFailed
+              ? <p className="text-text-muted text-xs italic p-4">Couldn't load the changes.</p>
+              : <p className="flex items-center gap-1.5 text-text-muted text-xs p-4"><Loader2 size={12} className="animate-spin" /> Loading changes…</p>}
         </div>
       )}
     </div>

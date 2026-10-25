@@ -1,5 +1,7 @@
 import { useStore } from '../../store/useStore'
-import { FONTS } from '../fonts'
+import { addFontFile, addInstalledFont, allFonts, FONT_ACCEPT, listCustomFonts } from '../fonts'
+import { deleteFont } from '../fontActions'
+import { pickLocalFile } from './pick'
 import { allSkins, getSkin } from '../skins'
 import { HOME_SECTIONS, isHomeSectionVisible } from '../homeSections'
 import {
@@ -11,11 +13,15 @@ import { DEFAULT_JWAPI_BASE, JWAPI_BASE, getServerOverride, getRouteRules, norma
 import cdnService from '../cdn'
 import { useSandboxStore } from '../../components/Modal'
 import { useChatStore } from '../../store/chatStore'
-import { useVizStore, type CaptionPos, type VizCycle } from '../../store/vizStore'
+import { useVizStore, wrldEdgeLook, type VizCycle } from '../../store/vizStore'
 import { VISUALIZERS, type Boost, type Quality } from '../viz'
+import { LOOKS } from '../../desktop/light/looks'
 import { NOTIFICATION_SOUNDS, getNotificationSoundId, playNotificationSound, setNotificationSoundId } from '../notifications'
 import { updatePrivacySettings } from '../userApi'
-import { fail, parseBool, pickByName, type TermCommand } from './types'
+import type { AudioFx } from '../audioEffects'
+import { debugRecordingCount, debugRecordingStartedAt, discardDebugRecording, getDebugAnonymousPref, isDebugRecording, isDebugRecordingAnonymous, setDebugAnonymousPref, startDebugRecording, stopAndDownloadDebugRecording } from '../debugRecorder'
+import { describeEntry, describeLog, formatOffset, isProblem, openDebugLogBlob, openDebugLogFile, type DebugLog } from '../debugLog'
+import { asJson, fail, oneLine, parseArgs, parseBool, pickByName, type TermCommand, type TermCtx } from './types'
 
 const st = (): ReturnType<typeof useStore.getState> => useStore.getState()
 
@@ -48,6 +54,8 @@ const color = (key: string, desc: string, get: () => string | null, set: (v: str
 // values go through the same store setters the Settings screen uses, so they
 // persist and sync to the account exactly the same way.
 const vz = (): ReturnType<typeof useVizStore.getState> => useVizStore.getState()
+const fx = (): AudioFx => st().audioFx
+const setFx = (patch: Partial<AudioFx>): void => st().setAudioFx(patch)
 const pills = (...values: string[]): Setting['options'] => () => values.map((v) => ({ value: v, label: v }))
 
 // The Settings screen lists output devices from enumerateDevices(), which is
@@ -78,8 +86,8 @@ const SETTINGS: Setting[] = [
   num('auto-hide-nav-zone', 'Width of the edge strip that reveals the hidden navigation', 4, 120, () => st().autoHideNavZone, (v) => st().setAutoHideNavZone(v), 'px'),
   bool('lyrics-override', 'Use your own lyrics colours over the theme', () => st().lyricsOverride, (v) => st().setLyricsOverride(v)),
   num('text-scale', 'App-wide text size', 0.75, 1.5, () => st().appTextScale, (v) => st().setAppTextScale(v), 'x'),
-  choice('font', 'App font', () => FONTS.map((f) => ({ value: f.id, label: f.id })), () => st().appFont, (v) => st().setAppFont(v)),
-  choice('lyrics-font', 'Lyrics font', () => FONTS.map((f) => ({ value: f.id, label: f.id })), () => st().lyricsFont, (v) => st().setLyricsFont(v)),
+  choice('font', 'App font (add your own with the fonts command)', () => allFonts().map((f) => ({ value: f.id, label: f.custom ? f.name : f.id })), () => st().appFont, (v) => st().setAppFont(v)),
+  choice('lyrics-font', 'Lyrics font (add your own with the fonts command)', () => allFonts().map((f) => ({ value: f.id, label: f.custom ? f.name : f.id })), () => st().lyricsFont, (v) => st().setLyricsFont(v)),
   num('lyrics-scale', 'Lyrics text size', 0.5, 2, () => st().lyricsScale, (v) => st().setLyricsScale(v), 'x'),
   choice('lyrics-align', 'Lyrics alignment', () => [{ value: 'left', label: 'left' }, { value: 'center', label: 'center' }], () => st().lyricsAlign, (v) => st().setLyricsAlign(v as 'left' | 'center')),
   bool('lyrics-blur', 'Blur the lines that are not playing', () => st().lyricsBlur, (v) => st().setLyricsBlur(v)),
@@ -98,6 +106,7 @@ const SETTINGS: Setting[] = [
   bool('crossfade', 'Crossfade between tracks', () => st().crossfadeEnabled, (v) => st().setCrossfade(v, st().crossfadeDuration)),
   num('crossfade-seconds', 'Crossfade length', 1, 12, () => st().crossfadeDuration, (v) => st().setCrossfade(st().crossfadeEnabled, v), 's'),
   bool('pause-fade', 'Fade out on pause', () => st().pauseFadeEnabled, (v) => st().setPauseFade(v)),
+  bool('remember-queue', 'Restore the queue, current track and position on this device (paused)', () => st().rememberQueue, (v) => st().setRememberQueue(v)),
   bool('skip-silence', 'Skip silence', () => st().skipSilence, (v) => st().setSkipSilence(v)),
   bool('eq', 'Equalizer on', () => st().eqEnabled, (v) => st().setEqEnabled(v)),
   bool('mono', 'Mono output', () => st().eqMono, (v) => st().setEqMono(v)),
@@ -107,17 +116,36 @@ const SETTINGS: Setting[] = [
   num('reverb-mix', 'Reverb amount', 0, 100, () => Math.round(st().reverbMix * 100), (v) => st().setReverbMix(v / 100), '%'),
   num('reverb-decay', 'Reverb tail length', 1, 8, () => st().reverbDecay, (v) => st().setReverbDecay(v), 's'),
   bool('pitch-shift', 'Let pitch follow the speed', () => st().pitchShift, (v) => st().setPitchShift(v)),
+  num('preamp', 'Equalizer preamp (level into the bands)', -12, 12, () => fx().preamp, (v) => setFx({ preamp: v }), 'dB'),
+  num('width', 'Stereo width (0 = mono, 100 = as mixed)', 0, 200, () => Math.round(fx().width * 100), (v) => setFx({ width: v / 100 }), '%'),
+  num('saturation', 'Saturation drive', 0, 100, () => Math.round(fx().drive * 100), (v) => setFx({ drive: v / 100 }), '%'),
+  bool('echo', 'Echo on', () => fx().echo, (v) => setFx({ echo: v })),
+  num('echo-time', 'Gap between echo repeats', 50, 1500, () => Math.round(fx().echoTime * 1000), (v) => setFx({ echoTime: v / 1000 }), 'ms'),
+  num('echo-feedback', 'Echo feedback (how many repeats)', 0, 90, () => Math.round(fx().echoFeedback * 100), (v) => setFx({ echoFeedback: v / 100 }), '%'),
+  num('echo-level', 'Echo level', 0, 100, () => Math.round(fx().echoMix * 100), (v) => setFx({ echoMix: v / 100 }), '%'),
+  bool('8d', '8D audio (sound circles around your head)', () => fx().autoPan, (v) => setFx({ autoPan: v })),
+  num('8d-rotation', 'Seconds per 8D sweep', 1, 20, () => fx().autoPanPeriod, (v) => setFx({ autoPanPeriod: v }), 's'),
+  num('8d-depth', 'How far the 8D sweep swings', 0, 100, () => Math.round(fx().autoPanDepth * 100), (v) => setFx({ autoPanDepth: v / 100 }), '%'),
+  bool('compressor', 'Compressor on', () => fx().compressor, (v) => setFx({ compressor: v })),
+  num('comp-threshold', 'Compressor threshold', -60, 0, () => fx().compThreshold, (v) => setFx({ compThreshold: v }), 'dB'),
+  num('comp-ratio', 'Compressor ratio', 1, 20, () => fx().compRatio, (v) => setFx({ compRatio: v }), ':1'),
+  num('comp-attack', 'Compressor attack', 1, 200, () => Math.round(fx().compAttack * 1000), (v) => setFx({ compAttack: v / 1000 }), 'ms'),
+  num('comp-release', 'Compressor release', 50, 1000, () => Math.round(fx().compRelease * 1000), (v) => setFx({ compRelease: v / 1000 }), 'ms'),
+  bool('filter', 'Low/high cut filter on', () => fx().filter, (v) => setFx({ filter: v })),
+  num('low-cut', 'Filter: cut everything below', 20, 2000, () => fx().lowCut, (v) => setFx({ lowCut: v }), 'Hz'),
+  num('high-cut', 'Filter: cut everything above', 1000, 20000, () => fx().highCut, (v) => setFx({ highCut: v }), 'Hz'),
+  num('filter-resonance', 'Filter emphasis at the cut points', 0, 15, () => fx().filterResonance, (v) => setFx({ filterResonance: v }), 'dB'),
   num('hotkey-seek', 'Seconds the skip shortcuts jump', 1, 120, () => st().hotkeySeekSeconds, (v) => st().setHotkeySeekSeconds(v), 's'),
   bool('global-hotkeys', 'OS-wide keyboard shortcuts (desktop app)', () => st().globalHotkeysEnabled, (v) => st().setGlobalHotkeysEnabled(v)),
   bool('media-overlay', 'Windows media overlay (desktop app)', () => st().mediaOverlayEnabled, (v) => st().setMediaOverlayEnabled(v)),
   bool('sandbox', 'Dock modals into a collapsible pill instead of a centered popup', () => useSandboxStore.getState().sandboxEnabled, (v) => useSandboxStore.getState().setSandboxEnabled(v)),
   bool('playlist-hero', 'Blurred cover art behind a playlist header (for the active light/dark skin)', () => (getSkin(st().theme).dark ? st().playlistHeroEnabledDark : st().playlistHeroEnabledLight), (v) => st().setPlaylistHeroEnabled(v)),
   choice('viz', 'WRLD visualizer', () => VISUALIZERS.map((v) => ({ value: v.id, label: v.name })), () => vz().vizMode, (v) => vz().selectMode(v, true)),
-  choice('viz-quality', 'Visualizer quality', pills('low', 'medium', 'high', 'ultra'), () => vz().vizQuality, (v) => vz().setVizQuality(v as Quality)),
+  choice('viz-edge', 'Edge light round the WRLD visualizer (on its own with the visualizer off); a look picked is the screen light\'s too', () => [{ value: 'none', label: 'none' }, ...LOOKS.map((l) => ({ value: l.id, label: l.title }))], () => wrldEdgeLook() ?? 'none', (v) => vz().setVizEdgeOverlay(v === 'none' ? null : v)),
+  choice('viz-quality','Visualizer quality', pills('low', 'medium', 'high', 'ultra'), () => vz().vizQuality, (v) => vz().setVizQuality(v as Quality)),
   choice('viz-boost', 'Visualizer input boost', pills('off', 'auto', '2', '4', '8'), () => vz().vizBoost, (v) => vz().setVizBoost(v as Boost)),
   choice('viz-cycle', 'Switch visualizer automatically', pills('off', 'track', 'album'), () => vz().vizCycle, (v) => vz().setVizCycle(v as VizCycle)),
-  bool('viz-minimal', 'Fullscreen shows the visualizer only', () => vz().immMinimal, (v) => vz().setImmMinimal(v)),
-  choice('viz-caption', 'Where the caption sits in visualizer-only mode', pills('tl', 'tr', 'bl', 'br'), () => vz().immCaptionPos, (v) => vz().setImmCaptionPos(v as CaptionPos)),
+  bool('wrld-widgets', 'WRLD shows the desktop player, playlist and clock instead of its own player', () => vz().wrldWidgets, (v) => vz().setWrldWidgets(v)),
   bool('viz-artwork', 'Visualizer uses colours from the artwork', () => vz().vizUseArtwork, (v) => vz().setVizUseArtwork(v)),
   choice('audio-output', 'Audio output device (default = system)', () => [{ value: 'default', label: 'system default' }, ...audioDevices.map((d) => ({ value: d.deviceId, label: d.label || `Device ${d.deviceId.slice(0, 6)}` }))], () => st().audioOutput || 'default', (v) => st().setAudioOutput(v === 'default' ? '' : v)),
   choice('notification-sound', 'Sound for chat and news notifications', () => NOTIFICATION_SOUNDS.map((x) => ({ value: x.id, label: x.label })), () => getNotificationSoundId(), (v) => { setNotificationSoundId(v); playNotificationSound(v) }),
@@ -128,7 +156,7 @@ const SETTINGS: Setting[] = [
   bool('chat-presence', 'Request and show who is online', () => useChatStore.getState().presenceEnabled, (v) => useChatStore.getState().setPresenceEnabled(v)),
   bool('chat-read-receipts', 'Send read receipts', () => useChatStore.getState().readEnabled, (v) => useChatStore.getState().setReadEnabled(v)),
   bool('cdn', 'Distributed CDN downloads (off always uses the origin server)', () => cdnService.enabled, (v) => cdnService.setEnabled(v)),
-  bool('embed-lyrics', 'Embed lyrics and your cover in downloaded MP3s', () => st().embedLyricsOnDownload, (v) => st().setEmbedLyricsOnDownload(v)),
+  bool('download-song-info', 'Write name, artist, album, cover and lyrics into downloaded MP3s', () => st().embedSongInfoOnDownload, (v) => st().setEmbedSongInfoOnDownload(v)),
   bool('auto-report-errors', 'Send crash reports automatically', () => st().autoReportErrors, (v) => st().setAutoReportErrors(v)),
   bool('developer-mode', 'Developer tab in Settings', () => st().developerMode, (v) => st().setDeveloperMode(v)),
 ]
@@ -253,7 +281,74 @@ function isHttpUrl(s: string): boolean {
 
 const reloadAfter = (apply: () => void): void => { setTimeout(apply, 500) }
 
+// `debuglog open` / `debuglog stop --view`: the log's summary, then its
+// problems (or every event with --all) - the same rows the viewer lists.
+function printDebugLog(ctx: TermCtx, log: DebugLog, all: boolean, json: boolean): void {
+  const rows = all ? log.entries : log.entries.filter(isProblem)
+  if (asJson(ctx, json, {
+    file: log.fileName, startedAt: new Date(log.startedAt).toISOString(), stoppedAt: new Date(log.stoppedAt).toISOString(),
+    environment: log.environment, summary: log.summary, warnings: log.warnings, entries: rows,
+  })) return
+  const s = log.summary
+  ctx.print(`${log.fileName} - ${describeLog(log)}`)
+  ctx.print(`${log.entries.length} events: ${s.requests} requests (${s.failedRequests} failed), ${s.console} console (${s.consoleErrors} errors/warnings), ${s.uncaughtErrors} uncaught errors, ${s.resources} resources, ${s.websocketEvents} websocket events`, 'dim')
+  for (const w of log.warnings) ctx.print(`warning: ${w}`, 'dim')
+  if (rows.length === 0) ctx.print(all ? 'no events' : 'no problems recorded', 'ok')
+  else {
+    if (!all) ctx.print(`${rows.length} ${rows.length === 1 ? 'problem' : 'problems'} (--all lists every event):`)
+    ctx.print(rows.map((e) => {
+      const d = describeEntry(e)
+      return `${formatOffset(e.sinceStartMs).padEnd(11)}${d.tag.padEnd(10)}${oneLine(d.text, 80)}${d.meta ? `  ${oneLine(d.meta, 40)}` : ''}`
+    }).join('\n'))
+  }
+  ctx.print('opened in the debug log viewer', 'dim')
+}
+
+const FONT_VERBS = ['import', 'add', 'remove']
+
 export const SETTINGS_COMMANDS: TermCommand[] = [
+  {
+    name: 'fonts', aliases: ['font'], group: 'Settings', usage: 'fonts [import | add <installed font name> | remove <font>]',
+    description: 'List the fonts you can pick, add your own - import a .ttf/.otf/.woff/.woff2 file or use one installed on this computer - or remove one (same as Settings > Appearance > Custom fonts). Pick it with "set font" / "set lyrics-font"',
+    complete: (before, partial) => {
+      const p = partial.toLowerCase()
+      if (before.length === 0) return FONT_VERBS.filter((v) => v.startsWith(p))
+      return before.length === 1 && before[0].toLowerCase() === 'remove' ? listCustomFonts().map((f) => f.id).filter((id) => id.toLowerCase().startsWith(p)) : []
+    },
+    run: async (args, ctx) => {
+      const [sub = '', ...rest] = args.trim().split(/\s+/).filter(Boolean)
+      const verb = sub.toLowerCase()
+      if (!verb || verb === 'list') {
+        ctx.print(allFonts().map((f) => `${f.id.padEnd(40)}${f.name}${st().appFont === f.id ? '  (app)' : ''}${st().lyricsFont === f.id ? '  (lyrics)' : ''}`).join('\n'))
+        return
+      }
+      if (verb === 'import') {
+        // The picker has to open straight off the keypress, before any await.
+        let file: File
+        try { file = await pickLocalFile(FONT_ACCEPT) } catch { ctx.print('cancelled', 'dim'); return }
+        const font = await addFontFile(file).catch((e: unknown) => fail(e instanceof Error ? e.message : 'could not add that font'))
+        ctx.print(`added ${font.name} (${font.id}) - set font ${font.id}`, 'ok')
+        return
+      }
+      if (verb === 'add') {
+        const name = rest.join(' ')
+        if (!name) fail('usage: fonts add <installed font name>')
+        let font
+        try { font = addInstalledFont(name) } catch (e) { fail(e instanceof Error ? e.message : 'could not add that font') }
+        ctx.print(`added ${font!.name} (${font!.id}) - set font ${font!.id}`, 'ok')
+        return
+      }
+      if (verb === 'remove' || verb === 'rm') {
+        const q = rest.join(' ')
+        const custom = allFonts().filter((f) => f.custom)
+        const font = custom.find((f) => f.id.toLowerCase() === q.toLowerCase()) ?? pickByName(custom, (f) => f.name, q) ?? fail(`no custom font "${q}" (fonts lists them)`)
+        await deleteFont(font.id)
+        ctx.print(`removed ${font.name}`, 'ok')
+        return
+      }
+      fail('usage: fonts [import | add <installed font name> | remove <font>]')
+    },
+  },
   {
     name: 'nav', aliases: ['menu', 'navbar'], group: 'Settings', usage: 'nav [show|hide|toggle <item> | move <item> <up|down|top|bottom|n> | reset]',
     description: 'List the menu items and bottom buttons, show or hide them, reorder them, or reset to the defaults (same as Settings > Menu items)',
@@ -319,6 +414,60 @@ export const SETTINGS_COMMANDS: TermCommand[] = [
       const section = HOME_SECTIONS.find((x) => x.id === name.toLowerCase()) ?? pickByName(HOME_SECTIONS, (x) => x.id, name) ?? pickByName(HOME_SECTIONS, (x) => x.label, name) ?? fail(`no section "${name}" (try: home-sections)`)
       st().setHomeSectionVisible(section.id, v === 'toggle' ? !vis(section.id) : v === 'show')
       ctx.print(`${section.label}: ${vis(section.id) ? 'shown' : 'hidden'}`, 'ok')
+    },
+  },
+  {
+    name: 'debuglog', aliases: ['debug-log', 'record'], group: 'Settings', usage: 'debuglog [start [--anon|--no-anon]|stop [--view]|discard|open [--all] [--json]|anon [on|off]]',
+    description: 'Record console messages and network requests, then save them to a file to send us; open reads a saved log back - prints its summary and problems (--all: every event) and shows it in the viewer. Anonymous mode (anon on, or start --anon) leaves out device details and scrubs your username, email, IP and folder paths (same as Settings > About > Record debug log / Open log / Anonymous)',
+    complete: (before, partial) => {
+      const p = partial.toLowerCase()
+      if (before.length === 0) return ['start', 'stop', 'discard', 'open', 'anon'].filter((v) => v.startsWith(p))
+      return before.length === 1 && before[0].toLowerCase() === 'anon' ? ['on', 'off'].filter((v) => v.startsWith(p)) : []
+    },
+    run: async (args, ctx) => {
+      const { rest, bool } = parseArgs(args)
+      const verb = (rest[0] ?? '').toLowerCase()
+      const on = isDebugRecording()
+      if (verb === 'anon' || verb === 'anonymous') {
+        const want = (rest[1] ?? '').toLowerCase()
+        if (want && !['on', 'off'].includes(want)) fail('usage: debuglog anon [on|off]')
+        if (want) setDebugAnonymousPref(want === 'on')
+        ctx.print(`anonymous mode ${getDebugAnonymousPref() ? 'on' : 'off'} for the next recording${on ? ` (this one is ${isDebugRecordingAnonymous() ? 'anonymous' : 'not anonymous'})` : ''}`, want ? 'ok' : undefined)
+        return
+      }
+      if (verb === 'open' || verb === 'view') {
+        // The picker has to open straight off the keypress, before any await.
+        const log = await openDebugLogFile()
+        if (!log) { ctx.print('cancelled', 'dim'); return }
+        printDebugLog(ctx, log, bool.has('all'), bool.has('json'))
+        return
+      }
+      if (!verb || verb === 'status') {
+        ctx.print(on ? `recording${isDebugRecordingAnonymous() ? ' (anonymous)' : ''} - ${Math.round((Date.now() - debugRecordingStartedAt()) / 1000)}s, ${debugRecordingCount()} events (debuglog stop saves it)` : 'not recording (debuglog start)', on ? 'ok' : 'dim')
+        return
+      }
+      if (verb === 'start') {
+        if (on) { ctx.print('already recording', 'dim'); return }
+        const anonymous = bool.has('anon') || bool.has('anonymous') ? true : bool.has('no-anon') ? false : undefined
+        startDebugRecording({ anonymous })
+        ctx.print(`recording console and network activity${isDebugRecordingAnonymous() ? ' (anonymous)' : ''} - reproduce the problem, then run debuglog stop`, 'ok')
+        return
+      }
+      if (verb === 'stop' || verb === 'save') {
+        if (!on) fail('debuglog: not recording')
+        const anonymous = isDebugRecordingAnonymous()
+        const { blob, filename, count } = stopAndDownloadDebugRecording()
+        ctx.print(`saved ${anonymous ? 'anonymous ' : ''}debug log (${count} events) - ${filename}`, 'ok')
+        if (bool.has('view') || bool.has('open')) printDebugLog(ctx, await openDebugLogBlob(blob, filename), bool.has('all'), bool.has('json'))
+        return
+      }
+      if (verb === 'discard') {
+        if (!on) fail('debuglog: not recording')
+        discardDebugRecording()
+        ctx.print('recording discarded', 'ok')
+        return
+      }
+      fail('usage: debuglog [start [--anon|--no-anon]|stop [--view]|discard|open [--all] [--json]|anon [on|off]]')
     },
   },
   {

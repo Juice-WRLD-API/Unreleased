@@ -9,6 +9,7 @@ import { loadEraFullNames, eraLabel, listEras } from '../lib/eras'
 import { useCanEdit } from './useChannelRoles'
 import { parseTimeFrame, type TimelineRow } from '../lib/statisticsShared'
 import type { SongContextMenuState } from '../components/SongContextMenu'
+import { showAppToast } from '../lib/appToast'
 
 // Catalog-wide numbers from GET /stats/ and GET /plays/stats/ - everyone sees
 // the same thing here, unlike StatsView ("Your Wrapped"), which is personal
@@ -55,7 +56,7 @@ export function useStatisticsData() {
   const playById = (id: number): void => {
     const cached = songMap.get(id)
     if (cached) { playTrack(statsSongToTrack(cached)); return }
-    getSongById(id).then((song) => playTrack(songToTrack(song))).catch(() => undefined)
+    getSongById(id).then((song) => playTrack(songToTrack(song))).catch(() => showAppToast("Couldn't load that song"))
   }
 
   const [ctxMenu, setCtxMenu] = useState<SongContextMenuState | null>(null)
@@ -67,7 +68,7 @@ export function useStatisticsData() {
     e.preventDefault()
     const { clientX: x, clientY: y } = e
     if (cover) { setCtxMenu({ track: statsSongToTrack(cover), songId: id, x, y }); return }
-    getSongById(id).then((song) => setCtxMenu({ track: songToTrack(song), songId: id, x, y })).catch(() => undefined)
+    getSongById(id).then((song) => setCtxMenu({ track: songToTrack(song), songId: id, x, y })).catch(() => showAppToast("Couldn't load that song"))
   }
 
   // listEras()/eraLabel() read a module-level cache that fills in

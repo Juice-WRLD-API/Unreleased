@@ -1,3 +1,4 @@
+import { MotionOverlay } from './MotionOverlay'
 import {
   ChevronLeft, Search, X, Check, Music2, BarChart3, Share2, RefreshCw,
   AlertCircle, Loader2, Volume2, SlidersHorizontal, RotateCcw, Type, Delete,
@@ -96,7 +97,7 @@ function SettingsPanel({ settings, onChange, eras, mode, onClose }: {
   const { set, toggleEra, toggleCategory } = useWordleSettingsForm(settings, onChange)
 
   return (
-    <div className="fixed inset-0 z-[200] flex items-center justify-center bg-black/60 p-4" onClick={onClose}>
+    <MotionOverlay className="fixed inset-0 z-[200] flex items-center justify-center bg-black/60 p-4" onClick={onClose}>
       <div
         className="w-full max-w-md max-h-[85vh] overflow-y-auto rounded-2xl border border-[var(--border)] bg-[var(--surface-raised)] p-5"
         onClick={(e) => e.stopPropagation()}
@@ -196,7 +197,7 @@ function SettingsPanel({ settings, onChange, eras, mode, onClose }: {
           </div>
         </div>
       </div>
-    </div>
+    </MotionOverlay>
   )
 }
 
@@ -206,7 +207,7 @@ function StatsPanel({ onClose }: { onClose: () => void }): JSX.Element {
   const stats: Stats = loadStats()
   const { max, winRate } = statsSummary(stats)
   return (
-    <div className="fixed inset-0 z-[200] flex items-center justify-center bg-black/60 p-4" onClick={onClose}>
+    <MotionOverlay className="fixed inset-0 z-[200] flex items-center justify-center bg-black/60 p-4" onClick={onClose}>
       <div
         className="w-full max-w-sm rounded-2xl border border-[var(--border)] bg-[var(--surface-raised)] p-5"
         onClick={(e) => e.stopPropagation()}
@@ -248,7 +249,7 @@ function StatsPanel({ onClose }: { onClose: () => void }): JSX.Element {
           ))}
         </div>
       </div>
-    </div>
+    </MotionOverlay>
   )
 }
 

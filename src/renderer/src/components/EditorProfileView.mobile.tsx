@@ -108,7 +108,7 @@ export default function EditorProfileView(): JSX.Element {
     loadingProposals, refreshing, filter, setFilter, search, setSearch, deletingId, resubmittingId,
     filteredProposals, handleDelete, handleResubmit, handleReview, reviewingId, canReviewProposals, tabCount, proposals,
     leaderboard, loadingLeaderboard, myEntry,
-    compProposals, loadingComp, compFilter, setCompFilter,
+    compProposals, loadingComp, compFilter, setCompFilter, reviewingCompId, handleReviewComp,
     compTabCount, filteredCompProposals,
     reports, reportStatus, setReportStatus, loadingReports,
     adminPreview, otpLocked, handleEdit,
@@ -343,10 +343,18 @@ export default function EditorProfileView(): JSX.Element {
                         </button>
                       )
                     })}
+                    <button
+                      onClick={() => setRefreshKey(k => k + 1)}
+                      disabled={refreshing}
+                      className="shrink-0 ml-auto w-8 h-8 flex items-center justify-center rounded-full bg-surface-overlay text-text-muted active:text-text-primary disabled:opacity-40"
+                      aria-label="Refresh"
+                    >
+                      <RefreshCw size={13} className={refreshing ? 'animate-spin' : ''} />
+                    </button>
                     {(account?.is_editor || account?.is_administrator) && (
                       <button
                         onClick={() => setShowAddSong(true)}
-                        className="shrink-0 ml-auto flex items-center gap-1 h-8 px-3 rounded-full bg-accent/15 active:bg-accent/25 text-accent text-xs font-semibold transition-colors"
+                        className="shrink-0 flex items-center gap-1 h-8 px-3 rounded-full bg-accent/15 active:bg-accent/25 text-accent text-xs font-semibold transition-colors"
                       >
                         <Plus size={12} /> New song
                       </button>
@@ -414,8 +422,16 @@ export default function EditorProfileView(): JSX.Element {
                     counts={{ all: compTabCount('all'), pending: compTabCount('pending'), approved: compTabCount('approved'), rejected: compTabCount('rejected') }}
                   />
                   <button
+                    onClick={() => setRefreshKey(k => k + 1)}
+                    disabled={refreshing}
+                    className="ml-auto w-7 h-7 flex items-center justify-center rounded-full bg-surface-overlay text-text-muted active:text-text-primary disabled:opacity-40 shrink-0"
+                    aria-label="Refresh"
+                  >
+                    <RefreshCw size={12} className={refreshing ? 'animate-spin' : ''} />
+                  </button>
+                  <button
                     onClick={() => setActiveView('contributor')}
-                    className="ml-auto flex items-center gap-1 h-7 px-2.5 rounded-full bg-accent/15 active:bg-accent/25 text-accent text-[11px] font-semibold transition-colors shrink-0"
+                    className="flex items-center gap-1 h-7 px-2.5 rounded-full bg-accent/15 active:bg-accent/25 text-accent text-[11px] font-semibold transition-colors shrink-0"
                   >
                     <Plus size={11} /> New comp proposal
                   </button>
@@ -428,6 +444,8 @@ export default function EditorProfileView(): JSX.Element {
                     proposals={filteredCompProposals}
                     loading={loadingComp}
                     onSelect={() => setActiveView('contributor')}
+                    onReview={canReviewProposals ? handleReviewComp : undefined}
+                    reviewingId={reviewingCompId}
                     empty={compSearch.trim() ? `No comp files match "${compSearch.trim()}"` : undefined}
                   />
                 </div>
@@ -483,7 +501,7 @@ export default function EditorProfileView(): JSX.Element {
                     group at all and Queues just takes the full width on its
                     own. Admins get one button per queue their nav actually
                     opens into, plus Channels and Eras (free). Admins without
-                    2FA only see the Security box (highlighted) so they can
+                    2FA only see the 2FA box (highlighted) so they can
                     find and turn it on - every other number/button here is
                     an account-wide admin surface and stays gated until then. */}
                 <div className="flex-1 min-w-0">
@@ -504,16 +522,16 @@ export default function EditorProfileView(): JSX.Element {
                         <AdminStatBox label="Channels" value={adminPreview?.totalChannels} onClick={() => openAdminTab('channels')} />
                         <AdminStatBox label="Eras" value={adminPreview?.totalEras} onClick={() => openAdminTab('eras')} />
                         <AdminStatBox label="CDN nodes" value={adminPreview?.pendingCdnNodes} highlight={!!adminPreview?.pendingCdnNodes} onClick={() => openAdminTab('cdn-nodes')} />
+                        <AdminStatBox label="Lyrics" value="Open" onClick={() => openAdminTab('lyrics')} />
+                        <AdminStatBox label="Logs" value="Open" onClick={() => openAdminTab('logs')} />
                         <AdminStatBox label="Broadcast" value="Send" onClick={() => setShowBroadcast(true)} />
                       </>
                     )}
-                    {isAdmin && (
-                      <AdminStatBox
-                        label="Security"
-                        value={adminPreview ? (adminPreview.otpEnabled ? 'ON' : 'OFF') : undefined}
-                        highlight={adminPreview?.otpEnabled === false}
-                        onClick={() => openAdminTab('security')}
-                      />
+                    {/* The 2FA status lives in Settings → Account; this box
+                        only appears while it's off. Admin opens on its
+                        setup gate. */}
+                    {otpLocked && (
+                      <AdminStatBox label="2FA" value="OFF" highlight onClick={() => openAdminTab('proposals')} />
                     )}
                   </div>
                   {otpLocked && (

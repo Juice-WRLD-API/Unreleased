@@ -109,57 +109,65 @@ async function withRetry<T>(run: () => Promise<T>, signal: AbortState): Promise<
   throw last instanceof Error ? last : new Error('Upload failed')
 }
 
+// init + every chunk, without upload/complete/: leaves a staged upload_id that
+// a proposal (complete) or a comp replacement can then use.
+async function sendChunks(file: File, channel: string | undefined, signal: AbortState,
+  onProgress?: (sent: number, total: number) => void): Promise<string> {
+  const init = await withRetry(
+    () => sendXhr<{ upload_id: string; chunk_size: number; total_chunks: number }>(
+      'POST',
+      `${ACCOUNT_BASE}/contributor/proposals/upload/init/`,
+      JSON.stringify({
+        filename: file.name,
+        total_size: file.size,
+        ...(channel ? { channel } : {}),
+      }),
+      signal,
+      undefined,
+      true,
+    ),
+    signal,
+  )
+  const chunkSize = init.chunk_size || COMP_CHUNK_THRESHOLD
+  const totalChunks = init.total_chunks || Math.max(1, Math.ceil(file.size / chunkSize))
+  for (let i = 0; i < totalChunks; i++) {
+    if (signal.aborted) throw new Error('cancelled')
+    const start = i * chunkSize
+    const end = Math.min(file.size, start + chunkSize)
+    const blob = file.slice(start, end)
+    const form = new FormData()
+    form.append('upload_id', init.upload_id)
+    form.append('chunk_index', String(i))
+    form.append('chunk', blob, `${file.name}.part.${i}`)
+    if (channel) form.append('channel', channel)
+    await withRetry(
+      () => sendXhr(
+        'POST',
+        `${ACCOUNT_BASE}/contributor/proposals/upload/chunk/`,
+        form,
+        signal,
+        (sent) => onProgress?.(start + sent, file.size),
+      ),
+      signal,
+    )
+    onProgress?.(end, file.size)
+  }
+  return init.upload_id
+}
+
 export function createCompProposalChunked(file: File, metadata: CompProposalChunkedMeta, opts: {
   onProgress?: (sent: number, total: number) => void
 } = {}): { promise: Promise<CompFileProposal>; abort: () => void } {
   if (!CONTRIBUTOR_ENABLED) throw new Error('Comp file contributions are not available yet')
   const signal: AbortState = { aborted: false, xhr: null }
   const promise = (async () => {
-    const init = await withRetry(
-      () => sendXhr<{ upload_id: string; chunk_size: number; total_chunks: number }>(
-        'POST',
-        `${ACCOUNT_BASE}/contributor/proposals/upload/init/`,
-        JSON.stringify({
-          filename: file.name,
-          total_size: file.size,
-          ...(metadata.channel ? { channel: metadata.channel } : {}),
-        }),
-        signal,
-        undefined,
-        true,
-      ),
-      signal,
-    )
-    const chunkSize = init.chunk_size || COMP_CHUNK_THRESHOLD
-    const totalChunks = init.total_chunks || Math.max(1, Math.ceil(file.size / chunkSize))
-    for (let i = 0; i < totalChunks; i++) {
-      if (signal.aborted) throw new Error('cancelled')
-      const start = i * chunkSize
-      const end = Math.min(file.size, start + chunkSize)
-      const blob = file.slice(start, end)
-      const form = new FormData()
-      form.append('upload_id', init.upload_id)
-      form.append('chunk_index', String(i))
-      form.append('chunk', blob, `${file.name}.part.${i}`)
-      if (metadata.channel) form.append('channel', metadata.channel)
-      await withRetry(
-        () => sendXhr(
-          'POST',
-          `${ACCOUNT_BASE}/contributor/proposals/upload/chunk/`,
-          form,
-          signal,
-          (sent) => opts.onProgress?.(start + sent, file.size),
-        ),
-        signal,
-      )
-      opts.onProgress?.(end, file.size)
-    }
+    const uploadId = await sendChunks(file, metadata.channel, signal, opts.onProgress)
     return withRetry(
       () => sendXhr<CompFileProposal>(
         'POST',
         `${ACCOUNT_BASE}/contributor/proposals/upload/complete/`,
         JSON.stringify({
-          upload_id: init.upload_id,
+          upload_id: uploadId,
           change_type: metadata.change_type,
           file_path: metadata.file_path,
           destination_path: metadata.destination_path || '',
@@ -173,6 +181,67 @@ export function createCompProposalChunked(file: File, metadata: CompProposalChun
       ),
       signal,
     )
+  })()
+  return {
+    promise,
+    abort: () => {
+      signal.aborted = true
+      signal.xhr?.abort()
+    },
+  }
+}
+
+// Per upload/stage/ request: Django takes at most 100 files, and the proxy in
+// front of the API caps the body, so small files go up in groups under both.
+const STAGE_MAX_FILES = 100
+const STAGE_MAX_BYTES = 64 * 1024 * 1024
+
+/** Stages every file and resolves their upload_ids in the same order. Files of
+ *  16 MB and up go in chunks, the rest in groups through upload/stage/.
+ *  Progress counts bytes across the whole set. */
+export function stageCompFiles(files: File[], channel?: string, opts: {
+  onProgress?: (sent: number, total: number) => void
+} = {}): { promise: Promise<string[]>; abort: () => void } {
+  const signal: AbortState = { aborted: false, xhr: null }
+  const total = files.reduce((n, f) => n + f.size, 0)
+  let done = 0
+  const report = (inFlight: number): void => opts.onProgress?.(done + inFlight, total)
+
+  const promise = (async () => {
+    const ids: string[] = new Array(files.length)
+    const small: number[] = []
+    for (let i = 0; i < files.length; i++) {
+      if (files[i].size < COMP_CHUNK_THRESHOLD) { small.push(i); continue }
+      ids[i] = await sendChunks(files[i], channel, signal, (sent) => report(sent))
+      done += files[i].size
+      report(0)
+    }
+    let group: number[] = []
+    let groupBytes = 0
+    const flush = async (): Promise<void> => {
+      if (group.length === 0) return
+      const form = new FormData()
+      for (const i of group) form.append('files', files[i], files[i].name)
+      if (channel) form.append('channel', channel)
+      const res = await withRetry(
+        () => sendXhr<{ uploads: { upload_id: string }[] }>(
+          'POST', `${ACCOUNT_BASE}/contributor/proposals/upload/stage/`, form, signal, (sent) => report(sent),
+        ),
+        signal,
+      )
+      group.forEach((fileIndex, k) => { ids[fileIndex] = res.uploads[k].upload_id })
+      done += groupBytes
+      report(0)
+      group = []
+      groupBytes = 0
+    }
+    for (const i of small) {
+      if (group.length >= STAGE_MAX_FILES || (group.length > 0 && groupBytes + files[i].size > STAGE_MAX_BYTES)) await flush()
+      group.push(i)
+      groupBytes += files[i].size
+    }
+    await flush()
+    return ids
   })()
   return {
     promise,

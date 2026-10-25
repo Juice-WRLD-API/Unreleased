@@ -4,21 +4,25 @@ import { reportSaveError } from '../lib/fileSave'
 import { useEffect, useState } from 'react'
 import type { ComponentProps } from 'react'
 import {
-  Info, ListPlus, ListEnd, Plus, Folder, Pencil, Download, PackageOpen, Check, Loader2, CheckSquare2, Heart, Trash2, ListMusic, Flag, FileAudio2, Share2, X, Link2, Layers,
+  Info, ListPlus, ListEnd, Plus, Folder, Pencil, Download, PackageOpen, Check, Loader2, CheckSquare2, Heart, Trash2, ListMusic, Flag, FileAudio2, Share2, X, Link2, Layers, MicVocal, HardDrive, Sparkles, Ellipsis,
 } from 'lucide-react'
 import { useStore } from '../store/useStore'
 import { useShallow } from 'zustand/react/shallow'
 import * as userApi from '../lib/userApi'
 import { ensureDonorUrl, isDonorStreamUrl } from '../lib/donorPlayback'
 import { buildStreamUrl, findSessionZips, songToTrack, JWApiSong, JWApiFileEntry, ZIP_OPERATIONS_ENABLED } from '../lib/juicewrldApi'
-import { downloadWithEmbed } from '../lib/lyricsEmbed'
+import { downloadWithEmbed } from '../lib/downloadEmbed'
 import { trackShareUrl } from '../lib/platform'
 import { Track } from '../types'
 import ChangeVersionPanel from './ChangeVersionPanel'
-import ContextMenu from './ContextMenu'
+import ContextMenu, { type ContextMenuEntry } from './ContextMenu'
 import { versionsEnabled } from '../lib/versionsApi'
 import { hasChatAccess } from '../lib/chatAccess'
 import { lazyOverlay } from '../lib/lazyView'
+import { addSongsInBackground, addTracksInBackground } from '../lib/optimisticPlaylist'
+import { isPrivateEntry, playlistTrackIds, trackToPlaylistEntry } from '../lib/playlistItems'
+import { downloadFileSmart } from '../lib/cdn'
+import { showAppToast } from '../lib/appToast'
 
 // Staff-only (it pulls in the chat store) - fetched when opened.
 const ShareSongModal = lazyOverlay(() => import('./chat/ShareSongModal'))
@@ -76,6 +80,9 @@ interface Props {
    *  which is server-driven and can't be manually redirected). */
   disableChangeVersion?: boolean
 
+  /** WRLD only - opens the lyric share card for the playing song. */
+  onShareLyrics?: () => void
+
   /** Session-edit file linking (Tracker only) - lets an editor/contributor
    *  manually point a recording-session song at its session-edit audio file
    *  when the automatic filename match got it wrong or found nothing. */
@@ -85,7 +92,8 @@ interface Props {
   onClearSessionLink?: () => void
 }
 
-function downloadTrack(track: Track, songId: number | null): void {
+/** Saves the song's file. Also the desktop player's song menu (lib/desktopBridge). */
+export function downloadTrack(track: Track, songId: number | null): void {
   // Donor files need the auth header, so hand them to the blob path instead.
   if (isDonorStreamUrl(track.streamUrl)) {
     void ensureDonorUrl(track.streamUrl).then((url) => {
@@ -95,7 +103,7 @@ function downloadTrack(track: Track, songId: number | null): void {
   }
   // Lyrics embedding needs the file bytes, so it takes the fetch path; with the
   // setting off (or nothing to embed) this stays a plain anchor download.
-  if (songId != null && useStore.getState().embedLyricsOnDownload) {
+  if (songId != null && useStore.getState().embedSongInfoOnDownload) {
     void downloadWithEmbed(track.streamUrl ?? buildStreamUrl(track.path), `${track.title}.mp3`, track.path, songId)
     return
   }
@@ -109,13 +117,13 @@ function downloadZipEntry(entry: JWApiFileEntry): void {
 export default function SongContextMenu({
   state, onClose, canEdit, onInfo,
   onPlay, onPlayNext, onAddToQueue, onShowInFiles, onSelect,
-  liked, onToggleLike, removeAction, song, disableChangeVersion,
+  liked, onToggleLike, removeAction, song, disableChangeVersion, onShareLyrics,
   canLinkSessionFile, hasSessionLinkOverride, onLinkSessionFile, onClearSessionLink,
 }: Props): JSX.Element {
-  const { playlists, account, refreshPlaylists, setShowUserAuth, playTrack, localPlaylists, addToLocalPlaylist, createLocalPlaylist } = useStore(
+  const { playlists, account, refreshPlaylists, setShowUserAuth, changeVersion, localPlaylists, addToLocalPlaylist, createLocalPlaylist } = useStore(
     useShallow(s => ({
       playlists: s.playlists, account: s.account, refreshPlaylists: s.refreshPlaylists,
-      setShowUserAuth: s.setShowUserAuth, playTrack: s.playTrack,
+      setShowUserAuth: s.setShowUserAuth, changeVersion: s.changeVersion,
       localPlaylists: s.localPlaylists, addToLocalPlaylist: s.addToLocalPlaylist, createLocalPlaylist: s.createLocalPlaylist,
     }))
   )
@@ -135,32 +143,50 @@ export default function SongContextMenu({
   const [zipLoading, setZipLoading] = useState(false)
   const [linkCopied, setLinkCopied] = useState(false)
 
+  // What this track becomes in a synced playlist: a song, or a comp, donor or
+  // local file entry. Null for anything a playlist can't point at.
+  const entry = songId != null && songId > 0 ? { song_id: songId } : songId == null ? trackToPlaylistEntry(track) : null
+  const entryIsPrivate = !!entry && isPrivateEntry(entry)
+
   useEffect(() => {
-    if (!account || songId == null || playlists.length === 0) return
+    if (!account || !entry || playlists.length === 0) return
     Promise.all(
       playlists.map(p =>
         userApi.getPlaylist(p.id)
-          .then(d => ({ id: p.id, has: (d.items ?? []).some(it => it.song.id === songId) }))
+          .then(d => ({
+            id: p.id,
+            has: songId != null
+              ? (d.items ?? []).some(it => it.song?.id === songId)
+              : playlistTrackIds(d.items ?? []).has(track.id),
+          }))
           .catch(() => ({ id: p.id, has: false }))
       )
-    ).then(results => setContained(new Set(results.filter(r => r.has).map(r => r.id))))
-  }, [playlists, songId, account])
+    // Merged rather than replaced, so a playlist ticked optimistically while
+    // this was in flight doesn't get unticked by the older answer.
+    ).then(results => setContained(prev => new Set([...prev, ...results.filter(r => r.has).map(r => r.id)])))
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [playlists, songId, track.id, account])
 
-  const addTo = async (id: number): Promise<void> => {
-    if (songId == null) return
-    setBusyId(id)
-    try {
-      await userApi.addToPlaylist(id, songId)
-      setDoneId(id)
-      setContained(prev => new Set([...prev, id]))
-      await refreshPlaylists()
-    } catch {} finally { setBusyId(null) }
+  // Optimistic: tick the row now, send the request in the background, and
+  // untick it (with a toast) if the server says no.
+  const addTo = (id: number): void => {
+    if (!entry || contained.has(id)) return
+    setDoneId(id)
+    setContained(prev => new Set([...prev, id]))
+    const pending = songId != null
+      ? addSongsInBackground(id, [songId])
+      : addTracksInBackground(id, [track])
+    void pending.then(failed => {
+      if (!failed.length) return
+      setDoneId(prev => (prev === id ? null : prev))
+      setContained(prev => { const next = new Set(prev); next.delete(id); return next })
+    })
   }
 
   const createAndAdd = async (): Promise<void> => {
     const name = newName.trim()
     if (!name) return
-    if (isLocalOnly) {
+    if (isLocalOnly && !account) {
       createLocalPlaylist(name)
       // createLocalPlaylist sets activeLocalPlaylistId synchronously (zustand
       // set() applies immediately), so it's readable right after the call -
@@ -170,14 +196,14 @@ export default function SongContextMenu({
       onClose()
       return
     }
-    if (songId == null) return
+    if (!entry) return
     setBusyId(-1)
     try {
       const playlist = await userApi.createPlaylist(name)
-      await userApi.addToPlaylist(playlist.id, songId)
+      await userApi.addPlaylistEntry(playlist.id, entry)
       await refreshPlaylists()
       onClose()
-    } catch {} finally { setBusyId(null) }
+    } catch { showAppToast("Couldn't create the playlist") } finally { setBusyId(null) }
   }
 
   const loadSessionZips = async (): Promise<void> => {
@@ -205,14 +231,36 @@ export default function SongContextMenu({
   const hasValidSong = songId != null && songId > 0
   const isUnplayable = track.genre === 'unsurfaced' || (track.genre === 'recording_session' && !track.path)
   // A local library file with no matching API song - it already lives on
-  // disk (so "Download" is meaningless) and can't join a server playlist,
-  // but it can join one of the device-local playlists instead.
+  // disk (so "Download" is meaningless). It can join a synced playlist (as an
+  // entry only this device can play) or one of the device-local playlists.
   const isLocalOnly = songId == null && track.id.startsWith('local-')
-  const canAddToPlaylist = !isUnplayable && (hasValidSong || isLocalOnly)
+  const canAddToPlaylist = !isUnplayable && (hasValidSong || isLocalOnly || !!entry)
   // Sharing rides the song's own stream URL, so it only makes sense for
   // real API songs (not local-only files, which nobody else can reach) and
   // only for staff, who are the only ones with a chat to share into.
+  // Anyone can time a song's lyrics by hand in Synced lyrics, and donors can
+  // have Whisper do it, for any song whose audio the app can load (stream or
+  // donor file).
+  const canSyncLyrics = !isUnplayable && !!track.streamUrl
+    && (!!track.path || isDonorStreamUrl(track.streamUrl))
   const canShareToChat = hasChatAccess(account) && hasValidSong && !!track.streamUrl && !isDonorStreamUrl(track.streamUrl)
+  // Sharing, lyrics and reporting share one flyout, so the top level stays
+  // short. A lone row is shown flat rather than as a submenu of one.
+  const moreRows = ([
+    canShareToChat && { icon: Share2, label: 'Share to chat', keepOpen: true, onSelect: () => setShareOpen(true) },
+    onShareLyrics && { icon: MicVocal, label: 'Share lyrics', onSelect: onShareLyrics },
+    canSyncLyrics && {
+      icon: Sparkles,
+      label: 'Synced lyrics',
+      onSelect: () => useStore.getState().openLyricsGen({ track, songId, tab: account?.is_donor ? 'create' : 'sync' }),
+    },
+    hasValidSong && {
+      icon: Flag,
+      label: 'Report issue',
+      separatorBefore: !!(canShareToChat || onShareLyrics || canSyncLyrics),
+      onSelect: () => useStore.getState().openReport({ kind: 'song', songId: songId as number, songName: track.apiTitle || track.title }),
+    },
+  ] satisfies ContextMenuEntry[]).filter((r): r is Exclude<typeof r, false | undefined | null> => !!r)
 
   const handleCopyLink = async (): Promise<void> => {
     if (!hasValidSong) return
@@ -231,27 +279,30 @@ export default function SongContextMenu({
     return <ShareSongModal track={track} songId={songId as number} onClose={onClose} />
   }
 
-  // "Add to playlist" second level: the account's playlists, or the device-local
-  // ones for a local-only file.
-  const playlistRows = isLocalOnly
-    ? localPlaylists.map(p => ({
+  // "Add to playlist" second level: the account's playlists (any song or file
+  // a playlist can point at), then the device-local ones for a local file.
+  // Donor and local files can't go in a public playlist, so those rows are off.
+  const syncedRows = account && entry
+    ? playlists.map(p => ({
         label: p.name,
         icon: ListMusic,
+        checked: contained.has(p.id) || doneId === p.id,
+        disabled: entryIsPrivate && p.is_public && !contained.has(p.id),
+        keepOpen: true,
+        onSelect: () => addTo(p.id),
+      }))
+    : []
+  const localRows = isLocalOnly
+    ? localPlaylists.map((p, i) => ({
+        label: p.name,
+        icon: HardDrive,
+        separatorBefore: i === 0 && syncedRows.length > 0,
         checked: p.trackIds.includes(track.id) || localDoneId === p.id,
         keepOpen: true,
         onSelect: () => { addToLocalPlaylist(p.id, track.id); setLocalDoneId(p.id) },
       }))
-    : !account
-      ? []
-      : playlists.map(p => ({
-          label: p.name,
-          icon: ListMusic,
-          checked: contained.has(p.id) || doneId === p.id,
-          loading: busyId === p.id,
-          disabled: busyId === p.id,
-          keepOpen: true,
-          onSelect: () => { void addTo(p.id) },
-        }))
+    : []
+  const playlistRows = [...syncedRows, ...localRows]
 
   const playlistFooter = !isLocalOnly && !account
     ? (
@@ -313,11 +364,6 @@ export default function SongContextMenu({
         onPlay && canQueue && { icon: ListEnd, label: 'Play', onSelect: onPlay },
         onPlayNext && canQueue && { icon: ListEnd, label: 'Play next', onSelect: onPlayNext },
         hasValidSong && { icon: Info, label: 'Song info', onSelect: onInfo },
-        hasValidSong && {
-          icon: Flag,
-          label: 'Report issue',
-          onSelect: () => useStore.getState().openReport({ kind: 'song', songId: songId as number, songName: track.apiTitle || track.title }),
-        },
         onSelect && { icon: CheckSquare2, label: 'Select', onSelect },
         onAddToQueue && canQueue && { icon: ListPlus, label: 'Add to queue', onSelect: onAddToQueue },
         canAddToPlaylist && {
@@ -327,7 +373,8 @@ export default function SongContextMenu({
           childrenEmpty: !isLocalOnly && !account ? 'Log in to save to playlists.' : 'No playlists yet.',
           childrenFooter: playlistFooter,
         },
-        canShareToChat && { icon: Share2, label: 'Share to chat', keepOpen: true, onSelect: () => setShareOpen(true) },
+        moreRows.length > 1 && { icon: Ellipsis, label: 'More', children: moreRows },
+        moreRows.length === 1 && moreRows[0],
         hasValidSong && { icon: linkCopied ? Check : Link2, label: linkCopied ? 'Link copied' : 'Copy link', keepOpen: true, onSelect: handleCopyLink },
         onShowInFiles && !!track.path && { icon: Folder, label: 'Show in Files', onSelect: onShowInFiles },
         canEdit && hasValidSong && { icon: Pencil, label: 'Edit', onSelect: () => useStore.getState().openSongEditor(songId as number) },
@@ -339,7 +386,7 @@ export default function SongContextMenu({
             <ChangeVersionPanel
               songId={songId as number}
               mobile={mobile}
-              onChangeVersion={(s) => { const t = songToTrack(s); playTrack(t, [t]); close() }}
+              onChangeVersion={(s) => { changeVersion(track, songToTrack(s)); close() }}
             />
           ),
         },

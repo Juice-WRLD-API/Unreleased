@@ -52,14 +52,39 @@ export interface EmbeddableLyrics {
   synced: { time: number; text: string }[]
 }
 
-/** Adds lyrics and/or a cover to an MP3 while keeping the tags it already
- *  carries (as far as this module reads them - see the header note). A given
- *  `cover` replaces the file's own one. */
-export async function embedInMp3(source: Blob, extras: { lyrics?: EmbeddableLyrics; cover?: Mp3Cover }): Promise<Blob> {
+/** Song details to write over whatever the file carries. Blank fields are
+ *  left as the file has them. */
+export interface EmbeddableInfo {
+  title: string
+  artist: string
+  album: string
+  albumArtist: string
+}
+
+export interface Mp3Extras {
+  info?: EmbeddableInfo
+  lyrics?: EmbeddableLyrics
+  /** Replaces the file's own cover. */
+  cover?: Mp3Cover
+  /** Used only when the file has no cover of its own (and `cover` isn't set). */
+  fallbackCover?: Mp3Cover
+}
+
+/** Adds song details, lyrics and/or a cover to an MP3 while keeping the tags
+ *  it already carries (as far as this module reads them - see the header
+ *  note). */
+export async function embedInMp3(source: Blob, extras: Mp3Extras): Promise<Blob> {
   const tags = await readMp3Tags(source)
-  if (extras.cover) tags.cover = extras.cover
+  const { info } = extras
+  if (info) {
+    if (info.title.trim()) tags.title = info.title
+    if (info.artist.trim()) tags.artist = info.artist
+    if (info.album.trim()) tags.album = info.album
+  }
+  tags.cover = extras.cover ?? tags.cover ?? extras.fallbackCover ?? null
   const writer = new ID3Writer(await source.arrayBuffer())
   applyTags(writer, tags)
+  if (info?.albumArtist.trim()) writer.setFrame('TPE2', info.albumArtist.trim())
   const { lyrics } = extras
   if (lyrics) {
     writer.setFrame('USLT', { description: '', lyrics: lyrics.text })

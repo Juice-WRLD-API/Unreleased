@@ -1,4 +1,4 @@
-import { ChevronRight, MoreHorizontal, Play, ListMusic, Gamepad2, Flame, Music2, Disc3, User, Newspaper, Radio, Album, Music, Search } from 'lucide-react'
+import { ChevronRight, MoreHorizontal, Play, ListMusic, Gamepad2, Flame, Music2, Disc3, User, Newspaper, Radio, Album, Music, Search, MicVocal } from 'lucide-react'
 import { useStore } from '../store/useStore'
 import * as userApi from '../lib/userApi'
 import { AlbumArtThumbnail } from './AlbumArtThumbnail'
@@ -6,6 +6,7 @@ import { ProgressiveCover } from './ProgressiveCover'
 import { useMobileNavSplit } from '../hooks/useMobileNavTabs'
 import { useHomeData } from '../hooks/useHomeData'
 import { hasChatAccess } from '../lib/chatAccess'
+import OnThisDayTile from './OnThisDayTile'
 import { lazyOverlay } from '../lib/lazyView'
 import { PlaylistCoverThumb } from '../lib/homeViewShared'
 
@@ -138,6 +139,12 @@ export default function HomeViewMobile(): JSX.Element {
             ))}
           </div>
         </Section>
+      )}
+
+      {showSection('onthisday') && (
+        <div className="px-4">
+          <OnThisDayTile onContextMenu={() => {}} span="shrink-0" />
+        </div>
       )}
 
       {showSection('news') && newsItems.length > 0 && (
@@ -308,6 +315,22 @@ export default function HomeViewMobile(): JSX.Element {
           <span className="flex-1 min-w-0 text-left">
             <span className="block text-text-primary text-sm font-semibold">Liked songs</span>
             <span className="block text-text-muted text-xs">{likedTrackIds.length} song{likedTrackIds.length === 1 ? '' : 's'}</span>
+          </span>
+          <ChevronRight size={16} className="text-text-muted shrink-0" />
+        </button>
+      )}
+
+      {showSection('tools') && (
+        <button
+          onClick={() => useStore.getState().openLyricsGen()}
+          className="mx-4 w-[calc(100%-2rem)] flex items-center gap-3 rounded-xl bg-[var(--surface-overlay)] px-3.5 py-3 active:bg-surface-highest transition-colors"
+        >
+          <span className="w-9 h-9 rounded-lg bg-accent/15 flex items-center justify-center shrink-0">
+            <MicVocal size={17} className="text-accent" />
+          </span>
+          <span className="flex-1 min-w-0 text-left">
+            <span className="block text-text-primary text-sm font-semibold">Synced lyrics</span>
+            <span className="block text-text-muted text-xs">Time a song's lyrics by the line or the word</span>
           </span>
           <ChevronRight size={16} className="text-text-muted shrink-0" />
         </button>

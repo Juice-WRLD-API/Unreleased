@@ -15,13 +15,19 @@ export const ls = {
       return null
     }
   },
-  set: <T>(key: string, value: T): void => {
+  set: <T>(key: string, value: T): void => { ls.trySet(key, value) },
+  trySet: <T>(key: string, value: T): boolean => {
     try {
       localStorage.setItem(`unreleased:${key}`, JSON.stringify(value))
+      return true
     } catch (e) {
       // Visible in DevTools instead of vanishing - most commonly quota
       // exhaustion, which otherwise silently drops the write.
       console.warn(`[persist] failed to save "${key}":`, e)
+      return false
     }
+  },
+  remove: (key: string): void => {
+    try { localStorage.removeItem(`unreleased:${key}`) } catch { /* storage unavailable */ }
   },
 }

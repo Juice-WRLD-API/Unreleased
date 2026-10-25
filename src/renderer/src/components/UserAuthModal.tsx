@@ -1,17 +1,19 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react'
 import { ModalOverlay } from './Modal'
-import { X, Loader2, AlertCircle, Heart, ListMusic } from 'lucide-react'
+import { X, Loader2, AlertCircle, Heart, ListMusic, Fingerprint } from 'lucide-react'
 import { useStorePick } from '../store/useStore'
 import { errorMessage } from '../lib/format'
 import * as userApi from '../lib/userApi'
+import { getPasskeySupport } from '../lib/passkeyApi'
 
 interface Props {
   onClose: () => void
 }
 
 export default function UserAuthModal({ onClose }: Props): JSX.Element {
-  const { loginWithDiscord, loginWithPassword, signupWithPassword, completeApprovedLogin } = useStorePick(
+  const { loginWithDiscord, loginWithPassword, signupWithPassword, completeApprovedLogin, loginWithPasskey } = useStorePick(
     'loginWithDiscord',
+    'loginWithPasskey',
     'loginWithPassword',
     'signupWithPassword',
     'completeApprovedLogin',
@@ -28,6 +30,15 @@ export default function UserAuthModal({ onClose }: Props): JSX.Element {
   const [otpMethod, setOtpMethod] = useState<'code' | 'device'>('code')
   const [approval, setApproval] = useState<{ code: string } | null>(null)
   const pollRef = useRef<number | null>(null)
+  // The passkey buttons only show where the prompt can open (Windows app, website).
+  const [passkeyReady, setPasskeyReady] = useState(false)
+  const [passkeyBusy, setPasskeyBusy] = useState(false)
+
+  useEffect(() => {
+    let alive = true
+    void getPasskeySupport().then((s) => { if (alive) setPasskeyReady(s.ceremonies) })
+    return () => { alive = false }
+  }, [])
 
   const stopPolling = (): void => {
     if (pollRef.current != null) { window.clearInterval(pollRef.current); pollRef.current = null }
@@ -86,6 +97,19 @@ export default function UserAuthModal({ onClose }: Props): JSX.Element {
       setError(errorMessage(e, 'Could not start Discord login'))
     } finally {
       setLoading(false)
+    }
+  }
+
+  const startPasskey = async (): Promise<void> => {
+    setError(null)
+    setPasskeyBusy(true)
+    try {
+      // false = the prompt was closed or cancelled: nothing to report.
+      if (await loginWithPasskey()) onClose()
+    } catch (e) {
+      setError(errorMessage(e, 'Could not sign in with a passkey'))
+    } finally {
+      setPasskeyBusy(false)
     }
   }
 
@@ -245,6 +269,18 @@ export default function UserAuthModal({ onClose }: Props): JSX.Element {
               {loading && <Loader2 size={16} className="animate-spin" />}
               {needsOtp ? (otpMethod === 'device' ? (approval ? 'Waiting…' : 'Send request') : 'Verify') : mode === 'signup' ? 'Create account' : 'Log in'}
             </button>
+            {/* A passkey counts as two-factor on the server, so it skips this step. */}
+            {needsOtp && passkeyReady && (
+              <button
+                type="button"
+                onClick={() => void startPasskey()}
+                disabled={loading || passkeyBusy}
+                className="w-full py-2.5 rounded-xl bg-[var(--surface-raised)] hover:bg-[var(--surface-overlay)] border border-[var(--border)] text-text-primary text-sm font-semibold transition-colors flex items-center justify-center gap-2 disabled:opacity-60"
+              >
+                {passkeyBusy ? <Loader2 size={16} className="animate-spin" /> : <Fingerprint size={17} />}
+                Use a passkey instead
+              </button>
+            )}
             {needsOtp && (
               <button
                 type="button"
@@ -274,9 +310,20 @@ export default function UserAuthModal({ onClose }: Props): JSX.Element {
             <span className="h-px flex-1 bg-[var(--border)]" />
           </div>
 
+          {mode === 'login' && passkeyReady && (
+            <button
+              onClick={() => void startPasskey()}
+              disabled={loading || passkeyBusy}
+              className="w-full py-2.5 rounded-xl bg-[var(--surface-raised)] hover:bg-[var(--surface-overlay)] border border-[var(--border)] text-text-primary text-sm font-semibold transition-colors flex items-center justify-center gap-2 disabled:opacity-60"
+            >
+              {passkeyBusy ? <Loader2 size={16} className="animate-spin" /> : <Fingerprint size={17} />}
+              Sign in with a passkey
+            </button>
+          )}
+
           <button
             onClick={start}
-            disabled={loading}
+            disabled={loading || passkeyBusy}
             className="w-full py-2.5 rounded-xl bg-[#5865F2] hover:bg-[#4752c4] text-white text-sm font-semibold transition-colors flex items-center justify-center gap-2"
           >
             {loading ? (

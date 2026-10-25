@@ -168,7 +168,10 @@ export function periodCoverage(events: ListeningPlayEvent[], period: ListeningPe
 }
 
 export function prefsFromEvents(events: ListeningPlayEvent[]): SongPreference[] {
-  const counts = playcountsFromEvents(events)
+  return prefsFromCounts(playcountsFromEvents(events))
+}
+
+function prefsFromCounts(counts: Map<number, number>): SongPreference[] {
   return [...counts.entries()]
     .map(([song, playcount]) => ({
       song,
@@ -186,10 +189,25 @@ export function eventsForPeriod(events: ListeningPlayEvent[], period: ListeningP
   return filterListeningPlaysByDays(events, Number(period))
 }
 
+/** All-time per-song counts. The log is capped (SERVER_LISTENING_PLAYS_LIMIT)
+ *  and evicts its oldest rows, so counting it alone stalls at the cap for a
+ *  heavy listener - songPrefs' aggregate playcounts are the uncapped total.
+ *  Takes the max per song, since a song can sit in the log without having
+ *  had its aggregate synced down yet. */
+export function allTimePrefs(events: ListeningPlayEvent[], songPrefs: Record<number, SongPreference>): SongPreference[] {
+  const counts = playcountsFromEvents(events)
+  for (const pref of Object.values(songPrefs)) {
+    if (pref.playcount > (counts.get(pref.song) ?? 0)) counts.set(pref.song, pref.playcount)
+  }
+  return prefsFromCounts(counts)
+}
+
 export function prefsForPeriod(
   events: ListeningPlayEvent[],
   period: ListeningPeriod,
+  songPrefs?: Record<number, SongPreference>,
 ): SongPreference[] {
+  if (period === 'all' && songPrefs) return allTimePrefs(events, songPrefs)
   return prefsFromEvents(eventsForPeriod(events, period))
 }
 

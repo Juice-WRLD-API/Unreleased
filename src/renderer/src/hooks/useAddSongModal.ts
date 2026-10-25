@@ -1,7 +1,8 @@
 // Shared state/logic for AddSongModal (propose a new song). Desktop and
 // mobile wrap this in their own JSX - keep behavior here, layout in them.
 import { useEffect, useState } from 'react'
-import { useStore } from '../store/useStore'
+import * as userApi from '../lib/userApi'
+import { errorMessage } from '../lib/format'
 import { apiFetch, JWApiEra, JWApiSong } from '../lib/juicewrldApi'
 import { useProposalForm, buildProposedData, type ProposalFormState } from '../lib/proposalForm'
 import { loadEraFullNames, listEras } from '../lib/eras'
@@ -23,7 +24,7 @@ export function useAddSongModal(onSubmitted: () => void, onClose: () => void, ch
   edNotes: string
   setEdNotes: (v: string) => void
   copyFrom: (s: JWApiSong) => void
-  handleSubmit: () => void
+  handleSubmit: () => Promise<void>
 } {
   // Every field lives in one reducer (lib/proposalForm.ts) instead of ~26
   // separate useState calls. Auxiliary UI-only state (showMore, copiedFrom
@@ -57,19 +58,24 @@ export function useAddSongModal(onSubmitted: () => void, onClose: () => void, ch
   // buildProposedData reproduces the exact pre-rewrite "only include
   // non-empty fields" payload mapping byte-for-byte (verified field-by-field
   // against proposalForm.ts's implementation) - do not hand-roll this here.
-  const handleSubmit = (): void => {
+  const handleSubmit = async (): Promise<void> => {
     if (!f.name.trim() || submitState === 'submitting') return
     setSubmitState('submitting'); setSubmitError(null)
-    useStore.getState().stageSongChanges([{
-      songId: null,
-      changeType: 'create',
-      title: f.name.trim(),
-      proposedData: buildProposedData(f),
-      editorNotes: edNotes,
-      channel,
-    }])
-    setSubmitState('submitted')
-    setTimeout(() => { onSubmitted(); onClose() }, 1200)
+    try {
+      await userApi.createProposal({
+        song: null,
+        change_type: 'create',
+        title: f.name.trim(),
+        proposed_data: buildProposedData(f),
+        editor_notes: edNotes,
+        channel,
+      })
+      setSubmitState('submitted')
+      setTimeout(() => { onSubmitted(); onClose() }, 1200)
+    } catch (e) {
+      setSubmitState('error')
+      setSubmitError(errorMessage(e, 'Submission failed'))
+    }
   }
 
   return {

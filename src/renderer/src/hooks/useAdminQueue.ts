@@ -25,7 +25,7 @@ import type { FeedbackRow, SongReportRow, SongReportStatus } from '../lib/report
 import { useStrictModeSafeEffect } from './useStrictModeSafeEffect'
 import { errorMessage } from '../lib/format'
 
-export type AdminTab = 'proposals' | 'comp-proposals' | 'applications' | 'reports' | 'feedback' | 'users' | 'stats' | 'security' | 'channels' | 'eras' | 'cdn-nodes' | 'beta'
+export type AdminTab = 'proposals' | 'comp-proposals' | 'comp-replace' | 'applications' | 'reports' | 'feedback' | 'users' | 'stats' | 'channels' | 'eras' | 'cdn-nodes' | 'beta' | 'lyrics' | 'logs'
 
 // Deep-link paths for the standalone (non-embedded) admin console - each
 // section its own top-level URL instead of one flat "/admin" for every tab.
@@ -36,6 +36,7 @@ export type AdminTab = 'proposals' | 'comp-proposals' | 'applications' | 'report
 export const ADMIN_TAB_PATHS: Partial<Record<AdminTab, string>> = {
   proposals: '/admin',
   'comp-proposals': '/comp-files',
+  'comp-replace': '/comp-replace',
   applications: '/applications',
   reports: '/reports',
   feedback: '/feedback',
@@ -44,7 +45,8 @@ export const ADMIN_TAB_PATHS: Partial<Record<AdminTab, string>> = {
   eras: '/eras',
   'cdn-nodes': '/cdn-nodes',
   beta: '/beta',
-  security: '/security',
+  lyrics: '/lyrics-gen',
+  logs: '/logs',
 }
 
 // Reverse of the above, for turning a URL back into a tab on load/back-forward.
@@ -58,7 +60,7 @@ export type FeedbackFilter = 'human' | 'automated' | ''
 export interface AdminNavItem {
   id: AdminTab
   label: string
-  iconKey: 'proposals' | 'comp-proposals' | 'applications' | 'reports' | 'feedback' | 'users' | 'stats' | 'channels' | 'eras' | 'cdn-nodes' | 'beta' | 'security'
+  iconKey: 'proposals' | 'comp-proposals' | 'comp-replace' | 'applications' | 'reports' | 'feedback' | 'users' | 'stats' | 'channels' | 'eras' | 'cdn-nodes' | 'beta' | 'lyrics' | 'logs'
   badge?: number
 }
 
@@ -190,7 +192,10 @@ export function useAdminQueue(opts: UseAdminQueueOptions) {
 
   const fullNav: AdminNavItem[] = [
     { id: 'proposals',    label: 'Song edits',   iconKey: 'proposals',   badge: pendingProps || undefined },
-    ...(CONTRIBUTOR_ENABLED ? [{ id: 'comp-proposals' as const, label: 'Comp files', iconKey: 'comp-proposals' as const }] : []),
+    ...(CONTRIBUTOR_ENABLED ? [
+      { id: 'comp-proposals' as const, label: 'Comp files', iconKey: 'comp-proposals' as const },
+      { id: 'comp-replace' as const, label: 'Replace comp', iconKey: 'comp-replace' as const },
+    ] : []),
     { id: 'applications', label: 'Applications', iconKey: 'applications', badge: pendingApps || undefined },
     { id: 'reports',      label: 'Reports',      iconKey: 'reports',      badge: pendingReports || undefined },
     { id: 'feedback',     label: 'Feedback',     iconKey: 'feedback' },
@@ -200,7 +205,8 @@ export function useAdminQueue(opts: UseAdminQueueOptions) {
     { id: 'eras',         label: 'Eras',         iconKey: 'eras' },
     { id: 'cdn-nodes',    label: 'CDN nodes',    iconKey: 'cdn-nodes' },
     { id: 'beta',         label: 'Beta',         iconKey: 'beta' },
-    { id: 'security',     label: 'Security',     iconKey: 'security' },
+    { id: 'lyrics',       label: 'Lyrics',       iconKey: 'lyrics' },
+    { id: 'logs',         label: 'Logs',         iconKey: 'logs' },
   ]
   const nav = isFullAdmin ? fullNav : fullNav.filter(n => managerNavIds.includes(n.id))
 

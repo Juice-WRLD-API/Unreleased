@@ -1,14 +1,14 @@
-import { useEffect, useLayoutEffect, useRef, useState } from 'react'
-import { createPortal } from 'react-dom'
-import { Check, EyeOff, GripVertical, Plus, RotateCcw } from 'lucide-react'
+import { useState } from 'react'
+import { ArrowLeftRight, Check, EyeOff, GripVertical, Plus, RotateCcw } from 'lucide-react'
 import {
   TRACKER_FIELD_MAP, unusedFields, replaceField, removeField, insertField, reorderField,
 } from '../lib/trackerFields'
 import type { TrackerField, TrackerFieldKey } from '../lib/trackerFields'
 import { useFieldDrag } from '../hooks/useFieldDrag'
+import ContextMenu from './ContextMenu'
 
 // ─── Tracker field picker (desktop) ───────────────────────────────────────────
-// Pointer-anchored popover for customizing a Tracker field layout (Detailed
+// Pointer-anchored menu for customizing a Tracker field layout (Detailed
 // view's metadata grid, List view's columns). Opened two ways:
 //  - on a specific slot (clicking a field label / right-clicking a column
 //    header): replace that slot with another field, hide it, or add a new
@@ -38,8 +38,7 @@ interface Props {
   onClose: () => void
 }
 
-const itemCls = 'w-full flex items-center gap-2.5 px-3 py-1.5 text-sm text-left text-text-secondary hover:text-text-primary hover:bg-surface-raised transition-colors disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-transparent'
-const headCls = 'px-3 pt-2 pb-1 text-[0.625rem] font-bold uppercase tracking-widest text-text-muted'
+const itemCls = 'menu-glass-row w-full flex items-center gap-2.5 px-3 py-1.5 text-sm text-left text-text-secondary hover:text-text-primary transition-colors disabled:opacity-40 disabled:cursor-not-allowed'
 
 // One shown field in the checklist: drag the row to reorder, click to hide.
 function ShownFieldRow({ field, index, scope, onReorder, onHide }: {
@@ -65,10 +64,6 @@ function ShownFieldRow({ field, index, scope, onReorder, onHide }: {
 }
 
 export default function TrackerFieldMenu({ state, keys, defaults, max, noun, dragScope, onChange, onClose }: Props): JSX.Element {
-  const ref = useRef<HTMLDivElement>(null)
-  const [pos, setPos] = useState({ left: state.x, top: state.y })
-  // 'add' swaps the "replace with" list for an "insert after this slot" one.
-  const [mode, setMode] = useState<'replace' | 'add'>('replace')
   // Tracked by key rather than index so a drag-reorder elsewhere while the
   // menu is open doesn't retarget it to a different field.
   const [slotKey] = useState<TrackerFieldKey | undefined>(() => (state.index >= 0 ? keys[state.index] : undefined))
@@ -77,119 +72,88 @@ export default function TrackerFieldMenu({ state, keys, defaults, max, noun, dra
   const full = keys.length >= max
   const isDefault = keys.length === defaults.length && keys.every((k, i) => k === defaults[i])
 
-  useEffect(() => {
-    const onDown = (e: MouseEvent): void => { if (ref.current && !ref.current.contains(e.target as Node)) onClose() }
-    const onKey = (e: KeyboardEvent): void => { if (e.key === 'Escape') onClose() }
-    // Any scroll moves the anchor out from under the popover - close rather
-    // than leave it floating over the wrong row.
-    const onScroll = (e: Event): void => { if (!ref.current?.contains(e.target as Node)) onClose() }
-    document.addEventListener('mousedown', onDown)
-    document.addEventListener('keydown', onKey)
-    document.addEventListener('scroll', onScroll, true)
-    return () => {
-      document.removeEventListener('mousedown', onDown)
-      document.removeEventListener('keydown', onKey)
-      document.removeEventListener('scroll', onScroll, true)
-    }
-  }, [onClose])
-
-  // Keep the popover on-screen (re-run when the mode swap changes its height).
-  useLayoutEffect(() => {
-    const el = ref.current
-    if (!el) return
-    const r = el.getBoundingClientRect()
-    setPos({
-      left: Math.max(8, Math.min(state.x, window.innerWidth - r.width - 8)),
-      top: Math.max(8, Math.min(state.y, window.innerHeight - r.height - 8)),
-    })
-  }, [state.x, state.y, mode])
-
   // The slot can vanish under us (e.g. reset while open) - nothing to edit then.
   if (slotKey && (slot < 0 || !current)) return <></>
 
-  const apply = (next: TrackerFieldKey[], close = true): void => { onChange(next); if (close) onClose() }
+  // On a slot: a plain menu, the fields to choose from in flyouts.
+  if (slotKey && current) {
+    const choices = unusedFields(keys)
+    return (
+      <ContextMenu
+        x={state.x}
+        y={state.y}
+        onClose={onClose}
+        zIndex={90}
+        title={current.label}
+        compact
+        items={[
+          {
+            label: 'Replace with',
+            icon: ArrowLeftRight,
+            children: choices.map((f) => ({ label: f.label, onSelect: () => onChange(replaceField(keys, slot, f.key)) })),
+            childrenEmpty: `Every ${noun} is already shown`,
+          },
+          {
+            label: `Add ${noun} after`,
+            icon: Plus,
+            disabled: full,
+            hint: full ? `Up to ${max} ${noun}s` : undefined,
+            children: choices.map((f) => ({ label: f.label, onSelect: () => onChange(insertField(keys, slot, f.key)) })),
+            childrenEmpty: `Every ${noun} is already shown`,
+          },
+          { label: `Hide ${current.label}`, icon: EyeOff, onSelect: () => onChange(removeField(keys, slot)) },
+          'divider',
+          { label: `Reset ${noun}s`, icon: RotateCcw, disabled: isDefault, onSelect: () => onChange(defaults) },
+        ]}
+      />
+    )
+  }
 
-  const body = !slotKey ? (
-    <>
-      <p className={headCls}>Show {noun}s</p>
-      <div className="max-h-72 overflow-y-auto">
-        {keys.map((key, i) => (
-          <ShownFieldRow
-            key={key}
-            field={TRACKER_FIELD_MAP.get(key)!}
-            index={i}
-            scope={dragScope}
-            onReorder={(from, to) => apply(reorderField(keys, from, to), false)}
-            onHide={() => apply(removeField(keys, i), false)}
-          />
-        ))}
-        {keys.length > 0 && <div className="my-1 border-t border-[var(--border)]" />}
-        {unusedFields(keys).map((f) => (
-          <button
-            key={f.key}
-            className={itemCls}
-            disabled={full}
-            title={full ? `Up to ${max} ${noun}s` : undefined}
-            onClick={() => apply([...keys, f.key], false)}
-          >
-            <span className="w-[13px] -ml-1 shrink-0" />
-            <span className="w-3.5 shrink-0" />
-            <span className="truncate">{f.label}</span>
+  // The whole layout: a checklist that stays open while fields are shown,
+  // hidden and dragged into order.
+  return (
+    <ContextMenu
+      x={state.x}
+      y={state.y}
+      onClose={onClose}
+      zIndex={90}
+      title={`Show ${noun}s`}
+      className="w-60"
+      items={[]}
+      body={(
+        <>
+          <div className="max-h-72 overflow-y-auto">
+            {keys.map((key, i) => (
+              <ShownFieldRow
+                key={key}
+                field={TRACKER_FIELD_MAP.get(key)!}
+                index={i}
+                scope={dragScope}
+                onReorder={(from, to) => onChange(reorderField(keys, from, to))}
+                onHide={() => onChange(removeField(keys, i))}
+              />
+            ))}
+            {keys.length > 0 && <div className="my-1 border-t border-[var(--border)]" />}
+            {unusedFields(keys).map((f) => (
+              <button
+                key={f.key}
+                className={itemCls}
+                disabled={full}
+                title={full ? `Up to ${max} ${noun}s` : undefined}
+                onClick={() => onChange([...keys, f.key])}
+              >
+                <span className="w-[13px] -ml-1 shrink-0" />
+                <span className="w-3.5 shrink-0" />
+                <span className="truncate">{f.label}</span>
+              </button>
+            ))}
+          </div>
+          <div className="my-1 border-t border-[var(--border)]" />
+          <button className={itemCls} disabled={isDefault} onClick={() => onChange(defaults)}>
+            <RotateCcw size={14} className="shrink-0" /> Reset {noun}s
           </button>
-        ))}
-      </div>
-    </>
-  ) : mode === 'add' ? (
-    <>
-      <p className={headCls}>Add after {current!.label}</p>
-      <div className="max-h-72 overflow-y-auto">
-        {unusedFields(keys).map((f) => (
-          <button key={f.key} className={itemCls} onClick={() => apply(insertField(keys, slot, f.key))}>
-            <Plus size={14} className="shrink-0 text-text-muted" />
-            {f.label}
-          </button>
-        ))}
-      </div>
-    </>
-  ) : (
-    <>
-      <p className={headCls}>Replace {current!.label} with</p>
-      <div className="max-h-56 overflow-y-auto">
-        {unusedFields(keys).map((f) => (
-          <button key={f.key} className={itemCls} onClick={() => apply(replaceField(keys, slot, f.key))}>
-            <span className="w-3.5 shrink-0" />
-            {f.label}
-          </button>
-        ))}
-      </div>
-      <div className="my-1 border-t border-[var(--border)]" />
-      <button
-        className={itemCls}
-        disabled={full}
-        title={full ? `Up to ${max} ${noun}s` : undefined}
-        onClick={() => setMode('add')}
-      >
-        <Plus size={14} className="shrink-0" /> Add {noun} after
-      </button>
-      <button className={itemCls} onClick={() => apply(removeField(keys, slot))}>
-        <EyeOff size={14} className="shrink-0" /> Hide {current!.label}
-      </button>
-    </>
-  )
-
-  return createPortal(
-    <div
-      ref={ref}
-      className="fixed z-[90] w-60 py-1 bg-surface border border-[var(--border)] rounded-xl shadow-2xl"
-      style={pos}
-      onContextMenu={(e) => e.preventDefault()}
-    >
-      {body}
-      <div className="my-1 border-t border-[var(--border)]" />
-      <button className={itemCls} disabled={isDefault} onClick={() => apply(defaults, !!slotKey)}>
-        <RotateCcw size={14} className="shrink-0" /> Reset {noun}s
-      </button>
-    </div>,
-    document.body,
+        </>
+      )}
+    />
   )
 }

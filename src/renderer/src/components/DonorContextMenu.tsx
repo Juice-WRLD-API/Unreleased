@@ -4,16 +4,18 @@ import {
 } from 'lucide-react'
 import { useStore } from '../store/useStore'
 import { donorFileToTrack } from '../lib/donorPlayback'
+import { useDonorFilePlaylists } from '../hooks/useDonorFilePlaylists'
 import type { DonorFile } from '../lib/donorFilesApi'
 import ContextMenu from './ContextMenu'
 
 export interface DonorMenuState { file: DonorFile; x: number; y: number }
 
-// Right-click menu for a donor file (My files, Settings, donor playlists).
-// Separate from SongContextMenu: that one is built around API song ids and
-// synced playlists, neither of which a donor file has. Queue and donor-playlist
-// actions live here; file actions (rename, share, delete...) come from the
-// caller, and any it leaves out simply don't show.
+// Right-click menu for a donor file (My files, Settings).
+// Separate from SongContextMenu: that one is built around API song ids, which
+// a donor file has none of. Queue and playlist actions live here (a donor
+// file joins private synced playlists as a donor entry); file actions
+// (rename, share, delete...) come from the caller, and any it leaves out
+// simply don't show.
 export default function DonorContextMenu({ state, onClose, onPlay, onDownload, onRename, onEditTags, onToggleShare, onCopyLink, onDelete, removeAction }: {
   state: DonorMenuState
   onClose: () => void
@@ -30,16 +32,14 @@ export default function DonorContextMenu({ state, onClose, onPlay, onDownload, o
   const { file } = state
   const playNext = useStore((s) => s.playNext)
   const addToQueue = useStore((s) => s.addToQueue)
-  const donorPlaylists = useStore((s) => s.donorPlaylists)
-  const addToDonorPlaylist = useStore((s) => s.addToDonorPlaylist)
-  const removeFromDonorPlaylist = useStore((s) => s.removeFromDonorPlaylist)
-  const createDonorPlaylist = useStore((s) => s.createDonorPlaylist)
+  const account = useStore((s) => s.account)
+  const { playlists, inList, toggle, createWith } = useDonorFilePlaylists(file.file_id)
   const [newName, setNewName] = useState('')
   const isAudio = !!onPlay
 
   const createWithFile = (): void => {
     if (!newName.trim()) return
-    createDonorPlaylist(newName.trim(), [file.file_id])
+    void createWith(newName.trim())
     onClose()
   }
 
@@ -53,19 +53,18 @@ export default function DonorContextMenu({ state, onClose, onPlay, onDownload, o
         isAudio && { icon: Play, label: 'Play', onSelect: onPlay },
         isAudio && { icon: ListStart, label: 'Play next', onSelect: () => playNext(donorFileToTrack(file)) },
         isAudio && { icon: ListEnd, label: 'Add to queue', onSelect: () => addToQueue(donorFileToTrack(file)) },
-        isAudio && {
+        isAudio && !!account && {
           icon: ListPlus,
-          label: 'Add to donor playlist',
-          childrenEmpty: 'No donor playlists yet.',
-          children: donorPlaylists.map((p) => {
-            const inList = p.fileIds.includes(file.file_id)
-            return {
-              label: p.name,
-              checked: inList,
-              keepOpen: true,
-              onSelect: () => (inList ? removeFromDonorPlaylist(p.id, file.file_id) : addToDonorPlaylist(p.id, file.file_id)),
-            }
-          }),
+          label: 'Add to playlist',
+          childrenEmpty: 'No playlists yet.',
+          // Public playlists can't hold donor files.
+          children: playlists.map((p) => ({
+            label: p.name,
+            checked: inList(p.id),
+            disabled: p.is_public && !inList(p.id),
+            keepOpen: true,
+            onSelect: () => toggle(p.id),
+          })),
           childrenFooter: (
             <div className="flex items-center gap-1">
               <input

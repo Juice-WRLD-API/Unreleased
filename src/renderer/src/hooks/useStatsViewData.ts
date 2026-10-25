@@ -54,8 +54,8 @@ export function useStatsViewData(): {
   topPlays: number
   nothingEverPlayed: boolean
 } {
-  const { listeningPlays, account, playTrack, playCollection, playNext } = useStorePick(
-    'listeningPlays', 'account', 'playTrack', 'playCollection', 'playNext')
+  const { listeningPlays, songPrefs, account, playTrack, playCollection, playNext } = useStorePick(
+    'listeningPlays', 'songPrefs', 'account', 'playTrack', 'playCollection', 'playNext')
 
   const [period, setPeriod] = useState<ListeningPeriod>('all')
   const [songs, setSongs] = useState<Map<number, StatsSong>>(new Map())
@@ -64,7 +64,7 @@ export function useStatsViewData(): {
   const [expanded, setExpanded] = useState(false)
   const [ctxMenu, setCtxMenu] = useState<SongContextMenuState | null>(null)
 
-  const prefs = useMemo(() => prefsForPeriod(listeningPlays, period), [listeningPlays, period])
+  const prefs = useMemo(() => prefsForPeriod(listeningPlays, period, songPrefs), [listeningPlays, period, songPrefs])
   const periodEvents = useMemo(() => sortListeningPlays(eventsForPeriod(listeningPlays, period)), [listeningPlays, period])
   const coverage = useMemo(
     () => periodCoverage(listeningPlays, period),

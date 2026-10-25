@@ -6,6 +6,7 @@
     "dev": "vite --port 3018 --strictPort --host",
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview",
+    "terminal:check-coverage": "node scripts/check-terminal-coverage.mjs",
     "android:sync": "npm run build && cap sync android",
     "android:apk": "npm run android:sync && cd android && gradlew assembleDebug",
     "android:deploy": "scripts\\run-android.bat --no-pause"

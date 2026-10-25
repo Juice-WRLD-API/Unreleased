@@ -1,8 +1,10 @@
 import { AlignLeft, AlignCenter } from 'lucide-react'
-import { useStorePick } from '../store/useStore'
+import ThemedColorPicker from './ThemedColorPicker'
+import { useStore, useStorePick } from '../store/useStore'
 
 // Lyric display controls (size, alignment, blur, colors). Shared by the WRLD
 // tab's Customize lyrics modal and the visualizer toolbar's settings popup.
+// Alignment and blur belong to the Classic list; the other lyric styles take size and colors only.
 
 const LYRIC_TEXT_SIZES: { label: string; value: number }[] = [
   { label: 'S', value: 0.85 },
@@ -42,11 +44,10 @@ function LyricColorRow({ label, presets, value, fallback, onChange }: {
           title={c}
         />
       ))}
-      <input
-        type="color"
+      <ThemedColorPicker
         value={value ?? fallback}
-        onChange={(e) => onChange(e.target.value)}
-        className="w-6 h-6 rounded-full cursor-pointer border-0 p-0 bg-transparent"
+        onChange={onChange}
+        className="w-6 h-6 rounded-full"
         title="Custom color"
       />
     </div>
@@ -67,8 +68,12 @@ export default function LyricsControls(): JSX.Element {
     'lyricsColorActive', 'setLyricsColorActive', 'lyricsColorInactive', 'setLyricsColorInactive',
   )
 
+  const classic = useStore((s) => s.desktop.lyrics.look === 'classic')
+  const fisheye = useStore((s) => s.desktop.lyrics.look === 'fisheye')
+
   return (
     <div className="flex flex-col gap-5">
+        {!fisheye && (
         <div>
           <p className="text-text-secondary text-xs mb-2">Text size</p>
           <div className="flex items-center gap-2 flex-wrap">
@@ -90,7 +95,10 @@ export default function LyricsControls(): JSX.Element {
             })}
           </div>
         </div>
+        )}
 
+        {classic && (
+          <>
         <div>
           <p className="text-text-secondary text-xs mb-2">Alignment</p>
           <div className="flex items-center gap-2 flex-wrap">
@@ -138,7 +146,10 @@ export default function LyricsControls(): JSX.Element {
             </div>
           )}
         </div>
+          </>
+        )}
 
+        {!fisheye && (
         <div className="flex flex-col gap-3">
           <p className="text-text-secondary text-xs -mb-1">Colors</p>
           <LyricColorRow
@@ -156,6 +167,7 @@ export default function LyricsControls(): JSX.Element {
             onChange={setLyricsColorInactive}
           />
         </div>
+        )}
     </div>
   )
 }

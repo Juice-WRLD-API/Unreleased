@@ -7,13 +7,19 @@ import {
   ListOrdered, GripVertical, CloudUpload, Type, AlignCenter, Menu, Pencil, Upload,
   ScrollText, ShieldCheck, Disc, Images, Search, LogOut, Bug, House, Heart, History, Music2, User, Check, Radio, Server,
   AudioLines, SlidersHorizontal, LogIn,
+  Activity, Lightbulb,
 } from 'lucide-react'
+import { DebugAnonymousToggle, DebugLogOpenButton, DebugRecordButton } from './DebugRecorder'
 import VizControls, { Pills, Toggle } from './VizControls'
+import DesktopSettings from './DesktopSettings'
+import Passkeys from './Passkeys'
 import { useStore, useStorePick, type SidebarPosition } from '../store/useStore'
 import { HOTKEY_ACTIONS, HOTKEY_CATEGORIES, effectiveBinding, comboTokens, eventToCombo } from '../lib/hotkeys'
 import { SKINS, getSkin } from '../lib/skins'
 import SkinEditorModal from './SkinEditorModal'
-import { FONTS } from '../lib/fonts'
+import { allFonts, addFontFile, addInstalledFont, FONT_ACCEPT } from '../lib/fonts'
+import { deleteFont } from '../lib/fontActions'
+import { useCustomFonts } from '../hooks/useCustomFonts'
 import { hasChatAccess, useChatStore } from '../store/chatStore'
 import ChatDevices from './chat/ChatDevices'
 import MyCdnNodes from './MyCdnNodes'
@@ -31,8 +37,11 @@ import { NOTIFICATION_SOUNDS } from '../lib/notifications'
 import { formatBytes, accountDisplayName, initial } from '../lib/format'
 import type { ViewType } from '../types'
 import LegalModal, { type LegalDoc } from './LegalModal'
-import { useSandboxStore } from './Modal'
+import { ModalOverlay, LockToggle, useSandboxStore } from './Modal'
 import EraCoversSection from './EraCoversSection'
+import { useContentMotion } from '../hooks/useContentMotion'
+import { MotionDisclosure } from './MotionDisclosure'
+import { useSlidingIndicator } from '../hooks/useSlidingIndicator'
 import { useSettingsAccount } from '../hooks/useSettingsAccount'
 import { useSettingsAppearance } from '../hooks/useSettingsAppearance'
 import { useLastfmConnect } from '../hooks/useLastfmConnect'
@@ -69,7 +78,7 @@ const NAV_POSITIONS: { id: SidebarPosition; label: string; icon: ElementType }[]
   { id: 'bottom', label: 'Bottom', icon: PanelBottom },
 ]
 
-type Tab = 'account' | 'appearance' | 'preferences' | 'playback' | 'shortcuts' | 'developer' | 'about'
+type Tab = 'account' | 'appearance' | 'preferences' | 'playback' | 'desktop' | 'shortcuts' | 'developer' | 'about'
 
 // A hand-maintained index of every setting row, used by the search bar to
 // jump straight to the tab a match lives on. `devOnly` mirrors the same gate
@@ -83,6 +92,8 @@ const SETTINGS_SEARCH_INDEX: { tab: Tab; label: string; sub?: string; devOnly?: 
   { tab: 'account', label: 'Show listening history', sub: 'Visible to anyone with your profile link' },
   { tab: 'account', label: 'Show public playlists', sub: 'Lists playlists already marked public' },
   { tab: 'account', label: 'My CDN nodes', sub: 'Nodes linked to your account' },
+  { tab: 'account', label: 'Two-factor authentication', sub: 'Whether sign-ins ask for an authenticator code' },
+  { tab: 'account', label: 'Passkeys', sub: 'Sign in with your face, fingerprint, PIN, a security key or your phone' },
   { tab: 'account', label: 'API keys', sub: 'Keys for scripts and integrations' },
   { tab: 'account', label: 'Auth Token', sub: 'View and copy your account token' },
   { tab: 'account', label: 'Log out' },
@@ -94,12 +105,13 @@ const SETTINGS_SEARCH_INDEX: { tab: Tab; label: string; sub?: string; devOnly?: 
   { tab: 'appearance', label: 'Theme background in WRLD', sub: "Use the app's theme behind the WRLD tab instead of the playing song's cover" },
   { tab: 'appearance', label: 'App font' },
   { tab: 'appearance', label: 'Lyrics font' },
+  { tab: 'appearance', label: 'Custom fonts' },
   { tab: 'appearance', label: 'App text size' },
   { tab: 'appearance', label: 'Lyrics text size' },
   { tab: 'appearance', label: 'Lyrics alignment' },
   { tab: 'appearance', label: 'Blur inactive lyrics', sub: 'Soften every synced line except the one playing' },
   { tab: 'appearance', label: 'Lyric colors', sub: 'Current line and other lines' },
-  { tab: 'appearance', label: 'WRLD visualizer', sub: 'Visualizer, quality, input boost, auto-switch, visualizer-only layout, artwork colors' },
+  { tab: 'appearance', label: 'WRLD visualizer', sub: 'Visualizer, Edge light, quality, input boost, auto-switch, visualizer-only or widgets layout, artwork colors' },
   // Preferences
   { tab: 'preferences', label: 'Full era names', sub: 'Show eras spelled out instead of abbreviated' },
   { tab: 'preferences', label: 'Sandbox', sub: 'Dock modals into a collapsible pill instead of a centered popup' },
@@ -109,6 +121,7 @@ const SETTINGS_SEARCH_INDEX: { tab: Tab; label: string; sub?: string; devOnly?: 
   { tab: 'preferences', label: 'Home screen', sub: 'Choose which sections show on the Home tab' },
   // Playback
   { tab: 'playback', label: 'Audio output' },
+  { tab: 'playback', label: 'Remember queue and now playing', sub: 'Restore your queue, current track and position on this device when you reopen. Playback stays paused.' },
   { tab: 'playback', label: 'Lyrics sync', sub: 'Offset lyrics timing' },
   { tab: 'playback', label: 'Crossfade' },
   { tab: 'playback', label: 'Smooth fade when pausing' },
@@ -120,6 +133,18 @@ const SETTINGS_SEARCH_INDEX: { tab: Tab; label: string; sub?: string; devOnly?: 
   { tab: 'playback', label: 'Last.fm scrobbling' },
   { tab: 'playback', label: 'Distributed CDN downloads', sub: 'Use the peer-to-peer CDN network for faster downloads' },
   // Shortcuts
+  // Desktop: the lyric styles, WRLD's Edge light and the widgets' looks for WRLD's Widgets layout
+  { tab: 'desktop', label: 'Light', sub: 'Snake, Lava, Fireflies, Lyrics Ticker, Fire, Snow… and how WRLD’s Edge light looks' },
+  { tab: 'desktop', label: 'Light place', sub: 'Everywhere, bottom, top or corners' },
+  { tab: 'desktop', label: 'Light animation', sub: 'Flow, still or music sync' },
+  { tab: 'desktop', label: 'Sensitivity', sub: 'How the light follows the music' },
+  { tab: 'desktop', label: 'Light thickness, glow and particles' },
+  { tab: 'desktop', label: 'Light colors', sub: 'One or two colors, or the cover’s' },
+  { tab: 'desktop', label: 'Lyric style', sub: 'Fisheye, Spread, Karaoke, Typewriter, Neon, Echo, Glitch, Cinema' },
+  { tab: 'desktop', label: 'Lyric font', sub: 'A font for each lyric style' },
+  { tab: 'desktop', label: 'Player widget', sub: 'Your queue as glass cards, in WRLD’s Widgets layout' },
+  { tab: 'desktop', label: 'Playlist widget', sub: 'Queue, playlists or liked songs, in WRLD' },
+  { tab: 'desktop', label: 'Clock widget', sub: 'Tall glass digits, in WRLD' },
   { tab: 'shortcuts', label: 'Skip amount', sub: 'How far skip-forward / skip-backward jump' },
   { tab: 'shortcuts', label: 'Keyboard shortcuts', sub: 'Rebind any in-app or global hotkey' },
   // Developer
@@ -128,6 +153,8 @@ const SETTINGS_SEARCH_INDEX: { tab: Tab; label: string; sub?: string; devOnly?: 
   // Feedback / About
   { tab: 'about', label: 'Feedback', sub: 'Report a bug or share an idea' },
   { tab: 'preferences', label: 'Auto-report app errors', sub: 'Automatically send a crash report when the app hits an unexpected error' },
+  { tab: 'about', label: 'Record debug log', sub: 'Record console messages and network requests to a file you can send us' },
+  { tab: 'about', label: 'Open debug log', sub: 'View a saved debug log file - requests, errors and console messages' },
   { tab: 'about', label: 'About', sub: 'Version, GitHub, Discord, API links' },
   { tab: 'about', label: 'API Docs' },
   { tab: 'about', label: 'Thank You', sub: 'Donors and contributors' },
@@ -341,7 +368,7 @@ function VizSettings(): JSX.Element {
       <button
         onClick={() => setOpen(!open)}
         aria-expanded={open}
-        className={`flex items-center gap-2.5 w-full text-left ${open ? 'mb-2.5' : ''}`}
+        className="flex items-center gap-2.5 w-full text-left"
       >
         <div className="w-6 h-6 rounded-md flex items-center justify-center shrink-0" style={{ backgroundColor: '#db2777' }}>
           <AudioLines size={13} className="text-white" strokeWidth={2.25} />
@@ -350,11 +377,9 @@ function VizSettings(): JSX.Element {
           <span className="text-text-primary text-sm">WRLD visualizer</span>
           <p className="text-text-muted text-[11px]">Plays behind the WRLD tab - ← → and V work in fullscreen: ← → switches visualizer, V toggles visualizer only</p>
         </div>
-        <ChevronDown size={14} className={`text-text-muted transition-transform duration-150 shrink-0 ${open ? 'rotate-180' : ''}`} />
+        <ChevronDown size={14} className={`text-text-muted control-motion shrink-0 ${open ? 'rotate-180' : ''}`} />
       </button>
-      {open && (
-      <div className="pl-[34px]"><VizControls /></div>
-      )}
+      <MotionDisclosure open={open} className="pl-[34px] pt-2.5"><VizControls /></MotionDisclosure>
     </div>
   )
 }
@@ -434,6 +459,7 @@ export default function Settings(): JSX.Element {
     audioOutput, setAudioOutput,
     crossfadeEnabled, crossfadeDuration, setCrossfade,
     pauseFadeEnabled, setPauseFade,
+    rememberQueue, setRememberQueue,
     preferOgVersion, setPreferOgVersion,
     rotateSuggestedCovers, setRotateSuggestedCovers,
     mediaOverlayEnabled, setMediaOverlayEnabled,
@@ -457,9 +483,9 @@ export default function Settings(): JSX.Element {
     playlistHeroEnabledDark, playlistHeroEnabledLight, setPlaylistHeroEnabled,
     refreshPlaylists, fullEraNames, setFullEraNames,
     autoReportErrors, setAutoReportErrors,
-    embedLyricsOnDownload, setEmbedLyricsOnDownload,
+    embedSongInfoOnDownload, setEmbedSongInfoOnDownload,
     uploads,
-  } = useStorePick('navStyle', 'setNavStyle', 'setShowSettings', 'setActiveView', 'account', 'logoutAccount', 'setShowUserAuth', 'theme', 'setTheme', 'customSkins', 'saveCustomSkin', 'deleteCustomSkin', 'accentColor', 'setAccentColor', 'settingsTab', 'setSettingsTab', 'sidebarPosition', 'setSidebarPosition', 'autoHideNav', 'setAutoHideNav', 'autoHideNavZone', 'setAutoHideNavZone', 'navOrder', 'setNavOrder', 'navVisibility', 'setNavItemVisible', 'navControlOrder', 'setNavControlOrder', 'navControlVisibility', 'setNavControlVisible', 'homeSectionVisibility', 'setHomeSectionVisible', 'audioOutput', 'setAudioOutput', 'crossfadeEnabled', 'crossfadeDuration', 'setCrossfade', 'pauseFadeEnabled', 'setPauseFade', 'preferOgVersion', 'setPreferOgVersion', 'rotateSuggestedCovers', 'setRotateSuggestedCovers', 'mediaOverlayEnabled', 'setMediaOverlayEnabled', 'lyricsOffset', 'setLyricsOffset', 'sleepTimerEnd', 'setSleepTimer', 'hotkeyBindings', 'setHotkeyBinding', 'resetHotkeyBindings', 'hotkeySeekSeconds', 'setHotkeySeekSeconds', 'developerMode', 'setDeveloperMode', 'lastfmUser', 'setLastfmUser', 'lastfmEnabled', 'setLastfmEnabled', 'appTextScale', 'setAppTextScale', 'lyricsScale', 'setLyricsScale', 'lyricsAlign', 'setLyricsAlign', 'lyricsBlur', 'setLyricsBlur', 'lyricsBlurAmount', 'setLyricsBlurAmount', 'lyricsColorActive', 'setLyricsColorActive', 'lyricsColorInactive', 'setLyricsColorInactive', 'appFont', 'setAppFont', 'lyricsFont', 'setLyricsFont', 'gradientsEnabled', 'setGradientsEnabled', 'surfaceGradientsEnabled', 'setSurfaceGradientsEnabled', 'wrldThemeBackground', 'setWrldThemeBackground', 'playlistHeroEnabledDark', 'playlistHeroEnabledLight', 'setPlaylistHeroEnabled', 'refreshPlaylists', 'fullEraNames', 'setFullEraNames', 'autoReportErrors', 'setAutoReportErrors', 'embedLyricsOnDownload', 'setEmbedLyricsOnDownload', 'uploads')
+  } = useStorePick('navStyle', 'setNavStyle', 'setShowSettings', 'setActiveView', 'account', 'logoutAccount', 'setShowUserAuth', 'theme', 'setTheme', 'customSkins', 'saveCustomSkin', 'deleteCustomSkin', 'accentColor', 'setAccentColor', 'settingsTab', 'setSettingsTab', 'sidebarPosition', 'setSidebarPosition', 'autoHideNav', 'setAutoHideNav', 'autoHideNavZone', 'setAutoHideNavZone', 'navOrder', 'setNavOrder', 'navVisibility', 'setNavItemVisible', 'navControlOrder', 'setNavControlOrder', 'navControlVisibility', 'setNavControlVisible', 'homeSectionVisibility', 'setHomeSectionVisible', 'audioOutput', 'setAudioOutput', 'crossfadeEnabled', 'crossfadeDuration', 'setCrossfade', 'pauseFadeEnabled', 'setPauseFade', 'rememberQueue', 'setRememberQueue', 'preferOgVersion', 'setPreferOgVersion', 'rotateSuggestedCovers', 'setRotateSuggestedCovers', 'mediaOverlayEnabled', 'setMediaOverlayEnabled', 'lyricsOffset', 'setLyricsOffset', 'sleepTimerEnd', 'setSleepTimer', 'hotkeyBindings', 'setHotkeyBinding', 'resetHotkeyBindings', 'hotkeySeekSeconds', 'setHotkeySeekSeconds', 'developerMode', 'setDeveloperMode', 'lastfmUser', 'setLastfmUser', 'lastfmEnabled', 'setLastfmEnabled', 'appTextScale', 'setAppTextScale', 'lyricsScale', 'setLyricsScale', 'lyricsAlign', 'setLyricsAlign', 'lyricsBlur', 'setLyricsBlur', 'lyricsBlurAmount', 'setLyricsBlurAmount', 'lyricsColorActive', 'setLyricsColorActive', 'lyricsColorInactive', 'setLyricsColorInactive', 'appFont', 'setAppFont', 'lyricsFont', 'setLyricsFont', 'gradientsEnabled', 'setGradientsEnabled', 'surfaceGradientsEnabled', 'setSurfaceGradientsEnabled', 'wrldThemeBackground', 'setWrldThemeBackground', 'playlistHeroEnabledDark', 'playlistHeroEnabledLight', 'setPlaylistHeroEnabled', 'refreshPlaylists', 'fullEraNames', 'setFullEraNames', 'autoReportErrors', 'setAutoReportErrors', 'embedSongInfoOnDownload', 'setEmbedSongInfoOnDownload', 'uploads')
 
   function startEditName(): void {
     setNameInput(accountDisplayName(account))
@@ -491,6 +517,38 @@ export default function Settings(): JSX.Element {
     sleepMinutes, setSleepMinutes,
     devices,
   } = useSettingsAppearance()
+  // Custom fonts - the hidden file input, the installed-font name being typed,
+  // and the last add error.
+  const customFonts = useCustomFonts()
+  const allFontChoices = allFonts()
+  const fontImportRef = useRef<HTMLInputElement>(null)
+  const [installedFontName, setInstalledFontName] = useState('')
+  const [fontError, setFontError] = useState<string | null>(null)
+  const [fontBusy, setFontBusy] = useState(false)
+
+  const importFontFile = async (file: File): Promise<void> => {
+    setFontBusy(true)
+    setFontError(null)
+    try {
+      const font = await addFontFile(file)
+      setAppFont(font.id)
+    } catch (e) {
+      setFontError(e instanceof Error ? e.message : 'Could not add that font')
+    } finally {
+      setFontBusy(false)
+    }
+  }
+
+  const addInstalled = (): void => {
+    try {
+      const font = addInstalledFont(installedFontName)
+      setInstalledFontName('')
+      setFontError(null)
+      setAppFont(font.id)
+    } catch (e) {
+      setFontError(e instanceof Error ? e.message : 'Could not add that font')
+    }
+  }
   // Drag-to-reorder state for the "Menu order" list - indices into the visible
   // nav list (see shownNav below). null = nothing being dragged / hovered.
   const [navDragIdx, setNavDragIdx] = useState<number | null>(null)
@@ -528,10 +586,9 @@ export default function Settings(): JSX.Element {
   }
 
   const closeSettings = (): void => setShowSettings(false)
-  // setActiveView alone leaves Settings now that it's a real page in the same
-  // slot as every other view - no separate close step, and no extra history
-  // entry from one.
-  const openMainView = (view: ViewType): void => setActiveView(view)
+  // Close the modal first, then navigate - it's an overlay now, not a view
+  // that setActiveView leaves behind on its own.
+  const openMainView = (view: ViewType): void => { setShowSettings(false); setActiveView(view) }
 
   const {
     lastfmBusy, lastfmWaiting, lastfmError, connectLastfm, disconnectLastfm, stopLastfmPoll,
@@ -565,11 +622,15 @@ export default function Settings(): JSX.Element {
   }, [recording, setHotkeyBinding])
 
   const [tab, setTab] = useState<Tab>((settingsTab as Tab) ?? 'account')
+  const { containerRef: categoryRef, indicatorRef: categoryIndicatorRef } = useSlidingIndicator<HTMLDivElement>(tab)
+  const { containerRef: mobileCategoryRef, indicatorRef: mobileCategoryIndicatorRef } = useSlidingIndicator<HTMLDivElement>(tab)
+  const contentRef = useRef<HTMLDivElement>(null)
   const tabs: { id: Tab; label: string; icon: ElementType }[] = [
     { id: 'account', label: 'Account', icon: User },
     { id: 'appearance', label: 'Appearance', icon: Palette },
     { id: 'preferences', label: 'Preferences', icon: SlidersHorizontal },
     { id: 'playback', label: 'Playback', icon: Volume2 },
+    { id: 'desktop' as Tab, label: 'Desktop', icon: Lightbulb },
     { id: 'shortcuts', label: 'Shortcuts', icon: Keyboard },
     ...(developerMode ? [{ id: 'developer' as Tab, label: 'Developer', icon: Wrench }] : []),
     { id: 'about', label: 'About', icon: Info },
@@ -584,6 +645,7 @@ export default function Settings(): JSX.Element {
   // result never points at a tab that doesn't exist in this build.
   const [settingsQuery, setSettingsQuery] = useState('')
   const settingsQueryTrimmed = settingsQuery.trim().toLowerCase()
+  useContentMotion(contentRef, settingsQueryTrimmed ? 'search' : tab)
   const searchResults = settingsQueryTrimmed
     ? SETTINGS_SEARCH_INDEX.filter((r) =>
         (!r.devOnly || developerMode) &&
@@ -611,7 +673,14 @@ export default function Settings(): JSX.Element {
   }
 
   return (
-    <>
+    <ModalOverlay
+      onClose={closeSettings}
+      zIndexClassName="z-50"
+      panelClassName="bg-surface border border-[var(--border)] rounded-3xl shadow-2xl w-full max-w-[760px] h-[600px] max-h-[85vh]"
+      minWidth={520} minHeight={420}
+    >
+      {({ onHandleMouseDown, locked, toggleLock, canLock }) => (
+      <>
       {/* Custom-skin editor (portals to <body>, so placement here is fine) */}
       {editingSkinId && (
         <SkinEditorModal
@@ -621,12 +690,13 @@ export default function Settings(): JSX.Element {
         />
       )}
       <div className="bg-surface w-full h-full flex flex-col overflow-hidden">
-        <div className="flex items-center justify-between px-6 py-4 border-b border-[var(--border)] shrink-0 select-none">
+        <div className="flex items-center justify-between px-6 py-4 border-b border-[var(--border)] shrink-0 select-none" onMouseDown={onHandleMouseDown}>
           <div className="flex items-center gap-2" >
             <h2 className="text-text-primary font-black text-xl tracking-tight">Settings</h2>
           </div>
           <div className="flex items-center gap-3" >
-            <button onClick={closeSettings} title="Back" className="text-text-muted hover:text-text-primary transition-colors">
+            {canLock && <LockToggle locked={locked} onClick={toggleLock} />}
+            <button onClick={closeSettings} title="Close" className="text-text-muted hover:text-text-primary transition-colors">
               <X size={20} />
             </button>
           </div>
@@ -660,40 +730,44 @@ export default function Settings(): JSX.Element {
 
         {/* Mobile tab bar - the sidebar collapses below sm, so categories
             move into a horizontal scroller instead. */}
-        <div className="sm:hidden shrink-0 flex gap-1.5 px-4 py-2.5 border-b border-[var(--border)] overflow-x-auto">
+        <div ref={mobileCategoryRef} className="relative isolate sm:hidden shrink-0 flex gap-1.5 px-4 py-2.5 border-b border-[var(--border)] overflow-x-auto">
           {tabs.map((t) => (
             <button
               key={t.id}
+              data-indicator-key={t.id}
               onClick={() => { setTab(t.id); setSettingsQuery('') }}
               className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium whitespace-nowrap transition-colors shrink-0 ${
-                tab === t.id ? 'bg-accent/15 text-accent' : 'text-text-muted hover:text-text-primary bg-[var(--surface-overlay)]'
+                tab === t.id ? 'text-accent' : 'text-text-muted hover:text-text-primary bg-[var(--surface-overlay)]'
               }`}
             >
               <t.icon size={13} />
               {t.label}
             </button>
           ))}
+          <div ref={mobileCategoryIndicatorRef} aria-hidden="true" className="nav-indicator rounded-full bg-accent/15" />
         </div>
 
         {/* Body - sidebar category list + flat content pane, mirroring
             macOS System Settings / Apple Music's own preferences window. */}
         <div className="flex flex-1 min-h-0">
-          <div className="w-[180px] shrink-0 border-r border-[var(--border)] py-3 px-2 overflow-y-auto hidden sm:block">
+          <div ref={categoryRef} className="relative isolate w-[180px] shrink-0 border-r border-[var(--border)] py-3 px-2 overflow-y-auto hidden sm:block">
             {tabs.map((t) => (
               <button
                 key={t.id}
+                data-indicator-key={t.id}
                 onClick={() => { setTab(t.id); setSettingsQuery('') }}
                 className={`w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-sm font-medium transition-colors mb-0.5 ${
-                  tab === t.id ? 'bg-accent/15 text-accent' : 'text-text-muted hover:text-text-primary hover:bg-[var(--surface-overlay)]'
+                  tab === t.id ? 'text-accent' : 'text-text-muted hover:text-text-primary hover:bg-[var(--surface-overlay)]'
                 }`}
               >
                 <t.icon size={15} className="shrink-0" />
                 {t.label}
               </button>
             ))}
+            <div ref={categoryIndicatorRef} aria-hidden="true" className="nav-indicator rounded-lg bg-accent/15" />
           </div>
 
-          <div key={tab} className="flex-1 min-w-0 overflow-y-auto px-6 py-5">
+          <div key={tab} ref={contentRef} className="flex-1 min-w-0 overflow-y-auto px-6 py-5">
 
             {/* ── Search results ── shown instead of the active tab's content
                 whenever there's a query; picking one jumps to its tab. */}
@@ -844,6 +918,30 @@ export default function Settings(): JSX.Element {
 
                     <p className="text-[10px] font-semibold uppercase tracking-widest text-text-muted mt-4 mb-1.5 px-0.5">My CDN nodes</p>
                     <MyCdnNodes />
+
+                    <p className="text-[10px] font-semibold uppercase tracking-widest text-text-muted mt-4 mb-1.5 px-0.5">Security</p>
+                    {/* Setup is admin-only on the server (GET otp/setup/ answers
+                        "Administrator access required."), and Admin already
+                        parks an admin without 2FA on its setup panel. */}
+                    <Row
+                      icon={ShieldCheck}
+                      iconColor={account.otp_enabled ? '#059669' : '#6b7280'}
+                      label="Two-factor authentication"
+                      sub={account.otp_enabled
+                        ? 'Sign-ins ask for a code from your authenticator app'
+                        : account.is_administrator ? 'Required for admin tools' : 'Not turned on for this account'}
+                    >
+                      {account.otp_enabled ? (
+                        <span className="shrink-0 text-[11px] font-semibold text-emerald-500">On</span>
+                      ) : account.is_administrator ? (
+                        <button onClick={() => openMainView('admin')} className="shrink-0 text-[11px] font-semibold text-accent hover:underline">Set up</button>
+                      ) : (
+                        <span className="shrink-0 text-[11px] font-semibold text-text-muted">Off</span>
+                      )}
+                    </Row>
+
+                    <p className="text-[10px] font-semibold uppercase tracking-widest text-text-muted mt-4 mb-1.5 px-0.5">Passkeys</p>
+                    <Passkeys />
 
                     <p className="text-[10px] font-semibold uppercase tracking-widest text-text-muted mt-4 mb-1.5 px-0.5">API keys</p>
                     <ApiKeys />
@@ -1096,7 +1194,7 @@ export default function Settings(): JSX.Element {
                     </div>
                   </div>
                   <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 pl-[34px]">
-                    {FONTS.map((font) => {
+                    {allFontChoices.map((font) => {
                       const active = appFont === font.id
                       return (
                         <button
@@ -1136,7 +1234,7 @@ export default function Settings(): JSX.Element {
                     </div>
                   </div>
                   <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 pl-[34px]">
-                    {FONTS.map((font) => {
+                    {allFontChoices.map((font) => {
                       const active = lyricsFont === font.id
                       return (
                         <button
@@ -1161,6 +1259,79 @@ export default function Settings(): JSX.Element {
                         </button>
                       )
                     })}
+                  </div>
+                </div>
+                <div className="py-3 border-b border-[var(--border)] last:border-b-0">
+                  <div className="flex items-center gap-2.5 mb-2.5">
+                    <div className="w-6 h-6 rounded-md flex items-center justify-center shrink-0" style={{ backgroundColor: '#0d9488' }}>
+                      <Type size={13} className="text-white" strokeWidth={2.25} />
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      <span className="text-text-primary text-sm">Custom fonts</span>
+                      <p className="text-text-muted text-[11px]">Import a font file, or use one already installed on this computer — they show up in both lists above</p>
+                    </div>
+                    <button
+                      onClick={() => fontImportRef.current?.click()}
+                      disabled={fontBusy}
+                      className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-[11px] font-medium text-text-secondary hover:text-text-primary hover:bg-[var(--surface-overlay)] transition-colors shrink-0 disabled:opacity-50"
+                      title="Import a .ttf, .otf, .woff or .woff2 file"
+                    >
+                      {fontBusy ? <Loader2 size={13} className="animate-spin" /> : <Upload size={13} />} Import file
+                    </button>
+                    <input
+                      ref={fontImportRef}
+                      type="file"
+                      accept={FONT_ACCEPT}
+                      className="hidden"
+                      onChange={(e) => {
+                        const file = e.target.files?.[0]
+                        if (file) void importFontFile(file)
+                        e.target.value = ''
+                      }}
+                    />
+                  </div>
+                  <div className="pl-[34px]">
+                    <form
+                      className="flex items-center gap-2"
+                      onSubmit={(e) => { e.preventDefault(); addInstalled() }}
+                    >
+                      <input
+                        type="text"
+                        value={installedFontName}
+                        onChange={(e) => { setInstalledFontName(e.target.value); setFontError(null) }}
+                        placeholder="Installed font name, e.g. Comic Sans MS"
+                        maxLength={64}
+                        className="flex-1 min-w-0 h-8 rounded-lg bg-[var(--surface-highest)] text-text-primary text-xs px-2.5 outline-none focus:ring-1 focus:ring-accent/50 transition-shadow placeholder:text-text-muted"
+                      />
+                      <button
+                        type="submit"
+                        disabled={!installedFontName.trim()}
+                        className="flex items-center gap-1.5 px-2.5 h-8 rounded-lg text-[11px] font-medium text-text-secondary hover:text-text-primary hover:bg-[var(--surface-overlay)] transition-colors shrink-0 disabled:opacity-40"
+                      >
+                        <Plus size={13} /> Add
+                      </button>
+                    </form>
+                    {fontError && <p className="text-red-400 text-[11px] mt-2">{fontError}</p>}
+                    {customFonts.length > 0 && (
+                      <div className="mt-2.5 flex flex-col gap-1">
+                        {customFonts.map((font) => (
+                          <div key={font.id} className="flex items-center gap-2 px-2.5 py-1.5 rounded-lg border border-[var(--border)]">
+                            <span className="flex-1 min-w-0 truncate text-sm text-text-primary" style={{ fontFamily: allFontChoices.find((f) => f.id === font.id)?.stack }}>
+                              {font.name}
+                            </span>
+                            <span className="text-[10px] text-text-muted shrink-0">{font.kind === 'file' ? 'Imported file' : 'Installed'}</span>
+                            <button
+                              onClick={() => void deleteFont(font.id)}
+                              className="p-1 rounded-md text-text-muted hover:text-red-400 hover:bg-[var(--surface-overlay)] transition-colors shrink-0"
+                              title={`Remove ${font.name}`}
+                              aria-label={`Remove ${font.name}`}
+                            >
+                              <Trash2 size={13} />
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                    )}
                   </div>
                 </div>
                 <div className="py-3 border-b border-[var(--border)] last:border-b-0">
@@ -1318,10 +1489,10 @@ export default function Settings(): JSX.Element {
                 <Row
                   icon={FileText}
                   iconColor="#8b5cf6"
-                  label="Embed lyrics and cover in downloads"
-                  sub="When you download an MP3, write the song's lyrics (synced too, if it has them) and your own cover for it, if you set one, into the file's tags - your cover replaces the one in the file"
+                  label="Add song info to downloads"
+                  sub="When you download an MP3, write the song's name, artist, album, cover and lyrics (synced too, if it has them) into the file's tags - a cover you set for the song replaces the one in the file"
                 >
-                  <Toggle on={embedLyricsOnDownload} onClick={() => setEmbedLyricsOnDownload(!embedLyricsOnDownload)} />
+                  <Toggle on={embedSongInfoOnDownload} onClick={() => setEmbedSongInfoOnDownload(!embedSongInfoOnDownload)} />
                 </Row>
                 <Row
                   icon={Bug}
@@ -1508,7 +1679,7 @@ export default function Settings(): JSX.Element {
                     )}
                   </div>
                   <div className="pl-[34px] space-y-1.5">
-                    {HOME_SECTIONS.filter((section) => !section.staffOnly || hasChatAccess(account)).map((section) => {
+                    {HOME_SECTIONS.filter((section) => (!section.staffOnly || hasChatAccess(account))).map((section) => {
                       const shown = isHomeSectionVisible(section.id, homeSectionVisibility)
                       return (
                         <div key={section.id} className="flex items-center gap-2.5 px-2.5 py-2 rounded-lg border border-[var(--border)] bg-[var(--surface-overlay)]">
@@ -1588,6 +1759,14 @@ export default function Settings(): JSX.Element {
             {!settingsQueryTrimmed && tab === 'playback' && (
               <div>
                 <h3 className="text-text-primary text-lg font-bold mb-4">Playback</h3>
+                <Row
+                  icon={ListOrdered}
+                  iconColor="#7c3aed"
+                  label="Remember queue and now playing"
+                  sub="Restore your queue, current track and position on this device when you reopen. Playback stays paused."
+                >
+                  <Toggle on={rememberQueue} onClick={() => setRememberQueue(!rememberQueue)} />
+                </Row>
                 {devices.length > 0 && (
                   <Row icon={Volume2} iconColor="#2563eb" label="Audio output">
                     <select
@@ -1790,6 +1969,8 @@ export default function Settings(): JSX.Element {
               </div>
             )}
 
+            {!settingsQueryTrimmed && tab === 'desktop' && <DesktopSettings />}
+
             {/* ── Shortcuts ── */}
             {!settingsQueryTrimmed && tab === 'shortcuts' && (
               <div>
@@ -1985,6 +2166,28 @@ export default function Settings(): JSX.Element {
                   Send Feedback
                 </button>
 
+                <div className="mt-2 px-3 rounded-xl bg-[var(--surface-raised)] border border-[var(--border)]">
+                  <Row
+                    icon={Activity}
+                    iconColor="#dc2626"
+                    label="Record debug log"
+                    sub="Records console messages and network requests while you reproduce a problem, then saves them to a file you can send us"
+                  >
+                    <div className="flex items-center gap-2 shrink-0">
+                      <DebugLogOpenButton />
+                      <DebugRecordButton />
+                    </div>
+                  </Row>
+                  <Row
+                    icon={EyeOff}
+                    iconColor="#6b7280"
+                    label="Anonymous"
+                    sub="Leaves out device and browser details, and scrubs your username, email, IP and folder paths from the log"
+                  >
+                    <DebugAnonymousToggle />
+                  </Row>
+                </div>
+
                 <button
                   onClick={() => openMainView('thanks')}
                   className="flex items-center gap-2 w-full px-3 py-2.5 rounded-xl bg-[var(--surface-raised)] hover:bg-[var(--surface-overlay)] border border-[var(--border)] text-text-secondary text-sm font-medium transition-colors mt-2"
@@ -2033,23 +2236,22 @@ export default function Settings(): JSX.Element {
                     <div key={q}>
                       <button
                         onClick={() => setOpenAbout(openAbout === q ? null : q)}
+                        aria-expanded={openAbout === q}
                         className="flex items-center justify-between w-full px-3 py-2.5 hover:bg-[var(--surface-raised)] transition-colors text-left"
                       >
                         <span className="text-text-secondary text-xs font-medium">{q}</span>
-                        <ChevronDown size={12} className={`text-text-muted transition-transform duration-150 shrink-0 ml-2 ${openAbout === q ? 'rotate-180' : ''}`} />
+                        <ChevronDown size={12} className={`text-text-muted control-motion shrink-0 ml-2 ${openAbout === q ? 'rotate-180' : ''}`} />
                       </button>
-                      {openAbout === q && (
-                        <div className="px-3 pb-3 pt-0">
-                          <p className="text-text-muted text-xs leading-relaxed">{a}</p>
-                          {link && (
-                            <button
-                              onClick={() => openMainView('docs')}
-                              className="mt-1.5 inline-block text-xs text-accent hover:underline">
-                              {link.text}
-                            </button>
-                          )}
-                        </div>
-                      )}
+                      <MotionDisclosure open={openAbout === q} className="px-3 pb-3 pt-0">
+                        <p className="text-text-muted text-xs leading-relaxed">{a}</p>
+                        {link && (
+                          <button
+                            onClick={() => openMainView('docs')}
+                            className="mt-1.5 inline-block text-xs text-accent hover:underline">
+                            {link.text}
+                          </button>
+                        )}
+                      </MotionDisclosure>
                     </div>
                   ))}
                 </div>
@@ -2060,6 +2262,8 @@ export default function Settings(): JSX.Element {
       </div>
 
       {legalDoc && <LegalModal initialDoc={legalDoc} onClose={() => setLegalDoc(null)} />}
-    </>
+      </>
+      )}
+    </ModalOverlay>
   )
 }

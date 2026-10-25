@@ -1,4 +1,4 @@
-import { useState, memo, useEffect, useMemo } from 'react'
+import { useState, memo, useEffect, useMemo, useRef } from 'react'
 import {
   ChevronLeft, Users, Clock, CheckCircle, XCircle, ShieldCheck, BarChart2,
   Loader2, RefreshCw, FileEdit, KeyRound, Check, AlertCircle, RotateCcw,
@@ -23,6 +23,8 @@ import CompProposalsTab from './CompProposalsTab.mobile'
 import ChannelsTab from './ChannelsTab.mobile'
 import EraTab from './EraTab.mobile'
 import CdnNodesTab from './CdnNodesTab.mobile'
+import LogsTab from './LogsTab'
+import LyricsGenAdminTab from './LyricsGenAdminTab'
 import { useBackToClose } from '../hooks/useBackToClose'
 import { useStaffRoles } from '../hooks/useStaffRoles'
 import { useAdminQueue, type AdminTab } from '../hooks/useAdminQueue'
@@ -34,6 +36,10 @@ import { useAdminUsersList } from '../hooks/useAdminUsersList'
 import { useAdminStats } from '../hooks/useAdminStats'
 import { TEXTAREA_FIELDS, ALL_SONG_FIELDS, PROPOSAL_FILTERS, PROPOSAL_SORTS, PROPOSAL_PAGE } from '../lib/proposalRevise'
 import RoleBadges from './RoleBadges'
+import { showAppToast } from '../lib/appToast'
+import ThemedSelect from './ThemedSelect'
+import ThemedCheckbox from './ThemedCheckbox'
+import { useContentMotion } from '../hooks/useContentMotion'
 
 type Tab = AdminTab
 
@@ -117,6 +123,8 @@ export default function AdminPage({ embedded = false, initialTab, onExit }: {
   // art) on every single switch, which for a list of any size fired hundreds
   // of redundant image requests for data that hadn't changed.
   const visited = useVisitedTabs(tab)
+  const contentRef = useRef<HTMLDivElement>(null)
+  useContentMotion(contentRef, tab)
 
   if (!canReviewStaff) return (
     <div className="flex-1 flex flex-col items-center justify-center gap-3 text-center">
@@ -157,7 +165,7 @@ export default function AdminPage({ embedded = false, initialTab, onExit }: {
           {/* A tab's data loads once per visit (see the sig comment in
               useAdminQueue) rather than refetching every time it's reselected -
               this is the explicit way back to fresh data instead. */}
-          {tab !== 'comp-proposals' && tab !== 'channels' && tab !== 'eras' && tab !== 'cdn-nodes' && tab !== 'security' && (
+          {tab !== 'comp-proposals' && tab !== 'channels' && tab !== 'eras' && tab !== 'cdn-nodes' && tab !== 'lyrics' && tab !== 'logs' && (
             <button onClick={() => refresh()} disabled={loading} title="Refresh"
               className="w-11 h-11 shrink-0 flex items-center justify-center rounded-full text-accent active:bg-surface-overlay transition-colors disabled:opacity-40">
               <RefreshCw size={14} className={loading ? 'animate-spin' : ''} />
@@ -194,7 +202,7 @@ export default function AdminPage({ embedded = false, initialTab, onExit }: {
           filter chips and each tab's local state (selection, draft notes,
           cached song lookups) on every refetch. A translucent overlay signals
           the load without tearing the UI down. */}
-      <div className="flex-1 overflow-hidden relative">
+      <div ref={contentRef} className="flex-1 overflow-hidden relative">
         {loading && (
           <div className="absolute inset-0 z-10 flex items-center justify-center bg-[var(--bg)]/60 backdrop-blur-[1px]">
             <Loader2 size={20} className="animate-spin text-text-muted" />
@@ -250,9 +258,14 @@ export default function AdminPage({ embedded = false, initialTab, onExit }: {
             <CdnNodesTab />
           </div>
         )}
-        {visited.has('security') && (
-          <div className={tab === 'security' ? 'h-full' : 'hidden'}>
-            <SecurityTab />
+        {visited.has('lyrics') && (
+          <div className={tab === 'lyrics' ? 'h-full' : 'hidden'}>
+            <LyricsGenAdminTab />
+          </div>
+        )}
+        {visited.has('logs') && (
+          <div className={tab === 'logs' ? 'h-full' : 'hidden'}>
+            <LogsTab active={tab === 'logs'} />
           </div>
         )}
       </div>
@@ -315,25 +328,22 @@ function RevisePanel({ proposal, onClose, onDone, channel }: {
 
         {/* Add field */}
         <div className="rounded-xl border border-dashed border-[var(--border)] overflow-hidden">
-          <div className="flex items-center gap-2 px-3 py-1.5 bg-[var(--surface-raised)] border-b border-[var(--border)]">
+          <div className="flex items-center gap-2 px-3 py-1.5 bg-[var(--surface-raised)]">
             <Plus size={11} className="text-text-muted" />
             <span className="text-[10px] text-text-muted font-semibold">Add field</span>
           </div>
           <div className="flex gap-2 p-2">
-            <select
+            <ThemedSelect
               value={addKey}
-              onChange={e => setAddKey(e.target.value)}
-              className="flex-1 bg-[var(--surface)] text-text-primary text-xs px-2 py-1.5 rounded-lg border border-[var(--border)] focus:outline-none focus:border-accent/40"
-            >
-              <option value="">Choose a field…</option>
-              {available.map(k => (
-                <option key={k} value={k}>{k.replace(/_/g, ' ')}</option>
-              ))}
-              {/* Also allow snapshot fields not in the predefined list */}
-              {Object.keys(snap).filter(k => !ALL_SONG_FIELDS.includes(k) && !(k in fields)).map(k => (
-                <option key={k} value={k}>{k.replace(/_/g, ' ')}</option>
-              ))}
-            </select>
+              onChange={setAddKey}
+              placeholder="Choose a field…"
+              options={[
+                ...available,
+                // Also allow snapshot fields not in the predefined list
+                ...Object.keys(snap).filter(k => !ALL_SONG_FIELDS.includes(k) && !(k in fields)),
+              ].map(k => ({ value: k, label: k.replace(/_/g, ' ') }))}
+              className="flex-1 min-w-0 bg-[var(--surface)] text-text-primary text-xs px-2 py-1.5 rounded-lg border border-[var(--border)] focus:outline-none focus:border-accent/40"
+            />
             <button
               onClick={() => addField(addKey)}
               disabled={!addKey}
@@ -346,7 +356,7 @@ function RevisePanel({ proposal, onClose, onDone, channel }: {
 
         {/* Review note */}
         <div className="rounded-xl border border-[var(--border)] overflow-hidden">
-          <div className="flex items-center gap-2 px-3 py-1.5 bg-[var(--surface-raised)] border-b border-[var(--border)]">
+          <div className="flex items-center gap-2 px-3 py-1.5 bg-[var(--surface-raised)]">
             <MessageSquare size={11} className="text-text-muted" />
             <span className="text-[10px] text-text-muted font-semibold">Review note (optional)</span>
           </div>
@@ -406,7 +416,7 @@ const ProposalRow = memo(function ProposalRow({ item, showUserHeader, pendingCou
   return (
     <div>
       {showUserHeader && (
-        <div className="flex items-center gap-2 px-3 py-1.5 bg-surface-overlay border-b border-[var(--border)] sticky top-0 z-[1]">
+        <div className="flex items-center gap-2 px-3 py-1.5 bg-surface-overlay sticky top-0 z-[1]">
           <span className="flex-1 min-w-0 truncate text-[10px] font-bold uppercase tracking-wider text-text-muted">
             {item.editor_username}
           </span>
@@ -474,14 +484,14 @@ function ProposalsTab({ proposals, status, setStatus, onChanged, channel }: {
   const doReview = async (id: number, action: 'approve' | 'reject') => {
     setActionId(id)
     try { await userApi.adminReviewProposal(id, { action, review_notes: notes[id] || '', channel }); dropCache(id); setArchive(null); onChanged(); setSelected(null) }
-    catch {} finally { setActionId(null) }
+    catch { showAppToast(`Couldn't ${action} the proposal`) } finally { setActionId(null) }
   }
 
   const doReverse = async (id: number) => {
     if (!confirm('Reverse this approval?')) return
     setActionId(id)
     try { await userApi.adminReverseProposal(id, channel); dropCache(id); setArchive(null); onChanged(); setSelected(null) }
-    catch {} finally { setActionId(null) }
+    catch { showAppToast("Couldn't reverse the proposal") } finally { setActionId(null) }
   }
 
   // Keyed off the full list so the group header's count and "Accept all"
@@ -494,21 +504,17 @@ function ProposalsTab({ proposals, status, setStatus, onChanged, channel }: {
     return m
   }, [proposals])
 
-  // Approves every pending proposal from one editor in sequence (not
-  // parallel - these mutate the same song's data, and a per-item failure is
-  // swallowed so one bad row doesn't stop the rest of the batch). Fired from
-  // the list view, so there's no detail selection to reconcile afterward -
-  // just a single refetch once the batch settles.
+  // Reviews every pending proposal from one editor - parallel across songs,
+  // in order within a song (see adminReviewProposalsBatch). Fired from the
+  // list view, so there's no detail selection to reconcile afterward - just
+  // a single refetch once the batch settles.
   const doReviewAllForUser = async (editorId: number, action: 'approve' | 'reject') => {
     const pending = proposals.filter(x => x.editor_id === editorId && x.status === 'pending')
     if (pending.length === 0) return
     if (!confirm(`${action === 'approve' ? 'Approve' : 'Deny'} all ${pending.length} pending proposal${pending.length !== 1 ? 's' : ''} from ${pending[0].editor_username} (#${editorId})?`)) return
     setAcceptingAllUser(editorId)
     try {
-      for (const item of pending) {
-        try { await userApi.adminReviewProposal(item.id, { action, channel }); dropCache(item.id) }
-        catch {}
-      }
+      await userApi.adminReviewProposalsBatch(pending, action, channel, (updated) => dropCache(updated.id))
       setArchive(null)
       onChanged()
     } finally {
@@ -785,7 +791,7 @@ function ApplicationsTab({ applications, onChanged }: { applications: EditorAppl
   const doReview = async (id: number, action: 'approve' | 'reject') => {
     setActionId(id)
     try { await userApi.adminReviewApplication(id, { action, review_notes: notes[id] || '' }); onChanged(); setSelected(null) }
-    catch {} finally { setActionId(null) }
+    catch { showAppToast(`Couldn't ${action} the application`) } finally { setActionId(null) }
   }
 
   const pending  = applications.filter(a => a.status === 'pending')
@@ -984,17 +990,15 @@ function UsersTab({ users, onChanged, currentUserId }: { users: AdminUser[]; onC
                           {u.role === 'editor' && (
                             <label className="flex items-center justify-between gap-2 text-sm text-text-secondary">
                               Song edit proposals
-                              <input type="checkbox" checked={u.auto_approve_proposals}
-                                onChange={e => doUpdate(u.user_id, { auto_approve_proposals: e.target.checked })}
-                                className="w-4 h-4 accent-[var(--accent)]" />
+                              <ThemedCheckbox variant="switch" checked={u.auto_approve_proposals}
+                                onChange={v => doUpdate(u.user_id, { auto_approve_proposals: v })} />
                             </label>
                           )}
                           {u.contributor_enabled && (
                             <label className="flex items-center justify-between gap-2 text-sm text-text-secondary">
                               Comp file proposals
-                              <input type="checkbox" checked={u.auto_approve_comp_proposals}
-                                onChange={e => doUpdate(u.user_id, { auto_approve_comp_proposals: e.target.checked })}
-                                className="w-4 h-4 accent-[var(--accent)]" />
+                              <ThemedCheckbox variant="switch" checked={u.auto_approve_comp_proposals}
+                                onChange={v => doUpdate(u.user_id, { auto_approve_comp_proposals: v })} />
                             </label>
                           )}
                         </div>
@@ -1010,9 +1014,8 @@ function UsersTab({ users, onChanged, currentUserId }: { users: AdminUser[]; onC
                         ] as const).map(([label, checked, payload]) => (
                           <label key={label} className="flex items-center justify-between gap-2 text-sm text-text-secondary cursor-pointer">
                             {label}
-                            <input type="checkbox" checked={checked}
-                              onChange={e => doUpdate(u.user_id, payload(e.target.checked))}
-                              className="w-4 h-4 accent-[var(--accent)]" />
+                            <ThemedCheckbox variant="switch" checked={checked}
+                              onChange={v => doUpdate(u.user_id, payload(v))} />
                           </label>
                         ))}
                       </div>
@@ -1092,24 +1095,6 @@ function StatsTab({ applications, proposals, users }: {
           </div>
         </div>
       )}
-    </div>
-  )
-}
-
-// ── Security ──────────────────────────────────────────────────────────────────
-
-function SecurityTab(): JSX.Element {
-  return (
-    <div className="p-4">
-      <div className="flex items-start gap-4 px-5 py-5 rounded-2xl bg-emerald-500/8 border border-emerald-500/20">
-        <div className="w-10 h-10 rounded-xl bg-emerald-500/15 flex items-center justify-center shrink-0">
-          <Check size={18} className="text-emerald-400" />
-        </div>
-        <div>
-          <p className="text-text-primary font-semibold">Two-factor authentication enabled</p>
-          <p className="text-text-muted text-sm mt-1">Your account is protected with 2FA.</p>
-        </div>
-      </div>
     </div>
   )
 }

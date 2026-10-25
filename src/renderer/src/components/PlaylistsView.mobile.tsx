@@ -9,6 +9,10 @@ import {
 } from 'lucide-react'
 import { useStore, useStorePick } from '../store/useStore'
 import * as userApi from '../lib/userApi'
+import { addTracksInBackground, addEntriesInBackground, setPlaylistPublic } from '../lib/optimisticPlaylist'
+import { playlistItemsToTracks, playlistSongIds, playlistItemToEntry } from '../lib/playlistItems'
+import type { PlaylistEntryInput } from '../lib/userApi'
+import { showAppToast } from '../lib/appToast'
 import { rememberRecentPlaylist } from '../lib/recentPlaylists'
 import type { PlaylistDetail, PlaylistSummary } from '../lib/userApi'
 import { useCanEdit } from '../hooks/useChannelRoles'
@@ -19,19 +23,18 @@ import { apiFetch, JWApiSong, playlistCoverUrl, smallCoverUrl } from '../lib/jui
 import { getSkin } from '../lib/skins'
 import { libraryTrackToTrack as libTrackToTrack } from '../lib/fileTypes'
 import { formatDuration, formatTotalDuration } from '../lib/format'
-import { fisherYates } from '../store/queueSlice'
 import LikedSongsView from './LikedSongsView'
 import { AlbumArtThumb } from './LibraryTab'
 import SongInfoModal from './SongInfoModal'
 import SongContextMenu, { SongContextMenuState } from './SongContextMenu'
-import { CompactGroupRow, CompactEmptyIcon, useExpandedGroups } from './CompactGroupRow'
-import { groupItemsByVersion, filterCompactGroups, subscribeCompactGroupsInvalidation } from '../lib/compactGroups'
-import type { CompactGroup } from '../lib/compactGroups'
+import { useExpandedGroups } from './CompactGroupRow'
+import CompactVersionRows from './CompactVersionRows'
+import { groupPlaylistBySong, subscribeCompactGroupsInvalidation } from '../lib/compactGroups'
+import type { SongUnit } from '../lib/compactGroups'
 import { versionsEnabled } from '../lib/versionsApi'
 import { shareOrigin } from '../lib/platform'
 import { useVirtualWindowEl } from '../hooks/useVirtualWindow'
 import PlaylistCard, { FolderRow } from './PlaylistCard.mobile'
-import { DonorPlaylistDetail, DonorPlaylistsSection } from './DonorPlaylists'
 import { Sheet, SheetItem, SheetDivider } from './mobile/Sheet'
 import { useLongPress } from './mobile/useLongPress'
 import { useDragReorder } from './mobile/useDragReorder'
@@ -168,10 +171,12 @@ interface TrackRowProps {
   onTap: () => void
   onLongPress: () => void
   onMenu: (e: React.MouseEvent) => void
+  /** Compact view only - an arrow that opens the song's versions below it. */
+  expander?: { expanded: boolean; count: number; onToggle: () => void }
 }
 
 const TrackRow = memo(function TrackRow({
-  track, libTrack, current, selectMode, selected, onTap, onLongPress, onMenu,
+  track, libTrack, current, selectMode, selected, onTap, onLongPress, onMenu, expander,
 }: TrackRowProps): JSX.Element {
   const press = useLongPress({
     onTap: () => (selectMode ? onLongPress() : onTap()),
@@ -199,6 +204,16 @@ const TrackRow = memo(function TrackRow({
         </p>
       </div>
       <span className="text-text-muted text-[11px] tabular-nums shrink-0">{formatDuration(track.duration, '--:--')}</span>
+      {expander && !selectMode && (
+        <button
+          onClick={(e) => { e.stopPropagation(); expander.onToggle() }}
+          className={`shrink-0 w-9 h-11 -mr-2 flex items-center justify-center ${expander.expanded ? 'text-text-primary' : 'text-text-muted'} active:text-accent`}
+          aria-label={`${expander.expanded ? 'Hide' : 'Show'} ${expander.count} versions`}
+          aria-expanded={expander.expanded}
+        >
+          <ChevronDown size={18} className={`transition-transform ${expander.expanded ? 'rotate-180' : ''}`} />
+        </button>
+      )}
       {!selectMode && (
         <button
           onClick={(e) => { e.stopPropagation(); onMenu(e) }}
@@ -324,6 +339,17 @@ type SheetState =
 
 const LS_LAYOUT = 'playlists:layout'
 
+// Entries worth copying into another playlist: songs that can play (not a
+// session or unsurfaced) and every file entry.
+function copyableEntries(detail: PlaylistDetail): PlaylistEntryInput[] {
+  return detail.items
+    .filter(item => !item.song || !['recording_session', 'unsurfaced'].includes(item.song.category))
+    .map(playlistItemToEntry)
+    .filter((e): e is PlaylistEntryInput => e != null)
+}
+
+const trackIsPlayable = (t: Track): boolean => !!t.path
+
 export default function PlaylistsView(): JSX.Element {
   const { account, playlists, refreshPlaylists, playTrack, playCollection, addToQueue, setShowUserAuth, likedTrackIds, toggleLike, setActiveView, setPendingEditorSongId,
     localPlaylists, libraryTracks, libraryArt, loadLibrary, deleteLocalPlaylist, renameLocalPlaylist, updateLocalPlaylist, addToLocalPlaylist, removeFromLocalPlaylist, reorderLocalPlaylist, createLocalPlaylist,
@@ -334,7 +360,7 @@ export default function PlaylistsView(): JSX.Element {
     playlistsSelectedLocalId: localSelectedId, setPlaylistsSelectedLocalId: setLocalSelectedId,
     playlistsSort: sortRaw, setPlaylistsSort: setSortRaw,
     playlistFolders, createFolder, renameFolder, deleteFolder, movePlaylistsToFolder,
-    appTextScale, currentTrack, setHeroBleedTop, playNext, theme, playlistHeroEnabledDark, playlistHeroEnabledLight } = useStorePick('account', 'playlists', 'refreshPlaylists', 'playTrack', 'playCollection', 'addToQueue', 'setShowUserAuth', 'likedTrackIds', 'toggleLike', 'setActiveView', 'setPendingEditorSongId', 'localPlaylists', 'libraryTracks', 'libraryArt', 'loadLibrary', 'deleteLocalPlaylist', 'renameLocalPlaylist', 'updateLocalPlaylist', 'addToLocalPlaylist', 'removeFromLocalPlaylist', 'reorderLocalPlaylist', 'createLocalPlaylist', 'guestPlaylists', 'createGuestPlaylist', 'deleteGuestPlaylist', 'renameGuestPlaylist', 'removeFromGuestPlaylist', 'followedPlaylists', 'followPlaylist', 'unfollowPlaylist', 'updateFollowedPlaylistMeta', 'pendingPlaylistId', 'setPendingPlaylistId', 'playlistsSelectedId', 'setPlaylistsSelectedId', 'playlistsSelectedLocalId', 'setPlaylistsSelectedLocalId', 'playlistsSort', 'setPlaylistsSort', 'playlistFolders', 'createFolder', 'renameFolder', 'deleteFolder', 'movePlaylistsToFolder', 'appTextScale', 'currentTrack', 'setHeroBleedTop', 'playNext', 'theme', 'playlistHeroEnabledDark', 'playlistHeroEnabledLight')
+    appTextScale, currentTrack, setHeroBleedTop, shufflePlay, playNext, theme, playlistHeroEnabledDark, playlistHeroEnabledLight } = useStorePick('account', 'playlists', 'refreshPlaylists', 'playTrack', 'shufflePlay', 'playCollection', 'addToQueue', 'setShowUserAuth', 'likedTrackIds', 'toggleLike', 'setActiveView', 'setPendingEditorSongId', 'localPlaylists', 'libraryTracks', 'libraryArt', 'loadLibrary', 'deleteLocalPlaylist', 'renameLocalPlaylist', 'updateLocalPlaylist', 'addToLocalPlaylist', 'removeFromLocalPlaylist', 'reorderLocalPlaylist', 'createLocalPlaylist', 'guestPlaylists', 'createGuestPlaylist', 'deleteGuestPlaylist', 'renameGuestPlaylist', 'removeFromGuestPlaylist', 'followedPlaylists', 'followPlaylist', 'unfollowPlaylist', 'updateFollowedPlaylistMeta', 'pendingPlaylistId', 'setPendingPlaylistId', 'playlistsSelectedId', 'setPlaylistsSelectedId', 'playlistsSelectedLocalId', 'setPlaylistsSelectedLocalId', 'playlistsSort', 'setPlaylistsSort', 'playlistFolders', 'createFolder', 'renameFolder', 'deleteFolder', 'movePlaylistsToFolder', 'appTextScale', 'currentTrack', 'setHeroBleedTop', 'playNext', 'theme', 'playlistHeroEnabledDark', 'playlistHeroEnabledLight')
   // Cast back to the component's own SortField union - the store keeps the
   // field as a plain string so it doesn't have to import this component's type.
   const sort = sortRaw as SortState
@@ -370,7 +396,6 @@ export default function PlaylistsView(): JSX.Element {
   // multi-select, no bulk actions. Just enough to create, open, rename, and
   // delete one, which is all that's needed while signed out.
   const [guestSelectedId, setGuestSelectedId] = useState<string | null>(null)
-  const [donorSelectedId, setDonorSelectedId] = useState<string | null>(null)
 
   // Context menu for a track row (shared with the Tracker's implementation).
   const [trackMenu, setTrackMenu] = useState<SongContextMenuState | null>(null)
@@ -407,17 +432,16 @@ export default function PlaylistsView(): JSX.Element {
   // Search across the library itself (playlist names).
   const [libSearch, setLibSearch] = useState('')
 
-  // Compact view - same grouping as the Tracker's (see lib/compactGroups.ts):
-  // collapses tracks sharing a version_title into one row. Uses the
-  // playlist-scoped groupItemsByVersion since `tracks` here is already the
-  // playlist's full, unpaginated list.
+  // Compact view - the normal list, but one row per SONG (see the desktop's
+  // twin for the full story): a song's versions collapse into its first
+  // entry, an arrow opens all of them with prefer/exclude toggles, and
+  // shuffle picks songs rather than tracks.
   const [compactView, setCompactView] = useState(false)
-  const [compactGroups, setCompactGroups] = useState<CompactGroup<Track>[]>([])
+  const [songUnits, setSongUnits] = useState<SongUnit<Track>[]>([])
   const [loadingCompact, setLoadingCompact] = useState(false)
   const { expanded: expandedGroups, toggle: toggleGroupExpanded, clear: clearExpandedGroups } = useExpandedGroups()
 
   // Zip / share / bulk-add
-  const [addingAll, setAddingAll] = useState(false)
   const [isSharedView, setIsSharedView] = useState(false)
   const [importState, setImportState] = useState<'idle' | 'loading' | 'done' | 'error'>('idle')
 
@@ -495,8 +519,13 @@ export default function PlaylistsView(): JSX.Element {
 
   const tracks: Track[] = useMemo(() => {
     if (isLocal) return localLibTracks.map(libTrackToTrack)
-    return detail ? detail.items.map(it => userApi.liteSongToTrack(it.song)) : []
+    return detail ? playlistItemsToTracks(detail.items) : []
   }, [isLocal, localLibTracks, detail])
+  // Track id -> the entry it came from, for removing and reordering by entry.
+  const itemByTrackId = useMemo(
+    () => new Map(detail && !isLocal ? tracks.map((t, i) => [t.id, detail.items[i]] as const) : []),
+    [detail, isLocal, tracks],
+  )
 
   const otherPlaylists = useMemo(() => playlists.filter(p => p.id !== selectedId), [playlists, selectedId])
   const otherLocalPlaylists = useMemo(() => localPlaylists.filter(p => p.id !== localSelectedId), [localPlaylists, localSelectedId])
@@ -531,18 +560,34 @@ export default function PlaylistsView(): JSX.Element {
   const { start: rowStart, end: rowEnd, totalHeight: rowsTotalHeight } =
     useVirtualWindowEl(listScrollEl, listContentEl, displayTracks.length, trackRowH)
 
-  // groupItemsByVersion doesn't know about the search box, so without this
-  // typing a query while compact view is active would just do nothing.
-  const filteredCompactGroups = useMemo(
-    () => filterCompactGroups(compactGroups, search, t => `${t.title} ${t.artist}`),
-    [compactGroups, search]
+  // Compact view's rows: one per song, in displayTracks' (search + sort)
+  // order, led by the song's first visible entry. A track the grouping hasn't
+  // caught up with yet (just added) shows as its own row.
+  const compactRows = useMemo(() => {
+    const unitOf = new Map<Track, SongUnit<Track>>()
+    for (const u of songUnits) for (const { item } of u.items) unitOf.set(item, u)
+    const seen = new Set<SongUnit<Track>>()
+    const rows: { lead: Track; unit: SongUnit<Track> }[] = []
+    for (const t of displayTracks) {
+      const unit = unitOf.get(t)
+      if (!unit) { rows.push({ lead: t, unit: { groupId: null, items: [{ item: t, meta: null }], versions: [] } }); continue }
+      if (seen.has(unit)) continue
+      seen.add(unit)
+      rows.push({ lead: t, unit })
+    }
+    return rows
+  }, [songUnits, displayTracks])
+  const compactLeads = useMemo(() => compactRows.map(r => r.lead), [compactRows])
+  const playlistTrackBySong = useMemo(
+    () => new Map(tracks.map(t => [userApi.trackIdToSongId(t.id) ?? -1, t])),
+    [tracks]
   )
 
   // ── Effects ────────────────────────────────────────────────────────────────
 
   // Populate membership cache when a detail loads
   useEffect(() => {
-    if (detail) membershipCache.current.set(detail.id, new Set(detail.items.map(i => i.song.id)))
+    if (detail) membershipCache.current.set(detail.id, new Set(playlistSongIds(detail.items)))
   }, [detail])
 
   // Bumped by the invalidation subscriber below so an edit made elsewhere
@@ -556,26 +601,16 @@ export default function PlaylistsView(): JSX.Element {
   }), [])
 
   useEffect(() => {
-    if (!compactView || !versionsEnabled) { setCompactGroups([]); return }
+    if (!compactView || isLocal) { setSongUnits([]); return }
     let cancelled = false
     setLoadingCompact(true)
-    groupItemsByVersion(tracks, t => userApi.trackIdToSongId(t.id) ?? -1).then(groups => {
+    groupPlaylistBySong(tracks, t => userApi.trackIdToSongId(t.id) ?? -1).then(units => {
       if (cancelled) return
-      // groupItemsByVersion builds groups from a Map keyed by version-group id,
-      // so they come back in whatever order the /versions/ lookup happened to
-      // return - not the playlist's actual track order. Re-sort both the
-      // groups and each group's members by their position in `tracks` so
-      // compact view lines up with what normal/grid view shows, instead of
-      // silently reshuffling the playlist.
-      const trackIndex = new Map(tracks.map((t, i) => [t.id, i]))
-      const ordered = groups
-        .map(g => ({ ...g, members: [...g.members].sort((a, b) => (trackIndex.get(a.item.id) ?? 0) - (trackIndex.get(b.item.id) ?? 0)) }))
-        .sort((a, b) => (trackIndex.get(a.members[0]?.item.id) ?? 0) - (trackIndex.get(b.members[0]?.item.id) ?? 0))
-      setCompactGroups(ordered)
+      setSongUnits(units)
       setLoadingCompact(false)
     })
     return () => { cancelled = true }
-  }, [compactView, tracks, compactReloadToken])
+  }, [compactView, isLocal, tracks, compactReloadToken])
 
   // Load local library so playlist tracks resolve
   useEffect(() => { loadLibrary() }, [])
@@ -696,13 +731,13 @@ export default function PlaylistsView(): JSX.Element {
       if (localPl) removeFromLocalPlaylist(localPl.id, track.id)
       return
     }
-    const songId = track.id ? userApi.trackIdToSongId(track.id) : null
-    if (selectedId == null || songId == null || songId <= 0) return
-    setDetail(prev => prev ? { ...prev, items: prev.items.filter(i => i.song.id !== songId) } : null)
-    membershipCache.current.get(selectedId)?.delete(songId)
-    try { await userApi.removeFromPlaylist(selectedId, songId); await refreshPlaylists() }
-    catch { await loadDetail(selectedId) }
-  }, [isLocal, localPl, removeFromLocalPlaylist, selectedId, loadDetail, refreshPlaylists])
+    const item = itemByTrackId.get(track.id)
+    if (selectedId == null || !item) return
+    setDetail(prev => prev ? { ...prev, items: prev.items.filter(i => i.id !== item.id) } : null)
+    if (item.song) membershipCache.current.get(selectedId)?.delete(item.song.id)
+    try { await userApi.removePlaylistEntry(selectedId, item.id); await refreshPlaylists() }
+    catch { showAppToast("Couldn't remove the track"); await loadDetail(selectedId) }
+  }, [isLocal, localPl, removeFromLocalPlaylist, selectedId, itemByTrackId, loadDetail, refreshPlaylists])
 
   // ── Multi-select bulk actions (tracks) ────────────────────────────────────
   const toggleTrackSelect = useCallback((track: Track) => {
@@ -728,17 +763,19 @@ export default function PlaylistsView(): JSX.Element {
   }, [selectedTrackList, addToQueue, exitSelectMode])
 
   const bulkAddToPlaylist = useCallback(async (targetId: number) => {
+    if (!selectedTrackList.length) return
     const ids = selectedTrackList
       .map(t => (t.id ? userApi.trackIdToSongId(t.id) : null))
       .filter((id): id is number => id != null && id > 0)
-    if (!ids.length) return
-    await Promise.all(ids.map(id => userApi.addToPlaylist(targetId, id).catch(() => {})))
+    // Optimistic: mark membership and leave select mode now, add in the
+    // background, and drop whatever failed back out of the cache.
     const targetSet = membershipCache.current.get(targetId) ?? new Set<number>()
     ids.forEach(id => targetSet.add(id))
     membershipCache.current.set(targetId, targetSet)
-    await refreshPlaylists()
     exitSelectMode()
-  }, [selectedTrackList, refreshPlaylists, exitSelectMode])
+    const failed = await addTracksInBackground(targetId, selectedTrackList)
+    failed.forEach(t => { const id = userApi.trackIdToSongId(t.id); if (id != null) membershipCache.current.get(targetId)?.delete(id) })
+  }, [selectedTrackList, exitSelectMode])
 
   // Local counterpart - device-only playlists hold library track ids, so the
   // selection goes in verbatim with no id translation.
@@ -785,16 +822,16 @@ export default function PlaylistsView(): JSX.Element {
       return
     }
     if (selectedId == null) return
-    const ids = selectedTrackList
-      .map(t => (t.id ? userApi.trackIdToSongId(t.id) : null))
-      .filter((id): id is number => id != null && id > 0)
-    if (!ids.length) return
+    const items = selectedTrackList
+      .map(t => itemByTrackId.get(t.id))
+      .filter((it): it is NonNullable<typeof it> => it != null)
+    if (!items.length) return
     setBulkRemoving(true)
-    const idSet = new Set(ids)
-    setDetail(prev => prev ? { ...prev, items: prev.items.filter(i => !idSet.has(i.song.id)) } : null)
-    ids.forEach(id => membershipCache.current.get(selectedId)?.delete(id))
+    const idSet = new Set(items.map(it => it.id))
+    setDetail(prev => prev ? { ...prev, items: prev.items.filter(i => !idSet.has(i.id)) } : null)
+    items.forEach(it => { if (it.song) membershipCache.current.get(selectedId)?.delete(it.song.id) })
     try {
-      await Promise.all(ids.map(id => userApi.removeFromPlaylist(selectedId, id)))
+      await Promise.all(items.map(it => userApi.removePlaylistEntry(selectedId, it.id)))
       await refreshPlaylists()
     } catch { await loadDetail(selectedId) }
     setBulkRemoving(false)
@@ -855,9 +892,9 @@ export default function PlaylistsView(): JSX.Element {
     newItems.splice(to, 0, removed)
     setDetail({ ...detail, items: newItems })
     try {
-      const updated = await userApi.reorderPlaylist(selectedId, newItems.map(it => it.song.id))
+      const updated = await userApi.reorderPlaylistItems(selectedId, newItems.map(it => it.id))
       setDetail(updated)
-    } catch { await loadDetail(selectedId) }
+    } catch { showAppToast("Couldn't reorder the playlist"); await loadDetail(selectedId) }
   }, [tracks.length, isLocal, localPl, localLibTracks, reorderLocalPlaylist, detail, selectedId, loadDetail])
 
   const trackDrag = useDragReorder(tracks.length, moveTrack)
@@ -884,30 +921,35 @@ export default function PlaylistsView(): JSX.Element {
     downloadBlob(playlistM3uContent(trackList), 'audio/x-mpegurl', `${name || 'playlist'}.m3u`)
   }, [])
 
+  // Optimistic like bulkAddToPlaylist: membership is marked up front and
+  // whatever fails comes back out once the background adds settle.
   const handleAddAllTo = useCallback(async (targetId: number, srcDetail: PlaylistDetail) => {
-    setAddingAll(true)
-    const eligible = srcDetail.items.filter(item => !['recording_session', 'unsurfaced'].includes(item.song.category))
-    await Promise.all(eligible.map(item => userApi.addToPlaylist(targetId, item.song.id).catch(() => {})))
+    const entries = copyableEntries(srcDetail)
+    const ids = entries.flatMap(e => ('song_id' in e ? [e.song_id] : []))
     const targetSet = membershipCache.current.get(targetId) ?? new Set<number>()
-    srcDetail.items.forEach(i => targetSet.add(i.song.id))
+    ids.forEach(id => targetSet.add(id))
     membershipCache.current.set(targetId, targetSet)
-    setAddingAll(false)
-    await refreshPlaylists()
-  }, [refreshPlaylists])
+    const failed = await addEntriesInBackground(targetId, entries)
+    failed.forEach(e => { if ('song_id' in e) membershipCache.current.get(targetId)?.delete(e.song_id) })
+  }, [])
 
   const handleImportPlaylist = useCallback(async () => {
     if (!detail) return
     setImportState('loading')
     try {
-      const allowedIds = detail.items
-        .filter(item => !['recording_session', 'unsurfaced'].includes(item.song.category))
-        .map(item => item.song.id)
+      const entries = copyableEntries(detail)
+      const allowedIds = entries.flatMap(e => ('song_id' in e ? [e.song_id] : []))
 
       // Request 1: create playlist with name + description + song_ids in one shot
       const newPl = await userApi.createPlaylist(detail.name, {
         description: detail.description,
         song_ids: allowedIds,
       })
+      // Files can't go through song_ids, so they follow one by one, after
+      // the songs.
+      for (const e of entries) {
+        if (!('song_id' in e)) await userApi.addPlaylistEntry(newPl.id, e).catch(() => undefined)
+      }
 
       // Request 2 (optional): cover - use existing base64 directly, or fetch from URL
       const b64 = coverData?.cover_image
@@ -1267,8 +1309,6 @@ export default function PlaylistsView(): JSX.Element {
               </>
             )}
 
-            <DonorPlaylistsSection onOpen={setDonorSelectedId} />
-
             {!account && (
               <div className="flex flex-col items-center text-center gap-3 px-8 py-8 mt-4 border-t border-[var(--border)]">
                 <p className="text-text-muted text-sm max-w-xs">
@@ -1305,10 +1345,10 @@ export default function PlaylistsView(): JSX.Element {
     // dark-on-light text.
     const heroLight = !!backdropSrc && isDarkSkin && playlistHeroEnabled
 
+    // Compact view shuffles by song - each song one slot, its version picked
+    // by preference (see the store's shufflePlay / pickGroupVersion).
     const playShuffle = (): void => {
-      if (!tracks.length) return
-      const shuffled = fisherYates(tracks)
-      playTrack(shuffled[0], shuffled)
+      void shufflePlay(tracks, { bySong: compactView && !isLocal && versionsEnabled })
     }
 
     return (
@@ -1525,49 +1565,45 @@ export default function PlaylistsView(): JSX.Element {
               ))}
             </div>
           ) : compactView && !isLocal ? (
-            loadingCompact ? (
+            loadingCompact && songUnits.length === 0 ? (
               <div className="flex items-center justify-center h-40 gap-2 text-text-muted">
                 <Loader2 size={18} className="animate-spin" />
-                <span className="text-sm">Loading version groups…</span>
+                <span className="text-sm">Loading versions…</span>
               </div>
-            ) : filteredCompactGroups.length === 0 ? (
-              <div className="flex flex-col items-center justify-center h-40 gap-2">
-                <CompactEmptyIcon size={32} className="text-text-muted opacity-30" />
-                <p className="text-text-muted text-sm">
-                  {compactGroups.length === 0 ? 'No version groups in this playlist' : `No version groups match “${search}”`}
-                </p>
-              </div>
+            ) : compactRows.length === 0 ? (
+              <p className="text-text-muted text-sm text-center py-10">No tracks match “{search}”</p>
             ) : (
               <div className="px-2">
-                {filteredCompactGroups.map(group => (
-                  <div key={group.groupId}>
-                    <CompactGroupRow
-                      coverTrack={group.members[0].item}
-                      title={group.title}
-                      count={group.members.length}
-                      expanded={expandedGroups.has(group.groupId)}
-                      onToggle={() => toggleGroupExpanded(group.groupId)}
-                      onPlay={() => playTrack(group.members[0].item, tracks)}
-                    />
-                    {expandedGroups.has(group.groupId) && (
-                      <div className="ml-4 pl-2 border-l border-[var(--border)]">
-                        {group.members.map(({ item: track, meta }) => (
-                          <div key={track.id} style={{ height: trackRowH }}>
-                            <TrackRow
-                              track={meta.version ? { ...track, title: `${track.title} (${meta.version})` } : track}
-                              current={currentTrack?.id === track.id}
-                              selectMode={false}
-                              selected={false}
-                              onTap={() => playTrack(track, tracks)}
-                              onLongPress={() => toggleTrackSelect(track)}
-                              onMenu={e => setTrackMenu({ track, songId: userApi.trackIdToSongId(track.id) ?? -1, x: e.clientX, y: e.clientY })}
-                            />
-                          </div>
-                        ))}
+                {compactRows.map(({ lead, unit }) => {
+                  const hasVersions = unit.versions.length > 1
+                  const open = hasVersions && expandedGroups.has(unit.groupId!)
+                  return (
+                    <div key={unit.groupId ?? lead.id}>
+                      <div style={{ height: trackRowH }}>
+                        <TrackRow
+                          track={lead}
+                          current={currentTrack?.id === lead.id}
+                          selectMode={selectMode}
+                          selected={selectedTracks.has(lead.id)}
+                          onTap={() => playTrack(lead, compactLeads, null, null, { songPool: tracks })}
+                          onLongPress={() => toggleTrackSelect(lead)}
+                          onMenu={e => setTrackMenu({ track: lead, songId: userApi.trackIdToSongId(lead.id) ?? -1, x: e.clientX, y: e.clientY })}
+                          expander={hasVersions ? { expanded: open, count: unit.versions.length, onToggle: () => toggleGroupExpanded(unit.groupId!) } : undefined}
+                        />
                       </div>
-                    )}
-                  </div>
-                ))}
+                      {open && (
+                        <CompactVersionRows
+                          versions={unit.versions}
+                          playlistTracks={playlistTrackBySong}
+                          layout="mobile"
+                          rowHeight={trackRowH}
+                          onPlay={track => playTrack(track, compactLeads.map(t => (t === lead ? track : t)), null, null, { songPool: tracks })}
+                          onMenu={(track, songId, e) => setTrackMenu({ track, songId, x: e.clientX, y: e.clientY })}
+                        />
+                      )}
+                    </div>
+                  )
+                })}
               </div>
             )
           ) : displayTracks.length === 0 ? (
@@ -1644,7 +1680,7 @@ export default function PlaylistsView(): JSX.Element {
             <div className="relative">
               <PlayShuffleRow
                 onPlay={() => playCollection(gp.tracks)}
-                onShuffle={() => { const sh = fisherYates(gp.tracks); playTrack(sh[0], sh) }}
+                onShuffle={() => { void shufflePlay(gp.tracks) }}
                 disabled={gp.tracks.length === 0}
               />
             </div>
@@ -1702,7 +1738,7 @@ export default function PlaylistsView(): JSX.Element {
     const localTargets = kind === 'local' ? localPlaylists.filter(p => !excludeLocal(p)) : []
 
     const addToApi = async (targetId: number): Promise<void> => {
-      if (forSelectedTracks) { await bulkAddToPlaylist(targetId); return }
+      if (forSelectedTracks) { void bulkAddToPlaylist(targetId); return }
       if (forAllTracks) {
         if (source?.kind === 'api') {
           const srcDetail = await userApi.getPlaylist(source.playlist.id)
@@ -1825,7 +1861,7 @@ export default function PlaylistsView(): JSX.Element {
             closeSheet()
             if (target.kind === 'local') { const q = localTracksOf(target.playlist); if (q.length) playCollection(q); return }
             const d = await userApi.getPlaylist(target.playlist.id).catch(() => null)
-            const trks = d ? d.items.map(i => userApi.liteSongToTrack(i.song)) : []
+            const trks = d ? playlistItemsToTracks(d.items).filter(t => t.path) : []
             if (trks.length) playCollection(trks)
           }}
         />
@@ -1836,10 +1872,8 @@ export default function PlaylistsView(): JSX.Element {
             closeSheet()
             const q = target.kind === 'local'
               ? localTracksOf(target.playlist)
-              : (await userApi.getPlaylist(target.playlist.id).catch(() => null))?.items.map(i => userApi.liteSongToTrack(i.song)) ?? []
-            if (!q.length) return
-            const sh = fisherYates(q)
-            playTrack(sh[0], sh)
+              : playlistItemsToTracks((await userApi.getPlaylist(target.playlist.id).catch(() => null))?.items ?? []).filter(trackIsPlayable)
+            void shufflePlay(q)
           }}
         />
         <SheetItem
@@ -1849,7 +1883,7 @@ export default function PlaylistsView(): JSX.Element {
             closeSheet()
             const q = target.kind === 'local'
               ? localTracksOf(target.playlist)
-              : (await userApi.getPlaylist(target.playlist.id).catch(() => null))?.items.map(i => userApi.liteSongToTrack(i.song)) ?? []
+              : playlistItemsToTracks((await userApi.getPlaylist(target.playlist.id).catch(() => null))?.items ?? []).filter(trackIsPlayable)
             q.forEach(t => addToQueue(t))
           }}
         />
@@ -1893,11 +1927,10 @@ export default function PlaylistsView(): JSX.Element {
             <SheetItem
               icon={(target.playlist as PlaylistSummary).is_public ? Globe : Lock}
               label={(target.playlist as PlaylistSummary).is_public ? 'Make private' : 'Make public'}
-              onClick={async () => {
+              onClick={() => {
                 closeSheet()
                 const p = target.playlist as PlaylistSummary
-                await userApi.updatePlaylist(p.id, { is_public: !p.is_public }).catch(() => {})
-                await refreshPlaylists()
+                void setPlaylistPublic(p.id, !p.is_public)
               }}
             />
             <SheetItem
@@ -1906,7 +1939,7 @@ export default function PlaylistsView(): JSX.Element {
               onClick={() => {
                 closeSheet()
                 const id = (target.playlist as PlaylistSummary).id
-                handleZipDownload(async () => (await userApi.getPlaylist(id)).items.map(i => userApi.liteSongToTrack(i.song)), pl.name)
+                handleZipDownload(async () => playlistItemsToTracks((await userApi.getPlaylist(id)).items), pl.name)
               }}
             />
           </>
@@ -1965,7 +1998,7 @@ export default function PlaylistsView(): JSX.Element {
         <SheetItem
           icon={FolderInput}
           label="Add all to another playlist"
-          disabled={addingAll || tracks.length === 0}
+          disabled={tracks.length === 0}
           onClick={() => setSheet({ kind: 'pick', for: 'allTracks' })}
         />
         {!isSharedView && (
@@ -2112,8 +2145,7 @@ export default function PlaylistsView(): JSX.Element {
           </div>
           <LikedSongsView />
         </>
-      ) : donorSelectedId !== null ? <DonorPlaylistDetail id={donorSelectedId} onBack={() => setDonorSelectedId(null)} />
-        : guestSelectedId !== null ? renderGuestDetail()
+      ) : guestSelectedId !== null ? renderGuestDetail()
         : inDetail ? renderDetail()
           : renderLibrary()}
 
@@ -2286,7 +2318,7 @@ export default function PlaylistsView(): JSX.Element {
               icon={Shuffle}
               label="Shuffle"
               disabled={gp.tracks.length < 2}
-              onClick={() => { const sh = fisherYates(gp.tracks); playTrack(sh[0], sh); closeSheet() }}
+              onClick={() => { void shufflePlay(gp.tracks); closeSheet() }}
             />
             <SheetDivider />
             <SheetItem
@@ -2344,7 +2376,7 @@ export default function PlaylistsView(): JSX.Element {
           <SheetItem
             icon={Shuffle}
             label="Shuffle these tracks"
-            onClick={() => { const sh = fisherYates(selectedTrackList); playTrack(sh[0], sh); exitSelectMode(); closeSheet() }}
+            onClick={() => { void shufflePlay(selectedTrackList); exitSelectMode(); closeSheet() }}
           />
           <SheetItem icon={ListPlus} label="Add to queue" onClick={() => { bulkAddToQueue(); closeSheet() }} />
           <SheetItem icon={Plus} label="Add to playlist" onClick={() => setSheet({ kind: 'pick', for: 'selectedTracks' })} />

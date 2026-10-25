@@ -34,6 +34,36 @@ export function cleanDate(raw: string | null | undefined): string {
   return raw.replace(/^[A-Za-z][a-z]+\s+(?=[A-Z]|\d)/g, '').trim().replace(/\.$/, '').trim()
 }
 
+// Lazily skips leading words up to the first month name or digit.
+const DATE_PREFIX = /^[A-Za-z\s,]*?(?=(?:Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|June?|July?|Aug(?:ust)?|Sep(?:t(?:ember)?)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)\b|\d)/
+
+/**
+ * Display form of a free-text date field: drops whatever words precede the
+ * actual date ("Surfaced", "Released", weekdays, even with a missing space as
+ * in "SurfacedJuly 10, 2023.") and the trailing period → "July 10, 2023".
+ * Values with no recognisable date are returned trimmed but otherwise as-is.
+ */
+export function displayDate(raw: string | null | undefined): string {
+  const s = (raw ?? '').trim()
+  if (!s) return ''
+  const m = DATE_PREFIX.exec(s)
+  return (m ? s.slice(m[0].length) : s).replace(/\.+$/, '').trim()
+}
+
+/** Timestamp for sorting a free-text date field, or null when it has no parseable date. */
+export function dateSortValue(raw: string | null | undefined): number | null {
+  const d = displayDate(raw)
+  if (!d) return null
+  const t = Date.parse(d)
+  return Number.isNaN(t) ? null : t
+}
+
+/** Comparator for dateSortValue results: undated values always sink to the end, whatever the direction. */
+export function compareDates(a: number | null, b: number | null, dir: 'asc' | 'desc'): number {
+  if (a === null || b === null) return a === b ? 0 : a === null ? 1 : -1
+  return dir === 'desc' ? b - a : a - b
+}
+
 /**
  * Full-account display name: display_name, then discord_username, then the
  * login-handle username (blank for Discord signups, set for username/password

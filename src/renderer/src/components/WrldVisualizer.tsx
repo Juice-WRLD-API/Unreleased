@@ -1,22 +1,32 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useShallow } from 'zustand/react/shallow'
-import { ChevronLeft, ChevronRight, TextQuote, ListMusic, AudioLines, Minimize2, Maximize2, Radio, Settings2 } from 'lucide-react'
-import { Visualizer, VISUALIZERS, type VizLayout } from '../lib/viz'
+import { Disc3, Monitor, Minimize2, Maximize2, Radio, Settings2, PictureInPicture2 } from 'lucide-react'
+import { Visualizer, VISUALIZERS, needsWebGL, type VizLayout } from '../lib/viz'
 import { getAnalysisTap, resumeEffectsContext } from '../lib/audioEffects'
 import { smallCoverUrl, JWAPI_HOST } from '../lib/juicewrldApi'
 import { ERA_PALETTES } from '../lib/eraPalettes'
 import { eventToCombo } from '../lib/hotkeys'
 import { hasEscapeLayer, useEscapeToClose } from '../hooks/useEscapeToClose'
 import { useStore } from '../store/useStore'
-import { useVizStore } from '../store/vizStore'
+import { useVizStore, useWrldEdgeLook } from '../store/vizStore'
 import VizControls from './VizControls'
+import WrldEdgeLight from './WrldEdgeLight'
 import LyricsControls from './LyricsControls'
+import DesktopSettings from './DesktopSettings'
+import { ls } from '../lib/persist'
+import { desktopWindowsSupported } from '../desktop/api'
+
+const DESKTOP_WIDGETS = ['player', 'playlist', 'clock'] as const
+type DesktopWidget = (typeof DESKTOP_WIDGETS)[number]
+import { NAV_PILL_EVENT } from './AutoHideNav'
 
 // Audio-reactive backdrop for the WRLD tab, plus its toolbar, keys and (in
 // fullscreen) the visualizer-only caption. WRLD only mounts while its tab is
 // open, so the engine never renders off-screen.
 
 const IDLE_MS = 2600
+// Settings > Desktop is desktop-app only, so its tab in the settings popup is too.
+const IS_ELECTRON = typeof navigator !== 'undefined' && navigator.userAgent.includes('Electron')
 const OSD_MS = 1400
 
 const vizName = (id: string): string => VISUALIZERS.find((v) => v.id === id)?.name ?? id
@@ -59,12 +69,8 @@ function eraAssetPath(url: string): string | null {
 // backs off around text, hardest on the lyric being sung. Elements opt in with
 // data-viz attributes inside the fullscreen root, so the layout is described
 // where it's rendered instead of being threaded through as refs.
-function readLayout(root: HTMLElement | null, minimal: boolean): VizLayout {
+function readLayout(root: HTMLElement | null): VizLayout {
   if (!root) return { focus: null, protect: [], intensity: 1 }
-  if (minimal) {
-    const cap = visibleRect(root, '[data-viz="caption"]')
-    return { focus: null, protect: cap ? [toRect(cap, 0.55)] : [], intensity: 1 }
-  }
 
   const cover = visibleRect(root, '[data-viz="cover"]')
   const focus = cover
@@ -118,26 +124,31 @@ export default function WrldVisualizer({
 }: Props): JSX.Element {
   const isPlaying = useStore((s) => s.isPlaying)
   const lyricsOverride = useStore((s) => s.lyricsOverride)
-  const { activeMode, vizQuality, vizUseArtwork, vizBoost, immMinimal, immCaptionPos } = useVizStore(useShallow((s) => ({
+  // The screen light's look, while WRLD's Edge light is on.
+  const vizEdgeOverlay = useWrldEdgeLook()
+  const { activeMode, vizQuality, vizUseArtwork, vizBoost, wrldWidgets, covered } = useVizStore(useShallow((s) => ({
     activeMode: s.activeMode,
     vizQuality: s.vizQuality,
     vizUseArtwork: s.vizUseArtwork,
     vizBoost: s.vizBoost,
-    immMinimal: s.immMinimal,
-    immCaptionPos: s.immCaptionPos,
+    wrldWidgets: s.wrldWidgets,
+    covered: s.vizCovered > 0,
   })))
 
   const hostRef = useRef<HTMLDivElement>(null)
   const vizRef = useRef<Visualizer | null>(null)
   const [glSupported, setGlSupported] = useState(true)
-  // The layout provider outlives any one render, so it reads through a ref.
-  const minimal = immMinimal
+  // The Edge light round the edges (WrldEdgeLight): over the visualizer, or on its own with it Off. Without WebGL2 it
+  // just doesn't show.
+  const [overlayFailed, setOverlayFailed] = useState(false)
+  const shownEdge = overlayFailed ? null : vizEdgeOverlay
   // "Off" tears the engine down entirely - no canvases, audio tap or frame loop.
   const off = activeMode === 'none'
   const [showSettings, setShowSettings] = useState(false)
   useEscapeToClose(() => setShowSettings(false), showSettings)
-  const minimalRef = useRef(minimal)
-  minimalRef.current = minimal
+  // The settings popup's tab, the same one next time.
+  const [settingsTab, setSettingsTab] = useState<'viz' | 'desktop'>(() => (ls.get('wrldSettingsTab') === 'desktop' ? 'desktop' : 'viz'))
+  const pickSettingsTab = (tab: 'viz' | 'desktop'): void => { setSettingsTab(tab); ls.set('wrldSettingsTab', tab) }
 
   // ── Engine lifetime ────────────────────────────────────────────────────────
   useEffect(() => {
@@ -153,15 +164,15 @@ export default function WrldVisualizer({
       return c
     }
     const viz = new Visualizer(canvas(), canvas())
-    viz.setLayoutProvider(() => readLayout(rootRef.current, minimalRef.current))
+    viz.setLayoutProvider(() => readLayout(rootRef.current))
     vizRef.current = viz
     setGlSupported(viz.glSupported)
     // A saved shader mode can't run without WebGL: the engine would quietly draw
-    // Aurora while the toolbar kept the shader's name. Show what's actually
+    // Aurora while the saved mode still named the shader. Show what's actually
     // drawn - unsaved, so the same choice still works where WebGL does.
     if (!viz.glSupported) {
       const { activeMode: cur, selectMode } = useVizStore.getState()
-      if (VISUALIZERS.find((v) => v.id === cur)?.engine === 'gl') selectMode('aurora', false)
+      if (needsWebGL(VISUALIZERS.find((v) => v.id === cur))) selectMode('aurora', false)
     }
     // Entering fullscreen is a click, which is the one moment a suspended
     // context is allowed to resume.
@@ -175,6 +186,8 @@ export default function WrldVisualizer({
     }
   }, [rootRef, off])
 
+  // Still under a picker: its own screens draw instead.
+  useEffect(() => { vizRef.current?.setHeld(covered) }, [covered, off])
   useEffect(() => { vizRef.current?.setQuality(vizQuality) }, [vizQuality, off])
   useEffect(() => { vizRef.current?.setBoost(vizBoost) }, [vizBoost, off])
   useEffect(() => { vizRef.current?.setUsePalette(vizUseArtwork) }, [vizUseArtwork, off])
@@ -258,17 +271,45 @@ export default function WrldVisualizer({
   // Cursor hiding and the chrome fade are fullscreen-only; on the tab only the toolbar fades.
   useEffect(() => { rootRef.current?.toggleAttribute('data-viz-idle', idle && fullscreen) }, [rootRef, idle, fullscreen])
 
+  // ── Clear of a top nav pill, only when the two would actually overlap ──────
+  // The toolbar is right-anchored, so its horizontal span doesn't depend on
+  // its top - compare it to the pill's published edges.
+  const toolbarRef = useRef<HTMLDivElement>(null)
+  const [underPill, setUnderPill] = useState(false)
+  useEffect(() => {
+    const el = toolbarRef.current
+    if (!el) return
+    const GAP = 8
+    const update = (): void => {
+      const cs = getComputedStyle(document.documentElement)
+      const left = parseFloat(cs.getPropertyValue('--nav-pill-left'))
+      const right = parseFloat(cs.getPropertyValue('--nav-pill-right'))
+      const r = el.getBoundingClientRect()
+      setUnderPill(Number.isFinite(left) && Number.isFinite(right) && r.left < right + GAP && r.right > left - GAP)
+    }
+    update()
+    const ro = new ResizeObserver(update)
+    ro.observe(el)
+    window.addEventListener('resize', update)
+    window.addEventListener(NAV_PILL_EVENT, update)
+    return () => {
+      ro.disconnect()
+      window.removeEventListener('resize', update)
+      window.removeEventListener(NAV_PILL_EVENT, update)
+    }
+  }, [])
+
   // ── Actions ────────────────────────────────────────────────────────────────
   // Everything the keys can reach reads the stores fresh, since the key
   // listener is registered once.
   const glRef = useRef(glSupported)
   glRef.current = glSupported
   const usableModes = (): string[] =>
-    VISUALIZERS.filter((v) => v.id !== 'none' && (v.engine !== 'gl' || glRef.current)).map((v) => v.id)
+    VISUALIZERS.filter((v) => v.id !== 'none' && (!needsWebGL(v) || glRef.current)).map((v) => v.id)
 
   const cycle = useCallback((dir: 1 | -1): void => {
     // Unlike auto-switch, the arrows also stop on "Off".
-    const ids = VISUALIZERS.filter((v) => v.engine !== 'gl' || glRef.current).map((v) => v.id)
+    const ids = VISUALIZERS.filter((v) => !needsWebGL(v) || glRef.current).map((v) => v.id)
     const { activeMode: cur, selectMode } = useVizStore.getState()
     let i = ids.indexOf(cur)
     if (i < 0) i = dir > 0 ? -1 : 0
@@ -277,35 +318,36 @@ export default function WrldVisualizer({
     announce(vizName(next))
   }, [announce])
 
-  const toggleMinimal = useCallback((): void => {
-    const { immMinimal: cur, setImmMinimal } = useVizStore.getState()
-    setImmMinimal(!cur)
-    announce(cur ? 'Player' : 'Visualizer only')
-  }, [announce])
+  const toggleWidgets = (): void => {
+    const { wrldWidgets: cur, setWrldWidgets } = useVizStore.getState()
+    setWrldWidgets(!cur)
+    announce(cur ? 'Old style on' : 'Old style off')
+  }
 
-  // Lyrics are toggled by the app's own "Toggle lyrics" hotkey as well as the
-  // toolbar, so the state follows the stores rather than the button. The button
-  // cycles off -> lyrics -> queue, or off -> radio -> lyrics during FM.
+  // The real widgets out on the desktop (Windows). Off puts away whichever are out and remembers them; on brings
+  // that same set back, or all three the first time.
+  const desktopWidgetsSupported = desktopWindowsSupported()
+  const desktopWidgetsOn = useStore((s) => s.desktop.player.isOn || s.desktop.playlist.isOn || s.desktop.clock.isOn)
+  const toggleDesktopWidgets = (): void => {
+    const { desktop, setDesktop } = useStore.getState()
+    if (desktopWidgetsOn) {
+      ls.set('desktopWidgetsOut', DESKTOP_WIDGETS.filter((w) => desktop[w].isOn))
+      setDesktop({ player: { isOn: false }, playlist: { isOn: false }, clock: { isOn: false } })
+      announce('Desktop widgets off')
+    } else {
+      const out = ls.get<DesktopWidget[]>('desktopWidgetsOut') ?? DESKTOP_WIDGETS
+      setDesktop({ player: { isOn: out.includes('player') }, playlist: { isOn: out.includes('playlist') }, clock: { isOn: out.includes('clock') } })
+      announce('Desktop widgets on')
+    }
+  }
+
+  // The side panel is driven by the page's own queue/lyrics toggle and the
+  // app's "Toggle lyrics" hotkey; this only follows the stores to announce it.
   const showQueue = useStore((s) => s.showQueue)
   const lyricsVisible = fm.active ? !lyricsOverride : hasLyrics !== lyricsOverride
   const panel: 'off' | 'lyrics' | 'queue' | 'radio' = fm.active
     ? (lyricsVisible ? fm.tab : 'off')
     : showQueue ? 'queue' : lyricsVisible ? 'lyrics' : 'off'
-
-  const toggleLyrics = (): void => {
-    const s = useStore.getState()
-    if (fm.active) {
-      if (panel === 'off') { fm.setTab('radio'); s.setLyricsOverride(false) }
-      else if (panel === 'radio') fm.setTab('lyrics')
-      else s.setLyricsOverride(true)
-      return
-    }
-    // Lyrics show when hasLyrics !== override, so these pick the override that
-    // hides or shows them for the current track.
-    if (panel === 'off') { s.setShowQueue(false); s.setLyricsOverride(!hasLyrics) }
-    else if (panel === 'lyrics') s.setShowQueue(true)
-    else { s.setShowQueue(false); s.setLyricsOverride(hasLyrics) }
-  }
 
   const seenPanel = useRef(panel)
   useEffect(() => {
@@ -326,7 +368,6 @@ export default function WrldVisualizer({
       if (!fullscreen) return
       if (combo === 'ArrowLeft') cycle(-1)
       else if (combo === 'ArrowRight') cycle(1)
-      else if (combo === 'V') toggleMinimal()
       else return
       e.preventDefault()
       e.stopPropagation()
@@ -334,7 +375,7 @@ export default function WrldVisualizer({
     }
     window.addEventListener('keydown', onKey, true)
     return () => window.removeEventListener('keydown', onKey, true)
-  }, [cycle, toggleMinimal, wake, fullscreen])
+  }, [cycle, wake, fullscreen])
 
   // ── Auto-switch: a random mode per track or album, never saved ─────────────
   const prevTrack = useRef<string | null>(null)
@@ -359,21 +400,27 @@ export default function WrldVisualizer({
   const tool = 'w-9 h-9 flex items-center justify-center rounded-[10px] transition-colors disabled:opacity-30 disabled:pointer-events-none'
   const toolIdle = 'text-white/60 hover:text-white hover:bg-white/10'
   const toolOn = 'text-[var(--accent)] bg-[rgb(var(--accent-rgb)/0.16)]'
-  const corner: Record<typeof immCaptionPos, string> = {
-    bl: 'left-0 bottom-0',
-    br: 'right-0 bottom-0 text-right',
-    tl: 'left-0 top-0',
-    tr: 'right-0 top-0 text-right',
-  }
-  const shadow = '0 2px 40px rgba(0,0,0,0.5)'
 
   return (
     <>
       {/* Above WRLD's blurred-art background, beneath its content. */}
       <div ref={hostRef} className="absolute inset-0 pointer-events-none" aria-hidden />
+      {shownEdge !== null && (
+        <div className="absolute inset-0 pointer-events-none" aria-hidden>
+          {/* One light whatever the look: a new one per look meant a new WebGL context and its programs built again. */}
+          <WrldEdgeLight
+            look={shownEdge}
+            held={covered}
+            onUnsupported={() => setOverlayFailed(true)}
+          />
+        </div>
+      )}
 
       <div
-        className={`absolute top-4 right-4 z-40 flex items-center gap-0.5 p-[5px] rounded-[14px] bg-black/40 backdrop-blur-xl border border-white/10 transition-[opacity,transform] duration-300 ${
+        ref={toolbarRef}
+        // Below a top-docked floating nav pill only when they'd overlap.
+        style={underPill ? { top: 'calc(var(--nav-pill-top, 0px) + 1rem)' } : { top: '1rem' }}
+        className={`absolute right-4 z-40 flex items-center gap-0.5 p-[5px] rounded-[14px] bg-black/40 backdrop-blur-xl border border-white/10 transition-[opacity,transform] duration-300 ${
           idle && !showSettings ? 'opacity-0 -translate-y-1.5 pointer-events-none' : ''
         }`}
         onMouseEnter={() => { overToolbar.current = true }}
@@ -391,35 +438,26 @@ export default function WrldVisualizer({
           <span>{fm.label}</span>
         </button>
         <span className="w-px h-5 mx-1 bg-white/10" />
-        <button className={`${tool} ${toolIdle}`} onClick={() => cycle(-1)} title="Previous visualizer (←)" aria-label="Previous visualizer">
-          <ChevronLeft size={19} />
-        </button>
-        <span className="min-w-[74px] text-center text-[11px] font-bold tracking-[0.1em] uppercase text-white/90 select-none" aria-live="polite">
-          {vizName(activeMode)}
-        </span>
-        <button className={`${tool} ${toolIdle}`} onClick={() => cycle(1)} title="Next visualizer (→)" aria-label="Next visualizer">
-          <ChevronRight size={19} />
-        </button>
-        <span className="w-px h-5 mx-1 bg-white/10" />
         <button
-          className={`${tool} ${panel !== 'off' && !minimal ? toolOn : toolIdle}`}
-          onClick={toggleLyrics}
-          title={fm.active ? "Cycle: off / radio / lyrics" : "Cycle: off / lyrics / queue"}
-          aria-label="Toggle lyrics"
-          aria-pressed={panel !== 'off'}
-          disabled={minimal}
+          className={`${tool} ${wrldWidgets ? toolIdle : toolOn}`}
+          onClick={toggleWidgets}
+          title={wrldWidgets ? 'Old style is off: click for the original player' : 'Old style is on: click for the widgets'}
+          aria-label={wrldWidgets ? 'Old style is off' : 'Old style is on'}
+          aria-pressed={!wrldWidgets}
         >
-          {panel === 'queue' ? <ListMusic size={18} /> : panel === 'radio' ? <Radio size={18} /> : <TextQuote size={18} />}
+          <Disc3 size={17} />
         </button>
-        <button
-          className={`${tool} ${immMinimal ? toolOn : toolIdle}`}
-          onClick={toggleMinimal}
-          title={fullscreen ? 'Visualizer only (V)' : 'Visualizer only'}
-          aria-label="Visualizer only"
-          aria-pressed={immMinimal}
-        >
-          <AudioLines size={18} />
-        </button>
+        {desktopWidgetsSupported && (
+          <button
+            className={`${tool} ${desktopWidgetsOn ? toolOn : toolIdle}`}
+            onClick={toggleDesktopWidgets}
+            title="Desktop widgets: the player, playlist and clock out on your desktop"
+            aria-label="Desktop widgets"
+            aria-pressed={desktopWidgetsOn}
+          >
+            <Monitor size={17} />
+          </button>
+        )}
         <button
           className={`${tool} ${showSettings ? toolOn : toolIdle}`}
           onClick={() => setShowSettings((v) => !v)}
@@ -447,32 +485,35 @@ export default function WrldVisualizer({
         )}
         {showSettings && (
           <div
-            className="absolute top-full right-0 mt-2 w-[380px] max-w-[calc(100vw-2rem)] max-h-[70vh] overflow-y-auto p-4 rounded-[14px] bg-[var(--surface)] border border-[var(--border)] shadow-2xl"
+            className={`absolute top-full right-0 mt-2 ${IS_ELECTRON && settingsTab === 'desktop' ? 'w-[460px]' : 'w-[400px]'} max-w-[calc(100vw-2rem)] max-h-[70vh] overflow-y-auto p-4 rounded-[14px] bg-[var(--surface)] border border-[var(--border)] shadow-2xl`}
           >
-            <VizControls />
-            <p className="mt-4 mb-3 pt-4 border-t border-[var(--border)] text-text-secondary text-xs font-semibold">Lyrics</p>
-            <LyricsControls />
+            {IS_ELECTRON && (
+              <div role="tablist" aria-label="Settings" className="flex rounded-lg border border-[var(--border)] overflow-hidden mb-4">
+                {([['viz', 'Visualizer'], ['desktop', 'Desktop']] as const).map(([id, label]) => (
+                  <button
+                    key={id}
+                    role="tab"
+                    aria-selected={settingsTab === id}
+                    onClick={() => pickSettingsTab(id)}
+                    className={`flex-1 py-1.5 text-[12px] font-medium transition-colors ${
+                      settingsTab === id ? 'bg-accent text-white' : 'text-text-muted hover:text-text-primary hover:bg-[var(--surface-overlay)]'
+                    }`}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+            )}
+            {IS_ELECTRON && settingsTab === 'desktop' ? <DesktopSettings heading={false} /> : (
+              <>
+                <VizControls modes={false} />
+                <p className="mt-4 mb-3 pt-4 border-t border-[var(--border)] text-text-secondary text-xs font-semibold">Lyrics</p>
+                <LyricsControls />
+              </>
+            )}
           </div>
         )}
       </div>
-
-      {minimal && (
-        <div
-          data-viz="caption"
-          className={`absolute z-20 max-w-[46vw] px-[4.5vw] py-[6vh] select-none pointer-events-none ${corner[immCaptionPos]}`}
-          // Clear the toolbar, which sits in the top-right corner.
-          style={immCaptionPos === 'tr' ? { paddingTop: 'max(6vh, 92px)' } : undefined}
-        >
-          <p className="font-extrabold leading-[1.04] tracking-[-0.025em]" style={{ fontSize: 'clamp(30px, 4.4vw, 72px)', color: txtPri, textShadow: shadow }}>
-            {title}
-          </p>
-          {artist && (
-            <p className="mt-[0.55em] font-semibold" style={{ fontSize: 'clamp(15px, 1.6vw, 26px)', color: txtSec, textShadow: shadow }}>
-              {artist}
-            </p>
-          )}
-        </div>
-      )}
 
       <div
         className={`absolute left-1/2 bottom-[7vh] z-40 px-[18px] py-[9px] rounded-[20px] bg-black/45 backdrop-blur-lg text-white text-xs font-bold tracking-[0.12em] uppercase pointer-events-none transition-[opacity,transform] duration-300 ${

@@ -1,6 +1,10 @@
 import { useState, type ReactNode } from 'react'
-import { VISUALIZERS, type Boost, type Quality } from '../lib/viz'
-import { useVizStore, type CaptionPos, type VizCycle } from '../store/vizStore'
+import { VISUALIZERS, needsWebGL, type Boost, type Quality } from '../lib/viz'
+import { useVizStore, type VizCycle } from '../store/vizStore'
+import { lazyOverlay } from '../lib/lazyView'
+
+// Every visualizer, Edge light or lyric style, playing at once to pick one from (the picker Settings > Desktop uses too).
+const DesktopPicker = lazyOverlay(() => import('./DesktopPicker'))
 
 export function Pills<T extends string>({ value, options, onChange }: {
   value: T
@@ -61,31 +65,51 @@ export function Toggle({ on, onClick, locked }: { on: boolean; onClick: () => vo
   )
 }
 
-/** Every visualizer control, shared by Settings and the WRLD toolbar's popup. */
-export default function VizControls(): JSX.Element {
+/**
+ * Every visualizer control, shared by Settings and the WRLD toolbar's popup.
+ * The popup leaves out the mode picker: the toolbar's mode name, right beside
+ * it, opens the same list.
+ */
+export default function VizControls({ modes = true }: { modes?: boolean }): JSX.Element {
   const s = useVizStore()
   const gl = webglAvailable()
+  const [browsing, setBrowsing] = useState<'viz' | 'overlay' | 'lyrics' | null>(null)
   const line = (label: string, control: ReactNode): JSX.Element => (
     <div className="flex items-start gap-2">
       <span className="text-text-muted text-[11px] w-[86px] shrink-0 pt-1">{label}</span>
       <div className="min-w-0 flex-1">{control}</div>
     </div>
   )
+  const browse = (kind: 'viz' | 'overlay' | 'lyrics', title: string): JSX.Element => (
+    <button
+      onClick={() => setBrowsing(kind)}
+      className="px-2.5 py-1 rounded-lg text-[11px] font-medium border border-[var(--border)] text-text-muted hover:text-text-primary hover:bg-[var(--surface-overlay)] transition-colors"
+      title={title}
+    >
+      Browse
+    </button>
+  )
   return (
     <div className="flex flex-col gap-2.5">
-      {line('Visualizer', (
+      {modes && line('Visualizer', (
         <Pills
           // A saved shader mode plays as Aurora without WebGL; highlight that.
-          value={!gl && VISUALIZERS.find((v) => v.id === s.vizMode)?.engine === 'gl' ? 'aurora' : s.vizMode}
+          value={!gl && needsWebGL(VISUALIZERS.find((v) => v.id === s.vizMode)) ? 'aurora' : s.vizMode}
           onChange={(id) => s.selectMode(id, true)}
           options={VISUALIZERS.map((v) => ({
             value: v.id,
             label: v.name,
-            disabled: v.engine === 'gl' && !gl,
-            title: v.engine === 'gl' && !gl ? 'Needs WebGL, which this browser has turned off' : undefined,
+            disabled: needsWebGL(v) && !gl,
+            title: needsWebGL(v) && !gl ? 'Needs WebGL, which this browser has turned off' : undefined,
           }))}
         />
       ))}
+      {line('Visualizers', browse('viz', 'See every classic visualizer and shader playing, then pick one'))}
+      {gl && line('Edge light', browse('overlay', 'See every Edge light playing, then pick one. A light round the edges: over the visualizer, or on its own with the visualizer Off'))}
+      {line('Lyric style', browse('lyrics', 'See every lyric style playing, then pick one'))}
+      {browsing && (
+        <DesktopPicker kind={browsing} onClose={() => setBrowsing(null)} />
+      )}
       {line('Quality', (
         <Pills<Quality>
           value={s.vizQuality}
@@ -123,24 +147,12 @@ export default function VizControls(): JSX.Element {
         />
       ))}
       {line('Layout', (
-        <Pills<'player' | 'minimal'>
-          value={s.immMinimal ? 'minimal' : 'player'}
-          onChange={(v) => s.setImmMinimal(v === 'minimal')}
+        <Pills<'player' | 'widgets'>
+          value={s.wrldWidgets ? 'widgets' : 'player'}
+          onChange={(v) => s.setWrldWidgets(v === 'widgets')}
           options={[
+            { value: 'widgets', label: 'Widgets', title: 'The desktop player, playlist and clock, here in WRLD. Hide all three for the visualizer only' },
             { value: 'player', label: 'Player & lyrics' },
-            { value: 'minimal', label: 'Visualizer only' },
-          ]}
-        />
-      ))}
-      {s.immMinimal && line('Caption', (
-        <Pills<CaptionPos>
-          value={s.immCaptionPos}
-          onChange={s.setImmCaptionPos}
-          options={[
-            { value: 'tl', label: 'Top left' },
-            { value: 'tr', label: 'Top right' },
-            { value: 'bl', label: 'Bottom left' },
-            { value: 'br', label: 'Bottom right' },
           ]}
         />
       ))}

@@ -18,6 +18,7 @@ import { Sheet } from './mobile/Sheet'
 import { GameSwitcher, GameBackdrop } from './gameShell'
 import { useTierlistData, MAX_TIERS } from '../hooks/useTierlistData'
 import { ListsPanelBody, FiltersPanelBody, TierlistViewer } from './TierlistPanels'
+import { SearchHelpButton } from './SearchHelpPopover'
 
 // Drop-zone id used for the "Unranked" pool, since tier ids are already
 // unique strings and null can't be stuffed into a DOM dataset attribute.
@@ -440,23 +441,29 @@ export default function TierlistView(): JSX.Element {
                 </button>
               )}
             </div>
-            <div className="relative mb-3">
-              <Search size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-text-muted pointer-events-none" />
-              <input
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
-                placeholder="Search songs or eras"
-                className="w-full pl-8 pr-9 py-2 rounded-lg bg-[var(--surface-overlay)] border border-[var(--border)] text-xs text-text-primary focus:outline-none focus:border-accent/50"
+            <div className="flex items-center gap-1.5 mb-3">
+              <div className="relative flex-1 min-w-0">
+                <Search size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-text-muted pointer-events-none" />
+                <input
+                  value={search}
+                  onChange={(e) => setSearch(e.target.value)}
+                  placeholder="Search songs or eras"
+                  className="w-full pl-8 pr-9 py-2 rounded-lg bg-[var(--surface-overlay)] border border-[var(--border)] text-xs text-text-primary focus:outline-none focus:border-accent/50"
+                />
+                {search && (
+                  <button
+                    onClick={() => setSearch('')}
+                    aria-label="Clear search"
+                    className="absolute right-0 top-0 h-full w-9 flex items-center justify-center text-text-muted"
+                  >
+                    <X size={13} />
+                  </button>
+                )}
+              </div>
+              <SearchHelpButton
+                size={14}
+                className={(open) => `p-2 rounded-lg border border-[var(--border)] transition-colors ${open ? 'bg-accent/15 text-accent' : 'bg-[var(--surface-overlay)] text-text-muted'}`}
               />
-              {search && (
-                <button
-                  onClick={() => setSearch('')}
-                  aria-label="Clear search"
-                  className="absolute right-0 top-0 h-full w-9 flex items-center justify-center text-text-muted"
-                >
-                  <X size={13} />
-                </button>
-              )}
             </div>
             <div
               onClick={clickRow(null)}

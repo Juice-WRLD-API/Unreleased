@@ -1,7 +1,9 @@
+import { MotionOverlay } from '../MotionOverlay'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { useShallow } from 'zustand/react/shallow'
 import { Check, ChevronDown, Globe, Hash, ImagePlus, Loader2, Lock, Plus, Search, ShieldCheck, Slash, Trash2, X } from 'lucide-react'
+import ThemedColorPicker from '../ThemedColorPicker'
 import * as api from '../../lib/chatApi'
 import { CHAT_PERMISSIONS, type ChannelOverride, type ChatChannel, type ChatMember, type ChatPermissionName, type ChatUserBrief, type PublicServerSummary, type ServerRoleDef } from '../../lib/chatApi'
 import { adminListUsers, compressImageFile } from '../../lib/userApi'
@@ -24,11 +26,11 @@ export function DialogShell({ title, subtitle, onClose, children, footer, width 
 }): JSX.Element {
   useEscapeToClose(onClose)
   return createPortal(
-    <div className="fixed inset-0 z-[140] flex items-end md:items-center justify-center md:p-4" onMouseDown={onClose}>
+    <MotionOverlay className="fixed inset-0 z-[140] flex items-end md:items-center justify-center md:p-4" onMouseDown={onClose}>
       <div className="absolute inset-0 bg-black/55 backdrop-blur-[2px]" />
       <div
         onMouseDown={(e) => e.stopPropagation()}
-        className={`chat-sheet relative w-full ${width} max-h-[92vh] flex flex-col rounded-t-2xl md:rounded-2xl border border-[var(--border)] bg-surface shadow-2xl`}
+        className={`relative w-full ${width} max-h-[92vh] flex flex-col rounded-t-2xl md:rounded-2xl border border-[var(--border)] bg-surface shadow-2xl`}
         style={{ paddingBottom: 'env(safe-area-inset-bottom, 0px)' }}
       >
         <header className="flex items-start gap-3 px-5 pt-5 pb-3">
@@ -41,7 +43,7 @@ export function DialogShell({ title, subtitle, onClose, children, footer, width 
         <div className="chat-scroll flex-1 min-h-0 overflow-y-auto px-5 pb-4">{children}</div>
         {footer && <footer className="flex items-center justify-end gap-2 px-5 py-3.5 border-t border-[var(--border)] bg-surface-raised/40 md:rounded-b-2xl">{footer}</footer>}
       </div>
-    </div>,
+    </MotionOverlay>,
     document.body,
   )
 }
@@ -699,7 +701,7 @@ function RoleRow({ serverId, role, canManage }: { serverId: number; role: Server
       {open && (
         <div className="px-3 pb-3 border-t border-[var(--border)] pt-3">
           <div className="flex items-center gap-2 mb-3">
-            <input type="color" value={color || '#8a8f98'} onChange={(e) => setColor(e.target.value)} className="w-9 h-9 rounded-lg border border-[var(--border)] bg-transparent cursor-pointer" />
+            <ThemedColorPicker value={color || '#8a8f98'} onChange={setColor} title="Role color" className="w-9 h-9 rounded-lg border border-[var(--border)]" />
             {!role.is_default ? (
               <input value={name} onChange={(e) => setName(e.target.value)} className={`${inputCls} flex-1`} />
             ) : (
@@ -766,7 +768,7 @@ function NewRoleRow({ serverId, onDone }: { serverId: number; onDone: () => void
   return (
     <div className="rounded-xl border border-accent/40 bg-accent/5 p-3 mb-2">
       <div className="flex items-center gap-2 mb-3">
-        <input type="color" value={color} onChange={(e) => setColor(e.target.value)} className="w-9 h-9 rounded-lg border border-[var(--border)] bg-transparent cursor-pointer" />
+        <ThemedColorPicker value={color} onChange={setColor} title="Role color" className="w-9 h-9 rounded-lg border border-[var(--border)]" />
         <input autoFocus value={name} onChange={(e) => setName(e.target.value)} className={`${inputCls} flex-1`} />
       </div>
       <PermissionCheckboxes value={permissions} onChange={setPermissions} />

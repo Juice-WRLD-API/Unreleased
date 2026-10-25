@@ -1,8 +1,11 @@
+import { useCascade } from '../hooks/useCascade'
 import { useEffect, useState } from 'react'
 import { Play, Loader2, Music2, Share2, Download, ChevronLeft } from 'lucide-react'
 import { useStore, useStorePick } from '../store/useStore'
 import { apiFetch, buildStreamUrl, buildCoverArtUrl } from '../lib/juicewrldApi'
 import { liteSongToTrack, ApiSongLite } from '../lib/userApi'
+import type { PlaylistItemEntry } from '../lib/userApi'
+import { playlistItemsToTracks } from '../lib/playlistItems'
 import { Track } from '../types'
 import { AlbumArtThumbnail } from './AlbumArtThumbnail'
 import { clickable } from '../lib/a11y'
@@ -58,8 +61,9 @@ function parseTracks(data: unknown): Track[] {
     if (!Array.isArray(list) || list.length === 0) continue
     const first = list[0]
     if (isApiSongLite(first)) return (list as ApiSongLite[]).map(liteSongToTrack)
-    if (first && typeof first === 'object' && 'song' in first && isApiSongLite((first as AnyObject).song)) {
-      return list.map((i: AnyObject) => liteSongToTrack(i.song as ApiSongLite))
+    // Library playlist entries: songs, plus comp files (song: null).
+    if (first && typeof first === 'object' && 'song' in first && ('source' in first || isApiSongLite((first as AnyObject).song))) {
+      return playlistItemsToTracks(list as PlaylistItemEntry[]).filter(t => t.path)
     }
     const byPath = (list as AnyObject[]).flatMap((s: AnyObject) => {
       const p = (s.path ?? s.file_path ?? s.url ?? '') as string
@@ -107,6 +111,7 @@ export default function SharedPlaylistView(): JSX.Element {
   const [tracks, setTracks] = useState<Track[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(false)
+  const cascade = useCascade(tracks.length > 0)
 
   useEffect(() => {
     if (!shareId) { setError(true); setLoading(false); return }
@@ -175,7 +180,7 @@ export default function SharedPlaylistView(): JSX.Element {
       )}
 
       {/* Track list */}
-      <div className="space-y-0.5">
+      <div className={`space-y-0.5 ${cascade ? 'rows-cascade' : ''}`}>
         {tracks.map((t, i) => (
           <div
             key={t.id}

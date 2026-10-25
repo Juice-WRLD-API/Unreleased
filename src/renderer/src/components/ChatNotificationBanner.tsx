@@ -3,12 +3,17 @@ import { createPortal } from 'react-dom'
 import { X } from 'lucide-react'
 import { onChatNotificationBanner, type ChatNotificationPayload } from '../lib/chatNotifications'
 import { clickable } from '../lib/a11y'
+import { useListMotion, type ListMotionOptions } from '../hooks/useListMotion'
 
 interface BannerToast extends ChatNotificationPayload {
   toastId: number
 }
 
 const AUTO_DISMISS_MS = 6000
+const BANNER_MOTION: ListMotionOptions = {
+  enter: [{ opacity: 0, transform: 'translateX(16px)' }, { opacity: 1, transform: 'translateX(0)' }],
+  exit: [{ opacity: 0, transform: 'translateX(12px)' }],
+}
 
 const LEVEL_BORDER: Record<NonNullable<ChatNotificationPayload['level']>, string> = {
   info: 'border-accent/50',
@@ -23,6 +28,8 @@ const LEVEL_BORDER: Record<NonNullable<ChatNotificationPayload['level']>, string
 export default function ChatNotificationBanner(): JSX.Element | null {
   const [toasts, setToasts] = useState<BannerToast[]>([])
   const nextId = useRef(1)
+  const stackRef = useRef<HTMLDivElement>(null)
+  useListMotion(stackRef, BANNER_MOTION)
 
   useEffect(() => onChatNotificationBanner((payload) => {
     const toastId = nextId.current++
@@ -30,14 +37,13 @@ export default function ChatNotificationBanner(): JSX.Element | null {
     window.setTimeout(() => setToasts((t) => t.filter((x) => x.toastId !== toastId)), payload.autoDismissMs ?? AUTO_DISMISS_MS)
   }), [])
 
-  if (toasts.length === 0) return null
-
   const dismiss = (toastId: number): void => setToasts((t) => t.filter((x) => x.toastId !== toastId))
 
   return createPortal(
     // Always-mounted live region, so an incoming message is announced rather
     // than appearing silently. Polite: a new chat message shouldn't interrupt.
     <div
+      ref={stackRef}
       role="status"
       aria-live="polite"
       className="fixed top-4 right-4 z-[250] flex flex-col gap-2 w-[320px] max-w-[calc(100vw-2rem)] pointer-events-none"
@@ -45,8 +51,9 @@ export default function ChatNotificationBanner(): JSX.Element | null {
       {toasts.map((t) => (
         <div
           key={t.toastId}
+          data-flip-key={t.toastId}
           {...clickable(() => { t.onOpen(); dismiss(t.toastId) })}
-          className={`animate-slide-in-right pointer-events-auto cursor-pointer flex items-start gap-2.5 p-3 rounded-xl border bg-surface shadow-2xl ${t.level ? LEVEL_BORDER[t.level] : 'border-[var(--border)]'}`}
+          className={`pointer-events-auto cursor-pointer flex items-start gap-2.5 p-3 rounded-xl border bg-surface shadow-2xl ${t.level ? LEVEL_BORDER[t.level] : 'border-[var(--border)]'}`}
         >
           {t.icon ? (
             <img src={t.icon} alt="" className="w-9 h-9 rounded-full object-cover shrink-0" />

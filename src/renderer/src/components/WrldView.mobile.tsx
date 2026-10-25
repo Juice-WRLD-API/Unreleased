@@ -12,9 +12,9 @@ import { useShallow } from 'zustand/react/shallow'
 import { getCurrentLineIndex, downloadSyncedLyrics, splitAdLibs, splitColorWords, ADLIB_OPACITY } from '../lib/lyrics'
 import { formatDuration } from '../lib/format'
 import { seekAudio, getAudioDuration, getAudioCurrentTime, runPlayerCommand } from './Player'
-import { apiFetch, getSongsByIds } from '../lib/juicewrldApi'
+import { apiFetch, getSongsByIds, fullCoverUrl, smallCoverUrl } from '../lib/juicewrldApi'
 import { getActiveRadioClient } from '../lib/radioSocketService'
-import { EFFECTS_SUPPORTED } from '../lib/audioEffects'
+import { EFFECTS_SUPPORTED, fxInUse } from '../lib/audioEffects'
 import { getVersionGroup } from '../lib/versionsApi'
 import type { JWApiSong } from '../lib/juicewrldApi'
 import type { SyncedLyricLine, Track } from '../types'
@@ -23,7 +23,7 @@ import { useCanEdit } from '../hooks/useChannelRoles'
 import SongInfoModal from './SongInfoModal'
 import CoverEditor from './CoverEditor'
 import { AlbumArtThumbnail } from './AlbumArtThumbnail'
-import { ProgressiveCover } from './ProgressiveCover'
+import { FallbackImg, ProgressiveCover } from './ProgressiveCover'
 import SongContextMenu from './SongContextMenu'
 import { getSkin } from '../lib/skins'
 import { IS_IOS } from '../lib/platform'
@@ -98,7 +98,7 @@ export default function WrldView(): JSX.Element {
     setShowQueue: s.setShowQueue,
     toggleEqPanel: s.toggleEqPanel,
     // Same "anything non-neutral" indicator as the player bar's EQ button.
-    eqFxActive: s.eqEnabled || s.playbackSpeed !== 1 || s.eqBalance !== 0 || s.eqMono || s.eqBoost !== 1 || s.skipSilence || s.reverbEnabled,
+    eqFxActive: s.playbackSpeed !== 1 || (EFFECTS_SUPPORTED && (s.eqEnabled || s.eqBalance !== 0 || s.eqMono || s.eqBoost !== 1 || s.skipSilence || s.reverbEnabled || fxInUse(s.audioFx, s.eqEnabled))),
   })))
 
   // Skins beyond the classic pair mean `theme === 'dark'` no longer covers
@@ -170,7 +170,7 @@ export default function WrldView(): JSX.Element {
     return () => { cancelled = true }
   }, [currentTrack?.id, radioFmActive])
 
-  const handlePlayVersion = usePlayVersion(playTrack)
+  const handlePlayVersion = usePlayVersion()
 
   // Long-press the cover for a quick "Change cover" sheet - the same picker
   // Personalize's "Custom cover" section offers (see CoverEditor), just
@@ -207,7 +207,7 @@ export default function WrldView(): JSX.Element {
   const trackBg  = textIsDark ? 'rgba(0,0,0,0.15)'  : 'rgba(255,255,255,0.2)'
 
   const { displayTitle, displayArtist, displayAlbum, fmDisabled, noTrack, toggleFm } = useWrldNowPlaying(
-    radioFmActive, radioFmIsLive, radioFmNowPlaying, currentTrack, setRadioFmActive, setIsPlaying,
+    radioFmActive, radioFmIsLive, radioFmNowPlaying, currentTrack,
   )
 
   // The chevron collapses the player back to wherever you came from - the same
@@ -481,9 +481,7 @@ export default function WrldView(): JSX.Element {
             {!radioFmActive && songVersions.length > 0 && (
               <ActionChip icon={Layers} label="Versions" onClick={() => setSheet('versions')} light={textIsDark} />
             )}
-            {EFFECTS_SUPPORTED && (
-              <ActionChip icon={SlidersHorizontal} label="EQ" onClick={toggleEqPanel} active={eqFxActive} light={textIsDark} />
-            )}
+            <ActionChip icon={SlidersHorizontal} label="EQ" onClick={toggleEqPanel} active={eqFxActive} light={textIsDark} />
           </div>
         </div>
       </div>
@@ -682,7 +680,7 @@ function ArtBackdrop({ artSrc, artError, isDarkSkin, radioFmActive, onError, ext
         // patches this was reported against. transform's own upscale is a
         // separate, always-smooth bilinear step, so the visible result is
         // softer even though the source blur radius is smaller.
-        <img src={artSrc} alt=""
+        <FallbackImg key={artSrc} sources={[artSrc, fullCoverUrl(artSrc), smallCoverUrl(artSrc)]}
           className="absolute object-cover"
           style={{
             width: '50%', height: '50%', left: '50%', top: '50%',
@@ -973,7 +971,7 @@ const MAX_HISTORY_SHOWN = 10
 const QUEUE_SHEET_EXIT_MS = 200
 
 function QueueSheet({ open, onClose }: { open: boolean; onClose: () => void }): JSX.Element {
-  const { queue, queueIndex, currentTrack, isPlaying, shuffle, radioMode, playTrack, jumpToTrack, removeFromQueue, clearQueue, reorderQueue, reshuffleQueue } = useStore(useShallow(s => ({
+  const { queue, queueIndex, currentTrack, isPlaying, shuffle, radioMode, playHistory, playFromHistory, playTrack, jumpToTrack, removeFromQueue, clearQueue, reorderQueue, reshuffleQueue } = useStore(useShallow(s => ({
     queue: s.queue,
     queueIndex: s.queueIndex,
     currentTrack: s.currentTrack,
@@ -982,13 +980,15 @@ function QueueSheet({ open, onClose }: { open: boolean; onClose: () => void }): 
     radioMode: s.radioMode,
     playTrack: s.playTrack,
     jumpToTrack: s.jumpToTrack,
+    playHistory: s.playHistory,
+    playFromHistory: s.playFromHistory,
     removeFromQueue: s.removeFromQueue,
     clearQueue: s.clearQueue,
     reorderQueue: s.reorderQueue,
     reshuffleQueue: s.reshuffleQueue,
   })))
 
-  const history = queue.slice(0, queueIndex) // played tracks, oldest first
+  const history = playHistory // what was actually played, newest first - see QueuePanel
   const upcoming = queue.slice(queueIndex + 1)
   const [historyOpen, setHistoryOpen] = useState(false)
   // reorderQueue's (from, to) are indices within `upcoming` itself - see its
@@ -1103,18 +1103,15 @@ function QueueSheet({ open, onClose }: { open: boolean; onClose: () => void }): 
             <ChevronDown size={15} className={`transition-transform ${historyOpen ? 'rotate-180' : ''}`} />
           </button>
           {historyOpen && (() => {
-            // Displayed newest-first, so reversed index i maps back to
-            // absolute queue position history.length - 1 - i.
-            const reversedIndexed = [...history].reverse().map((track, i) => ({ track, i }))
-            const filtered = query ? reversedIndexed.filter(({ track }) => matchesQuery(track)) : reversedIndexed
+            const filtered = query ? history.filter(matchesQuery) : history
             const shown = query ? filtered : filtered.slice(0, MAX_HISTORY_SHOWN)
             return (
               <div className="opacity-70">
-                {shown.map(({ track, i }) => (
+                {shown.map((track) => (
                   <QueueRow
-                    key={`hist-${track.id}-${i}`}
+                    key={`hist-${track.id}`}
                     track={track}
-                    onPlay={() => jumpToTrack(track, history.length - 1 - i)}
+                    onPlay={() => playFromHistory(track)}
                   />
                 ))}
                 {!query && filtered.length > MAX_HISTORY_SHOWN && (
@@ -1985,6 +1982,17 @@ const LyricsPanel = memo(function LyricsPanel({
     setTranslateY(active.offsetTop + active.offsetHeight / 2 - vpHalf)
   }, [currentLineIdx, vpHalf, lyricsScale])
 
+  // No glide until the first centring has landed. translateY starts at 0, so
+  // every mount scrolled the whole song past from the top down to the current
+  // line. Waits for a measured viewport: a panel mounted hidden has none yet.
+  const [placed, setPlaced] = useState(false)
+  useEffect(() => {
+    if (placed || vpHalf === 0) return
+    const raf = requestAnimationFrame(() => setPlaced(true))
+    return () => cancelAnimationFrame(raf)
+  }, [placed, vpHalf])
+
+
   if (!rawLyrics) {
     return (
       <div className="relative flex-1 flex flex-col items-center justify-center gap-3 px-8">
@@ -2029,7 +2037,7 @@ const LyricsPanel = memo(function LyricsPanel({
           className={`relative flex flex-col ${padded ? 'gap-5 px-7' : 'gap-4 px-5'}`}
           style={{
             transform: `translateY(${-displayTranslateY}px)`,
-            transition: autoFollow ? 'transform 0.6s cubic-bezier(0.22,1,0.36,1)' : 'none',
+            transition: autoFollow && placed ? 'transform 0.6s cubic-bezier(0.22,1,0.36,1)' : 'none',
             willChange: 'transform',
           }}
         >

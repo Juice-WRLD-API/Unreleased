@@ -1,6 +1,9 @@
 import React, { useEffect, useRef, useState } from 'react'
 import { useStore, type SidebarPosition } from '../store/useStore'
 
+/** Fired on window when the top nav pill's published --nav-pill-* edges change. */
+export const NAV_PILL_EVENT = 'nav-pill-change'
+
 const HIDE_DELAY_MS = 300
 const SLIDE_MS = 200
 
@@ -34,6 +37,9 @@ export default function AutoHideNav({ position, autoHide = true, pill = false, c
   children: React.ReactNode
 }): JSX.Element {
   const hotZonePx = useStore((s) => s.autoHideNavZone)
+  // The floating nav sits at z-40, above WRLD's fullscreen portal (z-30) -
+  // step out of the way entirely while that immersive view is up.
+  const wrldFullscreen = useStore((s) => s.wrldFullscreen)
   const [hovered, setHovered] = useState(false)
   const open = !autoHide || hovered
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -82,6 +88,34 @@ export default function AutoHideNav({ position, autoHide = true, pill = false, c
     }
   }, [autoHide, hovered])
 
+  // A top pill floats over the page, so publish where it reaches (bottom and
+  // left/right edges) - page overlays pinned to the top (WRLD's visualizer
+  // toolbar) drop below it only when they'd actually run into it.
+  useEffect(() => {
+    const pillEl = wrapRef.current?.firstElementChild
+    if (!pill || position !== 'top' || !pillEl) return
+    const root = document.documentElement
+    const update = (): void => {
+      const r = pillEl.getBoundingClientRect()
+      root.style.setProperty('--nav-pill-top', `${Math.ceil(r.bottom)}px`)
+      root.style.setProperty('--nav-pill-left', `${Math.floor(r.left)}px`)
+      root.style.setProperty('--nav-pill-right', `${Math.ceil(r.right)}px`)
+      window.dispatchEvent(new Event(NAV_PILL_EVENT))
+    }
+    update()
+    const ro = new ResizeObserver(update)
+    ro.observe(pillEl)
+    // Centred, so a window resize moves it without resizing it.
+    window.addEventListener('resize', update)
+    return () => {
+      ro.disconnect()
+      window.removeEventListener('resize', update)
+      for (const v of ['--nav-pill-top', '--nav-pill-left', '--nav-pill-right']) root.style.removeProperty(v)
+      window.dispatchEvent(new Event(NAV_PILL_EVENT))
+    }
+  }, [pill, position, wrldFullscreen])
+
+  if (wrldFullscreen) return <></>
   return (
     <>
       {autoHide && (

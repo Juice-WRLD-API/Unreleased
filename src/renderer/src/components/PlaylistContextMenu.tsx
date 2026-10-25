@@ -8,14 +8,19 @@ import {
 import { useStore } from '../store/useStore'
 import { useShallow } from 'zustand/react/shallow'
 import * as userApi from '../lib/userApi'
+import { setPlaylistPublic, addPlaylistInBackground, PRIVATE_PLAYLIST_REASON } from '../lib/optimisticPlaylist'
 import type { PlaylistSummary } from '../lib/userApi'
-import { buildStreamUrl } from '../lib/juicewrldApi'
+import { buildStreamUrl, JWAPI_BASE } from '../lib/juicewrldApi'
+import { resolveTrackFile } from '../lib/sessionEditsApi'
 import { shareOrigin } from '../lib/platform'
 import { openZipTarget, saveItems } from '../lib/clientZip'
 import { Track } from '../types'
 import { hasChatAccess } from '../lib/chatAccess'
 import { lazyOverlay } from '../lib/lazyView'
 import ContextMenu from './ContextMenu'
+import { showAppToast } from '../lib/appToast'
+import { isServerFileTrack, playlistItemsToTracks, playlistSongIds } from '../lib/playlistItems'
+import { playlistJsonPayload, playlistM3uContent } from '../lib/playlistExport'
 
 // Staff-only (it pulls in the chat store) - fetched when opened.
 const SharePlaylistModal = lazyOverlay(() => import('./chat/SharePlaylistModal'))
@@ -50,7 +55,6 @@ export default function PlaylistContextMenu({ state, onClose }: {
   const [renameVal, setRenameVal] = useState(state.playlist.name)
   const [zipState, setZipState] = useState<'idle' | 'loading' | 'done' | 'error'>('idle')
   const [shareCopied, setShareCopied] = useState(false)
-  const [busy, setBusy] = useState(false)
   const [shareToChatOpen, setShareToChatOpen] = useState(false)
   const canShareToChat = hasChatAccess(account)
 
@@ -64,13 +68,13 @@ export default function PlaylistContextMenu({ state, onClose }: {
 
   const playAll = async (): Promise<void> => {
     const d = await userApi.getPlaylist(playlist.id)
-    const tracks = d.items.map(i => userApi.liteSongToTrack(i.song))
+    const tracks = playlistItemsToTracks(d.items).filter(t => t.path)
     if (tracks.length) playCollection(tracks)
   }
 
   const queueAll = async (): Promise<void> => {
     const d = await userApi.getPlaylist(playlist.id)
-    d.items.forEach(i => addToQueue(userApi.liteSongToTrack(i.song)))
+    playlistItemsToTracks(d.items).filter(t => t.path).forEach(t => addToQueue(t))
   }
 
   // Backend ZIP jobs are disabled (see ZIP_OPERATIONS_ENABLED) - the ZIP is
@@ -83,12 +87,13 @@ export default function PlaylistContextMenu({ state, onClose }: {
     setZipState('loading')
     try {
       const d = await userApi.getPlaylist(playlist.id)
-      const tracks = d.items.map(i => userApi.liteSongToTrack(i.song)).filter((t: Track) => t.path)
+      const tracks = playlistItemsToTracks(d.items).filter(isServerFileTrack)
       if (!tracks.length) { setZipState('error'); setTimeout(() => setZipState('idle'), 2500); return }
-      const { saved, cancelled } = await saveItems(target, tracks.map(t => ({
-        name: t.path.split('/').pop() || t.title,
-        url: t.streamUrl ?? buildStreamUrl(t.path),
-      })))
+      // A session not yet looked up has no file of its own until it is.
+      const items = (await Promise.all(tracks.map(t =>
+        resolveTrackFile(t).then(f => ({ name: f.path.split('/').pop() || t.title, url: f.url, songId: userApi.trackIdToSongId(t.id) }), () => null))))
+        .filter(<T,>(f: T | null): f is T => f != null)
+      const { saved, cancelled } = await saveItems(target, items)
       if (cancelled) { setZipState('idle'); return }
       setZipState(saved > 0 ? 'done' : 'error')
     } catch { setZipState('error') }
@@ -98,34 +103,16 @@ export default function PlaylistContextMenu({ state, onClose }: {
 
   const exportJson = async (): Promise<void> => {
     const d = await userApi.getPlaylist(playlist.id)
-    const data = {
-      name: d.name,
-      description: d.description,
-      tracks: d.items.map(i => ({
-        id: i.song.id,
-        title: i.song.name,
-        artist: i.song.credited_artists,
-        album: i.song.album ?? null,
-        era: i.song.era?.name ?? null,
-        path: i.song.path,
-        image_url: i.song.image_url,
-      })),
-    }
-    downloadBlob(JSON.stringify(data, null, 2), 'application/json', `${playlist.name}.json`)
+    downloadBlob(JSON.stringify(playlistJsonPayload(d), null, 2), 'application/json', `${playlist.name}.json`)
   }
 
   const exportM3u = async (): Promise<void> => {
     const d = await userApi.getPlaylist(playlist.id)
-    const tracks = d.items.map(i => userApi.liteSongToTrack(i.song))
-    const lines = ['#EXTM3U']
-    for (const t of tracks) {
-      lines.push(`#EXTINF:${Math.round(t.duration)},${t.artist} - ${t.title}`)
-      lines.push(t.streamUrl ?? t.path)
-    }
-    downloadBlob(lines.join('\n'), 'audio/x-mpegurl', `${playlist.name}.m3u`)
+    downloadBlob(playlistM3uContent(playlistItemsToTracks(d.items).filter(isServerFileTrack)), 'audio/x-mpegurl', `${playlist.name}.m3u`)
   }
 
   const copyShare = async (): Promise<void> => {
+    if (!playlist.is_public && playlist.can_be_public === false) { showAppToast(PRIVATE_PLAYLIST_REASON); return }
     if (!playlist.is_public) {
       if (!window.confirm('This playlist is private. Copying a share link will make it public so anyone with the link can open it. Continue?')) return
     }
@@ -138,10 +125,11 @@ export default function PlaylistContextMenu({ state, onClose }: {
       await navigator.clipboard.writeText(`${shareOrigin()}/playlists?id=${playlist.id}&view=shared`)
       setShareCopied(true)
       setTimeout(() => setShareCopied(false), 2000)
-    } catch {}
+    } catch { showAppToast("Couldn't share the playlist") }
   }
 
   const shareToChat = async (): Promise<void> => {
+    if (!playlist.is_public && playlist.can_be_public === false) { showAppToast(PRIVATE_PLAYLIST_REASON); return }
     if (!playlist.is_public) {
       if (!window.confirm('This playlist is private. Sharing it to chat will make it public so recipients can open it. Continue?')) return
       try {
@@ -153,21 +141,15 @@ export default function PlaylistContextMenu({ state, onClose }: {
     setShareToChatOpen(true)
   }
 
+  // Optimistic: the label flips now and flips back (with a toast) on failure.
   const togglePublic = async (): Promise<void> => {
-    if (busy) return
-    setBusy(true)
-    try {
-      await userApi.updatePlaylist(playlist.id, { is_public: !playlist.is_public })
-      setPlaylist(p => ({ ...p, is_public: !p.is_public }))
-      await refreshPlaylists()
-    } catch {} finally { setBusy(false) }
+    const next = !playlist.is_public
+    setPlaylist(p => ({ ...p, is_public: next }))
+    const actual = await setPlaylistPublic(playlist.id, next)
+    if (actual !== next) setPlaylist(p => ({ ...p, is_public: actual }))
   }
 
-  const addAllTo = async (targetId: number): Promise<void> => {
-    const src = await userApi.getPlaylist(playlist.id)
-    await Promise.all(src.items.map(item => userApi.addToPlaylist(targetId, item.song.id).catch(() => {})))
-    await refreshPlaylists()
-  }
+  const addAllTo = (targetId: number): Promise<void> => addPlaylistInBackground(playlist.id, targetId)
 
   const commitRename = async (): Promise<void> => {
     const val = renameVal.trim() || playlist.name
@@ -229,7 +211,7 @@ export default function PlaylistContextMenu({ state, onClose }: {
         'divider',
         canShareToChat && { icon: Share2, label: 'Share to chat', keepOpen: true, onSelect: () => void shareToChat() },
         { icon: shareCopied ? Check : Link, label: shareCopied ? 'Link copied!' : 'Copy share link', keepOpen: true, onSelect: copyShare },
-        { icon: playlist.is_public ? Globe : Lock, label: playlist.is_public ? 'Make private' : 'Make public', disabled: busy, keepOpen: true, onSelect: togglePublic },
+        { icon: playlist.is_public ? Globe : Lock, label: playlist.is_public ? 'Make private' : 'Make public', keepOpen: true, onSelect: togglePublic },
         'divider',
         { icon: Pencil, label: 'Rename', keepOpen: true, onSelect: () => { setRenameVal(playlist.name); setRenaming(true) } },
         otherPlaylists.length > 0 && {

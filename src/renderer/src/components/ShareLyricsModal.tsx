@@ -3,6 +3,7 @@ import { ChangeEvent, useEffect, useMemo, useRef, useState } from 'react'
 import { flushSync } from 'react-dom'
 import { toBlob, toPng } from 'html-to-image'
 import { X, Download, Share2, Copy, Loader2, Music2, ImagePlus, ChevronDown, Check, MessagesSquare } from 'lucide-react'
+import ThemedColorPicker from './ThemedColorPicker'
 import { ModalOverlay } from './Modal'
 import { parseLrc, isLrcFormat, getCurrentLineIndex, splitColorWords } from '../lib/lyrics'
 import { fetchImageDataUrl } from '../lib/coverImage'
@@ -10,7 +11,7 @@ import { getAudioCurrentTime } from './Player'
 import { useStore } from '../store/useStore'
 import { hasChatAccess } from '../lib/chatAccess'
 import { lazyOverlay } from '../lib/lazyView'
-import { FONTS, getFont } from '../lib/fonts'
+import { allFonts, getFont } from '../lib/fonts'
 import logo from '../assets/logo.png'
 
 // Staff-only (it pulls in the chat store) - fetched when opened.
@@ -266,8 +267,19 @@ export default function ShareLyricsModal({ title, artist, imageUrl, rawLyrics, o
 
   // Plain toggle: click an unselected line to add it (up to MAX_LINES), click
   // a selected one to drop it - so a selection can skip lines in between
-  // instead of always being one contiguous block.
+  // instead of always being one contiguous block. A second click on the same
+  // line in quick succession keeps just that line - timed here rather than
+  // onDoubleClick so a double-tap works on touch screens too.
+  const lastLineClickRef = useRef<{ i: number; at: number } | null>(null)
   const handleLineClick = (i: number): void => {
+    const now = performance.now()
+    const last = lastLineClickRef.current
+    if (last && last.i === i && now - last.at < 350) {
+      lastLineClickRef.current = null
+      setSelected([i])
+      return
+    }
+    lastLineClickRef.current = { i, at: now }
     setSelected(prev => {
       if (prev.includes(i)) return prev.filter(x => x !== i)
       if (prev.length >= MAX_LINES) return prev
@@ -514,7 +526,7 @@ export default function ShareLyricsModal({ title, artist, imageUrl, rawLyrics, o
                 </button>
                 {fontMenuOpen && (
                   <div className="mt-1 rounded-lg bg-[var(--surface-highest)] p-1 flex flex-col gap-0.5">
-                    {FONTS.map(f => (
+                    {allFonts().map(f => (
                       <button
                         key={f.id}
                         onClick={() => { setFontId(f.id); setFontMenuOpen(false) }}
@@ -570,20 +582,15 @@ export default function ShareLyricsModal({ title, artist, imageUrl, rawLyrics, o
                   ))}
                   {/* Custom color - the swatch doubles as the picker's own
                       trigger, so there's no separate "choose color" button. */}
-                  <label
+                  <ThemedColorPicker
+                    value={customTextColor}
+                    onChange={(hex) => { setCustomTextColor(hex); setTextColor('custom') }}
                     title="Custom color"
-                    className={`relative w-6 h-6 rounded-full border-2 transition-transform cursor-pointer overflow-hidden ${
+                    className={`w-6 h-6 rounded-full border-2 transition-transform ${
                       textColor === 'custom' ? 'scale-110 border-text-primary' : 'border-transparent hover:scale-105'
                     }`}
-                    style={{ background: customTextColor, boxShadow: 'inset 0 0 0 1px rgba(0,0,0,0.15)' }}
-                  >
-                    <input
-                      type="color"
-                      value={customTextColor}
-                      onChange={(e) => { setCustomTextColor(e.target.value); setTextColor('custom') }}
-                      className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
-                    />
-                  </label>
+                    style={{ boxShadow: 'inset 0 0 0 1px rgba(0,0,0,0.15)' }}
+                  />
                 </div>
               </div>
               <div className="flex items-center justify-between gap-2">

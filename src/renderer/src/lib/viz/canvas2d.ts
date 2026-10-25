@@ -99,9 +99,8 @@ export class Canvas2DRenderer {
     this.scopePeak = 0.2;
   }
 
-  resize(scale: number): boolean {
-    const cw = this.canvas.clientWidth;
-    const ch = this.canvas.clientHeight;
+  /** Sizes the canvas to `cw` x `ch` CSS pixels at `scale`. */
+  resize(cw: number, ch: number, scale: number): boolean {
     if (cw === 0 || ch === 0) return false;
     const w = Math.floor(cw * scale);
     const h = Math.floor(ch * scale);

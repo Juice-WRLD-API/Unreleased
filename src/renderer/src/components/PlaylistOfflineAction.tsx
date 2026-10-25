@@ -2,6 +2,7 @@ import { Download, Trash2, Loader2 } from 'lucide-react'
 import { useStore } from '../store/useStore'
 import { IS_NATIVE_APP } from '../lib/platform'
 import { getPlaylist } from '../lib/userApi'
+import { playlistSongIds } from '../lib/playlistItems'
 import { reportSaveError } from '../lib/fileSave'
 import { SheetItem } from './mobile/Sheet'
 
@@ -11,7 +12,7 @@ export async function togglePlaylistOffline(id: number, name: string): Promise<v
   if (s.offlinePlaylists[key] && s.offlineSync[key]?.state !== 'error') await s.removePlaylistOffline(key)
   else {
     const detail = await getPlaylist(id)
-    await s.downloadPlaylistOffline(key, name, detail.items.map((item) => item.song.id))
+    await s.downloadPlaylistOffline(key, name, playlistSongIds(detail.items))
   }
 }
 

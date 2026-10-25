@@ -81,6 +81,9 @@ export const HOTKEY_ACTIONS: readonly HotkeyAction[] = [
   { id: 'open-diagnostics', label: 'Open diagnostics',          category: 'Navigation', defaultBinding: '' },
   { id: 'toggle-queue',     label: 'Toggle queue panel',        category: 'Navigation', defaultBinding: 'Q' },
   { id: 'focus-search',     label: 'Focus search box',          category: 'Navigation', defaultBinding: 'Ctrl+F' },
+  { id: 'next-light',        label: 'Next light',                category: 'Navigation', defaultBinding: '' },
+  { id: 'next-lyric-style',  label: 'Next lyric style',          category: 'Navigation', defaultBinding: '' },
+  { id: 'wrld-widgets',      label: 'WRLD widgets layout',       category: 'Navigation', defaultBinding: '' },
   { id: 'open-terminal',    label: 'Open terminal', category: 'Navigation', defaultBinding: 'Ctrl+`' },
 ] as const
 
