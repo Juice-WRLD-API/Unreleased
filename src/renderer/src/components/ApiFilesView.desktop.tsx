@@ -486,12 +486,17 @@ export default function ApiFilesView(): JSX.Element {
     },
     onDragLeave: () => setDropTarget(prev => (prev === entry.path ? null : prev)),
     onDrop: e => {
-      e.preventDefault(); e.stopPropagation()
       if (isExternalDrag(e)) {
+        // A file row isn't a target of its own - its dragover already fell
+        // through to the listing, so let the drop do the same and upload into
+        // the folder being browsed.
+        if (entry.type !== 'directory') return
+        e.preventDefault(); e.stopPropagation()
         setDropTarget(null); setFileDragOver(false)
-        if (entry.type === 'directory') collectDroppedFiles(e.dataTransfer).then(files => uploadLocalFiles(entry.path, files)).catch(() => {})
+        collectDroppedFiles(e.dataTransfer).then(files => uploadLocalFiles(entry.path, files)).catch(() => {})
         return
       }
+      e.preventDefault(); e.stopPropagation()
       if (!dropAllowed(entry)) { setDraggedItems([]); setDropTarget(null); return }
       if (entry.type === 'directory') proposeMovesInto(entry.path, draggedItems)
       // Onto a file: both sides move into a folder that doesn't exist yet, so

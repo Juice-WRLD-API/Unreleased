@@ -3,6 +3,7 @@ import { useShallow } from 'zustand/react/shallow'
 import { ViewType, Track, FullTrack, LibraryTrack, LocalPlaylist, GuestPlaylist, FollowedPlaylist, DonorPlaylist, LyricsGenTarget } from '../types'
 import { clearDonorPlaybackCache } from '../lib/donorPlayback'
 import { clearDonorImageCache } from '../lib/donorImageCache'
+import { clearDecryptedAttachments } from '../lib/chatAttachmentCache'
 import { clearDonorCoverCache } from '../lib/donorCoverArt'
 import { APP_VERSION } from '../lib/appVersion'
 import { ls } from '../lib/persist'
@@ -62,6 +63,7 @@ import { useSandboxStore } from '../components/Modal'
 import { runWhenIdle } from '../lib/platform'
 import { isMobileViewport } from '../hooks/useIsMobile'
 import { showAppToast } from '../lib/appToast'
+import { clearNotifications } from '../lib/notificationHistory'
 import { setNotificationsSignedIn } from '../lib/notificationSocket'
 
 // Lightweight localStorage persistence helper - see lib/persist.ts (it lives
@@ -518,6 +520,9 @@ interface AppState {
   // Uploads (comp upload progress - see lib/compUploads)
   uploads: UploadItem[]
   showUploadManager: boolean
+  // The notification area (NotificationCenter); its entries live in
+  // lib/notificationHistory, not here.
+  showNotifications: boolean
 }
 
 interface AppActions {
@@ -871,6 +876,7 @@ interface AppActions {
   removeUpload: (id: string) => void
   clearCompletedUploads: () => void
   setShowUploadManager: (show: boolean) => void
+  setShowNotifications: (show: boolean) => void
 }
 
 export type AppStore = QueueSlice & DesktopSlice & AppState & AppActions
@@ -2508,6 +2514,7 @@ export const useStore = create<AppStore>((set, get, store) => ({
     ls.set('donorPlaylists', [])
     clearDonorPlaybackCache()
     clearDonorImageCache()
+    clearDecryptedAttachments()
     clearDonorCoverCache()
     // Overrides stay on this device after signing out, the same way likes do -
     // they're re-merged upward on the next login.
@@ -2517,6 +2524,9 @@ export const useStore = create<AppStore>((set, get, store) => ({
     // to sign in on this machine would merge it in and push it to their own
     // profile. The server copy is authoritative from the next login anyway.
     get()._setListeningPlays([])
+    // Chat notifications quote the account's messages; the rest of the
+    // notification area (news, announcements, toasts) isn't anyone's.
+    clearNotifications(['chat'])
   },
 
   refreshPlaylists: async () => {
@@ -3019,7 +3029,11 @@ export const useStore = create<AppStore>((set, get, store) => ({
   clearCompletedUploads: () => set((s) => ({
     uploads: s.uploads.filter((d) => d.state === 'downloading'),
   })),
-  setShowUploadManager: (show) => set({ showUploadManager: show }),
+  // Both panels hang off the top-right corner, so only one is open at a time.
+  setShowUploadManager: (show) => set(show ? { showUploadManager: true, showNotifications: false } : { showUploadManager: false }),
+
+  showNotifications: false,
+  setShowNotifications: (show) => set(show ? { showNotifications: true, showUploadManager: false } : { showNotifications: false }),
 }))
 
 // Notification-socket tickets wait for a confirmed account, not just a stored token.

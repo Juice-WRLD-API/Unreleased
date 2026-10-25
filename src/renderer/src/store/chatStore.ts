@@ -362,6 +362,7 @@ export const useChatStore = create<ChatState>((set, get) => {
         title: 'New device wants to link',
         body: `${label || 'A new device'} signed in to your account. Open chat to compare its number and approve. If this wasn't you, decline.`,
         level: 'warning',
+        target: { view: 'chat' },
         onOpen: () => {
           useStore.setState({ activeView: 'chat' })
           // The approve prompt lives in the room pane, so make sure one is open.
@@ -419,6 +420,7 @@ export const useChatStore = create<ChatState>((set, get) => {
       title,
       body,
       icon: msg.author.avatar,
+      target: { view: 'chat', room },
       onOpen: () => {
         useStore.setState({ activeView: 'chat' })
         const path = room.kind === 'channel' ? `/chat/c/${room.id}` : `/chat/dm/${room.id}`

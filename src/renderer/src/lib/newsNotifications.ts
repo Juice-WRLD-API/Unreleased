@@ -109,6 +109,9 @@ export function fireNewsNotification(item: NewsItem, onOpen: (item: NewsItem) =>
     title: item.title,
     body,
     icon: item.image_url,
+    tag: `news-${item.id}`,
+    kind: 'news',
+    target: { view: 'news', postId: item.id },
     onOpen: () => { focusAppWindow(); onOpen(item) },
   })
   // Chime goes with the banner, not the OS notification, so it plays even when

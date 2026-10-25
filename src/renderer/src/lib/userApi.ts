@@ -1147,20 +1147,40 @@ const MY_PROPOSALS_PAGE = 200
 // the tab a signed-in editor lands on, and it shouldn't go blank just because
 // the request raced a flaky connection. The server pages this list (50 by
 // default, 200 at most) and returns summaries without proposed_data, so walk
-// every page and fetch one with getProposal before reading its data.
-export async function getMyProposals(channel?: string): Promise<SongEditProposal[]> {
-  const all: SongEditProposal[] = []
-  for (;;) {
+// every page and fetch one with getProposal before reading its data. The
+// first page gives the total, so the rest go out together; `onFirstPage` lets
+// a list show those rows while the others are still loading.
+export async function getMyProposals(
+  channel?: string,
+  onFirstPage?: (page: SongEditProposal[]) => void,
+): Promise<SongEditProposal[]> {
+  const fetchPage = async (offset: number): Promise<{ page: SongEditProposal[]; count: number } | SongEditProposal[]> => {
     // The cache key leaves out limit so withdrawProposal's cacheDelete still matches.
-    const key = myProposalsUrl(channel, all.length)
+    const key = myProposalsUrl(channel, offset)
     const url = new URL(key)
     url.searchParams.set('limit', String(MY_PROPOSALS_PAGE))
     const data = await request<SongEditProposal[] | { count?: number; results?: SongEditProposal[] }>(url.toString(), { method: 'GET' }, true, key)
     if (Array.isArray(data)) return data
-    const page = Array.isArray(data?.results) ? data.results : []
-    all.push(...page)
-    if (page.length === 0 || all.length >= (data?.count ?? 0)) return all
+    return { page: Array.isArray(data?.results) ? data.results : [], count: data?.count ?? 0 }
   }
+
+  const first = await fetchPage(0)
+  if (Array.isArray(first)) return first
+  if (first.page.length === 0 || first.page.length >= first.count) return first.page
+  onFirstPage?.(first.page)
+
+  // Step by what the server actually handed back, in case it clamps lower.
+  const step = first.page.length
+  const offsets: number[] = []
+  for (let o = step; o < first.count; o += step) offsets.push(o)
+  const rest = await Promise.all(offsets.map(async (o) => {
+    const r = await fetchPage(o)
+    return Array.isArray(r) ? r : r.page
+  }))
+  // A proposal made mid-walk shifts every page down by one, so the same row
+  // can turn up at the end of one page and the start of the next.
+  const seen = new Set<number>()
+  return [first.page, ...rest].flat().filter((p) => !seen.has(p.id) && !!seen.add(p.id))
 }
 
 /** One of your proposals in full, with proposed_data and original_snapshot. */

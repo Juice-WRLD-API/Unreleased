@@ -3,9 +3,11 @@ import ReactMarkdown, { type Components } from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { ChevronDown, ChevronUp, Download, FileText, Loader2, Lock, ShieldAlert } from 'lucide-react'
 import { chatAttachmentUrl, type ChatAttachment } from '../../lib/chatApi'
+import { peekDecryptedAttachment, rememberDecryptedAttachment, type DecryptedEntry } from '../../lib/chatAttachmentCache'
 import { useChatStore } from '../../store/chatStore'
 import MediaLightbox, { type LightboxItem } from '../MediaLightbox'
 import { formatBytes } from './ui'
+import { LazyImg } from '../LazyImg'
 
 export type Kind = 'image' | 'video' | 'audio' | 'text' | 'file'
 
@@ -45,9 +47,21 @@ interface Resolved {
   kind: Kind
 }
 
+function decryptedKey(att: ChatAttachment, conversationId: number | null): string {
+  return `${conversationId}:${att.id}:${att.nonce}:${att.key_version}`
+}
+
+function fromDecrypted(e: DecryptedEntry): Resolved {
+  return { url: e.url, downloadUrl: e.url, name: e.name, mime: e.mime, kind: kindOf(e.mime, e.name) }
+}
+
 function useResolved(att: ChatAttachment, conversationId: number | null, encrypted: boolean, load: boolean): { data: Resolved | null; error: string | null } {
   const meId = useChatStore((s) => s.meId)
-  const [data, setData] = useState<Resolved | null>(null)
+  // An attachment decrypted on an earlier mount paints straight away.
+  const [data, setData] = useState<Resolved | null>(() => {
+    const hit = encrypted && conversationId && load ? peekDecryptedAttachment(decryptedKey(att, conversationId)) : null
+    return hit ? fromDecrypted(hit) : null
+  })
   const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
@@ -63,23 +77,22 @@ function useResolved(att: ChatAttachment, conversationId: number | null, encrypt
       return
     }
     if (!meId) return
-    let objectUrl: string | null = null
+    const key = decryptedKey(att, conversationId)
+    const hit = peekDecryptedAttachment(key)
+    if (hit) { setData(fromDecrypted(hit)); return }
     let cancelled = false
     setError(null)
     import('../../lib/chatE2E')
       .then((m) => m.decryptAttachment(meId, conversationId, att))
       .then((dec) => {
-        if (cancelled) return
-        objectUrl = URL.createObjectURL(dec.blob)
-        setData({ url: objectUrl, downloadUrl: objectUrl, name: dec.name, mime: dec.mime, kind: kindOf(dec.mime, dec.name) })
+        // Kept even when this mount has gone, so coming back doesn't redo it.
+        const entry = rememberDecryptedAttachment(key, dec.blob, dec.name, dec.mime)
+        if (!cancelled) setData(fromDecrypted(entry))
       })
       .catch((err) => {
         if (!cancelled) setError((err as Error).message === 'missing-key' ? 'Waiting for key' : 'Could not decrypt')
       })
-    return () => {
-      cancelled = true
-      if (objectUrl) URL.revokeObjectURL(objectUrl)
-    }
+    return () => { cancelled = true }
     // Keyed on the attachment's identity, not the object: store updates rebuild
     // message objects, and re-running would re-download and re-decrypt.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -266,7 +279,7 @@ function Attachment({ att, conversationId, encrypted, onOpenMedia }: {
   if (data.kind === 'image') {
     return (
       <button onClick={() => onOpenMedia({ url: data.url, type: 'image', name: data.name })} className="block rounded-xl overflow-hidden border border-[var(--border)] bg-surface-raised max-w-[min(420px,100%)] hover:brightness-110 transition">
-        <img src={data.url} alt={data.name} loading="lazy" className="block max-h-80 w-auto object-contain" />
+        <LazyImg src={data.url} alt={data.name} className="block max-h-80 w-auto object-contain" />
       </button>
     )
   }

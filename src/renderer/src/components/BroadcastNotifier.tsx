@@ -69,6 +69,8 @@ function present(m: Incoming, opts: { os: boolean }): boolean {
     onOpen: focusAppWindow,
     autoDismissMs: BROADCAST_BANNER_MS,
     level,
+    kind: 'broadcast',
+    tag: m.id != null ? `broadcast-${m.id}` : typeof m.sent_at === 'string' ? `broadcast-${m.sent_at}` : undefined,
   })
   if (opts.os && notificationsSupported() && Notification.permission === 'granted') {
     playNotificationSound()
