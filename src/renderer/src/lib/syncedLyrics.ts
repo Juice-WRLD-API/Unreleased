@@ -53,11 +53,16 @@ export function lrcStamp(sec: number): string {
   return `${Math.floor(c / 6000)}:${((c % 6000) / 100).toFixed(2).padStart(5, '0')}`
 }
 
-/** "1:23.40", "1:23", "83.4" -> seconds; null when it isn't a time. */
+/** A typed time: "1:23.40", "1:23", "0:01:26" (h:mm:ss), "83.4" -> seconds;
+ *  null when it isn't a time. Two colons are hours, not LRC's old m:ss:cc. */
 export function parseStamp(raw: string): number | null {
   const v = raw.trim()
-  const m = /^(\d+):(\d{1,2})(?:[.:](\d{1,3}))?$/.exec(v)
-  if (m) return Number(m[2]) < 60 ? Number(m[1]) * 60 + Number(m[2]) + (m[3] ? Number(`0.${m[3]}`) : 0) : null
+  const m = /^(?:(\d+):)?(\d+):(\d{1,2})(?:\.(\d{1,3}))?$/.exec(v)
+  if (m) {
+    const [, h, min, sec, frac] = m
+    if (Number(sec) >= 60 || (h !== undefined && Number(min) >= 60)) return null
+    return (Number(h ?? 0) * 60 + Number(min)) * 60 + Number(sec) + (frac ? Number(`0.${frac}`) : 0)
+  }
   return /^\d+(?:\.\d+)?$/.test(v) ? Number(v) : null
 }
 
