@@ -791,6 +791,20 @@ const playlistDetailUrl = (id: number): string => `${LIBRARY_BASE}/playlists/${i
 
 const playlistDetailInFlight = new Map<number, Promise<PlaylistDetail>>()
 
+/** Playlist PATCH responses often omit `items`; keep the cached track list. */
+function storePlaylistDetail(id: number, patch: PlaylistDetail): PlaylistDetail {
+  const prev = playlistDetailCache.get(id)
+  const detail: PlaylistDetail = {
+    ...(prev ?? patch),
+    ...patch,
+    id,
+    items: Array.isArray(patch.items) ? patch.items : (prev?.items ?? []),
+  }
+  playlistDetailCache.set(id, detail)
+  cacheSet(playlistDetailUrl(id), detail)
+  return detail
+}
+
 // Single request - tracks + cover in one response. Concurrent callers for the
 // same id share the in-flight request.
 export function getPlaylist(id: number): Promise<PlaylistDetail> {
@@ -798,7 +812,7 @@ export function getPlaylist(id: number): Promise<PlaylistDetail> {
   if (pending) return pending
   const url = playlistDetailUrl(id)
   const p = request<PlaylistDetail>(url, {}, true, url)
-    .then((result) => { playlistDetailCache.set(id, result); return result })
+    .then((result) => storePlaylistDetail(id, result))
     .finally(() => playlistDetailInFlight.delete(id))
   playlistDetailInFlight.set(id, p)
   return p
@@ -809,9 +823,7 @@ export async function renamePlaylist(id: number, name: string): Promise<Playlist
     method: 'PATCH',
     body: JSON.stringify({ name }),
   })
-  playlistDetailCache.set(id, result)
-  cacheSet(playlistDetailUrl(id), result)
-  return result
+  return storePlaylistDetail(id, result)
 }
 
 export async function updatePlaylist(id: number, data: { name?: string; description?: string; is_public?: boolean }): Promise<PlaylistDetail> {
@@ -819,17 +831,14 @@ export async function updatePlaylist(id: number, data: { name?: string; descript
     method: 'PATCH',
     body: JSON.stringify(data),
   })
-  playlistDetailCache.set(id, result)
-  cacheSet(playlistDetailUrl(id), result)
-  return result
+  return storePlaylistDetail(id, result)
 }
 
 /** Fetch a public playlist without authentication. */
 export async function getPublicPlaylist(id: number): Promise<PlaylistDetail> {
   const url = `${LIBRARY_BASE}/playlists/public/${id}/`
   const result = await request<PlaylistDetail>(url, {}, false, url)
-  playlistDetailCache.set(id, result)
-  return result
+  return storePlaylistDetail(id, result)
 }
 
 /** Fetch cover of a public playlist without authentication. */
@@ -896,9 +905,7 @@ export async function addToPlaylist(id: number, songId: number): Promise<Playlis
     method: 'POST',
     body: JSON.stringify({ song_id: songId }),
   })
-  playlistDetailCache.set(id, result)
-  cacheSet(playlistDetailUrl(id), result)
-  return result
+  return storePlaylistDetail(id, result)
 }
 
 /** Add any kind of entry (song, comp file, donor file, local file). Resolves
@@ -910,9 +917,7 @@ export async function addPlaylistEntry(id: number, entry: PlaylistEntryInput): P
     body: JSON.stringify(entry),
   })
   if (!('items' in result)) return playlistDetailCache.get(id) ?? getPlaylist(id)
-  playlistDetailCache.set(id, result)
-  cacheSet(playlistDetailUrl(id), result)
-  return result
+  return storePlaylistDetail(id, result)
 }
 
 /** Remove one entry by its own id - the only way to remove a non-song entry. */
@@ -920,9 +925,8 @@ export async function removePlaylistEntry(id: number, itemId: number): Promise<v
   await request(`${LIBRARY_BASE}/playlists/${id}/entries/${itemId}/`, { method: 'DELETE' })
   const cached = playlistDetailCache.get(id)
   if (cached) {
-    const updated = { ...cached, items: cached.items.filter(it => it.id !== itemId) }
-    playlistDetailCache.set(id, updated)
-    cacheSet(playlistDetailUrl(id), updated)
+    const updated = { ...cached, items: (cached.items ?? []).filter(it => it.id !== itemId) }
+    storePlaylistDetail(id, updated)
   }
 }
 
@@ -933,18 +937,15 @@ export async function reorderPlaylistItems(id: number, itemIds: number[]): Promi
     method: 'PATCH',
     body: JSON.stringify({ item_order: itemIds }),
   })
-  playlistDetailCache.set(id, result)
-  cacheSet(playlistDetailUrl(id), result)
-  return result
+  return storePlaylistDetail(id, result)
 }
 
 export async function removeFromPlaylist(id: number, songId: number): Promise<void> {
   await request(`${LIBRARY_BASE}/playlists/${id}/items/${songId}/`, { method: 'DELETE' })
   const cached = playlistDetailCache.get(id)
   if (cached) {
-    const updated = { ...cached, items: cached.items.filter(it => it.song?.id !== songId) }
-    playlistDetailCache.set(id, updated)
-    cacheSet(playlistDetailUrl(id), updated)
+    const updated = { ...cached, items: (cached.items ?? []).filter(it => it.song?.id !== songId) }
+    storePlaylistDetail(id, updated)
   }
 }
 
