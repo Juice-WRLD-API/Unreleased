@@ -40,8 +40,6 @@ const STEP_KEY = 'lyricsTimingStep'
 /** Nudge sizes; Shift makes a nudge five times bigger. */
 const STEPS = [0.01, 0.05, 0.25]
 const RATES = [0.5, 0.75, 1]
-/** How much of the song plays before a picked line or word. */
-const PREROLL = 1.5
 
 /** The tool's mode: words once the lyrics have word times, else the last one used. */
 export function useSyncMode(words: boolean): [SyncMode, (mode: SyncMode) => void] {
@@ -138,7 +136,7 @@ const KEYS: Array<[string, string]> = [
   ['↑ ↓', 'Pick the previous or next line (in word mode, word)'],
   ['← →', 'Move the picked one earlier or later (Shift for 5×)'],
   ['Enter', 'Start the picked one at the playhead, staying on it'],
-  ['R', 'Hear the picked one again'],
+  ['R', 'Replay the last stamp, or the line or word you picked'],
   ['J  L', 'Back or forward 2 seconds'],
   ['Delete', 'Take the picked one\'s time away'],
   ['Esc', 'Pick nothing (Space then goes to the first untimed one)'],
@@ -211,7 +209,14 @@ export default function SyncedLyricsTool({
   className?: string
 }): JSX.Element {
   const editText = !readOnly
-  const [rawSel, setSel] = useState<SyncTarget | null>(null)
+  const [rawSel, setRawSel] = useState<SyncTarget | null>(null)
+  const [lastStamped, setLastStamped] = useState<SyncTarget | null>(null)
+  const [stampFinished, setStampFinished] = useState(false)
+  const setSel = (next: Parameters<typeof setRawSel>[0]): void => {
+    setRawSel(next)
+    setLastStamped(null)
+    setStampFinished(false)
+  }
   const [lit, setLit] = useState({ line: -1, word: -1 })
   const [follow, setFollow] = useState(true)
   const [step, setStep] = useState(() => {
@@ -243,7 +248,9 @@ export default function SyncedLyricsTool({
     return rawSel.word < wordsOf(l).length ? rawSel : null
   }, [rawSel, lines, mode])
   // What Space stamps: the pick, else the first line or word without a time.
-  const cursor = readOnly ? null : sel ?? firstTarget(lines, mode)
+  const cursor = readOnly || stampFinished ? null : sel ?? firstTarget(lines, mode)
+  const replayTarget = lastStamped ?? sel
+  const replayStart = replayTarget ? targetStart(lines, replayTarget) : null
   const order = useMemo(() => outOfOrder(lines), [lines])
   const marks = useMemo(() => lines.map((_, i) => rowMarks(lines, i, order, original, mode)), [lines, order, original, mode])
   const progress = syncProgress(lines, mode)
@@ -294,7 +301,7 @@ export default function SyncedLyricsTool({
   const hear = (t: SyncTarget): void => {
     const s = targetStart(lines, t)
     if (!clock.ready || s === null) return
-    clock.seek(Math.max(0, s - PREROLL))
+    clock.seek(s)
     clock.setPlaying(true)
   }
   const pick = (t: SyncTarget, listen = true): void => {
@@ -313,7 +320,13 @@ export default function SyncedLyricsTool({
     if (!clock.ready || !t) return
     onChange(stampTarget(lines, t, clock.now()))
     flashOn(t)
-    if (advance) setSel(stepTarget(lines, t, 1, mode))
+    setLastStamped(t)
+    if (advance) {
+      const next = stepTarget(lines, t, 1, mode)
+      const finished = targetKey(next) === targetKey(t)
+      setRawSel(finished ? null : next)
+      setStampFinished(finished)
+    }
   }
 
   // A nudge pushes whatever it runs into along with it; it only stops at the
@@ -383,8 +396,9 @@ export default function SyncedLyricsTool({
     switch (e.key) {
       case ' ':
         claim()
+        if (e.repeat) break
         if (e.ctrlKey || readOnly) clock.setPlaying(!clock.playing)
-        else if (!e.repeat) stamp(true)
+        else stamp(true)
         break
       case 'ArrowUp':
       case 'ArrowDown': {
@@ -407,9 +421,9 @@ export default function SyncedLyricsTool({
         stamp(false)
         break
       case 'r': case 'R': case 'x': case 'X':
-        if (!sel) return
+        if (!replayTarget) return
         claim()
-        hear(sel)
+        hear(replayTarget)
         break
       case 'j': case 'J': case 'l': case 'L':
         claim()
@@ -421,7 +435,7 @@ export default function SyncedLyricsTool({
         clear()
         break
       case 'Escape':
-        if (!sel) return
+        if (!sel && !lastStamped && !stampFinished) return
         claim()
         setSel(null)
         break
@@ -666,7 +680,7 @@ export default function SyncedLyricsTool({
             <button onClick={() => stamp(false)} disabled={!clock.ready || !sel} title="Start it where the song is now (Enter)" className={SMALL_BTN}>
               <Crosshair size={13} /> To playhead
             </button>
-            <button onClick={() => { if (sel) hear(sel) }} disabled={!clock.ready || !sel || selStart === null} title={`Play from ${PREROLL}s before it (R)`} className={SMALL_BTN}>
+            <button onClick={() => { if (replayTarget) hear(replayTarget) }} disabled={!clock.ready || replayStart === null} title="Replay the last stamp or your pick (R)" className={SMALL_BTN}>
               <Ear size={13} /> Hear it
             </button>
           </div>
