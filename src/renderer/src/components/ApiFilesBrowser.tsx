@@ -710,12 +710,14 @@ export default function ApiFilesBrowser(): JSX.Element {
     },
     onDragLeave: () => setDropTarget(prev => (prev === entry.path ? null : prev)),
     onDrop: e => {
-      e.preventDefault(); e.stopPropagation()
       if (isExternalDrag(e)) {
+        if (entry.type !== 'directory') return
+        e.preventDefault(); e.stopPropagation()
         setDropTarget(null); setFileDragOver(false)
-        if (entry.type === 'directory') collectDroppedFiles(e.dataTransfer).then(files => uploadDroppedFiles(entry.path, files)).catch(() => showAppToast("Couldn't read the dropped files"))
+        collectDroppedFiles(e.dataTransfer).then(files => uploadDroppedFiles(entry.path, files)).catch(() => showAppToast("Couldn't read the dropped files"))
         return
       }
+      e.preventDefault(); e.stopPropagation()
       if (!dropAllowed(entry)) { setDraggedItems([]); setDropTarget(null); return }
       if (entry.type === 'directory') proposeMovesInto(entry.path, draggedItems)
       // Onto a file: both sides move into a folder that doesn't exist yet, so

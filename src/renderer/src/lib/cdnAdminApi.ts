@@ -4,11 +4,11 @@
 // Nodes register anonymously from the node app (jwa-cdn-node) and serve
 // nothing until an admin approves them here. Disabling (is_active false)
 // takes a node out but keeps its history; deleting wipes it.
-import { JWAPI_BASE } from './juicewrldApi'
+import { routeUrl } from './juicewrldApi'
 import { authedRequest, apiRequest, authHeaders } from './apiClient'
 import { getToken } from './userApi'
 
-const CDN_ADMIN_BASE = `${JWAPI_BASE}/cdn/admin`
+const CDN_ADMIN_BASE = routeUrl('/cdn/admin')
 
 export type CdnNodeStatus = 'pending' | 'online' | 'offline' | 'disabled'
 
@@ -113,6 +113,38 @@ export function wasAutoDisabled(n: CdnAdminNode): boolean {
   return n.trust_score <= 0 || n.hash_violations >= VIOLATION_LIMIT
 }
 
+export type CdnNodeEventType =
+  | 'registered' | 'approved' | 'revoked' | 'enabled' | 'disabled'
+  | 'trust_reset' | 'violation' | 'auto_disabled' | 'deleted' | 'restored'
+  | 'settings_changed'
+
+export interface CdnNodeEvent {
+  id: number
+  node_id_ext: string
+  event_type: CdnNodeEventType
+  actor_username: string | null
+  actor_ip: string | null
+  detail: Record<string, unknown>
+  created_at: string
+}
+
+export interface CdnNodeEventsPage {
+  events: CdnNodeEvent[]
+  count: number
+  page: number
+  has_next: boolean
+}
+
+export async function fetchNodeEvents(
+  nodeId: string,
+  page = 1,
+  types?: CdnNodeEventType[],
+): Promise<CdnNodeEventsPage> {
+  const params = new URLSearchParams({ page: String(page) })
+  if (types?.length) params.set('type', types.join(','))
+  return request(`${CDN_ADMIN_BASE}/nodes/${encodeURIComponent(nodeId)}/events/?${params}`, { method: 'GET' })
+}
+
 export type PropagationState = 'propagated' | 'propagating' | 'offline' | 'skipped'
 
 export type PropagationSkipReason = '' | 'channel' | 'folder' | 'storage'
@@ -155,7 +187,7 @@ export async function fetchProposalPropagation(proposalId: number): Promise<Prop
 
 // Node binary distribution under /cdn/binary/ - the jwa-cdn-node builds
 // volunteers download. Listing is public; uploading needs an admin token.
-const CDN_BINARY_BASE = `${JWAPI_BASE}/cdn/binary`
+const CDN_BINARY_BASE = routeUrl('/cdn/binary')
 
 export const CDN_BINARY_PLATFORMS = [
   'windows/amd64', 'linux/amd64', 'linux/arm64', 'darwin/amd64', 'darwin/arm64',

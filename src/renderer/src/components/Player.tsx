@@ -81,25 +81,33 @@ function fillSessionArtist(trackId: string, streamUrl: string | undefined): void
   })
 }
 
-// Whether a source that failed before playing a single frame is worth another
-// try. Chrome reports an HTTP error on that first request exactly like a file
-// it can't decode ("Format error", MEDIA_ERR_SRC_NOT_SUPPORTED), so a server
-// having a bad moment (the API's intermittent 500/502s) used to read as a
-// broken file and skip straight to the next song. Ask the server instead: a
-// 5xx/429 or no answer at all is transient, and so is a file that downloads
-// fine now in a type this browser plays. A 4xx, or a type it can't play, won't
-// come back.
-async function sourceFailureIsTransient(url: string): Promise<boolean> {
-  if (!/^https?:/.test(url)) return false
+// Asks the server why a source failed. Chrome reports an HTTP error on the
+// first request exactly like a file it can't decode ("Format error",
+// MEDIA_ERR_SRC_NOT_SUPPORTED), so a server having a bad moment (the API's
+// intermittent 500/502s) used to read as a broken file and skip straight to
+// the next song. 'down': a 5xx/429 or no answer at all - the connection or
+// the server, which comes back. 'playable': the file downloads fine now in a
+// type this browser plays. 'broken': a 4xx, or a type it can't play - that
+// won't come back.
+type SourceVerdict = 'down' | 'playable' | 'broken'
+// A probe that hasn't answered by now counts as no answer: a request on a
+// dropped connection can hang for minutes instead of failing.
+const PROBE_TIMEOUT_MS = 10000
+async function probeSource(url: string): Promise<SourceVerdict> {
+  if (!/^https?:/.test(url)) return 'broken'
+  const ctrl = new AbortController()
+  const timer = window.setTimeout(() => ctrl.abort(), PROBE_TIMEOUT_MS)
   try {
-    const res = await fetch(url, { headers: { Range: 'bytes=0-1' }, cache: 'no-store' })
+    const res = await fetch(url, { headers: { Range: 'bytes=0-1' }, cache: 'no-store', signal: ctrl.signal })
     void res.body?.cancel().catch(() => {})
-    if (res.status >= 500 || res.status === 429) return true
-    if (!res.ok) return false
+    if (res.status >= 500 || res.status === 429) return 'down'
+    if (!res.ok) return 'broken'
     const type = res.headers.get('Content-Type')?.split(';')[0].trim() ?? ''
-    return !!type && document.createElement('audio').canPlayType(type) !== ''
+    return !!type && document.createElement('audio').canPlayType(type) !== '' ? 'playable' : 'broken'
   } catch {
-    return true
+    return 'down'
+  } finally {
+    clearTimeout(timer)
   }
 }
 
@@ -111,9 +119,16 @@ const PAUSE_FADE_MS = 400
 const PLAYCOUNT_THRESHOLD_SECONDS = 30
 
 // ── Stream recovery tuning ───────────────────────────────────────────────────
-// How many times a single track may be reloaded before the player gives up and
-// admits it isn't playing.
+// How many quick reloads (1s, 2s, 4s, 8s apart) a track gets before the player
+// asks the server whether the connection or the file is the problem.
 const MAX_RECOVERY_ATTEMPTS = 4
+// The quick reloads only cover ~15 seconds, and a dead spot on a train or a
+// lift ride lasts longer than that - giving up there is what left the player
+// stopped for good once the signal came back. While the server stays
+// unreachable, keep retrying at this slower pace...
+const SLOW_RETRY_MS = 10000
+// ...for up to this long after the first failed reload, then stop.
+const RECOVERY_WINDOW_MS = 5 * 60 * 1000
 // How long playback may sit with the clock not advancing before that counts as
 // a dead stream rather than ordinary rebuffering. Generous, because a phone on
 // a weak connection legitimately stalls for a while and re-fetching costs data.
@@ -395,10 +410,12 @@ export default function Player(): JSX.Element {
   // pending play() request - calling pause() while it's still outstanding
   // can lose to it and leave the track audibly playing once the data
   // arrives. Deferring the pause until play() has settled closes that gap.
+  // Every play() on a slot goes through playSlot so this covers all of them
+  // (recovery, the watchdog, repeat-one), not just the play button.
   const pendingPlays = useRef(new WeakMap<HTMLAudioElement, Promise<unknown>>()).current
 
-  const playSlot = (audio: HTMLAudioElement): void => {
-    const p = audio.play().catch(console.error)
+  const playSlot = (audio: HTMLAudioElement, onRejected: (err: unknown) => void = console.error): void => {
+    const p = audio.play().catch(onRejected)
     pendingPlays.set(audio, p)
     p.finally(() => { if (pendingPlays.get(audio) === p) pendingPlays.delete(audio) })
   }
@@ -826,6 +843,8 @@ export default function Player(): JSX.Element {
   const recoveryAttempts   = useRef(0)
   const recoveryTimer      = useRef<number | null>(null)
   const lastRecoveryAt     = useRef(0)
+  const recoveryStartedAt  = useRef(0)
+  const recoveryProbe      = useRef<object | null>(null)
   // Last observed playhead position and when it was observed — the pair that
   // distinguishes "buffering" from "the stream is gone".
   const lastProgressTime   = useRef(0)
@@ -849,58 +868,23 @@ export default function Player(): JSX.Element {
     recoveryResumeAt.current = getActive()?.currentTime ?? 0
     recoveryGeneration.current++
     recoveryLoading.current = null
+    recoveryProbe.current = null
     clearRecoveryTimer()
   }, [currentTrack?.id])
   useEffect(() => () => {
     recoveryGeneration.current++
     recoveryLoading.current = null
+    recoveryProbe.current = null
     clearRecoveryTimer()
   }, [])
 
-  // Reloads the active slot and picks up where it stopped. Reads everything
-  // from the store/refs so a stale closure (the watchdog interval holds one)
-  // can still call it safely.
-  const recoverPlayback = (reason: string): void => {
-    const audio = getActive()
-    const track = useStore.getState().currentTrack
-    if (!audio || !track || !useStore.getState().isPlaying) return
-    // A crossfade deliberately drives one slot to silence — never reload
-    // through one. (A pending seek is filtered by the caller, not here: a
-    // stream that dies mid-seek leaves `seeking` stuck true, and that case
-    // still has to be recoverable.)
-    if (cfActive.current) return
-    if (recoveryTimer.current != null) return  // a retry is already queued
-
-    const url = resolvePlaybackUrl(track)
-    // Nothing to retry into while the device is offline — don't burn attempts;
-    // the 'online' listener in the watchdog retries the moment it's back.
-    // Downloaded and local files are unaffected by connectivity.
-    if (url.startsWith('http') && navigator.onLine === false) return
-
-    if (recoveryAttempts.current >= MAX_RECOVERY_ATTEMPTS) {
-      // Out of retries. Stop pretending — a paused player the user can tap is
-      // far better than a play button that lies.
-      if (recoveryLoading.current?.audio === audio) recoveryLoading.current = null
-      console.error(`Playback recovery gave up on "${track.title}" after ${MAX_RECOVERY_ATTEMPTS} attempts (${reason})`)
-      showAppToast(`Couldn't play "${track.title}"`)
-      setIsPlaying(false)
-      return
-    }
-
-    const attempt = recoveryAttempts.current++
+  const scheduleReload = (audio: HTMLAudioElement, trackId: string, url: string, delay: number): void => {
     const queueIndex = useStore.getState().queueIndex
-    const trackId = track.id
     lastRecoveryAt.current = Date.now()
-    // Zero is a meaningful user intent (restart/seek-to-start), so fall back to
-    // the live intent ref rather than an older progress sample.
-    // This ref is authoritative: the element can retain an obsolete non-zero
-    // currentTime when a user seek/restart throws during an error state.
-    const resumeAt = recoveryResumeAt.current
     // Scheduling a replacement must not invalidate an in-flight load yet: the
     // user can pause during backoff, canceling this retry, while the prior load
     // is still capable of restoring its position once metadata arrives.
     const scheduledGeneration = recoveryGeneration.current
-    console.warn(`Playback ${reason} — reloading "${track.title}" at ${resumeAt.toFixed(1)}s (attempt ${attempt + 1}/${MAX_RECOVERY_ATTEMPTS})`)
 
     recoveryTimer.current = window.setTimeout(() => {
       recoveryTimer.current = null
@@ -941,7 +925,7 @@ export default function Player(): JSX.Element {
         a.volume = volumeRef.current
         // A pause that lands during metadata loading should suppress autoplay,
         // not discard the restored position needed by the next manual resume.
-        if (latest.isPlaying) a.play().catch(() => {})
+        if (latest.isPlaying) playSlot(a, () => {})
       }
       a.addEventListener('loadedmetadata', onReady)
       recoveryLoading.current = { audio: a, generation }
@@ -949,7 +933,77 @@ export default function Player(): JSX.Element {
       a.load()
       // Fresh stall budget so the reload itself isn't immediately judged.
       lastProgressAt.current = Date.now()
-    }, Math.min(1000 * 2 ** attempt, 8000))
+    }, delay)
+  }
+
+  // Reloads the active slot and picks up where it stopped. Reads everything
+  // from the store/refs so a stale closure (the watchdog interval holds one)
+  // can still call it safely.
+  const recoverPlayback = (reason: string): void => {
+    const audio = getActive()
+    const track = useStore.getState().currentTrack
+    if (!audio || !track || !useStore.getState().isPlaying) return
+    // A crossfade deliberately drives one slot to silence - never reload
+    // through one. (A pending seek is filtered by the caller, not here: a
+    // stream that dies mid-seek leaves `seeking` stuck true, and that case
+    // still has to be recoverable.)
+    if (cfActive.current) return
+    // A retry is already queued, or the server is being asked what's wrong.
+    if (recoveryTimer.current != null || recoveryProbe.current) return
+
+    const url = resolvePlaybackUrl(track)
+    if (!url) return  // donor file still downloading - nothing to reload yet
+    // Nothing to retry into while the device is offline - don't burn attempts;
+    // the 'online' listener in the watchdog retries the moment it's back.
+    // Downloaded and local files are unaffected by connectivity.
+    if (url.startsWith('http') && navigator.onLine === false) return
+
+    if (recoveryAttempts.current >= MAX_RECOVERY_ATTEMPTS) {
+      // Out of quick retries. Whether to keep going depends on what's broken,
+      // so ask the server.
+      const probe = {}
+      recoveryProbe.current = probe
+      const trackId = track.id
+      const generation = recoveryGeneration.current
+      void probeSource(url).then((verdict) => {
+        if (recoveryProbe.current !== probe) return
+        recoveryProbe.current = null
+        const s = useStore.getState()
+        // Paused, skipped or crossfaded away while the server answered.
+        if (getActive() !== audio || !s.isPlaying || s.currentTrack?.id !== trackId
+          || recoveryGeneration.current !== generation || cfActive.current || recoveryTimer.current != null) return
+        if (verdict === 'down' && Date.now() - recoveryStartedAt.current < RECOVERY_WINDOW_MS) {
+          console.warn(`Playback ${reason} - server unreachable, retrying "${track.title}" in ${SLOW_RETRY_MS / 1000}s`)
+          scheduleReload(audio, trackId, url, SLOW_RETRY_MS)
+          return
+        }
+        if (recoveryLoading.current?.audio === audio) recoveryLoading.current = null
+        if (verdict === 'down') {
+          // Still no connection. Stop pretending - a paused player the user
+          // can tap is far better than a play button that lies.
+          console.error(`Playback recovery gave up on "${track.title}" after ${RECOVERY_WINDOW_MS / 60000} minutes unreachable (${reason})`)
+          showAppToast(`Couldn't play "${track.title}"`)
+          setIsPlaying(false)
+          return
+        }
+        // The server answers fine, so it's this file that won't play through
+        // (cut short, or broken at this point). Stopping the whole queue on it
+        // is the wrong call - move on, as with any other unplayable song.
+        console.error(`Playback recovery gave up on "${track.title}" after ${MAX_RECOVERY_ATTEMPTS} attempts (${reason}) - skipping it`)
+        skipUnplayableTrack()
+      })
+      return
+    }
+
+    if (recoveryAttempts.current === 0) recoveryStartedAt.current = Date.now()
+    const attempt = recoveryAttempts.current++
+    // Zero is a meaningful user intent (restart/seek-to-start), so fall back to
+    // the live intent ref rather than an older progress sample.
+    // This ref is authoritative: the element can retain an obsolete non-zero
+    // currentTime when a user seek/restart throws during an error state.
+    const resumeAt = recoveryResumeAt.current
+    console.warn(`Playback ${reason} - reloading "${track.title}" at ${resumeAt.toFixed(1)}s (attempt ${attempt + 1}/${MAX_RECOVERY_ATTEMPTS})`)
+    scheduleReload(audio, track.id, url, Math.min(1000 * 2 ** attempt, 8000))
   }
 
   // A source the browser can't play at all — a 404, a codec it doesn't
@@ -966,6 +1020,15 @@ export default function Player(): JSX.Element {
     if (!nextTrack()) setIsPlaying(false)
   }
 
+  // Data still arriving means the element is buffering, not dead. On a slow
+  // connection a song can take longer than STALL_TIMEOUT_MS to buffer enough
+  // to start or resume, and treating that as a stall threw away what had
+  // downloaded and started the wait over - four times, then stopped. A
+  // connection that's really gone sends nothing, so the stall still shows.
+  const handleAudioProgress = (audio: HTMLAudioElement): void => {
+    if (audio === getActive()) lastProgressAt.current = Date.now()
+  }
+
   const handleAudioError = (audio: HTMLAudioElement, slot: string): void => {
     // The inactive slot gets its src blanked by cancelCF(), which fires an
     // error of its own, and a preload dying is harmless either way.
@@ -978,17 +1041,17 @@ export default function Player(): JSX.Element {
     console.error(`Audio error (${slot}): code ${err.code}`, err.message)
     if (!useStore.getState().isPlaying) return
     // Unsupported before a single frame played = the file itself is the
-    // problem, or the server errored on the first request (see
-    // sourceFailureIsTransient) - retry that, skip the rest. Mid-song it means
-    // the connection died, which is recoverable.
+    // problem, or the server errored on the first request (see probeSource) -
+    // retry that, skip the rest. Mid-song it means the connection died, which
+    // is recoverable.
     if (err.code === MediaError.MEDIA_ERR_SRC_NOT_SUPPORTED && lastProgressTime.current === 0) {
       const trackId = useStore.getState().currentTrack?.id
-      void sourceFailureIsTransient(audio.currentSrc || audio.src).then((transient) => {
+      void probeSource(audio.currentSrc || audio.src).then((verdict) => {
         // Moved on while the server answered: skipped, paused, or a reload
         // already cleared the error.
         if (audio !== getActive() || !audio.error || !useStore.getState().isPlaying
           || useStore.getState().currentTrack?.id !== trackId) return
-        if (transient) recoverPlayback('server error')
+        if (verdict !== 'broken') recoverPlayback('server error')
         else skipUnplayableTrack()
       })
       return
@@ -1008,17 +1071,32 @@ export default function Player(): JSX.Element {
     if (cfActive.current || pauseFadeRaf.current != null) return
     // Assigning .src fires a pause of its own (the media load algorithm pauses
     // the element before tearing down the old resource), and it resets
-    // readyState to HAVE_NOTHING. Without this, every track change — and every
-    // recovery reload — would read as the OS taking playback away, so a quick
+    // readyState to HAVE_NOTHING. Without this, every track change - and every
+    // recovery reload - would read as the OS taking playback away, so a quick
     // triple-tap on skip was enough to stop the player outright.
     if (audio.readyState < HTMLMediaElement.HAVE_CURRENT_DATA) return
     unexpectedPauses.current++
     if (unexpectedPauses.current > 2) {
-      console.warn('Playback paused externally — yielding')
+      console.warn('Playback paused externally - yielding')
       setIsPlaying(false)
       return
     }
-    audio.play().catch(() => {})
+    playSlot(audio, () => {})
+  }
+
+  // The reverse: the active slot started playing without the app asking -
+  // the browser resuming after an interruption it caused (Android gives audio
+  // back after a call or another app's sound and resumes the element itself),
+  // or a deferred pause losing its race. Follow it. A store left saying
+  // "paused" while the song plays on makes onAudioEnded ignore the end of
+  // that song, so the queue just stops there.
+  const handleAudioPlaying = (audio: HTMLAudioElement): void => {
+    if (audio !== getActive() || audio.paused) return
+    if (useStore.getState().isPlaying) return
+    // Our own play() still settling (its pause is queued behind it), a
+    // crossfade, or a pause ramp still fading out - all expected.
+    if (pendingPlays.has(audio) || cfActive.current || pauseFadeFinalize.current) return
+    setIsPlaying(true)
   }
 
   // Mobile background watchdog — browsers can silently pause an audio
@@ -1036,6 +1114,17 @@ export default function Player(): JSX.Element {
     // The "last advanced" stamp goes stale while paused — a five-minute pause
     // would otherwise read as a five-minute stall the instant playback resumes.
     lastProgressAt.current = Date.now()
+    if (isPlaying) {
+      // Pressing play after the player gave up is a fresh attempt. With the
+      // old budget still spent, the first check stopped it again within
+      // seconds - the "it pauses itself" the user just tried to undo.
+      recoveryAttempts.current = 0
+      unexpectedPauses.current = 0
+      consecutiveSkips.current = 0
+      // play() can't revive an element that errored; only a reload can. Start
+      // it now rather than at the next tick.
+      if (getActive()?.error) recoverPlayback('error')
+    }
 
     const check = (): void => {
       if (!isPlaying) return
@@ -1051,7 +1140,7 @@ export default function Player(): JSX.Element {
       if (!audio) return
       if (audio.ended) { onAudioEnded(audio); return }
       if (audio.error) { recoverPlayback('error'); return }
-      if (audio.paused) { audio.play().catch(() => recoverPlayback('play-rejected')); return }
+      if (audio.paused) { playSlot(audio, () => recoverPlayback('play-rejected')); return }
       // Playing on paper, but the clock isn't moving. Very common on mobile:
       // the connection goes away without the element ever firing 'error', so it
       // sits in a rebuffer that will never finish. Nothing else detects this.
@@ -1519,7 +1608,7 @@ export default function Player(): JSX.Element {
     if (repeat === 'one') {
       const a = getActive()
       recoveryResumeAt.current = 0
-      if (a) { try { a.currentTime = 0 } catch {}; a.volume = volumeRef.current; a.play().catch(console.error) }
+      if (a) { try { a.currentTime = 0 } catch {}; a.volume = volumeRef.current; playSlot(a) }
       return
     }
     const prevId = currentTrack?.id
@@ -1532,7 +1621,7 @@ export default function Player(): JSX.Element {
       // Same track (single song in queue with repeat-all, or only one option)
       const a = getActive()
       recoveryResumeAt.current = 0
-      if (a) { try { a.currentTime = 0 } catch {}; a.volume = volumeRef.current; a.play().catch(console.error) }
+      if (a) { try { a.currentTime = 0 } catch {}; a.volume = volumeRef.current; playSlot(a) }
     }
   }
 
@@ -1543,7 +1632,7 @@ export default function Player(): JSX.Element {
     if (audio) {
       try { audio.currentTime = 0 } catch { /* recovery will restart at zero */ }
       audio.volume = volumeRef.current
-      if (shouldPlay) audio.play().catch(console.error)
+      if (shouldPlay) playSlot(audio)
     }
     setCurrentTime(0)
     setProgress(0)
@@ -1986,6 +2075,8 @@ export default function Player(): JSX.Element {
         onTimeUpdate={handleTimeUpdate}
         onEnded={handleEnded}
         onPause={(e) => handleAudioPause(e.currentTarget)}
+        onPlaying={(e) => handleAudioPlaying(e.currentTarget)}
+        onProgress={(e) => handleAudioProgress(e.currentTarget)}
         onError={(e) => handleAudioError(e.currentTarget, 'slotA')}
       />
       <audio
@@ -1996,6 +2087,8 @@ export default function Player(): JSX.Element {
         onTimeUpdate={handleTimeUpdate}
         onEnded={handleEnded}
         onPause={(e) => handleAudioPause(e.currentTarget)}
+        onPlaying={(e) => handleAudioPlaying(e.currentTarget)}
+        onProgress={(e) => handleAudioProgress(e.currentTarget)}
         onError={(e) => handleAudioError(e.currentTarget, 'slotB')}
       />
 

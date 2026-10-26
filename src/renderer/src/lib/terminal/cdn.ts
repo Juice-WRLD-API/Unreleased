@@ -1,10 +1,10 @@
 import { relativeTime } from '../../components/adminShared'
 import { formatBytes } from '../format'
 import {
-  DEFAULT_TRUST_SCORE, deleteCdnNode, fetchCdnNodes, fetchCdnStats, updateCdnNode, wasAutoDisabled,
-  type CdnAdminNode,
+  DEFAULT_TRUST_SCORE, deleteCdnNode, fetchCdnNodes, fetchCdnStats, fetchNodeEvents, updateCdnNode, wasAutoDisabled,
+  type CdnAdminNode, type CdnNodeEventType,
 } from '../cdnAdminApi'
-import { fail, profileLink, type TermCommand, type TermCtx } from './types'
+import { fail, parseArgs, profileLink, type TermCommand, type TermCtx } from './types'
 
 // The Admin page's CDN nodes tab (lib/cdnAdminApi.ts on the site): the roster
 // of volunteer nodes, approvals and CDN-wide stats under /cdn/admin/. Nodes
@@ -95,10 +95,29 @@ async function act(action: Action, n: CdnNode, ctx: TermCtx): Promise<void> {
 export const CDN_COMMANDS: TermCommand[] = [
   {
     name: 'cdn', group: 'Admin',
-    usage: 'cdn [<node>]  ·  cdn approve|revoke|enable|disable|reset|restore|delete <node>',
+    covers: ['cdnAdminApi.fetchNodeEvents'],
+    usage: 'cdn events <node> [--page N] [--type registered,violation]  ·  cdn [<node>]  ·  cdn approve|revoke|enable|disable|reset|restore|delete <node>',
     description: 'The CDN node roster and stats; one node in full; or approve, revoke, enable, disable, reset trust, restore or delete a node (a node is its id, the start of it, or its name)',
-    complete: (before, partial) => (before.length === 0 ? ACTIONS.filter((s) => s.startsWith(partial.toLowerCase())) : []),
+    complete: (before, partial) => (before.length === 0 ? ['events', ...ACTIONS].filter((s) => s.startsWith(partial.toLowerCase())) : []),
     run: async (args, ctx) => {
+      const parsed = parseArgs(args, ['page', 'type'])
+      if (parsed.rest[0]?.toLowerCase() === 'events') {
+        const nodeArg = parsed.rest.slice(1).join(' ')
+        if (!nodeArg) fail('usage: cdn events <node> [--page N] [--type registered,violation]')
+        const page = Number(parsed.value.get('page') ?? 1)
+        if (!Number.isInteger(page) || page < 1) fail('--page must be a positive integer')
+        const types = parsed.value.get('type')?.split(',').map(t => t.trim()).filter(Boolean) as CdnNodeEventType[] | undefined
+        const node = pick(await fetchCdnNodes(), nodeArg)
+        const result = await fetchNodeEvents(node.node_id, page, types)
+        const rows = result.events.map(event => [event.created_at, event.event_type,
+          event.actor_username ?? 'system', event.actor_ip ?? '', JSON.stringify(event.detail)].filter(Boolean).join(' · '))
+        ctx.print([
+          node.name || node.node_id,
+          result.count + ' events · page ' + result.page + (result.has_next ? ' · more available (--page ' + (result.page + 1) + ')' : ''),
+          ...(rows.length ? rows : ['no events recorded']),
+        ].join('\n'))
+        return
+      }
       const words = args.trim().split(/\s+/).filter(Boolean)
       const first = words[0]?.toLowerCase()
       if (first && (ACTIONS as readonly string[]).includes(first)) {
