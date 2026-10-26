@@ -5,7 +5,7 @@ import { useShallow } from 'zustand/react/shallow'
 import { useStore } from '../store/useStore'
 import {
   SongEditProposal, adminProposalCounts, adminCompProposalCounts, adminListApplications,
-  adminListUsers, updateDisplayName, updateAvatar, compressImageFile, withProposalData,
+  adminUserCounts, updateDisplayName, updateAvatar, compressImageFile, withProposalData,
 } from '../lib/userApi'
 import { showAppToast } from '../lib/appToast'
 import { accountDisplayName } from '../lib/format'
@@ -29,15 +29,15 @@ export const PROPOSAL_FILTER_TABS: { key: ProposalFilterTab; label: string }[] =
 ]
 
 export interface AdminPreview {
-  pendingProposals: number
-  pendingComp: number
+  pendingProposals: number | null
+  pendingComp: number | null
   pendingApplications: number | null
   pendingReports: number | null
   totalUsers: number | null
   totalChannels: number
   totalEras: number | null
   pendingCdnNodes: number | null
-  totalPending: number
+  totalPending: number | null
   otpEnabled: boolean | null
   totalProposals: number | null
   approvedProposals: number | null
@@ -274,40 +274,41 @@ export function useEditorProfileView(): {
     // an audio-src assignment.
     Promise.resolve().then(() => {
       if (cancelled) return
-      Promise.all([
-        adminProposalCounts(activeChannel),
-        adminCompProposalCounts(activeChannel),
-        isAdmin ? adminListApplications('pending') : Promise.resolve(null),
-        isAdmin ? reportsApi.listSongReports('pending') : Promise.resolve(null),
-        isAdmin ? adminListUsers() : Promise.resolve(null),
-        isAdmin ? fetchEraList() : Promise.resolve(null),
-        // Caught on its own: the CDN is a separate backend app, and it being
-        // down shouldn't blank every other number on the tile.
-        isAdmin ? fetchCdnStats().catch(() => null) : Promise.resolve(null),
-      ]).then(([propCounts, compCounts, apps, reps, users, eras, cdn]) => {
+      const initial: AdminPreview = {
+        pendingProposals: null, pendingComp: null, pendingApplications: null, pendingReports: null,
+        totalUsers: null, totalChannels: channelsRef.current.length, totalEras: null,
+        pendingCdnNodes: null, totalPending: null, otpEnabled: isAdmin ? !!account?.otp_enabled : null,
+        totalProposals: null, approvedProposals: null, approvalPct: null,
+        editors: null, managers: null, applicants: null,
+      }
+      setAdminPreview(null)
+      let preview = initial
+      const publish = (patch: Partial<AdminPreview>): void => {
         if (cancelled) return
-        const pendingApplications = apps?.length ?? null
-        const pendingReports = reps?.length ?? null
-        const reviewed = propCounts.total - propCounts.pending
-        setAdminPreview({
-          pendingProposals: propCounts.pending,
-          pendingComp: compCounts.pending,
-          pendingApplications,
-          pendingReports,
-          totalUsers: users?.length ?? null,
-          totalChannels: channelsRef.current.length,
-          totalEras: eras?.length ?? null,
-          pendingCdnNodes: cdn?.pending_nodes ?? null,
-          totalPending: propCounts.pending + compCounts.pending + (pendingApplications ?? 0) + (pendingReports ?? 0),
-          otpEnabled: isAdmin ? !!account?.otp_enabled : null,
-          totalProposals: isAdmin ? propCounts.total : null,
-          approvedProposals: isAdmin ? propCounts.approved : null,
-          approvalPct: isAdmin ? (reviewed > 0 ? Math.round(propCounts.approved / reviewed * 100) : 0) : null,
-          editors: users ? users.filter(u => u.role === 'editor').length : null,
-          managers: users ? users.filter(u => !!u.manager_enabled).length : null,
-          applicants: users ? users.filter(u => u.role === 'applicant').length : null,
-        })
-      }).catch(() => { if (!cancelled) setAdminPreview(null) })
+        preview = { ...preview, ...patch }
+        preview.totalPending = preview.pendingProposals == null || preview.pendingComp == null
+          || (isAdmin && (preview.pendingApplications == null || preview.pendingReports == null))
+          ? null : preview.pendingProposals + preview.pendingComp
+            + (preview.pendingApplications ?? 0) + (preview.pendingReports ?? 0)
+        setAdminPreview(preview)
+      }
+      // Each section can appear even if another request is slow or unavailable.
+      void adminProposalCounts(activeChannel).then(counts => {
+        const reviewed = counts.total - counts.pending
+        publish({ pendingProposals: counts.pending,
+          totalProposals: isAdmin ? counts.total : null,
+          approvedProposals: isAdmin ? counts.approved : null,
+          approvalPct: isAdmin ? (reviewed > 0 ? Math.round(counts.approved / reviewed * 100) : 0) : null })
+      }).catch(() => {})
+      void adminCompProposalCounts(activeChannel).then(counts => publish({ pendingComp: counts.pending })).catch(() => {})
+      if (isAdmin) {
+        void adminListApplications('pending').then(apps => publish({ pendingApplications: apps.length })).catch(() => {})
+        void reportsApi.listSongReports('pending').then(reps => publish({ pendingReports: reps.length })).catch(() => {})
+        void adminUserCounts().then(counts => publish({ totalUsers: counts.total,
+          editors: counts.editors, managers: counts.managers, applicants: counts.applicants })).catch(() => {})
+        void fetchEraList().then(eras => publish({ totalEras: eras.length })).catch(() => {})
+        void fetchCdnStats().then(cdn => publish({ pendingCdnNodes: cdn.pending_nodes })).catch(() => {})
+      }
     })
     return () => { cancelled = true }
     // channels.length deliberately excluded - see channelsRef comment above.

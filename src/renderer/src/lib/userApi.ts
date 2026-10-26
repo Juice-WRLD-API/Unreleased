@@ -1341,6 +1341,13 @@ export async function adminReviewApplication(id: number, payload: {
   })
 }
 
+export async function adminUserCounts(): Promise<{ total: number; editors: number; managers: number; applicants: number }> {
+  const data = await request<{ total: number; editors: number; managers: number; applicants: number }>(`${ACCOUNT_BASE}/admin/users/?counts=1`, { method: 'GET' })
+  // Older servers ignore counts and return the full list. Don't treat that as totals.
+  if (Array.isArray(data)) throw new Error('User counts require an updated server')
+  return data
+}
+
 export async function adminListUsers(roleFilter?: string): Promise<AdminUser[]> {
   const url = new URL(`${ACCOUNT_BASE}/admin/users/`)
   if (roleFilter) url.searchParams.set('role', roleFilter)

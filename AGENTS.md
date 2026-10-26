@@ -1,6 +1,6 @@
 # Agent guide: Juice WRLD API and Unreleased
 
-**Version 1.29** · updated 2026-10-25. Bump the version and date whenever you
+**Version 1.31** · updated 2026-10-26. Bump the version and date whenever you
 change this file (minor for fixes and additions, major for rewrites).
 
 **Keep this file current.** If you find something in the docs or this file that
@@ -389,6 +389,16 @@ Node 22.
 
 Newest first. One entry each: date, what went wrong, what to do instead. Delete
 entries that stop being true.
+
+- 2026-10-26: A bidirectional `port-c` left relevant uncommitted source changes
+  behind because they appeared during the relay. Include source changes from
+  both working trees in the review and relay; do not assume they are out of
+  scope. Keep machine-local settings, locks and generated reports out of commits.
+
+- 2026-10-26: The profile admin preview fetched every user with proposal counts
+  and badges just for totals, and waited for all sections together. Use
+  `adminUserCounts` (`admin/users/?counts=1`) and publish sections independently;
+  unavailable counts stay unknown. Deploy backend support before the renderer.
 
 - 2026-10-25: Remote iOS Siri changes referenced `SiriRadioDonation` and
   `PlayMediaIntentHandler` without their definitions, breaking the Xcode archive.
