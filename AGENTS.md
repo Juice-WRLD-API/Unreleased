@@ -1,6 +1,6 @@
 # Agent guide: Juice WRLD API and Unreleased
 
-**Version 1.31** · updated 2026-10-26. Bump the version and date whenever you
+**Version 1.32** · updated 2026-10-26. Bump the version and date whenever you
 change this file (minor for fixes and additions, major for rewrites).
 
 **Keep this file current.** If you find something in the docs or this file that
@@ -389,6 +389,13 @@ Node 22.
 
 Newest first. One entry each: date, what went wrong, what to do instead. Delete
 entries that stop being true.
+
+- 2026-10-26: Playlist PATCH responses (rename, public toggle, reorder,
+  description) omit `items`, but `updatePlaylist`/`renamePlaylist`/`reorderPlaylistItems`
+  replaced the detail cache and React state with the bare PATCH body. Playlists
+  then crashed in `playlistItemsToTracks` (`undefined.some`). Merge PATCH bodies
+  into cached detail via `storePlaylistDetail` in `userApi.ts`; treat missing
+  `items` as “keep previous”.
 
 - 2026-10-26: A bidirectional `port-c` left relevant uncommitted source changes
   behind because they appeared during the relay. Include source changes from
