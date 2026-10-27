@@ -6,6 +6,15 @@ All notable changes to this project are documented here.
 
 ---
 
+## [2.6.0] — 2026-10-27
+
+Changes since 2.5.46:
+
+- **New** **Identify song** names a song from 10 seconds of audio: listen with the microphone, record what this device is playing, or drop in an audio or video file and pick the part to send (the loudest part is chosen for you, and only that part is uploaded). Matches can be played, queued or opened for details. Open it from Home → Tools, the app menu or the button beside the Tracker search
+- **New** The terminal's `identify` command does the same from the mic, the device or a file (`--at 1:20` for another part of a file), and `open identify` shows the dialog
+
+---
+
 ## [2.5.46] — 2026-10-27
 
 Changes since 2.5.42:

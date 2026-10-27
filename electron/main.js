@@ -486,6 +486,10 @@ const iconPath = process.platform === 'linux'
 const preloadPath = path.join(__dirname, 'preload.js')
 
 let mainWindow = null
+// URL of the document the main window actually loaded. The router's pushState
+// rewrites getURL() (file:///C:/tracker in a packaged build), and did-navigate
+// does not fire for in-page changes, so this still names the real document.
+let mainDocumentUrl = ''
 // Desktop (electron/desktop): the light round the screens and the desktop widgets, Windows only.
 let desktop = null
 let tray = null
@@ -1176,6 +1180,8 @@ function createWindow() {
     return { action: 'deny' }
   })
   guardNavigation(mainWindow)
+  mainDocumentUrl = ''
+  mainWindow.webContents.on('did-navigate', (_event, url) => { mainDocumentUrl = url })
 
   // Frameless windows don't get the browser's native F11-toggles-fullscreen
   // behavior for free — wire it up so it behaves like users expect.
@@ -3935,12 +3941,12 @@ app.whenReady().then(() => {
   // record device audio (loopback) instead.
   const appDocumentUrl = pathToFileURL(path.join(__dirname, '../dist/index.html')).href
   const microphoneAllowed = (webContents, url, isMainFrame, mediaTypes) => canRequestMicrophone({
-    url, mainUrl: webContents?.getURL() || '', appUrl: appDocumentUrl, isDev,
+    url, mainUrl: mainDocumentUrl, appUrl: appDocumentUrl, isDev,
     isMainWindow: !!mainWindow && webContents === mainWindow.webContents,
     isMainFrame, mediaTypes,
   })
   const systemAudioAllowed = (webContents, url, isMainFrame) => canCaptureSystemAudio({
-    url, mainUrl: webContents?.getURL() || '', appUrl: appDocumentUrl, isDev,
+    url, mainUrl: mainDocumentUrl, appUrl: appDocumentUrl, isDev,
     isMainWindow: !!mainWindow && webContents === mainWindow.webContents,
     isMainFrame, audioRequested: true, platform: process.platform,
   })
@@ -3988,7 +3994,7 @@ app.whenReady().then(() => {
       return
     }
     runLog('permissions', 'request denied', JSON.stringify({
-      permission, mediaTypes: 'mediaTypes' in details ? details.mediaTypes : undefined, url: details.requestingUrl, isMainFrame: details.isMainFrame,
+      permission, mediaTypes: 'mediaTypes' in details ? details.mediaTypes : undefined, url: details.requestingUrl, isMainFrame: details.isMainFrame, documentUrl: mainDocumentUrl,
     }))
     callback(false)
   })
@@ -4004,7 +4010,7 @@ app.whenReady().then(() => {
       const main = webContents.mainFrame
       const isMainFrame = frame.processId === main.processId && frame.routingId === main.routingId
       return canCaptureSystemAudio({
-        url: frame.url, mainUrl: webContents.getURL() || '', appUrl: appDocumentUrl, isDev,
+        url: frame.url, mainUrl: mainDocumentUrl, appUrl: appDocumentUrl, isDev,
         isMainWindow: isMainFrame, isMainFrame, audioRequested: request.audioRequested, platform: process.platform,
       })
     }

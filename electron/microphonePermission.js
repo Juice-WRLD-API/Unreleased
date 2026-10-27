@@ -1,6 +1,9 @@
 /**
  * Recognition only needs audio in the main app frame. File origins are opaque,
  * so compare the actual packaged document rather than trusting every file URL.
+ * mainUrl is the document the main window loaded (did-navigate), not getURL():
+ * the router's pushState turns the frame URL into file:///C:/tracker, so the
+ * frame only has to stay on file: while its document must be the app bundle.
  * @param {{ url: string, mainUrl: string, appUrl: string, isDev: boolean,
  * isMainWindow: boolean, isMainFrame: boolean }} request
  */
@@ -11,7 +14,7 @@ function isAppMainFrame(request) {
     const top = new URL(request.mainUrl)
     if (request.isDev) return frame.origin === 'http://localhost:3018' && top.origin === frame.origin
     const app = new URL(request.appUrl)
-    return frame.protocol === 'file:' && frame.host === app.host && frame.pathname === app.pathname
+    return frame.protocol === 'file:' && frame.host === app.host
       && top.protocol === 'file:' && top.host === app.host && top.pathname === app.pathname
   } catch { return false }
 }
