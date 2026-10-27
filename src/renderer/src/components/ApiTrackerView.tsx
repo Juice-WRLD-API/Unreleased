@@ -1,117 +1,118 @@
-import { useState, useEffect, useCallback, useRef, useMemo, memo } from 'react'
+import { useCascade } from '../hooks/useCascade'
+import { useContentMotion } from '../hooks/useContentMotion'
+import { MotionOverlay } from './MotionOverlay'
+import { useState, useEffect, useCallback, useRef, useMemo, memo, Suspense } from 'react'
 import {
-  Search, Play, Loader2, Music2, X, Check,
+  Search, Play, Loader2, Music2, X, Check, AudioLines,
   LayoutList, Rows3, Info, ListPlus, ListFilter,
   ChevronUp, ChevronDown, MoreHorizontal, Plus, ListMusic, PackageOpen,
   CheckSquare2, Square, Link2, Layers, LayoutGrid, Mic2, CalendarDays, ChevronLeft, ChevronRight, Users,
-  AlertTriangle, Pencil, Clock, Timer, User, MapPin, Folder, SlidersHorizontal, Download, Type,
+  AlertTriangle, Pencil, Clock, Timer, User, MapPin, Folder, SlidersHorizontal, Download, Type, BarChart3,
 } from 'lucide-react'
 import { useStore } from '../store/useStore'
 import { useShallow } from 'zustand/react/shallow'
 import { AlbumArtThumbnail } from './AlbumArtThumbnail'
+import { lazyView } from '../lib/lazyView'
 import SongContextMenu from './SongContextMenu'
+import FilePickerModal from './FilePickerModal'
 import { CompactGroupRow, useExpandedGroups } from './CompactGroupRow'
 import {
-  apiFetch, apiPeek, songToTrack, parseDuration, buildStreamUrl, CATEGORY_LABELS, CATEGORY_COLORS, JWAPI_BASE,
-  JWApiSong, JWApiPaginatedResponse, JWApiStats, JWApiEra, loadAllSongs,
+  apiFetch, apiPeek, OMIT_BULK, peekTrackerCatalog, fetchTrackerCatalog, songToTrack, parseDuration, buildStreamUrl, CATEGORY_LABELS, CATEGORY_COLORS,
+  JWApiSong, JWApiStats, JWApiEra,
+  parseBrowseEntries, JWApiBrowseResponse, resolveSessionEditSource,
 } from '../lib/juicewrldApi'
-import { fisherYates, type QueueFilter } from '../store/queueSlice'
+import { openZipTarget, saveItems } from '../lib/clientZip'
+import { preloadView } from '../lib/lazyViews'
+import { startCdnFileDownload } from '../hooks/useCdnFileDownload'
+import { CdnDownloadToast } from './CdnDownloadToast'
 import { Track } from '../types'
 import * as userApi from '../lib/userApi'
-import { useCanEdit } from '../hooks/useChannelRoles'
+import { playlistSongIds } from '../lib/playlistItems'
+import { addSongsInBackground } from '../lib/optimisticPlaylist'
+import { useCanEdit, isPrimaryChannelSlug } from '../hooks/useChannelRoles'
+import { loadRecentlyAddedMap } from '../lib/changesApi'
+import { peekSessionEditOverride, setSessionEditOverride } from '../lib/sessionEditOverrides'
+import { resolveSongFile } from '../lib/sessionEditsApi'
+import { triggerDownload } from '../lib/apiFilesShared'
 import { versionsEnabled, linkSongVersion, getOwnVersionMeta, setGroupVersionTitle } from '../lib/versionsApi'
 import type { SongVersionMeta } from '../lib/versionsApi'
 import { fetchAllCompactGroups, filterCompactGroups, invalidateCompactGroupsCache, subscribeCompactGroupsInvalidation } from '../lib/compactGroups'
 import type { CompactGroup } from '../lib/compactGroups'
-import { useVirtualWindow } from '../hooks/useVirtualWindow'
+import { useVirtualWindow, useVariableVirtualWindow } from '../hooks/useVirtualWindow'
 import { runLog } from '../lib/runLog'
-import { formatDuration } from '../lib/format'
-import { parseSearchQuery, matchesFieldFilters, SEARCH_FIELD_HELP } from '../lib/trackerSearch'
-import { loadEraFullNames, eraLabel } from '../lib/eras'
+import { formatDuration, displayDate, dateSortValue, compareDates } from '../lib/format'
+import { parseSearchQuery, matchesFieldFilters, filterApiFields, textMatches } from '../lib/trackerSearch'
+import { displaySongName } from '../lib/songPrefs'
+import { SearchHelpButton } from './SearchHelpPopover'
+import { loadEraFullNames, eraLabel, listEras } from '../lib/eras'
 import { useMultiSelect } from '../hooks/useMultiSelect'
+import { useLongPress } from '../hooks/useLongPress'
+import {
+  Category, ViewMode, TrackerTab, TRACKER_TABS, isTrackerTab,
+  EraColor, ERA_COLOR_PALETTE, DEFAULT_ERA_COLOR, GROUP_CATEGORY_PRIORITY, groupCategory,
+  LS_TRACKER_SEARCH, MIN_PLAUSIBLE_RECORD_YEAR, getInitialSearch,
+  SNIPPET_CONTEXT_CHARS, getLyricSnippet, MONTH_LABELS, buildMonthGrid,
+  extractDateKeys, dateKey,
+} from '../lib/apiTrackerShared'
+import { useLyricSearch } from '../lib/useLyricSearch'
+import TrackerFieldMenu from './TrackerFieldMenu'
+import type { TrackerFieldMenuState } from './TrackerFieldMenu'
+import {
+  TRACKER_FIELD_MAP, DEFAULT_DETAIL_FIELDS, DEFAULT_LIST_COLUMNS, MAX_DETAIL_FIELDS, MAX_LIST_COLUMNS,
+} from '../lib/trackerFields'
+import type { TrackerFieldKey } from '../lib/trackerFields'
+import { reorderField, apiFieldsFor, useTrackerOmit, OPTIONAL_SONG_FIELDS } from '../lib/trackerFields'
+import { useFieldDrag } from '../hooks/useFieldDrag'
+import ContextMenu, { AnchoredContextMenu } from './ContextMenu'
+import ThemedSelect from './ThemedSelect'
 
-type Category = 'released' | 'unreleased' | 'unsurfaced' | 'recording_session' | ''
-type ViewMode = 'list' | 'detail' | 'grid'
-type TrackerTab = 'songs' | 'lyrics' | 'calendar' | 'producers'
+const StatisticsPanel = lazyView(() => import('./StatisticsPanel'))
 
-// ─── Era color palette (Calendar tab) ─────────────────────────────────────────
-// Eras are dynamic (fetched from the API, not a fixed enum), so colors are
-// assigned by index rather than hardcoded per name — same era always gets the
-// same color as long as `eras` keeps returning them in the same order.
-// Written as literal class names (not template-built) so Tailwind's static
-// scanner picks them all up.
-interface EraColor { text: string; bg: string; border: string; dot: string }
-const ERA_COLOR_PALETTE: EraColor[] = [
-  { text: 'text-rose-400',     bg: 'bg-rose-400/10',     border: 'border-rose-400/25',     dot: 'bg-rose-400' },
-  { text: 'text-orange-400',   bg: 'bg-orange-400/10',   border: 'border-orange-400/25',   dot: 'bg-orange-400' },
-  { text: 'text-amber-400',    bg: 'bg-amber-400/10',    border: 'border-amber-400/25',    dot: 'bg-amber-400' },
-  { text: 'text-lime-400',     bg: 'bg-lime-400/10',     border: 'border-lime-400/25',      dot: 'bg-lime-400' },
-  { text: 'text-emerald-400',  bg: 'bg-emerald-400/10',  border: 'border-emerald-400/25',  dot: 'bg-emerald-400' },
-  { text: 'text-teal-400',     bg: 'bg-teal-400/10',     border: 'border-teal-400/25',     dot: 'bg-teal-400' },
-  { text: 'text-cyan-400',     bg: 'bg-cyan-400/10',     border: 'border-cyan-400/25',     dot: 'bg-cyan-400' },
-  { text: 'text-blue-400',     bg: 'bg-blue-400/10',     border: 'border-blue-400/25',     dot: 'bg-blue-400' },
-  { text: 'text-indigo-400',   bg: 'bg-indigo-400/10',   border: 'border-indigo-400/25',   dot: 'bg-indigo-400' },
-  { text: 'text-violet-400',   bg: 'bg-violet-400/10',   border: 'border-violet-400/25',   dot: 'bg-violet-400' },
-  { text: 'text-fuchsia-400',  bg: 'bg-fuchsia-400/10',  border: 'border-fuchsia-400/25',  dot: 'bg-fuchsia-400' },
-  { text: 'text-pink-400',     bg: 'bg-pink-400/10',     border: 'border-pink-400/25',     dot: 'bg-pink-400' },
-]
-const DEFAULT_ERA_COLOR: EraColor = { text: 'text-text-muted', bg: 'bg-surface-overlay', border: 'border-[var(--border)]', dot: 'bg-text-muted' }
-
-// A compact-view group bundles several versions of one song, each of which
-// can sit in a different category — the group as a whole is labeled by
-// whichever category ranks highest here (a released version anywhere in the
-// group makes the whole group "Released", even if other versions are
-// unreleased/session/unsurfaced; same logic cascades down the list).
-const GROUP_CATEGORY_PRIORITY: Category[] = ['released', 'unreleased', 'recording_session', 'unsurfaced']
-function groupCategory(members: { item: JWApiSong }[]): Category {
-  const present = new Set(members.map(m => m.item.category as Category))
-  return GROUP_CATEGORY_PRIORITY.find(c => present.has(c)) ?? 'unsurfaced'
-}
-
-const PAGE_SIZE = 50
 const LS_TRACKER_VIEW = 'api-tracker:viewMode'
 const LS_TRACKER_COMPACT = 'api-tracker:compactView'
-const LS_TRACKER_SEARCH  = 'api-tracker:search'
 const LS_TRACKER_CALENDAR_MONTH = 'api-tracker:calendarMonth'
+const LS_TRACKER_CATEGORY_FILTER = 'api-tracker:categoryFilter'
+const LS_TRACKER_ERA_FILTER = 'api-tracker:eraFilter'
+const LS_TRACKER_ORDER_FIELD = 'api-tracker:orderField'
+const LS_TRACKER_ORDER_DIR = 'api-tracker:orderDir'
 
-// record_dates is free-text and occasionally yields a technically-valid but
-// implausible match (e.g. a stray "1/2/03" fragment that isn't really a
-// date). Juice WRLD's earliest known recordings are from the mid-2010s, so
-// anything before this is almost certainly a parsing false-positive rather
-// than a real recording date — treat it as invalid.
-const MIN_PLAUSIBLE_RECORD_YEAR = 2010
+let savedTrackerScrollTop = 0
 
-// The `q` URL param takes priority over the saved localStorage query so that
-// following/reloading a link with a search in it (or navigating back to one)
-// shows that search rather than whatever was last typed. Electron's file://
-// protocol has no meaningful URL routing (see App.tsx), so it's skipped there.
-function getInitialSearch(): string {
-  if (window.location.protocol !== 'file:') {
-    const q = new URLSearchParams(window.location.search).get('q')
-    if (q) return q
-  }
-  return localStorage.getItem(LS_TRACKER_SEARCH) || ''
+function getInitialSetFilter(key: string): Set<string> {
+  try {
+    const raw = localStorage.getItem(key)
+    const parsed = raw ? JSON.parse(raw) : []
+    return Array.isArray(parsed) ? new Set(parsed) : new Set()
+  } catch { return new Set() }
 }
 
-type OrderField = 'name' | 'credited_artists' | 'era__name' | 'category' | 'length'
+function safeSetLS(key: string, value: string): void {
+  try { localStorage.setItem(key, value) } catch (e) { console.warn(`[ApiTrackerView] failed to save "${key}":`, e) }
+}
+
+type OrderField = 'name' | 'credited_artists' | 'era__name' | 'category' | 'length' | 'date_added' | 'date_leaked'
 
 // Defined at module scope (not inline in render) so React keeps a stable
-// component identity across re-renders — an inline definition gets recreated
+// component identity across re-renders - an inline definition gets recreated
 // every render, which makes React unmount/remount the buttons on every
 // state update (e.g. every page loaded while sorting), causing a visible
 // flicker instead of a smooth active/inactive toggle.
-const SortBtn = ({ field, label, className, orderField, orderDir, onClick }: {
+const SortBtn = ({ field, label, className, orderField, orderDir, onClick, onContextMenu, title }: {
   field: OrderField
   label: string
   className?: string
   orderField: OrderField | null
   orderDir: 'asc' | 'desc'
   onClick: (field: OrderField) => void
+  onContextMenu?: (e: React.MouseEvent) => void
+  title?: string
 }): JSX.Element => {
   const active = orderField === field
   return (
     <button
       onClick={() => onClick(field)}
+      onContextMenu={onContextMenu}
+      title={title}
       className={`flex items-center gap-0.5 text-xs font-medium uppercase tracking-wider transition-colors ${active ? 'text-accent' : 'text-text-muted hover:text-text-secondary'} ${className ?? ''}`}
     >
       {label}
@@ -122,150 +123,7 @@ const SortBtn = ({ field, label, className, orderField, orderDir, onClick }: {
   )
 }
 
-const SNIPPET_CONTEXT_CHARS = 70
-// Finds where `query` occurs in `lyrics` and returns the surrounding text
-// split into before/match/after so the caller can highlight just the match.
-// The API's lyrics search may be more lenient than a plain substring match
-// (e.g. punctuation/case normalization), so this falls back to locating just
-// the first query word if the full phrase isn't found verbatim — better to
-// show an approximate snippet than none at all.
-function getLyricSnippet(lyrics: string | null, query: string): { before: string; match: string; after: string } | null {
-  const q = query.trim()
-  if (!lyrics || !q) return null
-  const lower = lyrics.toLowerCase()
-  let idx = lower.indexOf(q.toLowerCase())
-  let matchLen = q.length
-  if (idx === -1) {
-    const firstWord = q.split(/\s+/)[0]
-    idx = firstWord ? lower.indexOf(firstWord.toLowerCase()) : -1
-    matchLen = firstWord.length
-  }
-  if (idx === -1) return null
-  const start = Math.max(0, idx - SNIPPET_CONTEXT_CHARS)
-  const end = Math.min(lyrics.length, idx + matchLen + SNIPPET_CONTEXT_CHARS)
-  const clean = (s: string): string => s.replace(/\s+/g, ' ').trim()
-  return {
-    before: (start > 0 ? '…' : '') + clean(lyrics.slice(start, idx)),
-    match: lyrics.slice(idx, idx + matchLen),
-    after: clean(lyrics.slice(idx + matchLen, end)) + (end < lyrics.length ? '…' : ''),
-  }
-}
-
-// ─── Recording-date parsing (Calendar tab) ────────────────────────────────────
-// `record_dates` is free-text (e.g. "5/5/18", "May 5, 2018", sometimes several
-// dates for one song, sometimes just a year/season with no day at all) —
-// there's no structured date field to key a calendar off of. These helpers
-// pull out every exact (year, month, day) triple found in the text and
-// silently drop anything too vague to place on a specific day, rather than
-// guessing.
-const MONTH_MAP: Record<string, number> = {
-  jan: 0, january: 0, feb: 1, february: 1, mar: 2, march: 2, apr: 3, april: 3, may: 4,
-  jun: 5, june: 5, jul: 6, july: 6, aug: 7, august: 7, sep: 8, sept: 8, september: 8,
-  oct: 9, october: 9, nov: 10, november: 10, dec: 11, december: 11,
-}
-const MONTH_NAME_RE = new RegExp(
-  `\\b(${Object.keys(MONTH_MAP).join('|')})\\.?\\s+(\\d{1,2})(?:st|nd|rd|th)?,?\\s+(\\d{4})\\b`, 'gi'
-)
-
-function normalizeYear(y: number): number {
-  if (y >= 100) return y
-  return y <= 30 ? 2000 + y : 1900 + y
-}
-
-function isValidYMD(y: number, m: number, d: number): boolean {
-  if (y < MIN_PLAUSIBLE_RECORD_YEAR || y > new Date().getFullYear()) return false
-  if (m < 0 || m > 11 || d < 1 || d > 31) return false
-  const dt = new Date(y, m, d)
-  return dt.getFullYear() === y && dt.getMonth() === m && dt.getDate() === d
-}
-
-function dateKey(y: number, m: number, d: number): string {
-  return `${y}-${String(m + 1).padStart(2, '0')}-${String(d).padStart(2, '0')}`
-}
-
-function extractDateKeys(text: string | null | undefined): string[] {
-  if (!text) return []
-  const keys = new Set<string>()
-
-  for (const m of text.matchAll(/\b(\d{4})-(\d{1,2})-(\d{1,2})\b/g)) {
-    const y = +m[1], mo = +m[2] - 1, d = +m[3]
-    if (isValidYMD(y, mo, d)) keys.add(dateKey(y, mo, d))
-  }
-  for (const m of text.matchAll(/\b(\d{1,2})\/(\d{1,2})\/(\d{2,4})\b/g)) {
-    const mo = +m[1] - 1, d = +m[2], y = normalizeYear(+m[3])
-    if (isValidYMD(y, mo, d)) keys.add(dateKey(y, mo, d))
-  }
-  for (const m of text.matchAll(MONTH_NAME_RE)) {
-    const mo = MONTH_MAP[m[1].toLowerCase()]
-    const d = +m[2], y = +m[3]
-    if (mo !== undefined && isValidYMD(y, mo, d)) keys.add(dateKey(y, mo, d))
-  }
-
-  return [...keys]
-}
-
 const WEEKDAY_LABELS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
-const MONTH_LABELS = [
-  'January', 'February', 'March', 'April', 'May', 'June',
-  'July', 'August', 'September', 'October', 'November', 'December',
-]
-
-// One 7-wide grid of the given month, padded with nulls so every week is a
-// full row (including leading/trailing days from adjacent months).
-function buildMonthGrid(year: number, month: number): (Date | null)[][] {
-  const startDow = new Date(year, month, 1).getDay()
-  const daysInMonth = new Date(year, month + 1, 0).getDate()
-  const cells: (Date | null)[] = Array(startDow).fill(null)
-  for (let d = 1; d <= daysInMonth; d++) cells.push(new Date(year, month, d))
-  while (cells.length % 7 !== 0) cells.push(null)
-  const weeks: (Date | null)[][] = []
-  for (let i = 0; i < cells.length; i += 7) weeks.push(cells.slice(i, i + 7))
-  return weeks
-}
-
-// ─── Search syntax help popover ────────────────────────────────────────────────
-// Explains the field:"value" query syntax (trackerSearch.ts) that the search
-// box's info button opens. Closes on outside click/Escape like the other
-// popovers/menus in this file.
-function SearchHelpPopover({ onClose }: { onClose: () => void }): JSX.Element {
-  const ref = useRef<HTMLDivElement>(null)
-
-  useEffect(() => {
-    const handle = (e: MouseEvent): void => {
-      if (ref.current && !ref.current.contains(e.target as Node)) onClose()
-    }
-    const handleKey = (e: KeyboardEvent): void => { if (e.key === 'Escape') onClose() }
-    document.addEventListener('mousedown', handle)
-    document.addEventListener('keydown', handleKey)
-    return () => {
-      document.removeEventListener('mousedown', handle)
-      document.removeEventListener('keydown', handleKey)
-    }
-  }, [onClose])
-
-  return (
-    <div
-      ref={ref}
-      className="absolute right-0 top-full mt-2 w-72 max-h-80 overflow-y-auto bg-surface border border-[var(--border)] rounded-xl shadow-2xl z-50 p-3"
-    >
-      <p className="text-text-primary text-xs font-semibold mb-1">Search syntax</p>
-      <p className="text-text-muted text-xs mb-2.5 leading-snug">
-        Search any field directly with <code className="text-text-secondary bg-surface-overlay px-1 py-0.5 rounded">field:"value"</code>.
-        Combine with plain words and multiple fields — matches are case-insensitive substrings, all filters must match.
-        An optional <code className="text-text-secondary bg-surface-overlay px-1 py-0.5 rounded">&</code> between
-        fields is just for readability, e.g. <code className="text-text-secondary bg-surface-overlay px-1 py-0.5 rounded">artists:"Juice WRLD" &amp; category:unreleased</code>.
-      </p>
-      <div className="grid grid-cols-1 gap-1">
-        {SEARCH_FIELD_HELP.map(({ field, example }) => (
-          <div key={field} className="flex items-center justify-between gap-2 text-xs">
-            <span className="text-text-muted shrink-0">{field}</span>
-            <code className="text-text-secondary bg-surface-overlay px-1.5 py-0.5 rounded truncate">{example}</code>
-          </div>
-        ))}
-      </div>
-    </div>
-  )
-}
 
 // ─── Stats bar ────────────────────────────────────────────────────────────────
 function StatsBar({ stats }: { stats: JWApiStats | null }): JSX.Element {
@@ -295,7 +153,7 @@ function StatsBar({ stats }: { stats: JWApiStats | null }): JSX.Element {
 
 // ─── Category sidebar ─────────────────────────────────────────────────────────
 // Category/era are checkbox multi-selects (OR'd within each group) rather
-// than the old radio-style single pick — "All" / "All eras" just clears the
+// than the old radio-style single pick - "All" / "All eras" just clears the
 // respective set instead of being one more option inside it.
 const CAT_SIDEBAR: { key: Exclude<Category, ''>; label: string }[] = [
   { key: 'released',          label: 'Released' },
@@ -330,7 +188,7 @@ function SidebarCheckRow({ label, count, checked, onClick }: {
   )
 }
 
-// Popover version of the old always-on sidebar — opens from the filter
+// Popover version of the old always-on sidebar - opens from the filter
 // button next to the search box, closes on outside click/Escape like
 // SearchHelpPopover, and only takes up space while actually in use.
 function FilterPopover({
@@ -432,7 +290,7 @@ function FilterPopover({
         <SidebarCheckRow label="Not downloaded" checked={libraryFilter === 'missing'} onClick={() => onLibraryFilter('missing')} />
       </div>
       {!hasLibrary && libraryFilter === 'have' && (
-        <p className="text-[0.6875rem] text-text-muted pt-1.5">Nothing downloaded offline yet — right-click a song and choose "Download offline" first.</p>
+        <p className="text-[0.6875rem] text-text-muted pt-1.5">Nothing downloaded offline yet - right-click a song and choose "Download offline" first.</p>
       )}
     </div>
   )
@@ -440,33 +298,15 @@ function FilterPopover({
 
 // ─── Context menu ─────────────────────────────────────────────────────────────
 // Per-song right-click menu lives in SongContextMenu.tsx (shared across every
-// place a song can be right-clicked — Tracker, Liked Songs, Playlists, the
+// place a song can be right-clicked - Tracker, Liked Songs, Playlists, the
 // Player bar, WRLD). Only the bulk multi-select menu below is local to the
 // Tracker, since bulk actions don't apply anywhere else.
 interface BulkContextMenuState {
   x: number
   y: number
+  /** The playlists flyout has been opened - only then is each playlist
+   *  fetched to see which already hold the whole selection. */
   showPlaylists: boolean
-}
-
-// Hoisted to module scope — defining this inside SongContextMenu's render body
-// would give it a new function identity every render, causing React to
-// unmount/remount every menu item button (and flicker any :hover state) on
-// each re-render rather than just updating it.
-function MenuItem({ icon, label, onClick, disabled, title }: {
-  icon: React.ReactNode; label: string; onClick: () => void; disabled?: boolean; title?: string
-}): JSX.Element {
-  return (
-    <button
-      onClick={(e) => { e.stopPropagation(); onClick() }}
-      disabled={disabled}
-      title={title}
-      className="w-full flex items-center gap-2.5 px-3 py-2 text-sm text-left text-text-secondary hover:text-text-primary hover:bg-surface-raised transition-colors disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-transparent disabled:hover:text-text-secondary"
-    >
-      {icon}
-      {label}
-    </button>
-  )
 }
 
 function BulkContextMenu({
@@ -475,7 +315,7 @@ function BulkContextMenu({
   count,
   onAddToQueue,
   onDownloadZip,
-  onTogglePlaylists,
+  onPlaylistsOpen,
   playlists,
   account,
   onAddToPlaylist,
@@ -493,18 +333,18 @@ function BulkContextMenu({
   count: number
   onAddToQueue: () => void
   onDownloadZip: () => void
-  onTogglePlaylists: () => void
+  onPlaylistsOpen: () => void
   playlists: userApi.PlaylistSummary[]
   account: userApi.AccountUser | null
   onAddToPlaylist: (id: number) => void
   onLogin: () => void
   canLinkVersions: boolean
   onLinkVersions: () => void
-  /** Editors/admins only — opens the bulk editor for the whole selection. */
+  /** Editors/admins only - opens the bulk editor for the whole selection. */
   canBulkEdit: boolean
   onBulkEdit: () => void
   /** False when any selected song is a session/unsurfaced (playlists don't
-   *  support those) — hides "Add to playlist" entirely rather than silently
+   *  support those) - hides "Add to playlist" entirely rather than silently
    *  adding only the eligible ones. */
   canAddToPlaylist: boolean
   /** False unless every selected song is both eligible and has a path. */
@@ -512,99 +352,46 @@ function BulkContextMenu({
   /** Playlist ids that already contain every eligible selected song. */
   contained: Set<number>
 }): JSX.Element {
-  const menuRef = useRef<HTMLDivElement>(null)
-
-  useEffect(() => {
-    const handle = (e: MouseEvent): void => {
-      if (menuRef.current && !menuRef.current.contains(e.target as Node)) onClose()
-    }
-    const handleKey = (e: KeyboardEvent): void => { if (e.key === 'Escape') onClose() }
-    document.addEventListener('mousedown', handle)
-    document.addEventListener('keydown', handleKey)
-    return () => {
-      document.removeEventListener('mousedown', handle)
-      document.removeEventListener('keydown', handleKey)
-    }
-  }, [onClose])
-
-  const menuWidth = 208
-  const menuHeight = state.showPlaylists ? 320 : 160
-  const top = Math.max(8, Math.min(state.y, window.innerHeight - menuHeight - 8))
-  const left = Math.max(8, Math.min(state.x, window.innerWidth - menuWidth - 8))
-
   return (
-    <div
-      ref={menuRef}
-      style={{ position: 'fixed', zIndex: 9999, top, left }}
-      className="w-52 bg-surface border border-[var(--border)] rounded-xl shadow-2xl overflow-hidden py-1"
-    >
-      <div className="px-3 py-2 border-b border-[var(--border)] mb-1">
-        <p className="text-text-primary text-xs font-semibold truncate">{count} {count === 1 ? 'song' : 'songs'} selected</p>
-      </div>
-
-      {state.showPlaylists ? (
-        <>
-          <button
-            onClick={(e) => { e.stopPropagation(); onTogglePlaylists() }}
-            className="w-full flex items-center gap-2 px-3 py-2 text-xs text-text-muted hover:text-text-primary transition-colors"
-          >
-            <ChevronDown size={12} className="rotate-90" /> Back
-          </button>
-          {!account ? (
-            <div className="px-3 pb-2">
+    <ContextMenu
+      x={state.x}
+      y={state.y}
+      onClose={onClose}
+      zIndex={9999}
+      title={`${count} ${count === 1 ? 'song' : 'songs'} selected`}
+      className="w-52"
+      flyoutClassName="w-56"
+      items={[
+        {
+          label: 'Add to queue',
+          icon: ListPlus,
+          disabled: !canAddToQueue,
+          hint: !canAddToQueue ? "Sessions/unsurfaced songs can't be queued" : undefined,
+          onSelect: onAddToQueue,
+        },
+        canAddToPlaylist && {
+          label: 'Add to playlist',
+          icon: Plus,
+          onOpen: onPlaylistsOpen,
+          children: account
+            ? playlists.map(p => ({ label: p.name, icon: ListMusic, checked: contained.has(p.id), onSelect: () => onAddToPlaylist(p.id) }))
+            : [],
+          childrenEmpty: account ? 'No playlists yet.' : undefined,
+          childrenFooter: !account ? (
+            <div className="p-1">
               <p className="text-xs text-text-muted mb-2">Log in to save to playlists.</p>
-              <button
-                onClick={(e) => { e.stopPropagation(); onLogin() }}
-                className="w-full py-1.5 rounded-lg bg-accent/15 text-accent text-xs font-semibold"
-              >
+              <button onClick={onLogin} className="w-full py-1.5 rounded-lg bg-accent/15 text-accent text-xs font-semibold">
                 Log in
               </button>
             </div>
-          ) : (
-            <div className="max-h-44 overflow-y-auto">
-              {playlists.length === 0 && (
-                <p className="px-3 py-2 text-xs text-text-muted">No playlists yet.</p>
-              )}
-              {playlists.map((p) => {
-                const allIn = contained.has(p.id)
-                return (
-                  <button
-                    key={p.id}
-                    onClick={(e) => { e.stopPropagation(); onAddToPlaylist(p.id) }}
-                    className="w-full flex items-center gap-2 px-3 py-1.5 text-sm text-left text-text-secondary hover:text-text-primary hover:bg-surface-raised transition-colors"
-                  >
-                    <ListMusic size={13} className={`shrink-0 ${allIn ? 'text-accent' : 'text-text-muted'}`} />
-                    <span className="flex-1 truncate text-xs">{p.name}</span>
-                    {allIn && <Check size={12} className="text-accent shrink-0" />}
-                  </button>
-                )
-              })}
-            </div>
-          )}
-        </>
-      ) : (
-        <>
-          <MenuItem
-            icon={<ListPlus size={14} />}
-            label="Add to queue"
-            onClick={onAddToQueue}
-            disabled={!canAddToQueue}
-            title={!canAddToQueue ? "Sessions/unsurfaced songs can't be queued" : undefined}
-          />
-          {canAddToPlaylist && (
-            <MenuItem icon={<Plus size={14} />} label="Add to playlist" onClick={onTogglePlaylists} />
-          )}
-          {canLinkVersions && (
-            <MenuItem icon={<Link2 size={14} />} label="Link versions" onClick={onLinkVersions} />
-          )}
-          {canBulkEdit && (
-            <MenuItem icon={<Pencil size={14} />} label="Edit" onClick={onBulkEdit} />
-          )}
-          <div className="my-1 border-t border-[var(--border)]" />
-          <MenuItem icon={<PackageOpen size={14} />} label="Download ZIP" onClick={onDownloadZip} />
-        </>
-      )}
-    </div>
+          ) : undefined,
+        },
+        canLinkVersions && { label: 'Link versions', icon: Link2, onSelect: onLinkVersions },
+        canBulkEdit && { label: 'Edit', icon: Pencil, onSelect: onBulkEdit },
+        'divider',
+        { label: 'Download', icon: PackageOpen, onSelect: onDownloadZip },
+      ]}
+    />
   )
 }
 
@@ -638,6 +425,125 @@ function SongActions({
   )
 }
 
+// ─── List columns ─────────────────────────────────────────────────────────────
+// The List view's columns after Title are user-chosen (see lib/trackerFields).
+// Each column has a fixed width so header cells and row cells line up; the
+// four original columns keep their original widths/alignment and interactive
+// cells (Era / Category filter on click), everything else is plain text.
+const LIST_COLUMN_WIDTH: Partial<Record<TrackerFieldKey, string>> = {
+  artist: 'w-32', era: 'w-36', category: 'w-24', length: 'w-12',
+}
+const listColumnWidth = (key: TrackerFieldKey): string => LIST_COLUMN_WIDTH[key] ?? 'w-36'
+const LIST_COLUMN_SORT: Partial<Record<TrackerFieldKey, OrderField>> = {
+  artist: 'credited_artists', era: 'era__name', category: 'category', length: 'length',
+  date_leaked: 'date_leaked',
+}
+// Compact-view member rows only line up under the compact header's Category
+// column, so they ignore the user's column choice.
+const COMPACT_MEMBER_COLUMNS: TrackerFieldKey[] = ['category', 'length']
+
+function ListCell({ field, song, selectMode, fullEraNames, onEraClick, onCategoryClick }: {
+  field: TrackerFieldKey
+  song: JWApiSong
+  selectMode: boolean
+  fullEraNames: boolean
+  onEraClick: (era: string) => void
+  onCategoryClick: (cat: Category) => void
+}): JSX.Element {
+  const w = listColumnWidth(field)
+  if (field === 'era' && song.era?.name && !selectMode) {
+    const label = eraLabel(song.era.name, fullEraNames)
+    return (
+      <button
+        onClick={() => onEraClick(song.era!.name)}
+        className={`hidden md:block text-text-muted text-xs truncate ${w} shrink-0 text-left hover:text-accent transition-colors`}
+        title={`Filter by era: ${label}`}
+      >
+        {label}
+      </button>
+    )
+  }
+  if (field === 'category') {
+    const cls = `hidden md:block text-xs px-1.5 py-0.5 rounded border shrink-0 ${w} text-center ${CATEGORY_COLORS[song.category] ?? 'text-text-muted bg-surface border-[var(--border)]'}`
+    const label = CATEGORY_LABELS[song.category] ?? song.category
+    return selectMode
+      ? <span className={cls}>{label}</span>
+      : (
+        <button onClick={() => onCategoryClick(song.category as Category)} className={`${cls} transition-colors hover:opacity-80`} title="Filter by category">
+          {label}
+        </button>
+      )
+  }
+  if (field === 'length') {
+    return <span className={`hidden md:block text-text-muted text-xs ${w} shrink-0 tabular-nums`}>{formatDuration(parseDuration(song.length), '--:--')}</span>
+  }
+  const v = TRACKER_FIELD_MAP.get(field)!.get(song, fullEraNames)
+  return (
+    <span className={`hidden md:block text-xs truncate ${w} shrink-0 ${v ? 'text-text-muted' : 'text-text-muted/50'}`} title={v || undefined}>
+      {v || '—'}
+    </span>
+  )
+}
+
+// Drag-reorder for the in-place drop targets (column headers, field labels).
+// Read the layout fresh from the store so memoized rows needn't re-render
+// just to carry the current order in a callback.
+function reorderDetailFields(from: number, to: number): void {
+  const s = useStore.getState()
+  s.setTrackerDetailFields(reorderField(s.trackerDetailFields, from, to))
+}
+function reorderListColumns(from: number, to: number): void {
+  const s = useStore.getState()
+  s.setTrackerListColumns(reorderField(s.trackerListColumns, from, to))
+}
+
+// One user-chosen List column header: drag it onto another header to reorder
+// (like the nav tabs), click to sort (or, for unsortable columns, open the
+// column picker), right-click to swap/hide it.
+function ListColumnHeader({ field, index, orderField, orderDir, onSort, onMenu }: {
+  field: TrackerFieldKey
+  index: number
+  orderField: OrderField | null
+  orderDir: 'asc' | 'desc'
+  onSort: (field: OrderField) => void
+  onMenu: (index: number, e: React.MouseEvent) => void
+}): JSX.Element {
+  const drag = useFieldDrag('list', index, reorderListColumns)
+  const label = TRACKER_FIELD_MAP.get(field)!.label
+  const align = field === 'category' ? 'justify-center' : ''
+  const sortField = LIST_COLUMN_SORT[field]
+  const menu = (e: React.MouseEvent): void => { e.preventDefault(); onMenu(index, e) }
+  return (
+    <div
+      {...drag.props}
+      className={`${listColumnWidth(field)} shrink-0 flex min-w-0 rounded cursor-grab active:cursor-grabbing ${drag.over ? 'ring-1 ring-accent' : ''}`}
+    >
+      {sortField ? (
+        <SortBtn
+          field={sortField} label={label} className={`w-full min-w-0 ${align}`}
+          orderField={orderField} orderDir={orderDir} onClick={onSort}
+          onContextMenu={menu} title="Click to sort · drag to reorder · right-click to change column"
+        />
+      ) : (
+        <button
+          onClick={menu}
+          onContextMenu={menu}
+          className={`w-full min-w-0 flex items-center ${align} text-xs font-medium uppercase tracking-wider text-text-muted hover:text-text-secondary transition-colors`}
+          title="Click to change column · drag to reorder"
+        >
+          <span className="truncate">{label}</span>
+        </button>
+      )}
+    </div>
+  )
+}
+
+/** Anchors a field menu just under the clicked element. */
+function fieldMenuAnchor(e: React.MouseEvent, index: number): TrackerFieldMenuState {
+  const r = (e.currentTarget as HTMLElement).getBoundingClientRect()
+  return { x: r.left, y: r.bottom + 4, index }
+}
+
 // ─── Song row (list mode) ─────────────────────────────────────────────────────
 const SongRow = memo(function SongRow({
   song, onPlay, onCategoryClick, onEraClick, onInfo, onContextMenu,
@@ -653,12 +559,12 @@ const SongRow = memo(function SongRow({
   selected: boolean
   onToggleSelect: (song: JWApiSong) => void
   /** Shown next to the title when this row is a member of a compact-view
-   *  group (e.g. "v1", "TV Mix") — this song's own label within the group. */
+   *  group (e.g. "v1", "TV Mix") - this song's own label within the group. */
   versionLabel?: string | null
-  /** Compact-view member row: hides the Artist/Era columns (the compact
-   *  header has no columns for them) so the Category badge lines up under
-   *  the same header cell whether the row above it is a collapsed group
-   *  or an expanded version. */
+  /** Compact-view member row: shows only Category/Time (the compact header
+   *  has no columns for the rest) so the Category badge lines up under the
+   *  same header cell whether the row above it is a collapsed group or an
+   *  expanded version. */
   compact?: boolean
 }): JSX.Element {
   // This song's personal override, if any. Selecting just this song's row keeps
@@ -666,17 +572,20 @@ const SongRow = memo(function SongRow({
   // the custom cover from the same source on the render this triggers.
   const pref = useStore((s) => s.songPrefs[song.id])
   const fullEraNames = useStore((s) => s.fullEraNames)
+  const listColumns = useStore((s) => s.trackerListColumns)
   const track = songToTrack(song)
   const title = pref?.name || song.name
   const altTitles = song.track_titles ?? []
   const canPlay = !!song.path
+  const longPress = useLongPress()
 
   return (
     <div
       className={`group flex items-center gap-3 px-3 py-2.5 md:py-2 hover:bg-surface-overlay active:bg-surface-overlay rounded-lg transition-colors cursor-default ${selected ? 'bg-accent/10' : ''}`}
-      onClick={(e) => { if (e.ctrlKey || e.metaKey || selectMode) onToggleSelect(song) }}
-      onDoubleClick={() => { if (!selectMode) onInfo(song) }}
+      onClick={(e) => { if (longPress.consumeFired()) return; if (e.ctrlKey || e.metaKey || selectMode) onToggleSelect(song) }}
+      onDoubleClick={() => { if (!selectMode) onPlay(song) }}
       onContextMenu={(e) => { e.preventDefault(); onContextMenu(song, e) }}
+      {...longPress.bind(() => onToggleSelect(song))}
     >
       {selectMode && (
         <div className="shrink-0">
@@ -715,46 +624,23 @@ const SongRow = memo(function SongRow({
         )}
       </div>
 
-      {/* Desktop-only columns — omitted in compact view, which has no
-          Artist/Era header cells for them to line up under. */}
-      {!compact && (
-        <>
-          <span className="hidden md:block text-text-muted text-xs truncate w-32 shrink-0">{song.credited_artists || 'Juice WRLD'}</span>
-          {song.era?.name ? (
-            selectMode ? (
-              <span className="hidden md:block text-text-muted text-xs truncate w-36 shrink-0">{eraLabel(song.era.name, fullEraNames)}</span>
-            ) : (
-              <button
-                onClick={() => onEraClick(song.era!.name)}
-                className="hidden md:block text-text-muted text-xs truncate w-36 shrink-0 text-left hover:text-accent transition-colors"
-                title={`Filter by era: ${eraLabel(song.era.name, fullEraNames)}`}
-              >
-                {eraLabel(song.era.name, fullEraNames)}
-              </button>
-            )
-          ) : (
-            <span className="hidden md:block text-text-muted text-xs truncate w-36 shrink-0">—</span>
-          )}
-        </>
-      )}
-      {selectMode ? (
-        <span className={`hidden md:block text-xs px-1.5 py-0.5 rounded border shrink-0 w-24 text-center ${CATEGORY_COLORS[song.category] ?? 'text-text-muted bg-surface border-[var(--border)]'}`}>
-          {CATEGORY_LABELS[song.category] ?? song.category}
-        </span>
-      ) : (
-        <button
-          onClick={() => onCategoryClick(song.category as Category)}
-          className={`hidden md:block text-xs px-1.5 py-0.5 rounded border shrink-0 w-24 text-center transition-colors hover:opacity-80 ${CATEGORY_COLORS[song.category] ?? 'text-text-muted bg-surface border-[var(--border)]'}`}
-          title="Filter by category"
-        >
-          {CATEGORY_LABELS[song.category] ?? song.category}
-        </button>
-      )}
-      <span className="hidden md:block text-text-muted text-xs w-12 text-right shrink-0 tabular-nums">{formatDuration(parseDuration(song.length), '--:--')}</span>
+      {/* Desktop-only columns - the user's chosen set (compact member rows
+          use a fixed pair that lines up under the compact header). */}
+      {(compact ? COMPACT_MEMBER_COLUMNS : listColumns).map((key) => (
+        <ListCell
+          key={key}
+          field={key}
+          song={song}
+          selectMode={selectMode}
+          fullEraNames={fullEraNames}
+          onEraClick={onEraClick}
+          onCategoryClick={onCategoryClick}
+        />
+      ))}
 
       {/* Desktop action buttons */}
       {!selectMode && (
-        <div className="hidden md:flex items-center gap-0.5 shrink-0">
+        <div className="hidden md:flex items-center justify-end gap-0.5 shrink-0 w-14">
           <SongActions onInfo={() => onInfo(song)} onContextMenu={(e) => onContextMenu(song, e)} />
         </div>
       )}
@@ -787,7 +673,7 @@ const SongRow = memo(function SongRow({
 // Memoized so toggling one selection only re-renders that row, not every
 // rendered row. This depends on all the callbacks passed in (onPlay, onInfo,
 // onContextMenu, onCategoryClick, onEraClick, onToggleSelect) being stable
-// (useCallback) — otherwise the default shallow prop compare never matches and
+// (useCallback) - otherwise the default shallow prop compare never matches and
 // the memo is a no-op. Without it, compact view froze when selecting songs
 // across many expanded groups.
 
@@ -795,17 +681,39 @@ const SongRow = memo(function SongRow({
 // One labeled metadata cell in the detailed-row field grid. Values are
 // single-line truncated (full text on hover via title) so every row keeps
 // the fixed height the virtual window depends on.
-function DetailField({ label, value, className }: {
+function DetailField({ label, value, className, index, onLabelClick }: {
   label: string
   value: string | null | undefined
   className?: string
+  /** Slot index - the label's drag-to-reorder position. */
+  index: number
+  /** Makes the label a button that opens the field picker for this slot
+   *  (and a drag handle for reordering it). */
+  onLabelClick?: (e: React.MouseEvent) => void
 }): JSX.Element {
+  const drag = useFieldDrag('detail', index, reorderDetailFields)
   const v = value?.trim() || ''
+  // rem-valued rather than `text-[9px]` so the label tracks app text size
+  // like the value below it does - see useScaledRowH.
+  const labelCls = 'text-[0.5625rem] uppercase tracking-wider text-text-muted/70 leading-tight truncate'
   return (
     <div className={`min-w-0 ${className ?? ''}`}>
-      {/* rem-valued rather than `text-[9px]` so the label tracks app text size
-          like the value below it does — see useScaledRowH. */}
-      <p className="text-[0.5625rem] uppercase tracking-wider text-text-muted/70 leading-tight truncate">{label}</p>
+      {onLabelClick ? (
+        <button
+          {...drag.props}
+          className={`${labelCls} block max-w-full text-left rounded-sm hover:text-accent transition-colors cursor-grab active:cursor-grabbing ${drag.over ? 'ring-1 ring-accent text-accent' : ''}`}
+          onClick={(e) => { e.stopPropagation(); onLabelClick(e) }}
+          onDoubleClick={(e) => e.stopPropagation()}
+          onPointerDown={(e) => e.stopPropagation()}
+          onMouseDown={(e) => e.stopPropagation()}
+          onTouchStart={(e) => e.stopPropagation()}
+          title={`Click to change or hide ${label} · drag to reorder`}
+        >
+          {label}
+        </button>
+      ) : (
+        <p className={labelCls}>{label}</p>
+      )}
       <p className={`text-xs truncate ${v ? 'text-text-secondary' : 'text-text-muted/50'}`} title={v || undefined}>
         {v || '—'}
       </p>
@@ -817,12 +725,12 @@ function DetailField({ label, value, className }: {
 // otherwise only show up in SongInfoModal (producers, engineers, recording
 // dates/locations, leak info, file names…) are laid out in a fixed grid on
 // every row. The grid is a *fixed* set of cells (empty ones render "—")
-// so all rows share one height — required by the virtual window's fixed
+// so all rows share one height - required by the virtual window's fixed
 // stride. Mobile shows a 2-column subset; md: widens to 4 columns and adds
 // the rarer fields.
 const DetailedSongRow = memo(function DetailedSongRow({
   song, onPlay, onCategoryClick, onEraClick, onInfo, onContextMenu,
-  selectMode, selected, onToggleSelect,
+  selectMode, selected, onToggleSelect, onFieldMenu,
 }: {
   song: JWApiSong
   onPlay: (song: JWApiSong) => void
@@ -833,20 +741,23 @@ const DetailedSongRow = memo(function DetailedSongRow({
   selectMode: boolean
   selected: boolean
   onToggleSelect: (song: JWApiSong) => void
+  onFieldMenu?: (index: number, e: React.MouseEvent) => void
 }): JSX.Element {
   const pref = useStore((s) => s.songPrefs[song.id])
   const fullEraNames = useStore((s) => s.fullEraNames)
+  const detailFields = useStore((s) => s.trackerDetailFields)
   const track = songToTrack(song)
   const title = pref?.name || song.name
   const canPlay = !!song.path
-  const altTitles = song.track_titles ?? []
+  const longPress = useLongPress()
 
   return (
     <div
       className={`group flex gap-3 px-3 py-2 h-full overflow-hidden rounded-lg border border-[var(--border)] hover:bg-surface-overlay active:bg-surface-overlay transition-colors cursor-default ${selected ? 'bg-accent/10' : ''}`}
-      onClick={(e) => { if (e.ctrlKey || e.metaKey || selectMode) onToggleSelect(song) }}
-      onDoubleClick={() => { if (!selectMode) onInfo(song) }}
+      onClick={(e) => { if (longPress.consumeFired()) return; if (e.ctrlKey || e.metaKey || selectMode) onToggleSelect(song) }}
+      onDoubleClick={() => { if (!selectMode) onPlay(song) }}
       onContextMenu={(e) => { e.preventDefault(); onContextMenu(song, e) }}
+      {...longPress.bind(() => onToggleSelect(song))}
     >
       {selectMode && (
         <div className="shrink-0 pt-1">
@@ -922,30 +833,34 @@ const DetailedSongRow = memo(function DetailedSongRow({
           )}
         </div>
 
-        {/* Mobile subtitle — artist/era/category live here instead of badges */}
+        {/* Mobile subtitle - artist/era/category live here instead of badges */}
         <p className="md:hidden text-text-muted text-xs truncate mt-0.5">
           {song.credited_artists || 'Juice WRLD'}
           {song.era?.name ? ` · ${eraLabel(song.era.name, fullEraNames)}` : ''}
           {` · ${CATEGORY_LABELS[song.category] ?? song.category}`}
         </p>
 
-        {/* Metadata field grid — fixed cell set so every row is the same height */}
-        <div className="mt-1.5 grid grid-cols-2 md:grid-cols-4 gap-x-4 gap-y-1">
-          <DetailField label="Producers" value={song.producers} />
-          <DetailField label="Engineers" value={song.engineers} />
-          <DetailField label="Recording Locations" value={song.recording_locations} className="hidden md:block" />
-          <DetailField label="Record Dates" value={song.record_dates} />
-          <DetailField label="Leak Type" value={song.leak_type} />
-          <DetailField label="Date Leaked" value={song.date_leaked} className="hidden md:block" />
-          <DetailField label="Bitrate" value={song.bitrate} />
-          <DetailField label="Release Date" value={song.release_date} className="hidden md:block" />
-          <DetailField label="File Names" value={song.file_names} className="hidden md:block" />
-          {/* Title fields grouped together — `original_key` is the source-JSON
-              key (a name), not a musical key. */}
-          <DetailField label="Original Name" value={song.original_key} />
-          <DetailField label="Session Titles" value={song.session_titles} className="hidden md:block" />
-          <DetailField label="Alt Titles" value={altTitles.join(' · ')} className="hidden md:block" />
-        </div>
+        {/* Metadata field grid - the user's chosen fields (lib/trackerFields).
+            Every row renders the same cell set (empty ones show "—") so all
+            rows share one height; click a label to swap/hide that field,
+            drag it onto another label to reorder. */}
+        {detailFields.length > 0 && (
+          <div className="mt-1.5 grid grid-cols-2 md:grid-cols-4 gap-x-4 gap-y-1">
+            {detailFields.map((key, i) => {
+              const f = TRACKER_FIELD_MAP.get(key)!
+              return (
+                <DetailField
+                  key={key}
+                  index={i}
+                  label={f.label}
+                  value={f.get(song, fullEraNames)}
+                  className={i >= DETAIL_FIELDS_BELOW_MD ? 'hidden md:block' : undefined}
+                  onLabelClick={onFieldMenu && !selectMode ? (e) => onFieldMenu(i, e) : undefined}
+                />
+              )
+            })}
+          </div>
+        )}
       </div>
     </div>
   )
@@ -967,7 +882,7 @@ function useIsDesktop(): boolean {
 }
 
 // Rows are absolutely positioned at a fixed pixel stride so the virtual window
-// can place them without measuring the DOM — but their contents are rem-sized,
+// can place them without measuring the DOM - but their contents are rem-sized,
 // so Settings → App text size grows the text inside a box that would otherwise
 // stay put. The row clips its overflow and the page scroller only knows about
 // the (unchanged) total height, so the spilled text isn't merely ugly, it's
@@ -983,7 +898,7 @@ function useScaledRowH(desktopH: number, mobileH: number): number {
 // Compact view renders every titled version group app-wide (1200+ rows, each
 // with cover art). Mounted all at once, that's enough DOM that a single
 // expand/collapse (one relayout + style recalc across all of it) could hang
-// the renderer outright — the same many-rows failure mode useVirtualWindow
+// the renderer outright - the same many-rows failure mode useVirtualWindow
 // already solves for the local library. Groups and the expanded groups'
 // member rows are flattened into one fixed-stride row list so only the
 // visible slice is ever mounted.
@@ -1011,9 +926,10 @@ function CompactGroupList({
   onToggleSelect: (song: JWApiSong) => void
 }): JSX.Element {
   const contentRef = useRef<HTMLDivElement>(null)
+  const cascade = useCascade(groups.length > 0)
 
   // Row stride mirrors CompactGroupRow/SongRow's natural height plus the 2px
-  // gap the old space-y-0.5 flow layout provided — absolutely positioned rows
+  // gap the old space-y-0.5 flow layout provided - absolutely positioned rows
   // have to encode that spacing themselves.
   const rowH = useScaledRowH(52, 60)
   const stride = rowH + 2
@@ -1035,7 +951,7 @@ function CompactGroupList({
   const { start, end, totalHeight } = useVirtualWindow(scrollRef, contentRef, rows.length, stride)
 
   return (
-    <div ref={contentRef} style={{ height: totalHeight, position: 'relative' }}>
+    <div ref={contentRef} className={cascade ? 'rows-cascade' : undefined} style={{ height: totalHeight, position: 'relative' }}>
       {rows.slice(start, end).map((row, i) => {
         const top = (start + i) * stride
         if (row.kind === 'group') {
@@ -1084,7 +1000,7 @@ function CompactGroupList({
 }
 
 // ─── Flat song list / grid (virtualized) ──────────────────────────────────────
-// The flat views accumulate without bound — infinite scroll appends pages
+// The flat views accumulate without bound - infinite scroll appends pages
 // forever, and sort mode outright loads the whole ~2500-song catalog (that
 // load is what originally hung the renderer hard enough to look like a PC
 // freeze; see the tracker-sort runLog breadcrumbs). Windowing caps the
@@ -1108,11 +1024,12 @@ function VirtualSongList({
   selectMode, selected, onToggleSelect,
 }: VirtualSongsProps): JSX.Element {
   const contentRef = useRef<HTMLDivElement>(null)
+  const cascade = useCascade(songs.length > 0)
   const rowH = useScaledRowH(52, 60)
   const stride = rowH + 2 // + the old space-y-0.5 gap
   const { start, end, totalHeight } = useVirtualWindow(scrollRef, contentRef, songs.length, stride)
   return (
-    <div ref={contentRef} style={{ height: totalHeight, position: 'relative' }}>
+    <div ref={contentRef} className={cascade ? 'rows-cascade' : undefined} style={{ height: totalHeight, position: 'relative' }}>
       {songs.slice(start, end).map((song, i) => (
         <div key={song.id} style={{ position: 'absolute', top: (start + i) * stride, left: 0, right: 0, height: rowH }}>
           <SongRow
@@ -1132,24 +1049,39 @@ function VirtualSongList({
   )
 }
 
-// Detailed rows are taller than list rows (title line + a 3-row metadata
-// grid — 4 columns at md:, 2 on mobile), but still fixed-height —
-// DetailedSongRow clips overflow, so the stride below just has to match its
-// natural height with a little headroom.
-const DETAIL_ROW_H_DESKTOP = 136
-const DETAIL_ROW_H_MOBILE = 152
+// Detailed rows are taller than list rows (title line + the metadata grid -
+// 4 columns at md:, 2 below), but still fixed-height - DetailedSongRow clips
+// overflow, so the stride below just has to match its natural height with a
+// little headroom. The grid's row count follows the user's field count, so
+// height = chrome + grid rows, floored at the cover art's height. (The
+// defaults - 12 fields, 3 rows - come out at the original 136/152.)
+const DETAIL_ROW_BASE_DESKTOP = 43
+const DETAIL_ROW_BASE_MOBILE = 59
+const DETAIL_GRID_ROW_H = 31
+const DETAIL_ROW_MIN_DESKTOP = 74
+const DETAIL_ROW_MIN_MOBILE = 66
+/** Below md: only the first few fields fit the 2-column grid. */
+const DETAIL_FIELDS_BELOW_MD = 6
+function detailRowHeights(fieldCount: number): [desktop: number, mobile: number] {
+  return [
+    Math.max(DETAIL_ROW_MIN_DESKTOP, DETAIL_ROW_BASE_DESKTOP + Math.ceil(fieldCount / 4) * DETAIL_GRID_ROW_H),
+    Math.max(DETAIL_ROW_MIN_MOBILE, DETAIL_ROW_BASE_MOBILE + Math.ceil(Math.min(fieldCount, DETAIL_FIELDS_BELOW_MD) / 2) * DETAIL_GRID_ROW_H),
+  ]
+}
 const DETAIL_ROW_GAP = 6 // bordered card-style rows want more breathing room than the flat list's 2px
 
 function VirtualSongDetailList({
   scrollRef, songs, onPlay, onCategoryClick, onEraClick, onInfo, onContextMenu,
-  selectMode, selected, onToggleSelect,
-}: VirtualSongsProps): JSX.Element {
+  selectMode, selected, onToggleSelect, onFieldMenu,
+}: VirtualSongsProps & { onFieldMenu: (index: number, e: React.MouseEvent) => void }): JSX.Element {
   const contentRef = useRef<HTMLDivElement>(null)
-  const rowH = useScaledRowH(DETAIL_ROW_H_DESKTOP, DETAIL_ROW_H_MOBILE)
+  const cascade = useCascade(songs.length > 0)
+  const fieldCount = useStore((s) => s.trackerDetailFields.length)
+  const rowH = useScaledRowH(...detailRowHeights(fieldCount))
   const stride = rowH + DETAIL_ROW_GAP
   const { start, end, totalHeight } = useVirtualWindow(scrollRef, contentRef, songs.length, stride)
   return (
-    <div ref={contentRef} style={{ height: totalHeight, position: 'relative' }}>
+    <div ref={contentRef} className={cascade ? 'rows-cascade' : undefined} style={{ height: totalHeight, position: 'relative' }}>
       {songs.slice(start, end).map((song, i) => (
         <div key={song.id} style={{ position: 'absolute', top: (start + i) * stride, left: 0, right: 0, height: rowH }}>
           <DetailedSongRow
@@ -1162,6 +1094,7 @@ function VirtualSongDetailList({
             selectMode={selectMode}
             selected={selected.has(song.id)}
             onToggleSelect={onToggleSelect}
+            onFieldMenu={onFieldMenu}
           />
         </div>
       ))}
@@ -1177,7 +1110,7 @@ function VirtualSongDetailList({
 // download footer.
 //
 // Every fixed part of the card is given an explicit height below so the grid
-// can compute row offsets without measuring the DOM — see GRID_* constants and
+// can compute row offsets without measuring the DOM - see GRID_* constants and
 // VirtualSongGrid. That's also why the primary metadata lines and the section
 // headers always render (empty values fall back to "—") instead of being
 // dropped when a song lacks them.
@@ -1204,7 +1137,7 @@ const CARD_SECTIONS: CardSection[] = [
     ],
   },
   // `original_key` is the song's key in the API's source JSON (the docs call it
-  // "Original JSON Key"), not a musical key — findSessionZips searches on it as
+  // "Original JSON Key"), not a musical key - findSessionZips searches on it as
   // a stand-in for the name. It reads as a title, so it belongs with the other
   // title fields rather than next to Bitrate under Recording Details, where the
   // label invited exactly the wrong reading.
@@ -1237,13 +1170,18 @@ const CARD_SECTIONS: CardSection[] = [
   {
     key: 'dates', label: 'Important Dates', icon: <CalendarDays size={13} />,
     fields: (s) => [
-      ['Date Leaked', s.date_leaked],
-      ['Preview Date', s.preview_date],
-      ['Release Date', s.release_date],
+      ['Date Leaked', displayDate(s.date_leaked)],
+      ['Preview Date', displayDate(s.preview_date)],
+      ['Release Date', displayDate(s.release_date)],
       ['Dates', s.dates],
     ],
   },
 ]
+
+// Grid cards show every optional field between the expandable sections, the
+// status line (leak type + dates) and "Produced by" - nearly every optional
+// field - so a grid-view bulk fetch keeps the lot.
+const GRID_API_FIELDS: string[] = [...OPTIONAL_SONG_FIELDS]
 
 // One primary metadata line (icon + text), fixed height (scaled by app text size).
 function CardMetaLine({ icon, height, children }: { icon: JSX.Element; height: number; children: React.ReactNode }): JSX.Element {
@@ -1283,11 +1221,15 @@ const SongCard = memo(function SongCard({
   const track = songToTrack(song)
   const title = pref?.name || song.name
   const canPlay = !!song.path
+  const longPress = useLongPress()
+
+  const detailsRef = useRef<HTMLDivElement>(null)
+  useContentMotion(detailsRef, [...expandedSections].sort().join(','))
 
   // The site's status line: leak type, then the release/leak date after it.
   const statusDate = song.release_date
-    ? `Released ${song.release_date}`
-    : song.date_leaked ? `Leaked ${song.date_leaked}` : ''
+    ? `Released ${displayDate(song.release_date)}`
+    : song.date_leaked ? `Leaked ${displayDate(song.date_leaked)}` : ''
 
   return (
     // Hover highlights the border only. Tinting the card body would land on the
@@ -1295,15 +1237,16 @@ const SongCard = memo(function SongCard({
     // disappearing under the cursor.
     <div
       className={`group flex flex-col h-full overflow-hidden rounded-xl border bg-surface transition-colors ${selected ? 'border-accent bg-accent/10' : 'border-[var(--border)] hover:border-accent/40'}`}
-      onClick={(e) => { if (e.ctrlKey || e.metaKey || selectMode) onToggleSelect(song) }}
-      onDoubleClick={() => { if (!selectMode) onInfo(song) }}
+      onClick={(e) => { if (longPress.consumeFired()) return; if (e.ctrlKey || e.metaKey || selectMode) onToggleSelect(song) }}
+      onDoubleClick={() => { if (!selectMode) onPlay(song) }}
       onContextMenu={(e) => { e.preventDefault(); onContextMenu(song, e) }}
+      {...longPress.bind(() => onToggleSelect(song))}
     >
       {/* Cover */}
       <div className="relative shrink-0 w-full bg-surface-overlay" style={{ height: coverH }}>
         {/* fill mode: the art covers the 3:2 box rather than taking a square
             px size, so covers crop the way the site's grid does. */}
-        <AlbumArtThumbnail track={track} fill className="w-full h-full" shimmer={false} eager />
+        <AlbumArtThumbnail track={track} fill res={512} className="w-full h-full" shimmer={false} eager />
 
         {selectMode ? (
           <div className="absolute top-2 left-2">
@@ -1325,7 +1268,7 @@ const SongCard = memo(function SongCard({
           )
         )}
 
-        {/* Category badge — the site pins it to the cover's top-right corner */}
+        {/* Category badge - the site pins it to the cover's top-right corner */}
         {selectMode ? (
           <span className={`absolute top-2 right-2 text-[0.625rem] font-medium px-2 py-0.5 rounded-full border backdrop-blur-sm ${CATEGORY_COLORS[song.category] ?? 'text-text-muted bg-surface border-[var(--border)]'}`}>
             {CATEGORY_LABELS[song.category] ?? song.category}
@@ -1377,13 +1320,14 @@ const SongCard = memo(function SongCard({
         </div>
 
         {/* Collapsible detail sections */}
-        <div className="mt-2 flex flex-col gap-1 shrink-0">
+        <div ref={detailsRef} className="mt-2 flex flex-col gap-1 shrink-0">
           {CARD_SECTIONS.map((section) => {
             const open = expandedSections.has(section.key)
             return (
               <div key={section.key}>
                 <button
                   onClick={(e) => { e.stopPropagation(); onToggleSection(song.id, section.key) }}
+                  aria-expanded={open}
                   className={`w-full flex items-center gap-2 px-2 rounded-md border text-text-secondary text-[0.6875rem] transition-colors outline-none focus-visible:border-accent ${
                     open
                       ? 'bg-surface-raised border-accent/40 text-text-primary'
@@ -1393,7 +1337,7 @@ const SongCard = memo(function SongCard({
                 >
                   <span className="shrink-0 text-text-muted">{section.icon}</span>
                   <span className="truncate min-w-0 text-left flex-1">{section.label}</span>
-                  <ChevronDown size={m.iconSize} className={`shrink-0 text-text-muted transition-transform ${open ? 'rotate-180' : ''}`} />
+                  <ChevronDown size={m.iconSize} className={`shrink-0 text-text-muted control-motion ${open ? 'rotate-180' : ''}`} />
                 </button>
                 {open && (
                   // Fixed-height scroller: keeps the card's height a pure
@@ -1440,12 +1384,12 @@ const SongCard = memo(function SongCard({
           <button
             onClick={(e) => {
               e.stopPropagation()
-              const a = document.createElement('a')
-              a.href = buildStreamUrl(song.path)
-              a.download = `${title}.mp3`
-              a.target = '_blank'
-              a.rel = 'noopener noreferrer'
-              document.body.appendChild(a); a.click(); document.body.removeChild(a)
+              // The primary channel unless it's a session whose file lives
+              // in another comp - only the primary one is safe for the P2P CDN.
+              void resolveSongFile(song).then((f) => {
+                if (isPrimaryChannelSlug(useStore.getState().channels, f.channel)) void startCdnFileDownload(f.path, `${title}.mp3`, f.url, undefined, song.id)
+                else triggerDownload(f.url, `${title}.mp3`)
+              }, console.error)
             }}
             disabled={!canPlay}
             className="shrink-0 h-full px-3 rounded-lg bg-surface-overlay hover:bg-surface-raised text-text-secondary disabled:opacity-40 transition-colors"
@@ -1460,7 +1404,7 @@ const SongCard = memo(function SongCard({
 })
 
 // ─── Song grid (virtualized) ──────────────────────────────────────────────────
-// Cards are laid out on a row grid using the same windowing as the list views —
+// Cards are laid out on a row grid using the same windowing as the list views -
 // a grid of 2500 of these cards is exactly the mount cost virtualization exists
 // to avoid. Column count comes from the measured container width rather than
 // Tailwind breakpoints, because the row offsets have to be computable in JS.
@@ -1468,21 +1412,21 @@ const SongCard = memo(function SongCard({
 // Card height is deterministic: a fixed body (title clamped to two lines, five
 // always-rendered metadata lines, six section headers, footer) plus a fixed
 // block per *expanded* section. So a row's height only depends on the largest
-// number of sections open on any card in it — no DOM measurement, and rows
+// number of sections open on any card in it - no DOM measurement, and rows
 // below an expanded card shift by a known amount.
 const GRID_MIN_CARD_W = 260
 const GRID_GAP = 12
 const GRID_COVER_RATIO = 1.5      // cover is 3:2 of the card width
 
 // Every box on a card is an explicit pixel height (see above), which is what
-// makes row offsets computable — but it also means the card can't respond to
+// makes row offsets computable - but it also means the card can't respond to
 // Settings → App text size on its own. That setting scales the root font-size,
 // so rem-based type grows while these constants don't, and the taller text just
 // gets clipped by a box that stayed the same size. So the metrics are derived
 // from the scale instead of being fixed: the card's own padding/gaps are rem
 // (Tailwind spacing) and already scale, and multiplying the heights through
 // keeps them in step. Card text uses rem-valued arbitrary sizes for the same
-// reason — `text-[11px]` would ignore the setting entirely.
+// reason - `text-[11px]` would ignore the setting entirely.
 interface GridMetrics {
   titleH: number
   metaRowH: number
@@ -1540,6 +1484,7 @@ function VirtualSongGrid({
   selectMode, selected, onToggleSelect,
 }: VirtualSongsProps & { onQueue: (track: Track) => void }): JSX.Element {
   const contentRef = useRef<HTMLDivElement>(null)
+  const cascade = useCascade(songs.length > 0)
   const width = useElementWidth(contentRef)
 
   // Card box heights follow Settings → App text size (see gridMetrics). Memoized
@@ -1588,36 +1533,11 @@ function VirtualSongGrid({
     return { offsets: out, totalHeight: Math.max(0, y - GRID_GAP) }
   }, [rowCount, cols, songs, openSections, baseCardH, m])
 
-  // Windowing against the shared scroller. Uniform-stride binary search isn't
-  // needed — offsets is already materialized, so the visible range is a scan
-  // over it (cheap: it's one entry per row, and it's already in memory).
-  const [scrollTop, setScrollTop] = useState(0)
-  const [clientH, setClientH] = useState(0)
-  const [offsetTop, setOffsetTop] = useState(0)
-  useEffect(() => {
-    const el = scrollRef.current
-    if (!el) return
-    const onScroll = (): void => setScrollTop(el.scrollTop)
-    const measure = (): void => {
-      setClientH(el.clientHeight)
-      setScrollTop(el.scrollTop)
-      setOffsetTop(contentRef.current ? contentRef.current.offsetTop : 0)
-    }
-    measure()
-    el.addEventListener('scroll', onScroll, { passive: true })
-    const ro = new ResizeObserver(measure)
-    ro.observe(el)
-    if (contentRef.current) ro.observe(contentRef.current)
-    return () => { el.removeEventListener('scroll', onScroll); ro.disconnect() }
-  }, [scrollRef])
-
-  const viewTop = Math.max(0, scrollTop - offsetTop) - clientH   // one viewport of overscan
-  const viewBottom = Math.max(0, scrollTop - offsetTop) + clientH * 2
+  const { start, end } = useVariableVirtualWindow(scrollRef, contentRef, offsets, totalHeight)
 
   return (
-    <div ref={contentRef} style={{ height: totalHeight, position: 'relative' }}>
-      {width > 0 && Array.from({ length: rowCount }, (_, r) => r)
-        .filter((r) => offsets[r + 1] >= viewTop && offsets[r] <= viewBottom)
+    <div ref={contentRef} className={cascade ? 'rows-cascade' : undefined} style={{ height: totalHeight, position: 'relative' }}>
+      {width > 0 && Array.from({ length: end - start }, (_, r) => start + r)
         .map((r) => songs.slice(r * cols, r * cols + cols).map((song, c) => {
           const open = openSections.get(song.id)
           return (
@@ -1656,7 +1576,7 @@ function VirtualSongGrid({
 const EMPTY_SECTIONS: ReadonlySet<string> = new Set()
 
 // ─── Lyric search result row ──────────────────────────────────────────────────
-// Deliberately its own row type rather than reusing SongRow — the whole point
+// Deliberately its own row type rather than reusing SongRow - the whole point
 // of lyric search is surfacing *why* a song matched, so this trades the flat
 // list's fixed artist/era/category columns for a quoted lyric snippet with
 // the matched text highlighted.
@@ -1681,13 +1601,15 @@ const LyricResultRow = memo(function LyricResultRow({
   const title = pref?.name || song.name
   const canPlay = !!song.path
   const snippet = useMemo(() => getLyricSnippet(song.lyrics, query), [song.lyrics, query])
+  const longPress = useLongPress()
 
   return (
     <div
       className={`group flex items-start gap-3 px-3 py-3 hover:bg-surface-overlay active:bg-surface-overlay rounded-lg transition-colors cursor-default ${selected ? 'bg-accent/10' : ''}`}
-      onClick={(e) => { if (e.ctrlKey || e.metaKey || selectMode) onToggleSelect(song) }}
-      onDoubleClick={() => { if (!selectMode) onInfo(song) }}
+      onClick={(e) => { if (longPress.consumeFired()) return; if (e.ctrlKey || e.metaKey || selectMode) onToggleSelect(song) }}
+      onDoubleClick={() => { if (!selectMode) onPlay(song) }}
       onContextMenu={(e) => { e.preventDefault(); onContextMenu(song, e) }}
+      {...longPress.bind(() => onToggleSelect(song))}
     >
       {selectMode && (
         <div className="shrink-0 pt-1.5">
@@ -1741,7 +1663,7 @@ const LyricResultRow = memo(function LyricResultRow({
           {` · ${CATEGORY_LABELS[song.category] ?? song.category}`}
         </p>
 
-        {/* Lyric snippet — the reason this song matched */}
+        {/* Lyric snippet - the reason this song matched */}
         {snippet ? (
           <p className="mt-1 text-xs text-text-secondary italic leading-relaxed line-clamp-2">
             {snippet.before}
@@ -1798,7 +1720,7 @@ function VersionTitlePromptModal({
 }): JSX.Element {
   const [value, setValue] = useState('')
   return (
-    <div
+    <MotionOverlay
       className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/70 backdrop-blur-sm p-4"
       onClick={(e) => { if (e.target === e.currentTarget) onSkip() }}
     >
@@ -1828,62 +1750,97 @@ function VersionTitlePromptModal({
           </button>
         </div>
       </div>
-    </div>
+    </MotionOverlay>
   )
 }
 
 // ─── Main view ────────────────────────────────────────────────────────────────
+function warmStatistics(): void {
+  import('./StatisticsPanel').catch(() => undefined)
+  apiFetch('/stats/').catch(() => undefined)
+  apiFetch('/plays/stats/').catch(() => undefined)
+}
+
 export default function ApiTrackerView(): JSX.Element {
   const {
     playTrack, playNext, addToQueue, account,
     apiTrackerCategory, setApiTrackerCategory,
     apiTrackerEra, setApiTrackerEra,
-    setActiveView, setApiFilesPath, setPendingEditorSongId,
+    apiTrackerTab, setApiTrackerTab,
+    setActiveView, setApiFilesPath,
     playlists, refreshPlaylists, setShowUserAuth, likedTrackIds, toggleLike,
-    openBulkEditor, fullEraNames, offlineTracks,
+    openBulkEditor, fullEraNames, activeChannel, channels, setActiveChannel, offlineTracks,
   } = useStore(useShallow(s => ({
     playTrack: s.playTrack, playNext: s.playNext, addToQueue: s.addToQueue,
     account: s.account,
     apiTrackerCategory: s.apiTrackerCategory, setApiTrackerCategory: s.setApiTrackerCategory,
     apiTrackerEra: s.apiTrackerEra, setApiTrackerEra: s.setApiTrackerEra,
+    apiTrackerTab: s.apiTrackerTab, setApiTrackerTab: s.setApiTrackerTab,
     setActiveView: s.setActiveView, setApiFilesPath: s.setApiFilesPath,
-    setPendingEditorSongId: s.setPendingEditorSongId,
     playlists: s.playlists, refreshPlaylists: s.refreshPlaylists, setShowUserAuth: s.setShowUserAuth,
     likedTrackIds: s.likedTrackIds, toggleLike: s.toggleLike,
     openBulkEditor: s.openBulkEditor,
     fullEraNames: s.fullEraNames,
+    activeChannel: s.activeChannel, channels: s.channels, setActiveChannel: s.setActiveChannel,
     offlineTracks: s.offlineTracks,
   })))
 
   const canEdit = useCanEdit()
+  const [sessionEditOverrideVersion, setSessionEditOverrideVersion] = useState(0)
+  const [linkingSessionSong, setLinkingSessionSong] = useState<JWApiSong | null>(null)
 
-  // Full era names aren't in the offline cache seed for every session — fetch
+  // Full era names aren't in the offline cache seed for every session - fetch
   // once so eraLabel() has something to show once the user opts in.
   useEffect(() => { loadEraFullNames().catch(() => {}) }, [])
 
-  const [trackerTab, setTrackerTab] = useState<TrackerTab>('songs')
+  const [trackerTab, setTrackerTab] = useState<TrackerTab>(
+    () => (isTrackerTab(apiTrackerTab) ? apiTrackerTab : 'songs'),
+  )
+  // Deep link is one-shot - consumed into the initial state above, so it must
+  // not linger and re-apply on a later render (e.g. after switching tabs by
+  // hand and coming back to this view).
+  useEffect(() => { if (apiTrackerTab) setApiTrackerTab('') }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
   const [contextMenu, setContextMenu] = useState<{ song: JWApiSong; x: number; y: number } | null>(null)
+  // Field picker for the Detailed grid / List columns (TrackerFieldMenu).
+  const [fieldMenu, setFieldMenu] = useState<(TrackerFieldMenuState & { target: 'detail' | 'list' }) | null>(null)
+  const closeFieldMenu = useCallback(() => setFieldMenu(null), [])
+  const openDetailFieldMenu = useCallback((index: number, e: React.MouseEvent) => {
+    setFieldMenu({ target: 'detail', ...fieldMenuAnchor(e, index) })
+  }, [])
+  const openListFieldMenu = useCallback((index: number, e: React.MouseEvent) => {
+    setFieldMenu({ target: 'list', ...fieldMenuAnchor(e, index) })
+  }, [])
+  const { detailFields, listColumns, setTrackerDetailFields, setTrackerListColumns } = useStore(useShallow((s) => ({
+    detailFields: s.trackerDetailFields,
+    listColumns: s.trackerListColumns,
+    setTrackerDetailFields: s.setTrackerDetailFields,
+    setTrackerListColumns: s.setTrackerListColumns,
+  })))
+  // Title sort goes by the name the row shows - a personal rename included -
+  // so a renamed song moves to where its new name belongs.
+  const songPrefs = useStore((s) => s.songPrefs)
   const [bulkContextMenu, setBulkContextMenu] = useState<BulkContextMenuState | null>(null)
 
-  // Multi-select — see the useMultiSelect() call further down (needs
-  // compactView/fetchAllMode/sortedSongs, which aren't defined yet here) for
+  // Multi-select - see the useMultiSelect() call further down (needs
+  // compactView/sortedSongs, which aren't defined yet here) for
   // selectMode/selected/toggleSelect/exitSelectMode.
   const [bulkZipStatus, setBulkZipStatus] = useState<'idle' | 'zipping' | 'done' | 'partial' | 'none' | 'error'>('idle')
   const [bulkZipSkipped, setBulkZipSkipped] = useState(0)
   const [showBulkPlaylists, setShowBulkPlaylists] = useState(false)
+  const bulkPlBtnRef = useRef<HTMLButtonElement>(null)
   const [bulkLinkStatus, setBulkLinkStatus] = useState<'idle' | 'linking' | 'done' | 'error'>('idle')
   // Shown after a link completes if the resulting group still has no
-  // version_title — untitled groups are functionally useless in compact
+  // version_title - untitled groups are functionally useless in compact
   // view (see getAllVersionGroups, which only surfaces titled groups).
   const [titlePromptGroupId, setTitlePromptGroupId] = useState<number | null>(null)
   const [savingTitlePrompt, setSavingTitlePrompt] = useState(false)
 
-  // Compact view — shows only songs grouped into a titled version group,
+  // Compact view - shows only songs grouped into a titled version group,
   // collapsed to one row per group; expanding it reveals the individual
   // songs ("versions") nested underneath. Deliberately fetched independently
   // of the Tracker's own paginated `songs` list (see fetchAllCompactGroups)
-  // — tying it to sortedSongs previously meant a group's members could be
+  // - tying it to sortedSongs previously meant a group's members could be
   // missed if they hadn't scrolled into view yet, and re-querying on every
   // page load compounded into serious lag as more pages loaded.
   const [compactView, setCompactViewState] = useState(() => localStorage.getItem(LS_TRACKER_COMPACT) === 'true')
@@ -1896,7 +1853,7 @@ export default function ApiTrackerView(): JSX.Element {
   }
   const [compactGroups, setCompactGroups] = useState<CompactGroup<JWApiSong>[]>([])
   const [loadingCompact, setLoadingCompact] = useState(false)
-  // How compact-view groups are ordered — driven by clicking the "Name" /
+  // How compact-view groups are ordered - driven by clicking the "Name" /
   // "Versions" column headers (like the normal list's sortable headers), not
   // a separate control. field null keeps the fetch order (group_id asc).
   type CompactSortField = 'name' | 'versions'
@@ -1904,7 +1861,7 @@ export default function ApiTrackerView(): JSX.Element {
 
   // Click cycles: first click sorts by that field (Versions starts most-first,
   // Name starts A–Z), second click flips direction, third click clears back
-  // to default order — mirroring the flat list's SortBtn.
+  // to default order - mirroring the flat list's SortBtn.
   const handleCompactSort = (field: CompactSortField): void => {
     const firstDir: 'asc' | 'desc' = field === 'versions' ? 'desc' : 'asc'
     setCompactSort(prev => {
@@ -1922,9 +1879,8 @@ export default function ApiTrackerView(): JSX.Element {
     toggleGroupExpanded(group.groupId)
   }
 
-  // Compact view renders far less content than the underlying song list, so
-  // the sentinel stays permanently visible and would otherwise auto-page
-  // through the entire library in the background — pause that while active.
+  // Read by the compact-groups invalidation subscriber below, which is set up
+  // once and so can't close over compactView itself.
   const compactViewRef = useRef(false)
   useEffect(() => { compactViewRef.current = compactView }, [compactView])
 
@@ -1960,46 +1916,23 @@ export default function ApiTrackerView(): JSX.Element {
   }, [])
 
   // Stale-while-revalidate: seed from the offline cache synchronously so the
-  // list renders instantly on open, then the effects below refetch and replace
-  // it in the background. The seeded first-songs page must use the exact same
-  // params as the initial scroll-mode fetch (unfiltered: no search from the
-  // saved query, no category/era, page 1) or the cache key won't match. Read
-  // once via a ref so the per-render path never re-parses localStorage.
-  const seedRef = useRef<JWApiPaginatedResponse | undefined>(undefined)
-  const seededRef = useRef(false)
-  if (!seededRef.current) {
-    seededRef.current = true
-    const initialSearch = getInitialSearch()
-    seedRef.current = apiPeek<JWApiPaginatedResponse>('/songs/', {
-      searchall: parseSearchQuery(initialSearch).freeText || undefined, category: undefined, era: undefined,
-      page: 1, page_size: PAGE_SIZE,
-    })
-  }
-  const cachedFirstPage = seedRef.current
+  // list renders instantly on open, then the fetch effect below replaces it.
+  // The cache is keyed by search text only (see peekTrackerCatalog) - category,
+  // era, sort and field filters all apply client-side, so any saved
+  // combination of those can use it.
+  const [catalog, setCatalog] = useState<JWApiSong[]>(() =>
+    peekTrackerCatalog(parseSearchQuery(getInitialSearch()).freeText) ?? [])
   const [stats, setStats] = useState<JWApiStats | null>(() => apiPeek<JWApiStats>('/stats/') ?? null)
   const [eras, setEras] = useState<JWApiEra[]>(() => {
-    const c = apiPeek<JWApiEra[] | { results: JWApiEra[] }>('/eras/')
-    return c ? (Array.isArray(c) ? c : c.results ?? []) : []
+    return listEras()
   })
-  const [songs, setSongs] = useState<JWApiSong[]>(() => cachedFirstPage?.results ?? [])
-  const [rawAllSongs, setRawAllSongs] = useState<JWApiSong[]>([])
-  const [count, setCount] = useState(() => cachedFirstPage?.count ?? 0)
-  const [page, setPage] = useState(1)
-  const [hasMore, setHasMore] = useState(() => cachedFirstPage ? cachedFirstPage.next !== null : false)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  // Bumped by the error state's Retry button to rerun the catalogue fetch.
+  const [reloadToken, setReloadToken] = useState(0)
 
-  const sentinelRef = useRef<HTMLDivElement>(null)
-  // The song-list scroll container — CompactGroupList windows against it.
+  // The song-list scroll container - CompactGroupList windows against it.
   const listScrollRef = useRef<HTMLDivElement>(null)
-  // Refs for scroll logic — avoids stale closure issues in observer callback
-  const hasMoreRef = useRef(false)
-  const loadingRef = useRef(true)
-  const sentinelVisibleRef = useRef(false)
-  // `page` advances when a request starts. This ref advances only after that
-  // page has actually joined `songs`, so a queue created during an in-flight
-  // request can fetch the first page it is truly missing.
-  const lastLoadedPageRef = useRef(cachedFirstPage ? 1 : 0)
 
   const [viewMode, setViewModeState] = useState<ViewMode>(() => {
     const stored = localStorage.getItem(LS_TRACKER_VIEW)
@@ -2009,71 +1942,93 @@ export default function ApiTrackerView(): JSX.Element {
 
   const setViewMode = (v: ViewMode): void => { setViewModeState(v); localStorage.setItem(LS_TRACKER_VIEW, v) }
 
-  const [orderField, setOrderField] = useState<OrderField | null>(null)
-  const [orderDir, setOrderDir] = useState<'asc' | 'desc'>('asc')
-  // Whether any column is currently driving sort mode — the fetched song set
-  // only depends on this and the search/category/era filters, not on *which*
-  // column it'll be sorted by (that's applied client-side), so this is what
-  // the fetch effect below keys off instead of orderField itself.
-  const sortModeActive = orderField !== null
+  // Nothing stored = never picked a sort: default to Date Leaked, newest
+  // first. Clearing the sort stores 'none' so that choice sticks.
+  const [orderField, setOrderField] = useState<OrderField | null>(() => {
+    const stored = localStorage.getItem(LS_TRACKER_ORDER_FIELD)
+    if (stored === null) return 'date_leaked'
+    const valid: OrderField[] = ['name', 'credited_artists', 'era__name', 'category', 'length', 'date_added', 'date_leaked']
+    return valid.includes(stored as OrderField) ? (stored as OrderField) : null
+  })
+  const [orderDir, setOrderDir] = useState<'asc' | 'desc'>(() =>
+    localStorage.getItem(LS_TRACKER_ORDER_FIELD) === null || localStorage.getItem(LS_TRACKER_ORDER_DIR) === 'desc' ? 'desc' : 'asc')
+  useEffect(() => {
+    safeSetLS(LS_TRACKER_ORDER_FIELD, orderField ?? 'none')
+  }, [orderField])
+  useEffect(() => { safeSetLS(LS_TRACKER_ORDER_DIR, orderDir) }, [orderDir])
 
-  // Reset accumulated songs and go back to page 1
+  const [recentlyAddedMap, setRecentlyAddedMap] = useState<Map<string, string> | null>(null)
+  useEffect(() => {
+    if (orderField !== 'date_added') return
+    let cancelled = false
+    loadRecentlyAddedMap().then((m) => { if (!cancelled) setRecentlyAddedMap(m) }).catch(console.error)
+    return () => { cancelled = true }
+  }, [orderField])
+
+  const linkSessionEdit = useCallback((s: JWApiSong): JWApiSong => {
+    if (s.category !== 'recording_session') return s
+    const { path, length } = resolveSessionEditSource(s)
+    return path === s.path && length === s.length ? s : { ...s, path, length }
+  }, [sessionEditOverrideVersion])
+
+  // A new search/filter starts the list back at the top. The list itself
+  // re-derives (filters) or refetches (search) on its own.
   const resetSongs = useCallback((): void => {
-    setSongs([])
-    setPage(1)
-    // Clear the previous query's pagination state NOW, not when the new
-    // page-1 fetch lands. Emptying the list scrolls the sentinel into view,
-    // and its IntersectionObserver fires in the gap before the new fetch
-    // effect runs — reading the old query's hasMore/loading it would bump
-    // the page and request a page the narrower result set doesn't have (the
-    // API 404s "Invalid page"). On mobile, letter-by-letter typing runs this
-    // reset per keystroke, which made searches randomly come back empty.
-    setHasMore(false)
-    hasMoreRef.current = false
-    loadingRef.current = true
-    lastLoadedPageRef.current = 0
+    savedTrackerScrollTop = 0
+    listScrollRef.current?.scrollTo({ top: 0 })
   }, [])
 
   const handleSort = (field: OrderField): void => {
+    // Dates start newest-first; everything else starts ascending. Third click clears.
+    const first = field === 'date_leaked' ? 'desc' : 'asc'
     if (orderField === field) {
-      if (orderDir === 'desc') {
-        // Third click: clear sort, go back to infinite scroll
+      if (orderDir !== first) {
         setOrderField(null); setOrderDir('asc'); resetSongs()
       } else {
-        setOrderDir('desc')
+        setOrderDir(first === 'asc' ? 'desc' : 'asc')
       }
     } else {
-      setOrderField(field); setOrderDir('asc')
+      setOrderField(field); setOrderDir(first)
     }
   }
 
   const [search, setSearch] = useState(getInitialSearch)
   const [debouncedSearch, setDebouncedSearch] = useState(getInitialSearch)
+  const searchInputRef = useRef<HTMLInputElement>(null)
+  // Focus the search box on mount so arriving here (e.g. from the home
+  // page's search icon) lands the cursor ready to type instead of just
+  // opening the view.
+  useEffect(() => { searchInputRef.current?.focus() }, [])
   // Field-qualified tokens (e.g. `artists:"Juice WRLD"`) are stripped out of
   // the query the server sees (searchall has no per-field concept) and
-  // applied client-side instead — see the fetchAllMode effect below, which
-  // this pushes any field-filtered search into (same as sort/multi-category
-  // search already does).
+  // applied client-side instead - see the song-list fetch effect below.
   const parsedSearch = useMemo(() => parseSearchQuery(debouncedSearch), [debouncedSearch])
-  const hasFieldFilters = parsedSearch.filters.length > 0
-  const [showSearchHelp, setShowSearchHelp] = useState(false)
+  // ?omit= for the song-list fetch below: drop whatever display fields the
+  // current view/layout and field filters don't read.
+  const bulkOmit = useTrackerOmit([
+    ...(viewMode === 'grid' ? GRID_API_FIELDS : apiFieldsFor(viewMode === 'list' ? listColumns : detailFields)),
+    ...filterApiFields(parsedSearch.filters),
+    ...(orderField === 'date_leaked' ? ['date_leaked'] : []),
+  ])
   // Sets rather than single values so "Search Settings" can filter by more
   // than one category/era at once (OR'd within each dimension, AND'd across
-  // dimensions). The API itself only accepts one `category`/`era` value per
-  // request, so anything beyond a single selection in either dimension has
-  // to fall back to fetching everything and filtering client-side — see the
-  // fetchAllMode fetch effect below.
-  const [categoryFilter, setCategoryFilter] = useState<Set<Category>>(new Set())
-  const [eraFilter, setEraFilter] = useState<Set<string>>(new Set())
-  const [libraryFilter, setLibraryFilter] = useState<'all' | 'have' | 'missing'>('all')
+  // dimensions). Applied client-side over the loaded catalogue - see the
+  // song-list fetch effect below.
+  const [categoryFilter, setCategoryFilter] = useState<Set<Category>>(() => {
+    const valid = new Set(CAT_SIDEBAR.map((c) => c.key as string))
+    return new Set([...getInitialSetFilter(LS_TRACKER_CATEGORY_FILTER)].filter((c) => valid.has(c))) as Set<Category>
+  })
+  const [eraFilter, setEraFilter] = useState<Set<string>>(() => getInitialSetFilter(LS_TRACKER_ERA_FILTER))
   const multiFilterActive = categoryFilter.size > 1 || eraFilter.size > 1
-
-  const songInLibrary = useCallback((song: JWApiSong): boolean => !!offlineTracks[`jw-${song.id}`], [offlineTracks])
-  // Single-value form for the fast (server-side-filtered) path — only
-  // meaningful when multiFilterActive is false, which is exactly when each
+  useEffect(() => {
+    safeSetLS(LS_TRACKER_CATEGORY_FILTER, JSON.stringify([...categoryFilter]))
+  }, [categoryFilter])
+  useEffect(() => {
+    safeSetLS(LS_TRACKER_ERA_FILTER, JSON.stringify([...eraFilter]))
+  }, [eraFilter])
+  // Single-value form for the category <select> - only meaningful when the
   // set has at most one member.
   const categoryParam: Category = categoryFilter.size === 1 ? [...categoryFilter][0] : ''
-  const eraParam = eraFilter.size === 1 ? [...eraFilter][0] : ''
 
   const toggleCategoryFilter = useCallback((cat: Category) => {
     setCategoryFilter(prev => {
@@ -2091,6 +2046,9 @@ export default function ApiTrackerView(): JSX.Element {
       return next
     })
   }, [])
+  // Electron: narrow to songs that are / aren't downloaded for offline playback.
+  const [libraryFilter, setLibraryFilter] = useState<'all' | 'have' | 'missing'>('all')
+  const songInLibrary = useCallback((song: JWApiSong): boolean => !!offlineTracks[`jw-${song.id}`], [offlineTracks])
   const matchesFilters = useCallback((song: JWApiSong): boolean => {
     if (categoryFilter.size > 0 && !categoryFilter.has(song.category as Category)) return false
     if (eraFilter.size > 0 && !(song.era && eraFilter.has(song.era.name))) return false
@@ -2107,59 +2065,26 @@ export default function ApiTrackerView(): JSX.Element {
     if (apiTrackerEra) { setEraFilter(new Set([apiTrackerEra])); setApiTrackerEra('') }
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
-  // ── Lyric search (separate tab) — its own query/results, independent of
+  // ── Lyric search (separate tab) - its own query/results, independent of
   // the main song list's search/category/era/sort state above.
   const [lyricsQuery, setLyricsQuery] = useState('')
   const [debouncedLyricsQuery, setDebouncedLyricsQuery] = useState('')
-  const [lyricsResults, setLyricsResults] = useState<JWApiSong[]>([])
-  const [lyricsPage, setLyricsPage] = useState(1)
-  const [lyricsCount, setLyricsCount] = useState(0)
-  const [lyricsHasMore, setLyricsHasMore] = useState(false)
-  const [lyricsLoading, setLyricsLoading] = useState(false)
-  const [lyricsError, setLyricsError] = useState<string | null>(null)
 
   useEffect(() => {
     const t = setTimeout(() => setDebouncedLyricsQuery(lyricsQuery), 400)
     return () => clearTimeout(t)
   }, [lyricsQuery])
 
-  useEffect(() => {
-    if (!debouncedLyricsQuery.trim()) {
-      setLyricsResults([]); setLyricsCount(0); setLyricsHasMore(false); setLyricsError(null)
-      return
-    }
-    let cancelled = false
-    setLyricsLoading(true); setLyricsError(null)
-    apiFetch<JWApiPaginatedResponse>('/songs/', { lyrics: debouncedLyricsQuery, page: 1, page_size: PAGE_SIZE })
-      .then((data) => {
-        if (cancelled) return
-        setLyricsResults(data.results)
-        setLyricsCount(data.count)
-        setLyricsHasMore(data.next !== null)
-        setLyricsPage(1)
-      })
-      .catch((err) => { if (!cancelled) setLyricsError(err.message) })
-      .finally(() => { if (!cancelled) setLyricsLoading(false) })
-    return () => { cancelled = true }
-  }, [debouncedLyricsQuery])
+  const {
+    results: lyricsResults, all: lyricsAll, count: lyricsCount, hasMore: lyricsHasMore, loading: lyricsLoading, error: lyricsError, loadMore,
+  } = useLyricSearch(debouncedLyricsQuery)
+  const loadMoreLyrics = (): void => { if (!lyricsLoading) loadMore() }
 
-  const loadMoreLyrics = (): void => {
-    if (lyricsLoading || !lyricsHasMore) return
-    const nextPage = lyricsPage + 1
-    setLyricsLoading(true)
-    apiFetch<JWApiPaginatedResponse>('/songs/', { lyrics: debouncedLyricsQuery, page: nextPage, page_size: PAGE_SIZE })
-      .then((data) => {
-        setLyricsResults((prev) => [...prev, ...data.results])
-        setLyricsHasMore(data.next !== null)
-        setLyricsPage(nextPage)
-      })
-      .catch((err) => setLyricsError(err.message))
-      .finally(() => setLyricsLoading(false))
-  }
+  const linkedLyricsResults = useMemo(() => lyricsResults.map(linkSessionEdit), [lyricsResults, linkSessionEdit])
 
-  // ── Calendar (separate tab) — songs grouped by recording date ─────────────
+  // ── Calendar (separate tab) - songs grouped by recording date ─────────────
   // Fetches the whole catalog once (lazily, on first visiting the tab) since
-  // there's no server-side way to filter/group by record_dates — it's parsed
+  // there's no server-side way to filter/group by record_dates - it's parsed
   // out of free text client-side (see extractDateKeys above).
   const [calendarSongs, setCalendarSongs] = useState<JWApiSong[]>([])
   const [calendarLoading, setCalendarLoading] = useState(false)
@@ -2170,39 +2095,41 @@ export default function ApiTrackerView(): JSX.Element {
     if ((trackerTab !== 'calendar' && trackerTab !== 'producers') || calendarFetchedRef.current) return
     calendarFetchedRef.current = true
     setCalendarLoading(true)
-    apiFetch<JWApiSong[]>('/songs/', { all: 'true' })
+    apiFetch<JWApiSong[]>('/songs/', { all: 'true', omit: OMIT_BULK })
       .then(setCalendarSongs)
       .catch((err) => setCalendarError(err.message))
       .finally(() => setCalendarLoading(false))
   }, [trackerTab])
 
+  const linkedCalendarSongs = useMemo(() => calendarSongs.map(linkSessionEdit), [calendarSongs, linkSessionEdit])
+
   const calendarByDate = useMemo(() => {
     const map = new Map<string, JWApiSong[]>()
-    for (const song of calendarSongs) {
+    for (const song of linkedCalendarSongs) {
       for (const key of extractDateKeys(song.record_dates)) {
         if (!map.has(key)) map.set(key, [])
         map.get(key)!.push(song)
       }
     }
     return map
-  }, [calendarSongs])
+  }, [linkedCalendarSongs])
 
   // `recording_locations` is also free text (e.g. "Record One Studios, Los
-  // Angeles") — grouped by the exact trimmed string rather than parsed into
+  // Angeles") - grouped by the exact trimmed string rather than parsed into
   // parts, since there's no reliable delimiter between studio name and city.
   const calendarByStudio = useMemo(() => {
     const map = new Map<string, JWApiSong[]>()
-    for (const song of calendarSongs) {
+    for (const song of linkedCalendarSongs) {
       const loc = song.recording_locations?.trim()
       if (!loc) continue
       if (!map.has(loc)) map.set(loc, [])
       map.get(loc)!.push(song)
     }
     return [...map.entries()].sort((a, b) => b[1].length - a[1].length)
-  }, [calendarSongs])
+  }, [linkedCalendarSongs])
 
   // `producers` and `engineers` are both free text, often multiple names
-  // separated by commas (e.g. "Nick Mira, Taz Taylor") — split so each
+  // separated by commas (e.g. "Nick Mira, Taz Taylor") - split so each
   // person gets their own entry instead of grouping by the exact combined
   // string. Kept as two separate groupings (rather than merged) so a name
   // that appears in both credits still shows up as distinct panels.
@@ -2222,16 +2149,16 @@ export default function ApiTrackerView(): JSX.Element {
   }
 
   const producersByName = useMemo(
-    () => groupByNameField(calendarSongs, (s) => s.producers),
-    [calendarSongs]
+    () => groupByNameField(linkedCalendarSongs, (s) => s.producers),
+    [linkedCalendarSongs]
   )
   const engineersByName = useMemo(
-    () => groupByNameField(calendarSongs, (s) => s.engineers),
-    [calendarSongs]
+    () => groupByNameField(linkedCalendarSongs, (s) => s.engineers),
+    [linkedCalendarSongs]
   )
 
   // Assigns each era a stable color by its position in `eras` (already
-  // fetched for the category sidebar) — same era always maps to the same
+  // fetched for the category sidebar) - same era always maps to the same
   // color as long as the API keeps returning eras in the same order.
   const eraColorMap = useMemo(() => {
     const map = new Map<string, EraColor>()
@@ -2300,7 +2227,7 @@ export default function ApiTrackerView(): JSX.Element {
     if (window.location.protocol === 'file:') return
     const onPopState = (): void => {
       const q = new URLSearchParams(window.location.search).get('q') || ''
-      isFirstUrlSync.current = true // this sync came from the URL — don't push it again
+      isFirstUrlSync.current = true // this sync came from the URL - don't push it again
       setSearch(q)
       setDebouncedSearch(q)
       resetSongs()
@@ -2311,19 +2238,31 @@ export default function ApiTrackerView(): JSX.Element {
 
   useEffect(() => {
     apiFetch<JWApiStats>('/stats/').then(setStats).catch(console.error)
-    apiFetch<JWApiEra[] | { results: JWApiEra[] }>('/eras/')
-      .then((data) => setEras(Array.isArray(data) ? data : (data as { results: JWApiEra[] }).results ?? []))
-      .catch(console.error)
+    // /eras/ is paginated (34 across 2 pages) - going through the shared loader
+    // rather than fetching page 1 directly is what makes the back half of the
+    // list (SoundCloud, Vinyl, TTZ...) reachable in the era filter. `finally`,
+    // not `then`: the loader rejects if any page fails but keeps the pages it
+    // already ingested, so a page-2 outage still renders page 1's eras.
+    loadEraFullNames().catch(console.error).finally(() => setEras(listEras()))
   }, [])
+
+  useEffect(() => {
+    if (eras.length === 0) return
+    const valid = new Set(eras.map((e) => e.name))
+    setEraFilter((prev) => {
+      const next = new Set([...prev].filter((e) => valid.has(e)))
+      return next.size === prev.size ? prev : next
+    })
+  }, [eras])
 
   useEffect(() => {
     if (debounceRef.current) clearTimeout(debounceRef.current)
     debounceRef.current = setTimeout(() => {
       setDebouncedSearch(search)
-      // Skip resetSongs on initial mount — only reset when user actually types
+      // Skip resetSongs on initial mount - only reset when user actually types
       if (isFirstDebounce.current) { isFirstDebounce.current = false; return }
       // Settled back to the query already showing (typed then deleted within
-      // the debounce window): no dep changes, so nothing would refetch — a
+      // the debounce window): no dep changes, so nothing would refetch - a
       // reset here would just blank the list (and strand the loading flag
       // resetSongs now presets).
       if (search === debouncedSearch) return
@@ -2332,117 +2271,83 @@ export default function ApiTrackerView(): JSX.Element {
     return () => { if (debounceRef.current) clearTimeout(debounceRef.current) }
   }, [search, debouncedSearch, resetSongs])
 
-  // ── FETCH-ALL MODE: load the entire (server-filtered) result set, then sort
-  // and/or filter client-side ─────────────────────────────────────────────────
-  // The API has no ordering param and only accepts one category/era value per
-  // request, so both "sort by column" and "more than one category/era
-  // selected" fall back to fetching every matching page up front. category/
-  // era are still passed server-side when there's exactly one value selected
-  // (categoryParam/eraParam) to shrink the payload — matchesFilters then
-  // covers whichever dimension has 2+ values, which the server can't do.
-  // Keyed on sortModeActive/multiFilterActive rather than orderField directly
-  // — switching which column is active only changes how the already-fetched
-  // songs are sorted (see the sortedSongs memo below), so it must not
-  // re-trigger this fetch.
-  const fetchAllMode = sortModeActive || multiFilterActive || hasFieldFilters || libraryFilter !== 'all'
+  // ── Song list: the whole (server-searched) catalogue in one request ────────
+  // No paging: trimmed with ?omit= (see useTrackerOmit) the whole catalogue is
+  // ~1.2 MB - less than paging through it, since paged requests ignore ?omit
+  // and carry lyrics. The API also has no ordering param and takes only one
+  // category/era per request, so category/era (any number of each), field
+  // filters and sorting all apply client-side below; only the free-text
+  // search and the omit list refetch.
+  const lastSearchRef = useRef(parsedSearch.freeText)
   useEffect(() => {
-    if (!fetchAllMode) return
-    let cancelled = false
-    loadingRef.current = true
-    setLoading(true); setError(null); setSongs([]); setRawAllSongs([]); setHasMore(false); setCount(0)
-    const t0 = performance.now()
-    runLog('tracker-sort', `start search=${JSON.stringify(debouncedSearch)} category=${categoryParam || '-'} era=${eraParam || '-'} multi=${multiFilterActive} fields=${parsedSearch.filters.length}`)
-    ;(async () => {
-      try {
-        const unfiltered = !parsedSearch.freeText && !categoryParam && !eraParam
-        const all = unfiltered
-          ? await loadAllSongs()
-          : await apiFetch<JWApiSong[]>('/songs/', {
-              searchall: parsedSearch.freeText || undefined,
-              category: categoryParam || undefined,
-              era: eraParam || undefined,
-              all: 'true',
-            })
-        if (cancelled) return
-        setRawAllSongs(all)
-        runLog('tracker-sort', `done ${all.length} songs in ${Math.round(performance.now() - t0)}ms`)
-      } catch (e) {
-        if (!cancelled) { setError((e as Error).message); runLog('tracker-sort', 'ERROR', e as Error) }
-      } finally {
-        if (!cancelled) { loadingRef.current = false; setLoading(false) }
-      }
-    })()
-    return () => { cancelled = true }
-  }, [fetchAllMode, debouncedSearch, parsedSearch.freeText, categoryParam, eraParam])
-
-  // ── SCROLL MODE: infinite scroll, accumulates pages ──────────────────────────
-  useEffect(() => {
-    if (fetchAllMode) return // fetch-all mode handles fetching
-    let cancelled = false
-    loadingRef.current = true
+    // A new search swaps in that search's cached copy (or nothing) rather
+    // than leaving the previous query's results up while it loads.
+    if (lastSearchRef.current !== parsedSearch.freeText) {
+      lastSearchRef.current = parsedSearch.freeText
+      setCatalog(peekTrackerCatalog(parsedSearch.freeText) ?? [])
+    }
+    const ctl = new AbortController()
     setLoading(true); setError(null)
-    apiFetch<JWApiPaginatedResponse>('/songs/', {
-      searchall: parsedSearch.freeText || undefined,
-      category: categoryParam || undefined,
-      era: eraParam || undefined,
-      page,
-      page_size: PAGE_SIZE,
-    })
-      .then((data) => {
-        if (!cancelled) {
-          setSongs((prev) => page === 1 ? data.results : [...prev, ...data.results])
-          lastLoadedPageRef.current = page
-          setCount(data.count)
-          const more = data.next !== null
-          setHasMore(more)
-          hasMoreRef.current = more
-        }
+    const t0 = performance.now()
+    runLog('tracker-load', `start search=${JSON.stringify(parsedSearch.freeText)}`)
+    fetchTrackerCatalog(parsedSearch.freeText, bulkOmit, ctl.signal)
+      .then((all) => {
+        setCatalog(all)
+        runLog('tracker-load', `done ${all.length} songs in ${Math.round(performance.now() - t0)}ms`)
       })
-      .catch((err) => { if (!cancelled) setError(err.message) })
-      .finally(() => {
-        if (!cancelled) {
-          loadingRef.current = false
-          setLoading(false)
-          if (sentinelVisibleRef.current && hasMoreRef.current && !compactViewRef.current) {
-            setPage((p) => p + 1)
-          }
-        }
+      .catch((e) => {
+        if (ctl.signal.aborted) return
+        setError((e as Error).message)
+        runLog('tracker-load', 'ERROR', e as Error)
       })
-    return () => { cancelled = true }
-  }, [debouncedSearch, parsedSearch, categoryParam, eraParam, page, fetchAllMode])
+      .finally(() => { if (!ctl.signal.aborted) setLoading(false) })
+    return () => ctl.abort()
+  }, [parsedSearch.freeText, bulkOmit, reloadToken])
 
-  // Observe sentinel for infinite scroll
-  useEffect(() => {
-    const el = sentinelRef.current
-    if (!el) return
-    const obs = new IntersectionObserver(([entry]) => {
-      sentinelVisibleRef.current = entry.isIntersecting
-      // User scrolled to sentinel while we weren't loading
-      if (entry.isIntersecting && hasMoreRef.current && !loadingRef.current && !compactViewRef.current) {
-        setPage((p) => p + 1)
-      }
-    }, { threshold: 0.1 })
-    obs.observe(el)
-    return () => obs.disconnect()
-  }, [])
+  // Renames only change what a search matches, so the search memos re-run on
+  // a rename only while there's a query - not on every playcount bump.
+  const searchPrefs = parsedSearch.freeText || parsedSearch.filters.length ? songPrefs : null
+  // The server searches the API's own names, so a song renamed to something
+  // the query matches is pulled in from the unfiltered catalogue instead.
+  const renamedHits = useMemo(() => {
+    const q = parsedSearch.freeText
+    if (!q || !searchPrefs) return []
+    const have = new Set(catalog.map((s) => s.id))
+    const ids = new Set(Object.values(searchPrefs)
+      .filter((p) => p.name && !have.has(p.song) && textMatches(p.name, q))
+      .map((p) => p.song))
+    return ids.size ? (peekTrackerCatalog('') ?? []).filter((s) => ids.has(s.id)) : []
+  }, [catalog, parsedSearch.freeText, searchPrefs])
 
-  const filteredSongs = useMemo(() => {
-    if (!fetchAllMode) return songs
-    const passesAll = (s: JWApiSong): boolean => matchesFilters(s) && matchesFieldFilters(s, parsedSearch.filters)
-    return rawAllSongs.filter(passesAll)
-  }, [fetchAllMode, songs, rawAllSongs, matchesFilters, parsedSearch.filters])
+  const songs = useMemo(
+    () => (renamedHits.length ? [...catalog, ...renamedHits] : catalog)
+      .filter((s) => matchesFilters(s) && matchesFieldFilters(s, parsedSearch.filters)),
+    // searchPrefs: a title:"..." filter matches renames too.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [catalog, renamedHits, matchesFilters, parsedSearch.filters, searchPrefs],
+  )
+  const count = songs.length
 
-  const displayCount = fetchAllMode ? filteredSongs.length : count
-
+  // Only the title sort reads the prefs, so other sorts don't re-run on every
+  // playcount bump.
+  const namePrefs = orderField === 'name' ? songPrefs : null
   // Client-side sort applied over accumulated songs (sort mode only)
   const sortedSongs = useMemo(() => {
-    if (!orderField) return filteredSongs
-    return [...filteredSongs].sort((a, b) => {
+    const linked = songs.map(linkSessionEdit)
+    if (!orderField) return linked
+    const base = orderField === 'date_added'
+      ? (recentlyAddedMap ? linked.filter((s) => recentlyAddedMap.has(s.path)) : [])
+      : linked
+    if (orderField === 'date_leaked') {
+      const t = new Map(base.map((s) => [s.id, dateSortValue(s.date_leaked)]))
+      return [...base].sort((a, b) => compareDates(t.get(a.id) ?? null, t.get(b.id) ?? null, orderDir))
+    }
+    return [...base].sort((a, b) => {
       let av: string | number, bv: string | number
       switch (orderField) {
         case 'name':
-          av = a.name.toLowerCase()
-          bv = b.name.toLowerCase()
+          av = (namePrefs?.[a.id]?.name || a.name).toLowerCase()
+          bv = (namePrefs?.[b.id]?.name || b.name).toLowerCase()
           break
         case 'credited_artists':
           av = (a.credited_artists || '').toLowerCase()
@@ -2458,29 +2363,37 @@ export default function ApiTrackerView(): JSX.Element {
         case 'length':
           av = parseDuration(a.length); bv = parseDuration(b.length)
           break
+        case 'date_added':
+          av = recentlyAddedMap?.get(a.path) ?? ''
+          bv = recentlyAddedMap?.get(b.path) ?? ''
+          break
         default: return 0
       }
       const cmp = typeof av === 'number' ? av - (bv as number) : (av as string).localeCompare(bv as string)
       return orderDir === 'desc' ? -cmp : cmp
     })
-  }, [filteredSongs, orderField, orderDir])
+  }, [songs, orderField, orderDir, recentlyAddedMap, linkSessionEdit, namePrefs])
 
   // fetchAllCompactGroups is independent of the search box (it has to fetch
   // every group app-wide regardless), so the search query has to be applied
   // client-side afterward or typing while compact view is active would do
   // nothing.
   // Mirrors as much of the normal list's server-side `searchall` field
-  // coverage as this client-side filter reasonably can — matching only
+  // coverage as this client-side filter reasonably can - matching only
   // title/artist here made legitimate searches (e.g. by producer) come up
   // empty even though the normal (non-compact) list found them fine.
   const filteredCompactGroups = useMemo(() => {
     let filtered = filterCompactGroups(compactGroups, parsedSearch.freeText, s => [
-      s.track_titles?.join(' '), s.name, s.credited_artists, s.producers, s.engineers,
+      s.track_titles?.join(' '), displaySongName(s), s.name, s.credited_artists, s.producers, s.engineers,
       s.era?.name, s.notes, s.additional_information, s.session_titles, s.original_key,
     ].filter(Boolean).join(' '))
+    filtered = filtered.map((g) => {
+      if (!g.members.some((m) => m.item.category === 'recording_session')) return g
+      return { ...g, members: g.members.map((m) => m.item.category === 'recording_session' ? { ...m, item: linkSessionEdit(m.item) } : m) }
+    })
     // Field-qualified tokens (artists:"...", etc.) aren't handled by
     // filterCompactGroups' plain free-text match, so apply them here as an
-    // extra member-level pass — a group survives only if at least one
+    // extra member-level pass - a group survives only if at least one
     // version still matches after this.
     if (parsedSearch.filters.length > 0) {
       filtered = filtered
@@ -2488,19 +2401,14 @@ export default function ApiTrackerView(): JSX.Element {
         .filter(g => g.members.length > 0)
     }
     // Category/era filters aren't sent server-side for compact view (the
-    // whole catalog is always fetched — see fetchAllCompactGroups above), so
+    // whole catalog is always fetched - see fetchAllCompactGroups above), so
     // apply them here instead. A group counts as a match if any of its
     // versions does, same as clicking a member's own category/era badge.
     if (categoryFilter.size > 0 || eraFilter.size > 0 || libraryFilter !== 'all') {
       filtered = filtered.filter(g => g.members.some(m => matchesFilters(m.item)))
     }
-    if (libraryFilter !== 'all') {
-      filtered = filtered
-        .map(g => ({ ...g, members: g.members.filter(m => libraryFilter === 'have' ? songInLibrary(m.item) : !songInLibrary(m.item)) }))
-        .filter(g => g.members.length > 0)
-    }
     if (!compactSort.field) return filtered
-    // Copy before sorting — filterCompactGroups may return the input array.
+    // Copy before sorting - filterCompactGroups may return the input array.
     const sorted = [...filtered]
     const dir = compactSort.dir === 'asc' ? 1 : -1
     if (compactSort.field === 'name') {
@@ -2510,14 +2418,30 @@ export default function ApiTrackerView(): JSX.Element {
       sorted.sort((a, b) => (a.members.length - b.members.length) * dir || a.title.localeCompare(b.title))
     }
     return sorted
-  }, [compactGroups, parsedSearch, compactSort, categoryFilter, eraFilter, libraryFilter, matchesFilters, songInLibrary])
+    // searchPrefs: the haystack's displaySongName reads renames.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [compactGroups, parsedSearch, compactSort, categoryFilter, eraFilter, libraryFilter, matchesFilters, linkSessionEdit, searchPrefs])
 
-  // Multi-select — select mode, the selected-songs Map, Escape-to-exit, and
+  useEffect(() => {
+    const el = listScrollRef.current
+    if (!el) return
+    if (savedTrackerScrollTop === 0 || el.scrollTop !== 0) return
+    if (el.scrollHeight - el.clientHeight < savedTrackerScrollTop) return
+    el.scrollTop = savedTrackerScrollTop
+  }, [compactView, filteredCompactGroups.length, sortedSongs.length])
+  useEffect(() => {
+    const el = listScrollRef.current
+    if (!el) return
+    const id = setInterval(() => { if (el.scrollHeight > el.clientHeight) savedTrackerScrollTop = el.scrollTop }, 100)
+    return () => clearInterval(id)
+  }, [])
+
+  // Multi-select - select mode, the selected-songs Map, Escape-to-exit, and
   // Ctrl/Cmd+A "select all" are all handled by the shared hook (see its docs
   // for why: a race between an async select-all fetch and the auto-exit-on-
   // empty-selection effect used to silently discard the whole selection).
   // `all=true` returns the whole (filtered) catalogue as a plain array in one
-  // request — the server caps page_size well below what pagination here
+  // request - the server caps page_size well below what pagination here
   // would need to stay accurate, so this is used instead of paging through it.
   const {
     selectMode, setSelectMode, selected, setSelected, selectAllLoading,
@@ -2538,88 +2462,47 @@ export default function ApiTrackerView(): JSX.Element {
         }
         return new Map(sortedSongs.map((s) => [s.id, s]))
       },
-      needsFetch: () => !compactView && !fetchAllMode && (loadingRef.current || hasMoreRef.current),
-      fetchAll: async () => {
-        loadingRef.current = true
-        setLoading(true)
-        try {
-          const all = await apiFetch<JWApiSong[]>('/songs/', {
-            searchall: debouncedSearch || undefined,
-            category: categoryParam || undefined,
-            era: eraParam || undefined,
-            all: 'true',
-          })
-          setSongs(all)
-          setCount(all.length)
-          setHasMore(false)
-          hasMoreRef.current = false
-          return new Map(all.map((s) => [s.id, s]))
-        } catch (e) {
-          setError((e as Error).message)
-          return null
-        } finally {
-          loadingRef.current = false
-          setLoading(false)
-        }
-      },
     },
   })
-  // useCallback so SongRow's memo isn't defeated — a fresh identity here would
+  // useCallback so SongRow's memo isn't defeated - a fresh identity here would
   // re-render every row on each selection toggle.
   const toggleSelect = useCallback((song: JWApiSong): void => toggleSongSelect(song.id, song), [toggleSongSelect])
 
   const handlePlay = useCallback((song: JWApiSong) => {
     const track = songToTrack(song)
-    let sourceSongs = sortedSongs
-    let lazyFilter: QueueFilter | null = null
-
+    // Each surface queues what it lists, whole, so shuffle draws from all of
+    // it and a lower row never drags unrelated rows into the history.
+    let sourceSongs: JWApiSong[] = sortedSongs
     if (trackerTab === 'lyrics') {
-      sourceSongs = lyricsResults
-      if (lyricsHasMore) {
-        lazyFilter = {
-          category: '', era: '', search: '', lyrics: debouncedLyricsQuery,
-          page: lyricsPage + 1, hasMore: true, total: lyricsCount,
-        }
-      }
+      sourceSongs = lyricsAll
     } else if (trackerTab === 'calendar') {
       sourceSongs = selectedStudio
         ? (calendarByStudio.find(([studio]) => studio === selectedStudio)?.[1] ?? [])
         : selectedDateKey
           ? (calendarByDate.get(selectedDateKey) ?? [])
-          : calendarSongs
+          : linkedCalendarSongs
     } else if (trackerTab === 'producers') {
       sourceSongs = selectedProducer
         ? (producersByName.find(([producer]) => producer === selectedProducer)?.[1] ?? [])
         : selectedEngineer
           ? (engineersByName.find(([engineer]) => engineer === selectedEngineer)?.[1] ?? [])
-          : calendarSongs
-    } else {
-      if (compactView) {
-        sourceSongs = filteredCompactGroups.flatMap((group) => group.members.map((member) => member.item))
-      }
-      if (!fetchAllMode && hasMore) {
-        lazyFilter = {
-          category: categoryParam, era: eraParam, search: debouncedSearch,
-          page: lastLoadedPageRef.current + 1, hasMore: true, total: count,
-        }
-      }
+          : linkedCalendarSongs
+    } else if (compactView) {
+      sourceSongs = filteredCompactGroups.flatMap((group) => group.members.map((member) => member.item))
     }
-
     const playable = [...new Map(
       sourceSongs.filter((candidate) => !!candidate.path).map((candidate) => [candidate.id, candidate]),
     ).values()]
     const context = playable.map(songToTrack)
-    playTrack(track, context.length > 0 ? context : [track], lazyFilter, 'tracker')
+    playTrack(track, context.length > 0 ? context : [track], null, 'tracker')
   }, [
-    playTrack, trackerTab, sortedSongs, lyricsResults, lyricsHasMore, debouncedLyricsQuery,
-    lyricsPage, lyricsCount, selectedStudio, selectedDateKey, calendarByStudio, calendarByDate,
-    calendarSongs, selectedProducer, selectedEngineer, producersByName, engineersByName,
-    compactView, filteredCompactGroups, fetchAllMode, hasMore, categoryParam, eraParam,
-    debouncedSearch, count,
+    playTrack, trackerTab, sortedSongs, lyricsAll, selectedStudio, selectedDateKey, calendarByStudio,
+    calendarByDate, linkedCalendarSongs, selectedProducer, selectedEngineer, producersByName,
+    engineersByName, compactView, filteredCompactGroups,
   ])
 
-  // Global infoSongId (not local state) so the info panel — and its place in
-  // the sandbox — survives switching to another tab, which unmounts this view.
+  // Global infoSongId (not local state) so the info panel - and its place in
+  // the sandbox - survives switching to another tab, which unmounts this view.
   const handleInfo = useCallback((song: JWApiSong) => { useStore.getState().setInfoSongId(song.id) }, [])
   const handleQueue = useCallback((track: Track) => { addToQueue(track) }, [addToQueue])
 
@@ -2633,7 +2516,7 @@ export default function ApiTrackerView(): JSX.Element {
   }, [selectMode])
 
   // Right-clicking a compact-view group ("folder") acts on all its versions
-  // at once — selects every member and opens the bulk menu (Add to queue /
+  // at once - selects every member and opens the bulk menu (Add to queue /
   // playlist, Download ZIP, Link versions), the same menu you'd get from
   // multi-selecting those songs by hand.
   const handleGroupContextMenu = useCallback((group: CompactGroup<JWApiSong>, e: React.MouseEvent): void => {
@@ -2643,15 +2526,14 @@ export default function ApiTrackerView(): JSX.Element {
     setBulkContextMenu({ x: e.clientX, y: e.clientY, showPlaylists: false })
   }, [])
 
-
   const selectedSongs = useMemo(() => [...selected.values()], [selected])
-  // Sessions/unsurfaced songs can't go in playlists or the queue — same rule
+  // Sessions/unsurfaced songs can't go in playlists or the queue - same rule
   // the single-song menu already enforces (see canAddToPlaylist/canQueue in
   // SongContextMenu.tsx). If even one selected song is unplayable, both bulk
-  // actions are disabled entirely rather than silently dropping it — a
+  // actions are disabled entirely rather than silently dropping it - a
   // partial add on a selection the user made as one unit is surprising.
   const bulkEligibleSongs = useMemo(
-    () => selectedSongs.filter(s => !['recording_session', 'unsurfaced'].includes(s.category)),
+    () => selectedSongs.filter(s => s.category !== 'unsurfaced' && (s.category !== 'recording_session' || !!s.path)),
     [selectedSongs]
   )
   const canBulkAddToPlaylist = selectedSongs.length > 0 && bulkEligibleSongs.length === selectedSongs.length
@@ -2659,7 +2541,7 @@ export default function ApiTrackerView(): JSX.Element {
     && bulkEligibleSongs.length === selectedSongs.length
     && bulkEligibleSongs.every(s => s.path)
 
-  // Which playlists already contain *every* eligible selected song — shown
+  // Which playlists already contain *every* eligible selected song - shown
   // as a checkmark so re-adding to a playlist the whole selection is
   // already in isn't a silent no-op.
   const [bulkContained, setBulkContained] = useState<Set<number>>(new Set())
@@ -2673,7 +2555,7 @@ export default function ApiTrackerView(): JSX.Element {
       playlists.map(p =>
         userApi.getPlaylist(p.id)
           .then(d => {
-            const memberIds = new Set((d.items ?? []).map(it => it.song.id))
+            const memberIds = new Set(playlistSongIds(d.items ?? []))
             return { id: p.id, allIn: ids.every(id => memberIds.has(id)) }
           })
           .catch(() => ({ id: p.id, allIn: false }))
@@ -2689,42 +2571,48 @@ export default function ApiTrackerView(): JSX.Element {
     exitSelectMode()
   }
 
-  const bulkAddToPlaylist = async (playlistId: number): Promise<void> => {
-    // Only reachable when canBulkAddToPlaylist is true, i.e. every selected
-    // song is eligible.
-    await Promise.all(selectedSongs.map(s => userApi.addToPlaylist(playlistId, s.id).catch(() => {})))
-    await refreshPlaylists()
-    useStore.getState().autoDownloadIfOffline(playlistId, selectedSongs.map(s => s.id))
+  // Optimistic: select mode closes right away and the adds run in the
+  // background (failures toast). Only reachable when canBulkAddToPlaylist is
+  // true, i.e. every selected song is eligible.
+  const bulkAddToPlaylist = (playlistId: number): void => {
+    void addSongsInBackground(playlistId, selectedSongs.map(s => s.id))
     exitSelectMode()
   }
 
+  // Backend ZIP jobs are disabled (see ZIP_OPERATIONS_ENABLED) - the ZIP is
+  // built client-side instead (lib/clientZip). Songs whose file fails to
+  // fetch are counted with the ones that have no file at all.
   const bulkDownloadZip = async (): Promise<void> => {
-    const paths = selectedSongs.map(s => s.path).filter(Boolean) as string[]
-    const skipped = selectedSongs.length - paths.length
+    // Sessions download the file they play, which may be in another comp.
+    const files = (await Promise.all(selectedSongs.map(async s => {
+      const f = s.category === 'recording_session'
+        ? await resolveSongFile(s).catch(() => null)
+        : s.path ? { path: s.path, url: buildStreamUrl(s.path, activeChannel || undefined), channel: activeChannel || undefined } : null
+      return f && { ...f, songId: s.id }
+    })))
+      .filter(<T,>(f: T | null): f is T => f != null)
+    const paths = files.map(f => f.path)
+    let skipped = selectedSongs.length - paths.length
     if (paths.length === 0) {
       setBulkZipSkipped(skipped)
       setBulkZipStatus('none')
       setTimeout(() => setBulkZipStatus('idle'), 4000)
       return
     }
+    const target = await openZipTarget(paths.length === 1 ? (paths[0].split('/').pop() || 'Song').replace(/\.[^.]+$/, '') : `Songs (${paths.length})`)
+    if (!target) return
     setBulkZipStatus('zipping')
     try {
-      const res = await fetch(`${JWAPI_BASE}/files/zip-selection/`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ paths }),
-      })
-      if (!res.ok) throw new Error()
-      const contentType = res.headers.get('content-type') || ''
-      if (contentType.includes('zip') || contentType.includes('octet-stream')) {
-        const blob = await res.blob()
-        const url = URL.createObjectURL(blob)
-        const a = document.createElement('a'); a.href = url; a.download = 'songs.zip'; a.click()
-        URL.revokeObjectURL(url)
-      } else {
-        const data = await res.json()
-        if (data.download_url) { const a = document.createElement('a'); a.href = data.download_url; a.download = 'songs.zip'; a.click() }
-      }
+      // CDN only for the primary channel - see handleDownload's comment above.
+      const useCdn = isPrimaryChannelSlug(channels, activeChannel)
+      const { failed, cancelled } = await saveItems(target, files.map(f => ({
+        name: f.path.split('/').pop() || f.path,
+        url: f.url,
+        cdnPath: useCdn && (f.channel ?? '') === (activeChannel ?? '') ? f.path : undefined,
+        songId: f.songId,
+      })))
+      if (cancelled) { setBulkZipStatus('idle'); return }
+      skipped += failed
       setBulkZipSkipped(skipped)
       setBulkZipStatus(skipped > 0 ? 'partial' : 'done')
     } catch {
@@ -2733,10 +2621,10 @@ export default function ApiTrackerView(): JSX.Element {
     setTimeout(() => setBulkZipStatus('idle'), skipped > 0 ? 5000 : 3000)
   }
 
-  // Links every selected song together as versions of one another — pairing
+  // Links every selected song together as versions of one another - pairing
   // each against the first selected song merges all of their groups (see
   // linkSongVersion's group-merge logic in versionsApi.ts). If none of them
-  // already had a version_title, the merged group ends up untitled — prompt
+  // already had a version_title, the merged group ends up untitled - prompt
   // for one rather than leaving a silently untitled (and in compact view,
   // invisible) group.
   const bulkLinkVersions = async (): Promise<void> => {
@@ -2756,13 +2644,45 @@ export default function ApiTrackerView(): JSX.Element {
     setTimeout(() => setBulkLinkStatus('idle'), 3000)
   }
 
-  const handleShowInFiles = useCallback((song: JWApiSong): void => {
+  const handleShowInFiles = useCallback(async (song: JWApiSong): Promise<void> => {
     if (!song.path) return
-    const parts = song.path.split('/')
+    // A session's file may not be looked up yet, or may live in another comp.
+    let path = song.path
+    if (song.category === 'recording_session') {
+      try {
+        const f = await resolveSongFile(song)
+        path = f.path
+        if (f.channel && f.channel !== activeChannel) setActiveChannel(f.channel)
+      } catch { return }
+    }
+    const parts = path.split('/')
     const folderPath = parts.slice(0, -1).join('/')
     setApiFilesPath(folderPath)
     setActiveView('api-files')
-  }, [setApiFilesPath, setActiveView])
+  }, [setApiFilesPath, setActiveView, activeChannel, setActiveChannel])
+
+  const handleSessionFilePicked = useCallback(async (path: string, fileChannel: string): Promise<void> => {
+    const song = linkingSessionSong
+    setLinkingSessionSong(null)
+    if (!song) return
+    let duration: string | null = null
+    try {
+      const parts = path.split('/')
+      const folder = parts.slice(0, -1).join('/')
+      const params: Record<string, string> = folder ? { path: folder } : {}
+      if (fileChannel) params.channel = fileChannel
+      const data = apiPeek<JWApiBrowseResponse>('/files/browse/', params) ?? await apiFetch<JWApiBrowseResponse>('/files/browse/', params)
+      const entry = parseBrowseEntries(data).find((e) => e.path === path)
+      duration = entry?.duration ?? null
+    } catch (err) { console.error(err) }
+    setSessionEditOverride(song.id, activeChannel, { path, duration, channel: fileChannel })
+    setSessionEditOverrideVersion((v) => v + 1)
+  }, [linkingSessionSong, activeChannel])
+
+  const handleClearSessionLink = useCallback((song: JWApiSong): void => {
+    setSessionEditOverride(song.id, activeChannel, null)
+    setSessionEditOverrideVersion((v) => v + 1)
+  }, [activeChannel])
 
   return (
     <div className="flex-1 flex flex-col min-h-0 overflow-hidden">
@@ -2811,17 +2731,32 @@ export default function ApiTrackerView(): JSX.Element {
           >
             <Users size={11} /> Producers
           </button>
+          <button
+            onClick={() => setTrackerTab('statistics')}
+            // Warm the chunk and both endpoints so the first open doesn't
+            // flash a skeleton and then Statistics' own.
+            onPointerEnter={warmStatistics}
+            onFocus={warmStatistics}
+            className={`flex items-center gap-1 px-2 py-1 rounded text-[0.6875rem] font-medium transition-colors ${
+              trackerTab === 'statistics'
+                ? 'bg-surface-raised text-text-primary'
+                : 'text-text-muted hover:text-text-secondary'
+            }`}
+          >
+            <BarChart3 size={11} /> Statistics
+          </button>
         </div>
 
         {trackerTab === 'songs' && <StatsBar stats={stats} />}
 
         {trackerTab === 'songs' && <div className="flex flex-col gap-2">
-          {/* Search — uses searchall to include producers; field:"value" tokens
+          {/* Search - uses searchall to include producers; field:"value" tokens
               (see trackerSearch.ts) are parsed out and applied client-side. */}
           <div className="flex items-center gap-1.5 w-full">
             <div className="relative flex-1 min-w-0">
               <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-text-muted pointer-events-none" />
               <input
+                ref={searchInputRef}
                 type="text"
                 placeholder='Search, or artists:"Juice WRLD"…'
                 value={search}
@@ -2834,6 +2769,9 @@ export default function ApiTrackerView(): JSX.Element {
                 </button>
               )}
             </div>
+            <button onClick={() => useStore.getState().setShowRecognition(true)} title="Identify song" aria-label="Identify song" className="shrink-0 p-2.5 md:p-2 rounded-lg bg-surface-overlay text-text-muted hover:text-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent">
+              <AudioLines size={16} />
+            </button>
             <div className="relative shrink-0 hidden md:block">
               <button
                 onClick={() => setShowFilterMenu((v) => !v)}
@@ -2870,17 +2808,24 @@ export default function ApiTrackerView(): JSX.Element {
                 />
               )}
             </div>
-            <div className="relative shrink-0">
-              <button
-                onClick={() => setShowSearchHelp((v) => !v)}
-                onMouseDown={(e) => e.stopPropagation()}
-                className={`p-2.5 md:p-2 rounded-lg transition-colors ${showSearchHelp ? 'bg-accent/15 text-accent' : 'bg-surface-overlay text-text-muted hover:text-text-secondary'}`}
-                title="Search syntax help"
-              >
-                <Info size={15} />
-              </button>
-              {showSearchHelp && <SearchHelpPopover onClose={() => setShowSearchHelp(false)} />}
-            </div>
+            <SearchHelpButton
+              size={15}
+              className={(open) => `p-2.5 md:p-2 rounded-lg transition-colors ${open ? 'bg-accent/15 text-accent' : 'bg-surface-overlay text-text-muted hover:text-text-secondary'}`}
+            />
+
+            <button
+              onClick={() => {
+                if (orderField === 'date_added') { setOrderField(null); setOrderDir('asc'); resetSongs() }
+                else { setOrderField('date_added'); setOrderDir('desc'); resetSongs() }
+              }}
+              title="Sort by recently added - only covers the last ~200 file changes, so older songs may not have a known date"
+              className={`hidden md:flex items-center gap-1.5 px-2.5 py-2 rounded-lg text-xs font-medium transition-colors shrink-0 ${
+                orderField === 'date_added' ? 'bg-accent/15 text-accent' : 'bg-surface-overlay text-text-muted hover:text-text-secondary'
+              }`}
+            >
+              <Clock size={14} />
+              Recently added
+            </button>
 
             <div className="flex items-center bg-surface-overlay rounded-lg p-0.5 shrink-0">
               <button
@@ -2908,30 +2853,41 @@ export default function ApiTrackerView(): JSX.Element {
                 <button
                   onClick={() => { setCompactView(true); clearExpandedGroups() }}
                   className={`p-2 md:p-1.5 rounded-md transition-colors ${compactView ? 'bg-surface-raised text-text-primary' : 'text-text-muted hover:text-text-secondary'}`}
-                  title="Compact view — collapse songs into their version groups"
+                  title="Compact view - collapse songs into their version groups"
                 >
                   <Layers size={16} />
                 </button>
               )}
             </div>
+
+            {viewMode === 'detail' && !compactView && (
+              <button
+                onClick={(e) => setFieldMenu({ target: 'detail', ...fieldMenuAnchor(e, -1) })}
+                className={`p-2.5 md:p-2 rounded-lg transition-colors shrink-0 ${fieldMenu?.target === 'detail' ? 'bg-accent/15 text-accent' : 'bg-surface-overlay text-text-muted hover:text-text-secondary'}`}
+                title="Customize fields - or click any field label to swap/hide it"
+              >
+                <SlidersHorizontal size={15} />
+              </button>
+            )}
           </div>
 
-          {/* Second row — mobile-only category select (desktop uses the filter popover above) */}
+          {/* Second row - mobile-only category select (desktop uses the filter popover above) */}
           <div className="md:hidden flex items-center gap-2 flex-wrap">
-            <select
+            <ThemedSelect
               value={categoryParam}
-              onChange={(e) => { setCategoryFilter(new Set(e.target.value ? [e.target.value as Category] : [])); resetSongs() }}
-              className="flex-1 min-w-0 bg-surface-overlay text-text-primary text-sm px-3 py-2.5 rounded-lg outline-none border border-transparent focus:ring-1 ring-accent focus:border-accent/40 cursor-pointer"
-            >
-              <option value="">{categoryFilter.size > 1 ? `${categoryFilter.size} categories` : 'All categories'}</option>
-              <option value="released">Released</option>
-              <option value="unreleased">Unreleased</option>
-              <option value="unsurfaced">Unsurfaced</option>
-              <option value="recording_session">Sessions</option>
-            </select>
+              onChange={(v) => { setCategoryFilter(new Set(v ? [v as Category] : [])); resetSongs() }}
+              options={[
+                { value: '', label: categoryFilter.size > 1 ? `${categoryFilter.size} categories` : 'All categories' },
+                { value: 'released', label: 'Released' },
+                { value: 'unreleased', label: 'Unreleased' },
+                { value: 'unsurfaced', label: 'Unsurfaced' },
+                { value: 'recording_session', label: 'Sessions' },
+              ]}
+              className="flex-1 min-w-0 bg-surface-overlay text-text-primary text-sm px-3 py-2.5 rounded-lg outline-none border border-transparent focus:ring-1 ring-accent focus:border-accent/40"
+            />
           </div>
 
-          {/* Active filter chips — one per selected category/era, each
+          {/* Active filter chips - one per selected category/era, each
               individually removable so multi-select filters can be trimmed
               down one at a time instead of all-or-nothing. */}
           {(categoryFilter.size > 0 || eraFilter.size > 0 || libraryFilter !== 'all') && (
@@ -3013,7 +2969,7 @@ export default function ApiTrackerView(): JSX.Element {
           ) : (
             <>
               <div className="space-y-0.5">
-                {lyricsResults.map((song) => (
+                {linkedLyricsResults.map((song) => (
                   <LyricResultRow
                     key={song.id}
                     song={song}
@@ -3229,6 +3185,10 @@ export default function ApiTrackerView(): JSX.Element {
             </div>
           )}
         </div>
+      ) : trackerTab === 'statistics' ? (
+        <Suspense fallback={<div className="flex items-center justify-center h-40 gap-2 text-text-muted"><Loader2 size={18} className="animate-spin" /></div>}>
+          <StatisticsPanel onOpenEra={(era) => { setEraFilter(new Set([era])); setTrackerTab('songs') }} />
+        </Suspense>
       ) : trackerTab === 'producers' ? (
         <div className="flex-1 overflow-y-auto px-3 md:px-5 pb-4">
           {calendarLoading ? (
@@ -3356,11 +3316,11 @@ export default function ApiTrackerView(): JSX.Element {
         <div className="flex flex-col flex-1 min-h-0 overflow-hidden">
           {/* Column headers. Compact view swaps in its own pair (Title /
               Versions sorting the grouped rows) in the SAME outer slot as the
-              flat headers — same wrapper + padding, so the list below starts
+              flat headers - same wrapper + padding, so the list below starts
               at an identical y-offset and nothing jumps when toggling. */}
           {viewMode === 'list' && (
             <div className="hidden md:block px-5 pb-1 shrink-0">
-              <div className="flex items-center gap-3 px-3 py-1">
+              <div className="flex items-center gap-3 pl-3 pr-[18px] py-1">
                 <div className="w-9 shrink-0" />
                 {compactView ? (
                   <>
@@ -3373,7 +3333,7 @@ export default function ApiTrackerView(): JSX.Element {
                         ? compactSort.dir === 'asc' ? <ChevronUp size={10} /> : <ChevronDown size={10} />
                         : <span className="w-2.5" />}
                     </button>
-                    {/* Static label — compact view has no category sort; sits
+                    {/* Static label - compact view has no category sort; sits
                         over CompactGroupRow's w-24 category badge column. */}
                     <span className="w-24 shrink-0 text-center text-xs font-medium uppercase tracking-wider text-text-muted">Category</span>
                     <button
@@ -3392,11 +3352,27 @@ export default function ApiTrackerView(): JSX.Element {
                 ) : (
                   <>
                     <SortBtn field="name" label="Title" className="flex-1" orderField={orderField} orderDir={orderDir} onClick={handleSort} />
-                    <SortBtn field="credited_artists" label="Artist" className="w-32 shrink-0" orderField={orderField} orderDir={orderDir} onClick={handleSort} />
-                    <SortBtn field="era__name" label="Era" className="w-36 shrink-0" orderField={orderField} orderDir={orderDir} onClick={handleSort} />
-                    <SortBtn field="category" label="Category" className="w-24 shrink-0 justify-center" orderField={orderField} orderDir={orderDir} onClick={handleSort} />
-                    <SortBtn field="length" label="Time" className="w-12 shrink-0 justify-end" orderField={orderField} orderDir={orderDir} onClick={handleSort} />
-                    <div className="w-14 shrink-0" />
+                    {/* User-chosen columns - see ListColumnHeader. */}
+                    {listColumns.map((key, i) => (
+                      <ListColumnHeader
+                        key={key}
+                        field={key}
+                        index={i}
+                        orderField={orderField}
+                        orderDir={orderDir}
+                        onSort={handleSort}
+                        onMenu={openListFieldMenu}
+                      />
+                    ))}
+                    <div className="w-14 shrink-0 flex justify-end">
+                      <button
+                        onClick={(e) => setFieldMenu({ target: 'list', ...fieldMenuAnchor(e, -1) })}
+                        className="p-1 rounded text-text-muted hover:text-text-primary hover:bg-surface-raised transition-colors"
+                        title="Customize columns"
+                      >
+                        <SlidersHorizontal size={12} />
+                      </button>
+                    </div>
                   </>
                 )}
               </div>
@@ -3435,15 +3411,15 @@ export default function ApiTrackerView(): JSX.Element {
                 selected={selected}
                 onToggleSelect={toggleSelect}
               />
-            ) : loading && sortedSongs.length === 0 ? (
+            ) : (loading || (orderField === 'date_added' && !recentlyAddedMap)) && sortedSongs.length === 0 ? (
               <div className="flex items-center justify-center h-40 gap-2 text-text-muted">
                 <Loader2 size={18} className="animate-spin" />
-                <span className="text-sm">{orderField ? 'Loading full library for sorting…' : 'Loading…'}</span>
+                <span className="text-sm">Loading…</span>
               </div>
             ) : error ? (
               <div className="flex flex-col items-center justify-center h-40 gap-2 text-center">
                 <p className="text-text-muted text-sm">Failed to load: {error}</p>
-                <button onClick={resetSongs} className="text-accent text-sm underline">Retry</button>
+                <button onClick={() => setReloadToken((t) => t + 1)} className="text-accent text-sm underline">Retry</button>
               </div>
             ) : sortedSongs.length === 0 ? (
               <div className="flex flex-col items-center justify-center h-40 gap-2">
@@ -3489,18 +3465,16 @@ export default function ApiTrackerView(): JSX.Element {
                 selectMode={selectMode}
                 selected={selected}
                 onToggleSelect={toggleSelect}
+                onFieldMenu={openDetailFieldMenu}
               />
             )}
-            {/* Sentinel always in DOM so IntersectionObserver is set up from mount */}
-            <div ref={sentinelRef} className="h-4" />
             {loading && sortedSongs.length > 0 && (
               <div className="flex items-center justify-center gap-2 py-4 text-text-muted">
                 <Loader2 size={16} className="animate-spin" />
-                {fetchAllMode && <span className="text-xs">{sortedSongs.length.toLocaleString()} / {displayCount.toLocaleString()} loaded</span>}
               </div>
             )}
-            {!loading && !hasMore && sortedSongs.length > 0 && (
-              <p className="text-center text-text-muted text-xs py-4">{displayCount.toLocaleString()} songs total</p>
+            {!loading && sortedSongs.length > 0 && (
+              <p className="text-center text-text-muted text-xs py-4">{count.toLocaleString()} songs total</p>
             )}
           </div>
         </div>
@@ -3514,8 +3488,8 @@ export default function ApiTrackerView(): JSX.Element {
             <div className="px-4 py-2 flex items-center gap-2 bg-amber-500/10 border-b border-amber-500/30 text-amber-500 text-xs font-medium">
               <AlertTriangle size={14} className="shrink-0" />
               {bulkZipStatus === 'none'
-                ? "Couldn't download — none of the selected songs have a file available yet."
-                : `${bulkZipSkipped} of ${selected.size} selected song${selected.size === 1 ? '' : 's'} ${bulkZipSkipped === 1 ? "wasn't" : "weren't"} available and ${bulkZipSkipped === 1 ? 'was' : 'were'} left out of the ZIP.`}
+                ? "Couldn't download - none of the selected songs have a file available yet."
+                : `${bulkZipSkipped} of ${selected.size} selected song${selected.size === 1 ? '' : 's'} ${bulkZipSkipped === 1 ? "wasn't" : "weren't"} available and ${bulkZipSkipped === 1 ? 'was' : 'were'} left out of the download.`}
             </div>
           )}
           <div className="px-4 py-2.5 flex items-center gap-2">
@@ -3546,6 +3520,7 @@ export default function ApiTrackerView(): JSX.Element {
           </button>
           <div className="relative">
             <button
+              ref={bulkPlBtnRef}
               onClick={() => setShowBulkPlaylists(v => !v)}
               disabled={selected.size === 0 || !canBulkAddToPlaylist}
               title={!canBulkAddToPlaylist && selected.size > 0 ? "Can't add to playlist while a session/unsurfaced song is selected" : undefined}
@@ -3554,45 +3529,31 @@ export default function ApiTrackerView(): JSX.Element {
               <Plus size={13} /> Add to playlist
             </button>
             {showBulkPlaylists && (
-              <>
-                <div className="fixed inset-0 z-40" onClick={() => setShowBulkPlaylists(false)} />
-                <div className="absolute right-0 bottom-full mb-1 z-50 w-56 bg-surface border border-[var(--border)] rounded-xl shadow-2xl overflow-hidden">
-                  <div className="px-3 py-2 border-b border-[var(--border)] text-[0.6875rem] uppercase tracking-wider text-text-muted font-semibold">
-                    Add to playlist
+              <AnchoredContextMenu
+                anchorRef={bulkPlBtnRef}
+                title="Add to playlist"
+                onClose={() => setShowBulkPlaylists(false)}
+                className="w-56"
+                items={!account ? [] : playlists.length === 0
+                  ? [{ label: 'No playlists yet.', disabled: true }]
+                  : playlists.map(p => ({
+                    icon: ListMusic,
+                    label: p.name,
+                    checked: bulkContained.has(p.id),
+                    onSelect: () => bulkAddToPlaylist(p.id),
+                  }))}
+                footer={!account ? (
+                  <div className="p-1">
+                    <p className="text-xs text-text-muted mb-2">Log in to save to playlists.</p>
+                    <button
+                      onClick={() => { setShowUserAuth(true); setShowBulkPlaylists(false) }}
+                      className="w-full py-1.5 rounded-lg bg-accent/15 text-accent text-xs font-semibold"
+                    >
+                      Log in
+                    </button>
                   </div>
-                  {!account ? (
-                    <div className="p-3">
-                      <p className="text-xs text-text-muted mb-2">Log in to save to playlists.</p>
-                      <button
-                        onClick={() => { setShowUserAuth(true); setShowBulkPlaylists(false) }}
-                        className="w-full py-1.5 rounded-lg bg-accent/15 text-accent text-xs font-semibold"
-                      >
-                        Log in
-                      </button>
-                    </div>
-                  ) : (
-                    <div className="max-h-56 overflow-y-auto py-1">
-                      {playlists.length === 0 && (
-                        <p className="px-3 py-2 text-xs text-text-muted">No playlists yet.</p>
-                      )}
-                      {playlists.map(p => {
-                        const allIn = bulkContained.has(p.id)
-                        return (
-                          <button
-                            key={p.id}
-                            onClick={() => { bulkAddToPlaylist(p.id); setShowBulkPlaylists(false) }}
-                            className="w-full flex items-center gap-2.5 px-3 py-2 text-left text-sm text-text-secondary hover:text-text-primary hover:bg-surface-raised transition-colors"
-                          >
-                            <ListMusic size={14} className={`shrink-0 ${allIn ? 'text-accent' : 'text-text-muted'}`} />
-                            <span className="flex-1 truncate">{p.name}</span>
-                            {allIn && <Check size={12} className="text-accent shrink-0" />}
-                          </button>
-                        )
-                      })}
-                    </div>
-                  )}
-                </div>
-              </>
+                ) : undefined}
+              />
             )}
           </div>
           {canEdit && (
@@ -3638,7 +3599,7 @@ export default function ApiTrackerView(): JSX.Element {
             }`}
           >
             {bulkZipStatus === 'zipping' ? (
-              <><Loader2 size={13} className="animate-spin" /> Zipping…</>
+              <><Loader2 size={13} className="animate-spin" /> Downloading…</>
             ) : bulkZipStatus === 'done' ? (
               <><Check size={13} /> Done</>
             ) : bulkZipStatus === 'partial' ? (
@@ -3648,7 +3609,7 @@ export default function ApiTrackerView(): JSX.Element {
             ) : bulkZipStatus === 'error' ? (
               <><X size={13} /> Error</>
             ) : (
-              <><PackageOpen size={13} /> Download ZIP</>
+              <><PackageOpen size={13} /> Download</>
             )}
           </button>
           <button
@@ -3662,6 +3623,19 @@ export default function ApiTrackerView(): JSX.Element {
         </div>
       )}
 
+      {fieldMenu && (
+        <TrackerFieldMenu
+          key={`${fieldMenu.target}:${fieldMenu.index}:${fieldMenu.x}:${fieldMenu.y}`}
+          state={fieldMenu}
+          keys={fieldMenu.target === 'detail' ? detailFields : listColumns}
+          defaults={fieldMenu.target === 'detail' ? DEFAULT_DETAIL_FIELDS : DEFAULT_LIST_COLUMNS}
+          max={fieldMenu.target === 'detail' ? MAX_DETAIL_FIELDS : MAX_LIST_COLUMNS}
+          noun={fieldMenu.target === 'detail' ? 'field' : 'column'}
+          dragScope={fieldMenu.target}
+          onChange={fieldMenu.target === 'detail' ? setTrackerDetailFields : setTrackerListColumns}
+          onClose={closeFieldMenu}
+        />
+      )}
 
       {contextMenu && (
         <SongContextMenu
@@ -3676,6 +3650,21 @@ export default function ApiTrackerView(): JSX.Element {
           onSelect={() => toggleSelect(contextMenu.song)}
           liked={likedTrackIds.includes(`jw-${contextMenu.song.id}`)}
           onToggleLike={() => toggleLike(`jw-${contextMenu.song.id}`)}
+          canLinkSessionFile
+          hasSessionLinkOverride={!!peekSessionEditOverride(contextMenu.song.id, activeChannel)}
+          onLinkSessionFile={() => setLinkingSessionSong(contextMenu.song)}
+          onClearSessionLink={() => handleClearSessionLink(contextMenu.song)}
+        />
+      )}
+
+      {linkingSessionSong && (
+        <FilePickerModal
+          kind="audio"
+          songTitle={linkingSessionSong.name}
+          title="Link Session Edit file"
+          switchableChannel
+          onSelect={handleSessionFilePicked}
+          onClose={() => setLinkingSessionSong(null)}
         />
       )}
 
@@ -3686,7 +3675,7 @@ export default function ApiTrackerView(): JSX.Element {
           count={selected.size}
           onAddToQueue={() => { bulkAddToQueue(); setBulkContextMenu(null) }}
           onDownloadZip={() => { bulkDownloadZip(); setBulkContextMenu(null) }}
-          onTogglePlaylists={() => setBulkContextMenu((prev) => prev ? { ...prev, showPlaylists: !prev.showPlaylists } : null)}
+          onPlaylistsOpen={() => setBulkContextMenu((prev) => prev && !prev.showPlaylists ? { ...prev, showPlaylists: true } : prev)}
           playlists={playlists}
           account={account}
           onAddToPlaylist={(id) => { bulkAddToPlaylist(id); setBulkContextMenu(null) }}
@@ -3717,6 +3706,8 @@ export default function ApiTrackerView(): JSX.Element {
           }}
         />
       )}
+
+      <CdnDownloadToast />
     </div>
   )
 }

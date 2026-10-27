@@ -1,26 +1,28 @@
-// Song "version" grouping — e.g. "She's The One (v1)" / "(v2)" / "(TV Mix)"
+// Song "version" grouping - e.g. "She's The One (v1)" / "(v2)" / "(TV Mix)"
 // linked together as the same underlying song. juicewrldapi.com's own
 // /versions/ table backs this (previously a separate Supabase project).
 //
 // The table's list endpoint (GET /versions/) doesn't apply its query params
 // (group_id=, search=, title=) server-side, so any filtering by group or
-// title has to happen client-side — fetched in one shot via ?all=true (same
+// title has to happen client-side - fetched in one shot via ?all=true (same
 // bulk mode /songs/ supports) rather than paging through it. GET
 // /versions/{song_id}/ is the one endpoint that *does* filter server-side (0
 // or 1 result for that song), so single-song lookups go through that instead
 // of the full list.
 //
 // Writes (POST to create a row, PATCH /versions/{song_id}/{version_id}/ to
-// update one — both the song id AND the row's own id are required in the
+// update one - both the song id AND the row's own id are required in the
 // path, PATCH on /versions/{song_id}/ alone returns 405) require an
 // editor/admin auth token; there's no bulk-write endpoint, so group
 // merges/title changes touching multiple rows send one request per
 // affected song.
-import { JWAPI_BASE, apiFetch } from './juicewrldApi'
+import { routeUrl, apiFetch } from './juicewrldApi'
+import { authHeaders } from './apiClient'
 import { getToken } from './userApi'
+import { loadSessionSongIds } from './sessionEditsApi'
 
 /** Always true now that this is core juicewrldapi functionality rather than
- *  optional Supabase config — kept as an export so existing call sites that
+ *  optional Supabase config - kept as an export so existing call sites that
  *  gate version UI on it don't need to change. */
 export const versionsEnabled = true
 
@@ -32,6 +34,8 @@ interface VersionRow {
   title: string | null
   created_at: string
   created_by: string | null
+  /** Client-side: the row's song is a recording session (see fetchAllRows). */
+  is_session?: boolean
 }
 
 interface VersionsPage {
@@ -48,15 +52,23 @@ export interface SongVersionMeta {
   version: string | null
   versionTitle: string | null
   addedBy: string | null
+  /** The song is a recording session - it plays through its session edit, if
+   *  it has one, and counts as a "Session" version for preferences (see
+   *  lib/versionPrefs' prefLabel). */
+  isSession?: boolean
 }
 
 function toMeta(row: VersionRow): SongVersionMeta {
-  return { songId: row.song_id, groupId: row.group_id, version: row.version, versionTitle: row.title, addedBy: row.created_by }
+  return { songId: row.song_id, groupId: row.group_id, version: row.version, versionTitle: row.title, addedBy: row.created_by, isSession: row.is_session }
 }
 
 async function getRow(songId: number): Promise<VersionRow | null> {
   const data = await apiFetch<VersionsPage>(`/versions/${songId}/`)
-  return data.results[0] ?? null
+  const raw = data.results[0]
+  if (!raw) return null
+  // Use the title-unified copy so group_id comparisons match getAllRows
+  const all = await getAllRows()
+  return all.find(r => r.id === raw.id) ?? raw
 }
 
 // Full-table fetch (via ?all=true, same as juicewrldApi's /songs/ bulk mode),
@@ -72,8 +84,51 @@ function invalidateAllRowsCache(): void {
   allRowsCache = null
 }
 
+function titleKey(title: string | null): string | null {
+  const k = title?.replace(/['’‘]/g, '').replace(/\s+/g, ' ').trim().toLowerCase()
+  return k ? k : null
+}
+
+/** Songs are linked by title: rows whose titles match (ignoring case,
+ *  apostrophe style and stray whitespace) are one group even if their raw
+ *  group_ids differ. Rows that already share a group_id stay together too, so
+ *  untitled legacy links keep working. Each merged group is reported under
+ *  the lowest raw group_id among its members, which is also what the write
+ *  helpers patch to when they merge, so the two views agree. */
+function unifyByTitle(rows: VersionRow[]): VersionRow[] {
+  const parent = new Map<number, number>()
+  const find = (g: number): number => {
+    let p = parent.get(g) ?? g
+    while (p !== (parent.get(p) ?? p)) p = parent.get(p) ?? p
+    parent.set(g, p)
+    return p
+  }
+  const union = (a: number, b: number) => {
+    const ra = find(a), rb = find(b)
+    if (ra !== rb) parent.set(Math.max(ra, rb), Math.min(ra, rb))
+  }
+  const byTitle = new Map<string, number>()
+  for (const r of rows) {
+    find(r.group_id)
+    const k = titleKey(r.title)
+    if (!k) continue
+    const seen = byTitle.get(k)
+    if (seen === undefined) byTitle.set(k, r.group_id)
+    else union(seen, r.group_id)
+  }
+  return rows.map(r => {
+    const g = find(r.group_id)
+    return g === r.group_id ? r : { ...r, group_id: g }
+  })
+}
+
 async function fetchAllRows(): Promise<VersionRow[]> {
-  return apiFetch<VersionRow[]>('/versions/', { all: 'true' })
+  // Fetched alongside, not after; no session data just means no session marks.
+  const [rows, sessionIds] = await Promise.all([
+    apiFetch<VersionRow[]>('/versions/', { all: 'true' }),
+    loadSessionSongIds().catch(() => new Set<number>()),
+  ])
+  return unifyByTitle(rows.map(r => (sessionIds.has(r.song_id) ? { ...r, is_session: true } : r)))
 }
 
 async function getAllRows(): Promise<VersionRow[]> {
@@ -92,9 +147,9 @@ async function getAllRows(): Promise<VersionRow[]> {
 async function writeVersions<T>(path: string, method: 'POST' | 'PATCH', body: Record<string, unknown>): Promise<T> {
   const token = getToken()
   if (!token) throw new Error('Not logged in')
-  const res = await fetch(`${JWAPI_BASE}/versions${path}`, {
+  const res = await fetch(routeUrl(`/versions${path}`), {
     method,
-    headers: { 'Content-Type': 'application/json', Authorization: `Token ${token}` },
+    headers: { 'Content-Type': 'application/json', ...authHeaders(token) },
     body: JSON.stringify(body),
   })
   if (!res.ok) {
@@ -121,7 +176,7 @@ async function patchRow(songId: number, versionId: number, body: Record<string, 
 /** All other songs grouped with this one (excluding itself), with their
  *  version metadata. Empty if ungrouped.
  *
- *  Dedupes by song_id (keeping the most recently created row per song) —
+ *  Dedupes by song_id (keeping the most recently created row per song) -
  *  the /versions/ table has no unique constraint on (song_id, group_id), so
  *  a double-submitted "link versions" action leaves two identical rows per
  *  song and would otherwise show the same version twice in the UI. */
@@ -142,7 +197,7 @@ export async function getVersionGroup(songId: number): Promise<SongVersionMeta[]
   }
 }
 
-/** Every titled version group's rows. Used by the Tracker's compact view —
+/** Every titled version group's rows. Used by the Tracker's compact view -
  *  deliberately independent of whichever songs happen to be paginated into
  *  the Tracker at the time, since a group's members can easily span pages
  *  the Tracker hasn't loaded yet (or won't, under the current category/search
@@ -157,7 +212,7 @@ export async function getAllVersionGroups(): Promise<SongVersionMeta[]> {
 }
 
 /** Version metadata for a known, bounded set of songs (e.g. a playlist's
- *  tracks) — only songs actually linked into a group come back. */
+ *  tracks) - only songs actually linked into a group come back. */
 export async function getVersionMetaForSongs(songIds: number[]): Promise<Map<number, SongVersionMeta>> {
   if (songIds.length === 0) return new Map()
   try {
@@ -173,10 +228,43 @@ export async function getVersionMetaForSongs(songIds: number[]): Promise<Map<num
   }
 }
 
+/** Whole version groups for a known set of songs - unlike
+ *  getVersionMetaForSongs, each group carries *every* member (the songs
+ *  themselves included), not just the ones in `songIds`. Playlists' compact
+ *  view uses this to list a song's versions even when the playlist only holds
+ *  one of them. Untitled groups count too, and members are deduped by song
+ *  the same way getVersionGroup does. */
+export async function getVersionGroupsForSongs(songIds: number[]): Promise<{
+  groupOf: Map<number, number>
+  groups: Map<number, SongVersionMeta[]>
+}> {
+  const groupOf = new Map<number, number>()
+  const groups = new Map<number, SongVersionMeta[]>()
+  if (songIds.length === 0) return { groupOf, groups }
+  try {
+    const ids = new Set(songIds)
+    const all = await getAllRows()
+    for (const row of all) if (ids.has(row.song_id)) groupOf.set(row.song_id, row.group_id)
+    const wanted = new Set(groupOf.values())
+    const byGroup = new Map<number, Map<number, VersionRow>>()
+    for (const r of all) {
+      if (!wanted.has(r.group_id)) continue
+      if (!byGroup.has(r.group_id)) byGroup.set(r.group_id, new Map())
+      const members = byGroup.get(r.group_id)!
+      const existing = members.get(r.song_id)
+      if (!existing || r.created_at > existing.created_at) members.set(r.song_id, r)
+    }
+    for (const [groupId, members] of byGroup) groups.set(groupId, [...members.values()].map(toMeta))
+  } catch {
+    // Same as the other bulk lookups - no version data just means no groups.
+  }
+  return { groupOf, groups }
+}
+
 /** Groups two songs as versions of each other. If one is already in a group,
  *  the other joins it (inheriting its title); if both are in different
  *  groups already, the groups merge (all members repointed to the lower
- *  group id, and the surviving title — whichever side had one set — is
+ *  group id, and the surviving title - whichever side had one set - is
  *  written to every row so the merged group doesn't end up with two songs
  *  claiming different titles). */
 export async function linkSongVersion(songId: number, otherSongId: number): Promise<void> {
@@ -218,7 +306,7 @@ export async function getOwnVersionMeta(songId: number): Promise<SongVersionMeta
   }
 }
 
-/** Sets this song's own version label (e.g. "v1", "TV Mix") — distinct per
+/** Sets this song's own version label (e.g. "v1", "TV Mix") - distinct per
  *  song within a group, unlike the shared version title below. If the song
  *  isn't linked to anything yet, this creates a standalone one-song group
  *  for it (group_id = its own song id) rather than silently no-op'ing.
@@ -242,8 +330,8 @@ export async function setSongVersion(
 }
 
 /** A group id nothing is using yet. Standalone groups conventionally reuse the
- *  song's own id (see setSongVersion); when that's already taken — the song is
- *  currently in a group whose id came from it — pick the next free integer
+ *  song's own id (see setSongVersion); when that's already taken - the song is
+ *  currently in a group whose id came from it - pick the next free integer
  *  instead. Nothing reads meaning from the number, only equality. */
 function freeGroupId(all: VersionRow[], songId: number): number {
   const used = new Set<number>()
@@ -259,7 +347,7 @@ function freeGroupId(all: VersionRow[], songId: number): number {
 /** Retitles from the perspective of ONE song.
  *
  *  The title belongs to the group, so renaming it in place would rename every
- *  linked song — which is rarely what an editor typing in one song's title
+ *  linked song - which is rarely what an editor typing in one song's title
  *  field means. Instead, a song that shares its group with others is split out
  *  into a new group carrying the new title, leaving the original group and its
  *  remaining members untouched. A song that's alone in its group is simply
@@ -291,7 +379,7 @@ export async function setOwnVersionTitle(
     return row.group_id
   }
 
-  // Move every row this song owns in the old group — the table has no unique
+  // Move every row this song owns in the old group - the table has no unique
   // constraint on (song_id, group_id), so a double-submitted link can leave
   // duplicates behind that would otherwise keep the song in both groups.
   const groupId = freeGroupId(all, songId)
@@ -302,14 +390,14 @@ export async function setOwnVersionTitle(
 
 /** Sets the version title for every song in a group at once, so linked
  *  songs always agree on the title (e.g. "She's The One"). Group-wide by
- *  design — see setOwnVersionTitle for the single-song editor's rename. */
+ *  design - see setOwnVersionTitle for the single-song editor's rename. */
 export async function setGroupVersionTitle(groupId: number, versionTitle: string | null): Promise<void> {
   const all = await getAllRows()
   const members = all.filter(r => r.group_id === groupId)
   await Promise.all(members.map(row => patchRow(row.song_id, row.id, { title: versionTitle })))
 }
 
-/** An existing version title plus the group it belongs to — picking one of
+/** An existing version title plus the group it belongs to - picking one of
  *  these should join that group, not just copy the text (see
  *  joinVersionGroup below). */
 export interface VersionTitleSuggestion {

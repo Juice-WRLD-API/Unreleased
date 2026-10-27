@@ -30,3 +30,32 @@ test('download completions merge into the latest offline library index', async (
   assert.deepEqual(Object.keys(library.tracks).sort(), ['jw-first', 'jw-second'])
   assert.deepEqual(library.playlists.favorites.songIds, ['jw-existing'])
 })
+
+test('an unchanged index is parsed once, and a change on disk is read fresh', (t) => {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'unreleased-offline-library-'))
+  t.after(() => fs.rmSync(tempDir, { recursive: true, force: true }))
+  const dataPath = path.join(tempDir, 'offline-library.json')
+
+  updateOfflineLibraryFile(dataPath, (library) => {
+    library.tracks['jw-1'] = { localPath: 'a.mp3' }
+  })
+  assert.equal(loadOfflineLibraryFile(dataPath), loadOfflineLibraryFile(dataPath))
+
+  fs.writeFileSync(dataPath, JSON.stringify({ tracks: { 'jw-2': { localPath: 'bb.mp3' } }, playlists: {} }))
+  assert.deepEqual(Object.keys(loadOfflineLibraryFile(dataPath).tracks), ['jw-2'])
+})
+
+test('a mutation that throws leaves the index as it is on disk', (t) => {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'unreleased-offline-library-'))
+  t.after(() => fs.rmSync(tempDir, { recursive: true, force: true }))
+  const dataPath = path.join(tempDir, 'offline-library.json')
+
+  updateOfflineLibraryFile(dataPath, (library) => {
+    library.tracks['jw-1'] = { localPath: 'a.mp3' }
+  })
+  assert.throws(() => updateOfflineLibraryFile(dataPath, (library) => {
+    library.tracks['jw-2'] = { localPath: 'b.mp3' }
+    throw new Error('stop')
+  }))
+  assert.deepEqual(Object.keys(loadOfflineLibraryFile(dataPath).tracks), ['jw-1'])
+})

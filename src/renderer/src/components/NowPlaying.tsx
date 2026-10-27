@@ -1,12 +1,17 @@
 import { useState, useEffect } from 'react'
 import { useResizablePanel } from '../hooks/useResizablePanel'
-import { X, Music, ChevronUp, ChevronDown, Pencil, Info } from 'lucide-react'
+import { X, Music, ChevronUp, ChevronDown, Pencil, Info, MicVocal } from 'lucide-react'
 import { useStore, useStorePick } from '../store/useStore'
 import LyricsDisplay from './LyricsDisplay'
+import { lazyOverlay } from '../lib/lazyView'
 import { smallCoverUrl } from '../lib/juicewrldApi'
+import { trackIdToSongId } from '../lib/userApi'
 import { ProgressiveCover } from './ProgressiveCover'
 import { useCanEdit } from '../hooks/useChannelRoles'
-import { useLyricsVisible } from '../lib/lyrics'
+import { useLyricsVisible, lyricsLoading } from '../lib/lyrics'
+
+// Pulls in html-to-image for the export - only worth downloading once opened.
+const ShareLyricsModal = lazyOverlay(() => import('./ShareLyricsModal'))
 
 export default function NowPlaying(): JSX.Element {
   const {
@@ -18,6 +23,7 @@ export default function NowPlaying(): JSX.Element {
   } = useStorePick('currentTrack', 'currentTrackFull', 'setShowNowPlaying', 'showQueue', 'lyricsOverride')
 
   const [artCollapsed, setArtCollapsed] = useState(false)
+  const [showShareLyrics, setShowShareLyrics] = useState(false)
   const [panelWidth, dragHandle] = useResizablePanel(360, 280, 520)
   const [isMobile, setIsMobile] = useState(window.innerWidth < 768)
   const isElectron = navigator.userAgent.includes('Electron')
@@ -34,22 +40,24 @@ export default function NowPlaying(): JSX.Element {
 
   // Global infoSongId (not local state) so the info panel survives switching
   // to another tab (this component itself unmounts when the Wrld tab is
-  // active — see App.tsx). The id is already right there in currentTrack.id
+  // active - see App.tsx). The id is already right there in currentTrack.id
   // (format 'jw-<id>'), so no fetch is needed just to open it.
+  const songId = currentTrack ? trackIdToSongId(currentTrack.id) : null
   const handleInfo = (): void => {
-    const jwMatch = currentTrack?.id.match(/^jw-(\d+)$/)
-    if (!jwMatch) return
-    useStore.getState().setInfoSongId(Number(jwMatch[1]))
+    if (songId != null) useStore.getState().setInfoSongId(songId)
   }
 
-  const jwMatch = currentTrack?.id.match(/^jw-(\d+)$/)
   const canEdit = useCanEdit()
   const hasLyricsNatural = !!(currentTrackFull?.lyrics || currentTrackFull?.syncedLyrics)
-  const hasLyrics = useLyricsVisible(hasLyricsNatural, lyricsOverride)
+  const hasLyrics = useLyricsVisible(hasLyricsNatural, lyricsOverride, lyricsLoading(currentTrack, currentTrackFull))
 
   return (
     <div
-      className="bg-surface-raised flex shrink-0 overflow-hidden animate-slide-in-right"
+      // bg-surface on mobile, not bg-surface-raised: this is `position: fixed;
+      // inset: 0` there, so Safari's Liquid Glass toolbar tinting samples this
+      // element's background directly - bg-surface-raised made the status bar
+      // read visibly darker than the rest of the app while this panel is open.
+      className={`${isMobile ? 'bg-surface' : 'bg-surface-raised'} flex shrink-0 overflow-hidden`}
       style={isMobile
         ? { position: 'fixed', inset: 0, zIndex: 50 }
         : { width: panelWidth, borderLeft: '1px solid var(--border)' }
@@ -62,10 +70,7 @@ export default function NowPlaying(): JSX.Element {
       )}
 
       <div className="flex-1 flex flex-col min-w-0 min-h-0 overflow-hidden">
-        <div
-          className="flex items-center justify-between px-5 pb-3 shrink-0"
-          style={{ paddingTop: needsWindowControlClearance ? 36 : 20, paddingRight: needsWindowControlClearance ? 148 : undefined }}
-        >
+        <div className="flex items-center justify-between px-5 pb-3 pt-5 shrink-0">
           <h2 className="text-text-primary font-semibold text-sm uppercase tracking-widest truncate min-w-0">Now Playing</h2>
           <div className="flex items-center gap-2 shrink-0">
             {currentTrack && (
@@ -77,7 +82,16 @@ export default function NowPlaying(): JSX.Element {
                 {artCollapsed ? <ChevronDown size={16} /> : <ChevronUp size={16} />}
               </button>
             )}
-            {jwMatch && (
+            {hasLyrics && (
+              <button
+                onClick={() => setShowShareLyrics(true)}
+                className="text-text-muted hover:text-text-primary transition-colors"
+                title="Share lyrics"
+              >
+                <MicVocal size={16} />
+              </button>
+            )}
+            {songId != null && (
               <button
                 onClick={handleInfo}
                 className="text-text-muted hover:text-text-primary transition-colors"
@@ -86,9 +100,9 @@ export default function NowPlaying(): JSX.Element {
                 <Info size={16} />
               </button>
             )}
-            {jwMatch && canEdit && (
+            {songId != null && canEdit && (
               <button
-                onClick={() => useStore.getState().openSongEditor(parseInt(jwMatch[1]))}
+                onClick={() => useStore.getState().openSongEditor(songId)}
                 className="text-text-muted hover:text-text-primary transition-colors"
                 title="Edit this song"
               >
@@ -160,6 +174,15 @@ export default function NowPlaying(): JSX.Element {
           </div>
         )}
       </div>
+      {showShareLyrics && currentTrack && currentTrackFull && (
+        <ShareLyricsModal
+          title={currentTrack.title}
+          artist={currentTrack.artist}
+          imageUrl={currentTrackFull.albumArt ?? currentTrack.imageUrl}
+          rawLyrics={currentTrackFull.syncedLyrics || currentTrackFull.lyrics}
+          onClose={() => setShowShareLyrics(false)}
+        />
+      )}
     </div>
   )
 }

@@ -8,6 +8,7 @@
 // ApiTrackerView's fetchAllMode, which this pushes field-filtered queries
 // into (same as sort/multi-category search already does).
 import { JWApiSong } from './juicewrldApi'
+import { displaySongName } from './songPrefs'
 
 export interface FieldFilter { field: string; label: string; value: string }
 
@@ -17,28 +18,30 @@ interface FieldDef {
   /** Canonical key shown in the info popover and used as the token's field name. */
   label: string
   get: (s: JWApiSong) => string
+  /** Optional /songs/ fields `get` reads, so a bulk fetch with ?omit= keeps them. */
+  api?: string[]
 }
 
 const FIELD_DEFS: FieldDef[] = [
-  { keys: ['title', 'name', 'song'],                       label: 'title',      get: (s) => [s.name, ...(s.track_titles ?? [])].join(' ') },
+  { keys: ['title', 'name', 'song'],                       label: 'title',      get: (s) => [displaySongName(s), s.name, ...(s.track_titles ?? [])].join(' ') },
   { keys: ['artist', 'artists'],                            label: 'artists',    get: (s) => s.credited_artists },
-  { keys: ['producer', 'producers'],                        label: 'producers',  get: (s) => s.producers },
-  { keys: ['engineer', 'engineers'],                        label: 'engineers',  get: (s) => s.engineers ?? '' },
+  { keys: ['producer', 'producers'],                        label: 'producers',  get: (s) => s.producers, api: ['producers'] },
+  { keys: ['engineer', 'engineers'],                        label: 'engineers',  get: (s) => s.engineers ?? '', api: ['engineers'] },
   { keys: ['era'],                                          label: 'era',        get: (s) => s.era?.name ?? '' },
   { keys: ['category', 'cat'],                              label: 'category',   get: (s) => s.category },
-  { keys: ['location', 'locations', 'studio'],              label: 'location',   get: (s) => s.recording_locations ?? '' },
-  { keys: ['date', 'dates', 'recorddate', 'recorddates'],   label: 'date',       get: (s) => s.record_dates ?? '' },
-  { keys: ['leak', 'leaktype'],                             label: 'leak',       get: (s) => s.leak_type ?? '' },
-  { keys: ['dateleaked'],                                   label: 'dateleaked', get: (s) => s.date_leaked ?? '' },
-  { keys: ['bitrate'],                                      label: 'bitrate',    get: (s) => s.bitrate ?? '' },
-  { keys: ['release', 'releasedate'],                       label: 'release',    get: (s) => s.release_date ?? '' },
-  { keys: ['files', 'filenames', 'file'],                   label: 'files',      get: (s) => s.file_names ?? '' },
-  { keys: ['session', 'sessiontitle', 'sessiontitles'],     label: 'session',    get: (s) => s.session_titles ?? '' },
+  { keys: ['location', 'locations', 'studio'],              label: 'location',   get: (s) => s.recording_locations ?? '', api: ['recording_locations'] },
+  { keys: ['date', 'dates', 'recorddate', 'recorddates'],   label: 'date',       get: (s) => s.record_dates ?? '', api: ['record_dates'] },
+  { keys: ['leak', 'leaktype'],                             label: 'leak',       get: (s) => s.leak_type ?? '', api: ['leak_type'] },
+  { keys: ['dateleaked'],                                   label: 'dateleaked', get: (s) => s.date_leaked ?? '', api: ['date_leaked'] },
+  { keys: ['bitrate'],                                      label: 'bitrate',    get: (s) => s.bitrate ?? '', api: ['bitrate'] },
+  { keys: ['release', 'releasedate'],                       label: 'release',    get: (s) => s.release_date ?? '', api: ['release_date'] },
+  { keys: ['files', 'filenames', 'file'],                   label: 'files',      get: (s) => s.file_names ?? '', api: ['file_names'] },
+  { keys: ['session', 'sessiontitle', 'sessiontitles'],     label: 'session',    get: (s) => s.session_titles ?? '', api: ['session_titles'] },
   { keys: ['notes'],                                        label: 'notes',      get: (s) => s.notes ?? '' },
-  { keys: ['info', 'additional', 'additionalinfo'],         label: 'info',       get: (s) => s.additional_information ?? '' },
-  { keys: ['instrumental', 'instrumentals'],                label: 'instrumental', get: (s) => [s.instrumentals, s.instrumental_names].filter(Boolean).join(' ') },
+  { keys: ['info', 'additional', 'additionalinfo'],         label: 'info',       get: (s) => s.additional_information ?? '', api: ['additional_information'] },
+  { keys: ['instrumental', 'instrumentals'],                label: 'instrumental', get: (s) => [s.instrumentals, s.instrumental_names].filter(Boolean).join(' '), api: ['instrumentals', 'instrumental_names'] },
   { keys: ['album'],                                        label: 'album',      get: (s) => s.album ?? '' },
-  { keys: ['key', 'originalkey'],                           label: 'key',        get: (s) => s.original_key ?? '' },
+  { keys: ['key', 'originalkey'],                           label: 'key',        get: (s) => s.original_key ?? '', api: ['original_key'] },
 ]
 
 const FIELD_LOOKUP = new Map<string, FieldDef>()
@@ -95,10 +98,31 @@ function normalize(s: string): string {
   return s.replace(/['’‘]/g, '').toLowerCase()
 }
 
+/** The same apostrophe-insensitive substring test field filters use, for
+ *  callers matching against something other than a JWApiSong (999 FM's
+ *  library tracks). */
+export function textMatches(haystack: string, needle: string): boolean {
+  return normalize(haystack).includes(normalize(needle))
+}
+
+/** Optional /songs/ fields the given filters read - see useTrackerOmit. */
+export function filterApiFields(filters: FieldFilter[]): string[] {
+  return filters.flatMap(({ field }) => FIELD_LOOKUP.get(field)?.api ?? [])
+}
+
 export function matchesFieldFilters(song: JWApiSong, filters: FieldFilter[]): boolean {
   return filters.every(({ field, value }) => {
     const def = FIELD_LOOKUP.get(field)
     if (!def) return true
-    return normalize(def.get(song)).includes(normalize(value))
+    return textMatches(def.get(song), value)
   })
+}
+
+// Id lookup over the /songs/ catalogue (loadAllSongs), rebuilt only when the
+// catalogue itself is refetched - for lists whose rows carry a song id but
+// not the fields filters read (playlists, the queue, the tier list).
+let byIdIndex: { list: JWApiSong[]; byId: Map<number, JWApiSong> } | null = null
+export function songsById(list: JWApiSong[]): Map<number, JWApiSong> {
+  if (byIdIndex?.list !== list) byIdIndex = { list, byId: new Map(list.map((s) => [s.id, s])) }
+  return byIdIndex.byId
 }

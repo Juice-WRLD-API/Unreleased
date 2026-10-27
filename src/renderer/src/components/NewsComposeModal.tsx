@@ -1,12 +1,15 @@
 import { useState, useRef } from 'react'
 import { ModalOverlay, LockToggle } from './Modal'
-import { X, ImagePlus, Paperclip, Trash2, Star, FileText } from 'lucide-react'
+import { X, ImagePlus, Paperclip, Trash2, Star, FileText, HelpCircle } from 'lucide-react'
 import { compressImageFile } from '../lib/userApi'
 import Markdown from './Markdown'
+import NewsFormattingHelp from './NewsFormattingHelp'
 import {
   createNewsItem, updateNewsItem, uploadAttachment, isImageAttachment, MAX_ATTACHMENT_BYTES,
   type NewsItem, type NewsChannel, type NewsAttachment,
 } from '../lib/newsApi'
+import { errorMessage } from '../lib/format'
+import ThemedSelect from './ThemedSelect'
 
 // An attachment row in the composer: either one already hosted on the post
 // (kept as-is) or a freshly-picked local file (uploaded on publish).
@@ -44,6 +47,7 @@ export default function NewsComposeModal({ channels, initialChannel, editing, on
   const [body, setBody] = useState(editing?.body ?? '')
   const [featured, setFeatured] = useState(editing?.featured ?? false)
   const [bodyPreview, setBodyPreview] = useState(false)
+  const [showHelp, setShowHelp] = useState(false)
   const [imageUrl, setImageUrl] = useState<string | null>(editing?.image_url ?? null)
   // Existing attachments are kept as-is; newly picked files are held locally and
   // uploaded on publish (see save).
@@ -55,6 +59,50 @@ export default function NewsComposeModal({ channels, initialChannel, editing, on
 
   const imageInput = useRef<HTMLInputElement>(null)
   const fileInput = useRef<HTMLInputElement>(null)
+  // Last cursor/selection in the body, kept across the help view (which
+  // unmounts the textarea) so "Insert" lands where the user left off.
+  const bodySel = useRef<{ start: number; end: number } | null>(null)
+  // Set by an insert; the textarea restores focus + cursor once it remounts.
+  const pendingCursor = useRef<number | null>(null)
+
+  const rememberSel = (el: HTMLTextAreaElement): void => {
+    bodySel.current = { start: el.selectionStart, end: el.selectionEnd }
+  }
+
+  // Insert a snippet at the remembered cursor (end of body if none), on its
+  // own block so block syntax like lists, headings and tables still parses.
+  const insertSnippet = (text: string): void => {
+    const sel = bodySel.current ?? { start: body.length, end: body.length }
+    const before = body.slice(0, sel.start)
+    const after = body.slice(sel.end)
+    const lead = before === '' ? '' : before.endsWith('\n\n') ? '' : before.endsWith('\n') ? '\n' : '\n\n'
+    const trail = after === '' ? '' : after.startsWith('\n\n') ? '' : after.startsWith('\n') ? '\n' : '\n\n'
+    const next = before + lead + text + trail + after
+    const cursor = before.length + lead.length + text.length
+    setBody(next)
+    bodySel.current = { start: cursor, end: cursor }
+    pendingCursor.current = cursor
+    setBodyPreview(false)
+    setShowHelp(false)
+  }
+
+  const applyTemplate = (text: string): void => {
+    setBody(text)
+    bodySel.current = { start: text.length, end: text.length }
+    pendingCursor.current = 0
+    setBodyPreview(false)
+    setShowHelp(false)
+  }
+
+  const attachBody = (el: HTMLTextAreaElement | null): void => {
+    if (el && pendingCursor.current !== null) {
+      const c = pendingCursor.current
+      pendingCursor.current = null
+      el.focus()
+      el.setSelectionRange(c, c)
+      el.scrollIntoView({ block: 'nearest' })
+    }
+  }
 
   const pickImage = async (file: File | undefined): Promise<void> => {
     if (!file) return
@@ -105,7 +153,7 @@ export default function NewsComposeModal({ channels, initialChannel, editing, on
         : await createNewsItem(payload)
       onSaved(saved)
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to save')
+      setError(errorMessage(err, 'Failed to save'))
       setSaving(false)
     }
   }
@@ -120,24 +168,32 @@ export default function NewsComposeModal({ channels, initialChannel, editing, on
       panelClassName="bg-surface border border-[var(--border)] rounded-t-2xl md:rounded-2xl shadow-2xl w-full md:max-w-lg max-h-[92svh]"
       minWidth={420} minHeight={420}
     >
-      {({ onHandleMouseDown, locked, toggleLock }) => (
-      <div className="bg-surface w-full h-full overflow-y-auto">
+      {({ onHandleMouseDown, locked, toggleLock, canLock }) => (
+      <div className="bg-surface w-full h-full flex flex-col overflow-hidden">
         <div
-          className="flex items-center justify-between px-5 py-4 border-b border-[var(--border)] sticky top-0 bg-surface z-10 cursor-grab active:cursor-grabbing"
+          className={`shrink-0 flex items-center justify-between px-5 py-4 border-b border-[var(--border)] bg-surface`}
           onMouseDown={onHandleMouseDown}
         >
           <h2 className="flex items-center gap-2 text-text-primary text-sm font-semibold">
             <FileText size={15} className="text-accent" /> {editing ? 'Edit post' : 'New post'}
           </h2>
           <div className="flex items-center gap-1">
-            <LockToggle locked={locked} onClick={toggleLock} />
-            <button onClick={onClose} disabled={saving} className="text-text-muted hover:text-text-primary transition-colors disabled:opacity-50">
+            {canLock && <LockToggle locked={locked} onClick={toggleLock} />}
+            <button onClick={onClose} title="Close" disabled={saving} className="text-text-muted hover:text-text-primary transition-colors disabled:opacity-50">
               <X size={18} />
             </button>
           </div>
         </div>
 
-        <div className="px-5 py-4 space-y-4">
+        <div className="flex-1 min-h-0 overflow-y-auto px-5 py-4 space-y-4">
+          {showHelp ? (
+            <NewsFormattingHelp
+              onBack={() => setShowHelp(false)}
+              onInsert={insertSnippet}
+              onUseTemplate={applyTemplate}
+              bodyIsEmpty={!body.trim()}
+            />
+          ) : (<>
           {/* Lead image */}
           <div>
             <span className={label}>Cover image</span>
@@ -163,35 +219,40 @@ export default function NewsComposeModal({ channels, initialChannel, editing, on
             )}
           </div>
 
-          <div>
-            <label className={label}>Title</label>
+          <label className="block">
+            <span className={label}>Title</span>
             <input className={field} value={title} onChange={(e) => setTitle(e.target.value)} placeholder="What's the news?" maxLength={200} />
-          </div>
+          </label>
 
           <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label className={label}>Channel</label>
-              <select className={field} value={channel} onChange={(e) => setChannel(e.target.value)}>
-                {channels.length === 0 && <option value="">No channels</option>}
-                {channels.map((c) => <option key={c.id} value={c.id}>{c.label}</option>)}
-              </select>
-            </div>
-            <div>
-              <label className={label}>Tag <span className="text-text-muted/60 font-normal">(optional)</span></label>
+            <label className="block">
+              <span className={label}>Channel</span>
+              <ThemedSelect className={`${field} w-full`} value={String(channel)} onChange={setChannel}
+                placeholder="No channels"
+                options={channels.map((c) => ({ value: String(c.id), label: c.label }))} />
+            </label>
+            <label className="block">
+              <span className={label}>Tag <span className="text-text-muted/60 font-normal">(optional)</span></span>
               <input className={field} value={category} onChange={(e) => setCategory(e.target.value)} placeholder="e.g. Release" maxLength={40} />
-            </div>
+            </label>
           </div>
 
-          <div>
-            <label className={label}>Summary <span className="text-text-muted/60 font-normal">(optional)</span></label>
+          <label className="block">
+            <span className={label}>Summary <span className="text-text-muted/60 font-normal">(optional)</span></span>
             <textarea className={`${field} resize-none`} rows={2} value={summary} onChange={(e) => setSummary(e.target.value)} placeholder="One or two lines shown in the feed" maxLength={280} />
-          </div>
+          </label>
 
           <div>
             <div className="flex items-center justify-between mb-1">
               <span className={`${label} mb-0`}>Body</span>
               <div className="flex items-center gap-3">
-                <span className="text-[10px] text-text-muted/70">Markdown supported</span>
+                <button
+                  onClick={() => setShowHelp(true)}
+                  className="flex items-center gap-1 text-[11px] text-text-muted hover:text-accent transition-colors"
+                  title="How to format the post body, with examples"
+                >
+                  <HelpCircle size={12} /> Formatting help
+                </button>
                 <div className="flex rounded-md overflow-hidden border border-[var(--border)]">
                   {(['write', 'preview'] as const).map((mode) => {
                     const active = (mode === 'preview') === bodyPreview
@@ -215,7 +276,7 @@ export default function NewsComposeModal({ channels, initialChannel, editing, on
                   : <p className="text-sm text-text-muted">Nothing to preview yet.</p>}
               </div>
             ) : (
-              <textarea className={`${field} resize-y min-h-[120px] font-mono`} rows={6} value={body} onChange={(e) => setBody(e.target.value)} placeholder="Full post… **bold**, _italic_, [links](https://…), lists, > quotes" />
+              <textarea ref={attachBody} className={`${field} resize-y min-h-[120px] font-mono`} rows={6} value={body} onChange={(e) => { setBody(e.target.value); rememberSel(e.target) }} onSelect={(e) => rememberSel(e.currentTarget)} placeholder="Full post… **bold**, _italic_, [links](https://…), lists, > quotes" />
             )}
           </div>
 
@@ -255,10 +316,12 @@ export default function NewsComposeModal({ channels, initialChannel, editing, on
             Feature this post at the top of the feed
           </button>
 
+          </>)}
+
           {error && <p className="text-xs text-red-400">{error}</p>}
         </div>
 
-        <div className="flex items-center justify-end gap-2 px-5 py-4 border-t border-[var(--border)] sticky bottom-0 bg-surface">
+        <div className="shrink-0 flex items-center justify-end gap-2 px-5 py-4 border-t border-[var(--border)] bg-surface">
           <button onClick={onClose} disabled={saving} className="px-4 py-2 rounded-lg text-sm font-medium text-text-secondary hover:text-text-primary transition-colors disabled:opacity-50">
             Cancel
           </button>

@@ -1,7 +1,7 @@
 {
   "name": "Unreleased",
   "short_name": "Unreleased",
-  "description": "Stream Juice WRLD's full catalog — released and unreleased — with playlists, synced lyrics, 999 FM radio and offline downloads.",
+  "description": "Stream Juice WRLD's full catalog - released and unreleased - with playlists, synced lyrics, 999 FM radio and offline downloads.",
   "id": "/",
   "start_url": "/",
   "scope": "/",

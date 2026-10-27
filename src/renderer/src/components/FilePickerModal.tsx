@@ -1,18 +1,16 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { ModalOverlay, LockToggle } from './Modal'
 import { X, Folder, FolderOpen, ArrowLeft, Home, ChevronRight, Loader2, ImageIcon, Search, Check, Music2, File, FolderCheck, FolderPlus } from 'lucide-react'
 import {
-  apiFetch, apiPeek, buildStreamUrl, smallCoverUrl, parseBrowseEntries, cleanTitleForSearch, filterSearchResults,
+  apiFetch, apiPeek, buildStreamUrl, smallCoverUrl, parseBrowseEntries, cleanTitleForSearch, coverSearchQueries, filterSearchResults, searchFiles,
   JWApiFileEntry, JWApiBrowseResponse,
 } from '../lib/juicewrldApi'
 import { getMediaType } from '../lib/fileTypes'
+import { folderFromIndex, loadFileIndex, runFileSearch } from '../lib/fileSearch'
+import { SearchHelpButton } from './SearchHelpPopover'
+import { breadcrumbs, parentFolder } from '../lib/apiFilesShared'
 import { useStore } from '../store/useStore'
-
-function breadcrumbs(path: string): { label: string; path: string }[] {
-  if (!path) return []
-  const parts = path.split('/').filter(Boolean)
-  return parts.map((label, i) => ({ label, path: parts.slice(0, i + 1).join('/') }))
-}
+import { errorMessage } from '../lib/format'
 
 // Path join that tolerates a typed name with stray slashes or spaces.
 function joinFolder(base: string, name: string): string {
@@ -21,12 +19,7 @@ function joinFolder(base: string, name: string): string {
   return base ? `${base}/${clean}` : clean
 }
 
-function parentFolder(path: string): string {
-  const i = path.lastIndexOf('/')
-  return i > 0 ? path.slice(0, i) : ''
-}
-
-// Directories first, then matching files, alphabetically within each — a picker
+// Directories first, then matching files, alphabetically within each - a picker
 // has no need for the full sort/view-mode machinery ApiFilesView offers.
 function sortForPicker(entries: JWApiFileEntry[], kind: PickerKind): JWApiFileEntry[] {
   return [...entries]
@@ -46,16 +39,17 @@ interface Props {
    *  /files/download/ URL for use as a cover; 'audio' hands back the raw
    *  storage path, which is the shape the API's `path` field holds. */
   kind?: PickerKind
-  /** The song's title — seeds the initial search so covers already filed
+  /** The song's title - seeds the initial search so covers already filed
    *  under that name surface immediately instead of an empty root listing. */
   songTitle?: string
-  /** This song's other known titles — a cover may be filed under an alt name
+  /** This song's other known titles - a cover may be filed under an alt name
    *  instead of the primary one, so these are searched too and merged in. */
   altTitles?: string[]
-  onSelect: (path: string) => void
+  /** `channel` is the comp the file was picked from. */
+  onSelect: (path: string, channel: string) => void
   onClose: () => void
   /** Show a "Use this folder" action that hands back the folder currently
-   *  being browsed instead of a file. For targets that don't exist yet — a
+   *  being browsed instead of a file. For targets that don't exist yet - a
    *  comp upload names a new file, so there's nothing to click. */
   allowFolderSelect?: boolean
   /** Overrides the header text. */
@@ -67,14 +61,17 @@ interface Props {
   onSelectMany?: (paths: string[]) => void
   emptyFolderProposable?: boolean
   channel?: string
+  /** Show the comp switcher, so a file can come from a comp other than the
+   *  one the Files tab is on. */
+  switchableChannel?: boolean
 }
 
 // A scoped-down version of ApiFilesView's browser for picking one file out of
-// the API's storage — folders plus files of the requested kind, no playback/
+// the API's storage - folders plus files of the requested kind, no playback/
 // selection/download machinery.
 //
 // Image mode hands back the resolved /files/download/ URL (buildStreamUrl),
-// the same absolute-URL shape ApiFilesView's "Copy link" produces — NOT the
+// the same absolute-URL shape ApiFilesView's "Copy link" produces - NOT the
 // raw storage path. resolvePrefCoverUrl treats a bare path as an audio track
 // whose embedded art needs extracting via /files/cover-art/, which 404s on a
 // plain image file; an absolute URL passes through untouched instead.
@@ -82,9 +79,12 @@ interface Props {
 // Audio mode is the opposite: a song's `path` field in the API is the raw
 // storage path ("Compilation/1. Released Discography/…mp3") and the app builds
 // stream URLs from it, so handing back an absolute URL there would double-wrap.
-export default function FilePickerModal({ kind = 'image', songTitle, altTitles = [], onSelect, onClose, allowFolderSelect = false, title, multiple = false, onSelectMany, emptyFolderProposable = false, channel }: Props): JSX.Element {
+export default function FilePickerModal({ kind = 'image', songTitle, altTitles = [], onSelect, onClose, allowFolderSelect = false, title, multiple = false, onSelectMany, emptyFolderProposable = false, channel, switchableChannel = false }: Props): JSX.Element {
   const storeChannel = useStore((s) => s.activeChannel)
-  const activeChannel = channel ?? storeChannel
+  const channels = useStore((s) => s.channels)
+  const loadChannels = useStore((s) => s.loadChannels)
+  const [pickedChannel, setPickedChannel] = useState(channel ?? storeChannel)
+  const activeChannel = switchableChannel ? pickedChannel : (channel ?? storeChannel)
   const browseParams = useCallback((path: string): Record<string, string> => {
     const p: Record<string, string> = {}
     if (path) p.path = path
@@ -104,20 +104,18 @@ export default function FilePickerModal({ kind = 'image', songTitle, altTitles =
   const initialQuery = songTitle ? cleanTitleForSearch(songTitle) : ''
   // Alt titles searched alongside the primary one on mount (deduped, and never
   // repeating a name the primary search already covers).
-  const altQueries = altTitles
-    .map(cleanTitleForSearch)
-    .filter((q, i, arr) => q && q.toLowerCase() !== initialQuery.toLowerCase() && arr.indexOf(q) === i)
+  const altQueries = songTitle ? coverSearchQueries(songTitle, altTitles).filter((q) => q.toLowerCase() !== initialQuery.toLowerCase()) : []
   const [currentPath, setCurrentPath] = useState('')
   const [entries, setEntries] = useState<JWApiFileEntry[]>([])
   const [loading, setLoading] = useState(!initialQuery)
   const [error, setError] = useState<string | null>(null)
   const [history, setHistory] = useState<string[]>([])
-  // Kept across navigation on purpose — gathering a batch usually means
+  // Kept across navigation on purpose - gathering a batch usually means
   // dipping into a few folders before committing.
   const [checked, setChecked] = useState<string[]>([])
   // Naming a folder that doesn't exist yet. There's no endpoint that creates
-  // one — the API has no mkdir, and a comp proposal's change types are
-  // upload/replace/move/delete — so this only composes a path. The folder
+  // one - the API has no mkdir, and a comp proposal's change types are
+  // upload/replace/move/delete - so this only composes a path. The folder
   // comes into existence when an upload into it is approved.
   const [newFolder, setNewFolder] = useState<string | null>(null)
   const isMulti = multiple && !!onSelectMany
@@ -125,19 +123,24 @@ export default function FilePickerModal({ kind = 'image', songTitle, altTitles =
     setChecked((prev) => (prev.includes(path) ? prev.filter((p) => p !== path) : [...prev, path]))
 
   // Seeded from the song title (if any) so the picker opens already showing
-  // title-matched results — see the mount effect below for the root prefetch
+  // title-matched results - see the mount effect below for the root prefetch
   // that still happens quietly alongside it.
   const [search, setSearch] = useState(initialQuery)
   const [debouncedSearch, setDebouncedSearch] = useState(initialQuery)
-  const [searchResults, setSearchResults] = useState<JWApiFileEntry[]>([])
+  const [primaryResults, setSearchResults] = useState<JWApiFileEntry[]>([])
+  // Alt-title results live apart from the primary search's, so whichever of
+  // the two lands last can't wipe the other out.
+  const [altResults, setAltResults] = useState<JWApiFileEntry[]>([])
   const [searchLoading, setSearchLoading] = useState(!!initialQuery)
   const isSearching = debouncedSearch.trim().length > 0
 
   const navigate = useCallback(async (path: string, pushHistory = true, resetSearch = true) => {
     if (resetSearch) { setSearch(''); setDebouncedSearch('') }
-    const cached = apiPeek<JWApiBrowseResponse>('/files/browse/', browseParams(path))
+    // Cached listing, else the channel's file index if search already loaded it.
+    const peeked = apiPeek<JWApiBrowseResponse>('/files/browse/', browseParams(path))
+    const cached = peeked ? parseBrowseEntries(peeked) : folderFromIndex(activeChannel, path)
     if (cached) {
-      setEntries(parseBrowseEntries(cached))
+      setEntries(cached)
       setCurrentPath(path)
       setError(null)
       if (resetSearch) setLoading(false)
@@ -151,16 +154,30 @@ export default function FilePickerModal({ kind = 'image', songTitle, altTitles =
       setCurrentPath(path)
       setEntries(parseBrowseEntries(data))
     } catch (err) {
-      if (!cached && resetSearch) setError(err instanceof Error ? err.message : 'Failed to load')
+      if (!cached && resetSearch) setError(errorMessage(err, 'Failed to load'))
     } finally {
       if (resetSearch) setLoading(false)
     }
-  }, [currentPath, browseParams])
+  }, [currentPath, browseParams, activeChannel])
 
   // Always prefetch the root listing (silently, without touching the search
   // box) so clearing the initial title search drops straight into a populated
   // browser instead of an empty one.
   useEffect(() => { navigate('', false, !initialQuery) }, []) // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    if (switchableChannel && channels.length === 0) loadChannels().catch(() => {})
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Switching comps starts over at its root; a search in progress re-runs
+  // against the new comp through searchParams.
+  const mountedChannel = useRef(activeChannel)
+  useEffect(() => {
+    if (mountedChannel.current === activeChannel) return
+    mountedChannel.current = activeChannel
+    setHistory([])
+    navigate('', false, false)
+  }, [activeChannel]) // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     const t = setTimeout(() => setDebouncedSearch(search), 300)
@@ -172,43 +189,41 @@ export default function FilePickerModal({ kind = 'image', songTitle, altTitles =
     let cancelled = false
     setSearchLoading(true)
     const term = debouncedSearch.trim()
-    apiFetch<JWApiBrowseResponse>('/files/browse/', searchParams(term))
-      .then((data) => { if (!cancelled) setSearchResults(filterSearchResults(parseBrowseEntries(data), term)) })
+    // The seeded title lookup stays a strict whole-word match (a short title
+    // like "Rental" mustn't pull in "Parental Advisory"); anything typed gets
+    // the Files search syntax, narrowed to what this picker can pick.
+    const run = term === initialQuery
+      ? searchFiles(term, searchParams(term)).then((entries) => filterSearchResults(entries, term))
+      : runFileSearch(kind === 'any' ? term : `${term} type:${kind},folder`, activeChannel).then((r) => r.entries)
+    run
+      .then((entries) => { if (!cancelled) setSearchResults(entries) })
       .catch(() => { if (!cancelled) setSearchResults([]) })
       .finally(() => { if (!cancelled) setSearchLoading(false) })
     return () => { cancelled = true }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [debouncedSearch, isSearching, searchParams])
 
   // Merge in results for the song's alt titles alongside the primary-title
-  // search seeded above — a cover is often filed under a feature's alias or
-  // an alternate spelling rather than the main title. Runs once on mount only:
-  // once the user edits the search box, the effect above replaces
-  // searchResults wholesale with a plain single-term search as normal.
+  // search seeded above - a cover is often filed under a feature's alias or
+  // an alternate spelling rather than the main title. Runs on mount (and on a
+  // comp switch); once the user edits the search box, only the plain
+  // single-term search above shows (see searchResults below).
   useEffect(() => {
-    if (!initialQuery || altQueries.length === 0) return
+    // Re-run on a comp switch too, as long as the seeded search is still up.
+    setAltResults([])
+    if (!initialQuery || altQueries.length === 0 || search !== initialQuery) return
     let cancelled = false
     Promise.all(altQueries.map((q) =>
-      apiFetch<JWApiBrowseResponse>('/files/browse/', searchParams(q))
-        .then((data) => filterSearchResults(parseBrowseEntries(data), q))
+      searchFiles(q, searchParams(q))
+        .then((entries) => filterSearchResults(entries, q))
         .catch(() => [] as JWApiFileEntry[])
     )).then((lists) => {
-      if (cancelled) return
-      setSearchResults((prev) => {
-        const seen = new Set(prev.map((e) => e.path))
-        const merged = [...prev]
-        for (const list of lists) for (const e of list) if (!seen.has(e.path)) { seen.add(e.path); merged.push(e) }
-        return merged
-      })
+      if (!cancelled) setAltResults(lists.flat())
     })
     return () => { cancelled = true }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
+  }, [activeChannel])
 
-  useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent): void => { if (e.key === 'Escape') onClose() }
-    window.addEventListener('keydown', handleKeyDown)
-    return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [onClose])
 
   const goBack = (): void => {
     if (history.length > 0) {
@@ -222,6 +237,14 @@ export default function FilePickerModal({ kind = 'image', songTitle, altTitles =
 
   const goHome = (): void => { setHistory([]); navigate('', false) }
 
+  // Alt-title hits only while the seeded search is still the one showing.
+  const searchResults = useMemo(() => {
+    if (altResults.length === 0 || debouncedSearch !== initialQuery) return primaryResults
+    const seen = new Set(primaryResults.map((e) => e.path))
+    const merged = [...primaryResults]
+    for (const e of altResults) if (!seen.has(e.path)) { seen.add(e.path); merged.push(e) }
+    return merged
+  }, [primaryResults, altResults, debouncedSearch, initialQuery])
   const shown = sortForPicker(isSearching ? searchResults : entries, kind)
   const crumbs = breadcrumbs(currentPath)
 
@@ -232,11 +255,14 @@ export default function FilePickerModal({ kind = 'image', songTitle, altTitles =
       panelClassName="bg-surface border border-[var(--border)] rounded-t-2xl md:rounded-2xl shadow-2xl w-full md:max-w-lg h-[85svh] md:h-[600px] max-h-[92svh] md:max-h-[86vh]"
       minWidth={420} minHeight={420}
     >
-      {({ onHandleMouseDown, locked, toggleLock }) => (
-      <div className="select-text bg-surface w-full h-full flex flex-col overflow-hidden">
+      {({ onHandleMouseDown, locked, toggleLock, canLock }) => (
+      <div
+        className="select-text bg-surface w-full h-full flex flex-col overflow-hidden"
+        style={{ paddingBottom: 'env(safe-area-inset-bottom, 0px)' }}
+      >
         {/* Header */}
         <div
-          className="shrink-0 px-4 pt-4 pb-3 border-b border-[var(--border)] cursor-grab active:cursor-grabbing"
+          className={`shrink-0 px-4 pt-4 pb-3 border-b border-[var(--border)]`}
           onMouseDown={onHandleMouseDown}
         >
           <div className="flex items-center justify-between mb-3">
@@ -244,12 +270,25 @@ export default function FilePickerModal({ kind = 'image', songTitle, altTitles =
               {title ?? (isAudio ? 'Choose an audio file from API files' : kind === 'any' ? 'Choose a file from API files' : 'Choose a cover from API files')}
             </h2>
             <div className="flex items-center gap-1">
-              <LockToggle locked={locked} onClick={toggleLock} />
+              {canLock && <LockToggle locked={locked} onClick={toggleLock} />}
               <button onClick={onClose} className="p-1.5 rounded-lg hover:bg-surface-overlay transition-colors" title="Close">
                 <X size={15} className="text-text-muted" />
               </button>
             </div>
           </div>
+
+          {switchableChannel && channels.length > 1 && (
+            <div className="flex items-center bg-surface-overlay rounded-lg p-1 gap-0.5 mb-2.5 overflow-x-auto no-scrollbar">
+              {channels.map((ch) => (
+                <button
+                  key={ch.slug}
+                  onClick={() => setPickedChannel(ch.slug)}
+                  className={`shrink-0 px-2.5 py-1 rounded-md text-xs font-medium transition-colors ${activeChannel === ch.slug ? 'bg-surface-raised text-text-primary shadow-sm' : 'text-text-muted hover:text-text-primary'}`}
+                  title={ch.description || ch.name}
+                >{ch.name}</button>
+              ))}
+            </div>
+          )}
 
           <div className="relative mb-2.5">
             <Search size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-text-muted pointer-events-none" />
@@ -257,18 +296,26 @@ export default function FilePickerModal({ kind = 'image', songTitle, altTitles =
               type="text"
               value={search}
               onChange={(e) => setSearch(e.target.value)}
+              onFocus={() => { void loadFileIndex(activeChannel) }}
               placeholder={`Search ${noun}…`}
-              className="w-full bg-surface-overlay border border-[var(--border)] rounded-lg pl-8 pr-8 py-1.5 text-xs text-text-primary placeholder:text-text-muted focus:outline-none focus:border-accent/40"
+              className={`w-full bg-surface-overlay border border-[var(--border)] rounded-lg pl-8 ${search ? 'pr-14' : 'pr-8'} py-1.5 text-xs text-text-primary placeholder:text-text-muted focus:outline-none focus:border-accent/40`}
             />
-            {search && (
-              <button
-                onClick={() => { setSearch(''); setDebouncedSearch('') }}
-                className="absolute right-2 top-1/2 -translate-y-1/2 text-text-muted hover:text-text-primary transition-colors"
-                title="Clear search"
-              >
-                <X size={13} />
-              </button>
-            )}
+            <div className="absolute right-2 top-1/2 -translate-y-1/2 flex items-center gap-1.5">
+              {search && (
+                <button
+                  onClick={() => { setSearch(''); setDebouncedSearch('') }}
+                  className="text-text-muted hover:text-text-primary transition-colors"
+                  title="Clear search"
+                >
+                  <X size={13} />
+                </button>
+              )}
+              <SearchHelpButton
+                kind="files"
+                size={13}
+                className={(open) => `flex transition-colors ${open ? 'text-accent' : 'text-text-muted hover:text-text-primary'}`}
+              />
+            </div>
           </div>
 
           {isSearching ? (
@@ -340,7 +387,7 @@ export default function FilePickerModal({ kind = 'image', songTitle, altTitles =
               </p>
             </div>
           ) : isList ? (
-            /* Audio has no thumbnail worth showing — a compact list reads better
+            /* Audio has no thumbnail worth showing - a compact list reads better
                than a grid of identical note icons. */
             <div className="flex flex-col gap-0.5">
               {currentPath && !isSearching && (
@@ -357,7 +404,7 @@ export default function FilePickerModal({ kind = 'image', songTitle, altTitles =
                     onClick={() => {
                       if (isDir) navigate(entry.path)
                       else if (isMulti) toggle(entry.path)
-                      else onSelect(entry.path)
+                      else onSelect(entry.path, activeChannel)
                     }}
                     title={entry.path}
                     className={`group flex items-center gap-2.5 px-2 py-2 rounded-lg transition-colors text-left ${
@@ -397,7 +444,7 @@ export default function FilePickerModal({ kind = 'image', songTitle, altTitles =
                 return (
                   <button
                     key={entry.path}
-                    onClick={() => { if (isDir) navigate(entry.path); else onSelect(buildStreamUrl(entry.path, activeChannel)) }}
+                    onClick={() => { if (isDir) navigate(entry.path); else onSelect(buildStreamUrl(entry.path, activeChannel), activeChannel) }}
                     title={entry.name}
                     className="group flex flex-col rounded-xl overflow-hidden transition-colors bg-surface-overlay hover:bg-surface-raised text-left"
                   >
@@ -407,7 +454,7 @@ export default function FilePickerModal({ kind = 'image', songTitle, altTitles =
                       ) : (
                         <>
                           <img
-                            // Picker thumbnails only — the path handed back on
+                            // Picker thumbnails only - the path handed back on
                             // select is still the full-size one.
                             src={smallCoverUrl(buildStreamUrl(entry.path, activeChannel))}
                             alt=""
@@ -474,7 +521,7 @@ export default function FilePickerModal({ kind = 'image', songTitle, altTitles =
                   <FolderPlus size={14} /> New folder
                 </button>
                 <button
-                  onClick={() => onSelect(currentPath)}
+                  onClick={() => onSelect(currentPath, activeChannel)}
                   disabled={isSearching}
                   title={isSearching ? 'Clear the search to pick the folder you are browsing' : 'Use this folder'}
                   className="shrink-0 px-3 py-2 rounded-lg bg-accent text-white text-xs font-semibold flex items-center gap-1.5 disabled:opacity-40"
@@ -490,7 +537,7 @@ export default function FilePickerModal({ kind = 'image', songTitle, altTitles =
                     value={newFolder}
                     onChange={(e) => setNewFolder(e.target.value.replace(/^\/+/, ''))}
                     onKeyDown={(e) => {
-                      if (e.key === 'Enter' && newFolder.trim()) onSelect(joinFolder(currentPath, newFolder))
+                      if (e.key === 'Enter' && newFolder.trim()) onSelect(joinFolder(currentPath, newFolder), activeChannel)
                       if (e.key === 'Escape') { e.stopPropagation(); setNewFolder(null) }
                     }}
                     placeholder="New folder name"
@@ -501,7 +548,7 @@ export default function FilePickerModal({ kind = 'image', songTitle, altTitles =
                     Cancel
                   </button>
                   <button
-                    onClick={() => onSelect(joinFolder(currentPath, newFolder))}
+                    onClick={() => onSelect(joinFolder(currentPath, newFolder), activeChannel)}
                     disabled={!newFolder.trim()}
                     className="shrink-0 px-3 py-2 rounded-lg bg-accent text-white text-xs font-semibold flex items-center gap-1.5 disabled:opacity-40"
                   >
@@ -511,8 +558,8 @@ export default function FilePickerModal({ kind = 'image', songTitle, altTitles =
                 <p className="text-[11px] text-text-muted leading-relaxed">
                   <span className="font-mono text-text-secondary">{joinFolder(currentPath, newFolder) || '…'}</span>
                   {emptyFolderProposable
-                    ? " — created on disk once this folder proposal is approved, ready for you to upload files into."
-                    : " — the folder is created when an upload into it is approved. An empty folder can't be proposed on its own."}
+                    ? " - created on disk once this folder proposal is approved, ready for you to upload files into."
+                    : " - the folder is created when an upload into it is approved. An empty folder can't be proposed on its own."}
                 </p>
               </>
             )}

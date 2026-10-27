@@ -1,0 +1,103 @@
+import { useMemo, useRef, useState } from 'react'
+import { getMyProposals, withdrawProposal, resubmitProposal, adminReviewProposal } from '../lib/userApi'
+import type { SongEditProposal } from '../lib/userApi'
+import { proposalSearchText, type ProposalFilterTab } from '../lib/proposalSearch'
+import { useStrictModeSafeEffect } from './useStrictModeSafeEffect'
+import { showAppToast } from '../lib/appToast'
+
+// Owns the "my proposals" list + filter/search/edit/resubmit/withdraw logic
+// shared by EditorProfileView.desktop.tsx and .mobile.tsx. `refreshKey` is
+// owned by the caller (it also drives sibling hooks - leaderboard, comp
+// proposals, reports - off the same refresh button), so it's a parameter
+// here rather than state.
+export function useMyProposals(activeChannel: string, refreshKey: number) {
+  const [proposals, setProposals] = useState<SongEditProposal[]>([])
+  const [loading, setLoading] = useState(true)
+  const [refreshing, setRefreshing] = useState(false)
+  const [filter, setFilter] = useState<ProposalFilterTab>('all')
+  const [search, setSearch] = useState('')
+  const [deletingId, setDeletingId] = useState<number | null>(null)
+  const [resubmittingId, setResubmittingId] = useState<number | null>(null)
+  const [reviewingId, setReviewingId] = useState<number | null>(null)
+  // Channel whose full list `proposals` holds, once one has finished loading.
+  const shownChannel = useRef<string | null>(null)
+
+  useStrictModeSafeEffect((isCancelled) => {
+    setRefreshing(true)
+    // On a first load (or a channel switch) the first page shows as soon as it
+    // lands; `refreshing` stays on until the rest have come in too. A plain
+    // refresh keeps the full list up instead of shrinking it to one page.
+    getMyProposals(activeChannel, (page) => {
+      if (isCancelled() || shownChannel.current === activeChannel) return
+      setProposals(page)
+      setLoading(false)
+    })
+      .then((data) => {
+        if (isCancelled()) return
+        shownChannel.current = activeChannel
+        setProposals(data)
+      })
+      .catch(() => {})
+      .finally(() => {
+        if (isCancelled()) return
+        setLoading(false)
+        setRefreshing(false)
+      })
+  }, [refreshKey, activeChannel])
+
+  const handleDelete = async (id: number): Promise<void> => {
+    setDeletingId(id)
+    try {
+      await withdrawProposal(id)
+      setProposals(prev => prev.filter(p => p.id !== id))
+    } catch (e) { console.error('withdraw failed:', e); showAppToast("Couldn't withdraw the proposal") }
+    finally { setDeletingId(null) }
+  }
+
+  const handleResubmit = async (p: SongEditProposal): Promise<void> => {
+    setResubmittingId(p.id)
+    try {
+      const fresh = await resubmitProposal(p)
+      setProposals(prev => [fresh, ...prev.filter(x => x.id !== p.id)])
+    } catch (e) { console.error('resubmit failed:', e); showAppToast("Couldn't resubmit the proposal") }
+    finally { setResubmittingId(null) }
+  }
+
+  // Staff reviewing their own proposal straight from this list - same
+  // endpoint as AdminPage's queue; the returned row replaces the local one so
+  // the status badge flips without a refetch.
+  const handleReview = async (p: SongEditProposal, action: 'approve' | 'reject'): Promise<void> => {
+    setReviewingId(p.id)
+    try {
+      const updated = await adminReviewProposal(p.id, { action, channel: activeChannel })
+      setProposals(prev => prev.map(x => x.id === p.id ? updated : x))
+    } catch (e) { console.error('review failed:', e); showAppToast(`Couldn't ${action} the proposal`) }
+    finally { setReviewingId(null) }
+  }
+
+  const filteredProposals = useMemo(() => {
+    const byStatus = filter === 'all' ? proposals : proposals.filter(p => p.status === filter)
+    const q = search.trim().toLowerCase()
+    if (!q) return byStatus
+    return byStatus.filter(p => proposalSearchText(p).includes(q))
+  }, [proposals, filter, search])
+
+  const tabCount = (tab: ProposalFilterTab): number =>
+    tab === 'all' ? proposals.length : proposals.filter(p => p.status === tab).length
+
+  return {
+    proposals,
+    loading,
+    refreshing,
+    filter, setFilter,
+    search, setSearch,
+    deletingId,
+    resubmittingId,
+    reviewingId,
+    filteredProposals,
+    handleDelete,
+    handleResubmit,
+    handleReview,
+    tabCount,
+  }
+}

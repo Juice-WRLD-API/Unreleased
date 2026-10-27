@@ -1,11 +1,8 @@
 # player.juicewrldapi.com
-# Everything under these paths is either per-user (liked songs, stats, local
-# library), an authoring surface (editor/admin/contributor), or a one-off share
-# link — none of it belongs in an index. lib/seo.ts also sends noindex on those
-# routes; this just saves the crawl budget.
-#
-# Excluded from the packaged desktop build (see build.files in package.json) —
-# it would be dead weight inside the installer.
+# Everything under these paths is either per-user (liked songs, wrapped, local
+# library, settings), an authoring surface (editor/admin/contributor), or a
+# one-off share link - none of it belongs in an index. lib/seo.ts also sends
+# noindex on those routes; this just saves the crawl budget.
 
 User-agent: *
 Allow: /
@@ -14,9 +11,20 @@ Disallow: /shared/
 Disallow: /admin
 Disallow: /editor
 Disallow: /contributor
+Disallow: /home
 Disallow: /liked
-Disallow: /stats
+Disallow: /wrapped
 Disallow: /library
 Disallow: /playlists
+Disallow: /settings
+
+# Link-unfurling bots that honor robots.txt would otherwise skip /shared/
+# links entirely (no card at all) - server/social-preview.mjs serves them
+# per-item preview tags there. A named group replaces the * group for them.
+User-agent: Twitterbot
+User-agent: Slackbot
+User-agent: Slackbot-LinkExpanding
+Allow: /
+Disallow: /auth/
 
 Sitemap: https://player.juicewrldapi.com/sitemap.xml

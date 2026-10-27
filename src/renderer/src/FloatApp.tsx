@@ -2,7 +2,7 @@ import { Suspense, lazy, useEffect, useState, CSSProperties } from 'react'
 import { Loader2 } from 'lucide-react'
 import { useStore, useStorePick } from './store/useStore'
 import { useThemeEffects } from './lib/themeEffects'
-import { apiFetch, JWApiSong } from './lib/juicewrldApi'
+import { getSongById, JWApiSong } from './lib/juicewrldApi'
 import { showStaffProfile, staffProfileView } from './lib/userApi'
 import ErrorBoundary from './components/ErrorBoundary'
 
@@ -13,12 +13,14 @@ const EditorPage = lazy(() => import('./components/EditorPage'))
 const LocalEditorPage = lazy(() => import('./components/LocalEditorPage'))
 const MiniPlayer = lazy(() => import('./components/MiniPlayer'))
 const EqualizerPanel = lazy(() => import('./components/EqualizerPanel'))
+const LyricsGenModal = lazy(() => import('./components/LyricsGenModal'))
 // Not lazy: every list view already imports the info modal statically, so
 // it lives in the main chunk regardless — a dynamic import here would just
 // trigger Vite's mixed-import warning without splitting anything.
 import SongInfoModal from './components/SongInfoModal'
 import ReportModal from './components/ReportModal'
 import ConvertFormatModal from './components/ConvertFormatModal'
+import AppToastHost from './components/AppToastHost'
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const el = (window as any).electron
@@ -31,11 +33,11 @@ function initialParam(key: string): string | null {
 // and song-info have modal chrome of their own that doubles as the handle).
 // Mirrors App's WindowControls but through the sender-scoped *Self IPC —
 // the plain variants would minimize/close the MAIN window.
-function FloatTitleBar(): JSX.Element {
+function FloatTitleBar({ bordered = true }: { bordered?: boolean }): JSX.Element {
   const [maximized, setMaximized] = useState(false)
   const btn = 'flex items-center justify-center w-11 h-7 text-text-muted hover:text-text-primary transition-colors'
   return (
-    <div className="shrink-0 flex h-7 border-b border-[var(--border)]">
+    <div className={`shrink-0 flex h-7 ${bordered ? 'border-b border-[var(--border)]' : ''}`}>
       <div className="flex-1 select-none" style={{ WebkitAppRegion: 'drag' } as CSSProperties} />
       <div className="flex" style={{ WebkitAppRegion: 'no-drag' } as CSSProperties}>
         <button className={btn} onClick={() => el?.minimizeSelf()} title="Minimize">
@@ -70,7 +72,7 @@ function FloatSongInfo(): JSX.Element | null {
   useEffect(() => {
     if (!songId) return
     let stale = false
-    apiFetch<JWApiSong>(`/songs/${songId}/`).then((s) => { if (!stale) setSong(s) }).catch(() => {})
+    getSongById(songId).then((s) => { if (!stale) setSong(s) }).catch(() => {})
     return () => { stale = true }
   }, [songId])
 
@@ -103,9 +105,19 @@ function FloatEditor(): JSX.Element {
     if (p?.songId) useStore.setState({ pendingEditorSongId: Number(p.songId) })
   }), [])
 
+  // The lyrics box's Sync opens the Synced lyrics dialog, which hands its
+  // result back to this editor, so it opens in this window, toasts and all.
+  const lyricsGenOpen = useStore((s) => s.lyricsGenModal !== null)
+
   return (
     <div className="flex-1 min-h-0 overflow-hidden flex">
       <EditorPage initialSongId={bootSongId} />
+      {lyricsGenOpen && (
+        <ErrorBoundary variant="overlay" onDismiss={() => useStore.getState().closeLyricsGen()}>
+          <Suspense fallback={null}><LyricsGenModal /></Suspense>
+        </ErrorBoundary>
+      )}
+      <AppToastHost />
     </div>
   )
 }
@@ -211,7 +223,7 @@ export default function FloatApp({ view }: { view: string }): JSX.Element {
     // The equalizer pop-out matches the in-app popover's surface (bg-surface-
     // highest) so detaching it doesn't visibly change the panel's color.
     <div className={`h-dvh overflow-hidden flex flex-col ${view === 'equalizer' ? 'bg-surface-highest' : 'bg-surface'}`}>
-      {(view === 'editor' || view === 'local-editor' || view === 'equalizer' || view === 'profile') && <FloatTitleBar />}
+      {(view === 'editor' || view === 'local-editor' || view === 'equalizer' || view === 'profile') && <FloatTitleBar bordered={view !== 'editor'} />}
       {/* A pop-out's view is the whole window's content, so an uncaught render
           error left nothing but a blank window with no way back — the boundary
           keeps the error (and its stack) visible and reloadable in place. */}

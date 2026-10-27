@@ -4,6 +4,11 @@ Unreleased Music Player — Interactive Release Script
 
 Just run it — no arguments needed.
 
+The very first question is whether this is a beta. A beta skips ALL git and
+GitHub work (no sync, commit, push, web sync or release): pick a version, add
+notes, build the installer locally and upload it to juicewrldapi.com's gated
+beta backend. The rest of this list is the stable path.
+
 Prompts are asked up front, then everything else runs unattended:
   1. Fast-forward app onto origin/app. The previous release's web push
      fires the sync-web-to-app workflow, which advances origin/app behind
@@ -11,14 +16,11 @@ Prompts are asked up front, then everything else runs unattended:
      rejected at step 7 and rolled back. Runs before the version bump,
      while the tree is still clean.
   2. Pick a version (bump patch / minor / major, or keep / custom)
-  3. Enter a commit message (only if the tree is dirty)
+  3. (no prompt) the commit message is just the version
   4. Enter release notes (blank = auto-generate from commits)
-     and choose stable or beta. Betas are NEVER uploaded to GitHub —
-     they're privately published to juicewrldapi.com's gated backend,
-     only reachable with a beta access code (see build/fetch-releases.ps1
-     for the endpoint contract). Stable releases are unaffected.
   ── nothing left to answer past this point ──
-  5. Commit all changes to the desktop branch (app)
+  5. Commit ONLY the package.json version bump to the desktop branch (app);
+     other uncommitted changes are left alone
   6. Beta only: build the renderer + Electron installer locally (needed
      right here, since step 9's beta publish uploads the .exe this
      produces). Stable builds are NOT done locally anymore — see step 9.
@@ -29,8 +31,9 @@ Prompts are asked up front, then everything else runs unattended:
      no assets attached. That publish event is what triggers
      .github/workflows/build-{windows,mac,linux}.yml — every platform
      builds in CI and attaches its own installer.
-     Beta: publish privately to the gated backend instead (needs
-     BETA_ADMIN_TOKEN in .env.local), using the local build from step 6.
+     Beta: POST the local build from step 6 to
+     juicewrldapi.com/beta/admin/versions/ (multipart; needs BETA_ADMIN_TOKEN
+     in .env.local - an administrator's API token, with 2FA enabled).
 """
 
 import os, sys, re, json, shutil, subprocess, threading, time, urllib.request, urllib.error
@@ -74,11 +77,11 @@ WHT  = "\033[97m"
 def _c(text, *codes):
     return "".join(codes) + str(text) + RST
 
-def banner():
+def banner(title="Release & Publish", icon="🎵"):
     w = 66
     print()
     print(_c("╔" + "═"*(w-2) + "╗", CYN, BOLD))
-    row = "  🎵  UNRELEASED  —  Release & Publish  "
+    row = f"  {icon}  UNRELEASED  —  {title}  "
     print(_c("║", CYN, BOLD) + _c(row.ljust(w-2), WHT, BOLD) + _c("║", CYN, BOLD))
     print(_c("╚" + "═"*(w-2) + "╝", CYN, BOLD))
     print()
@@ -164,28 +167,41 @@ def bump(v, part):
 
 # ── GitHub API ────────────────────────────────────────────────────────────────
 
-def get_token():
-    t = os.environ.get("GH_TOKEN")
-    if t: return t
-    env = ROOT / ".env.local"
-    if env.exists():
-        for line in env.read_text().splitlines():
-            if line.startswith("GH_TOKEN="):
-                return line.split("=", 1)[1].strip()
+def _env_local_files():
+    """ROOT's .env.local first, then any sibling worktree's (app/beta/web/...
+    are separate checkouts under one parent, and .env.local is gitignored, so
+    a fresh worktree never has its own copy)."""
+    yield ROOT / ".env.local"
+    try:
+        for d in sorted(ROOT.parent.iterdir()):
+            if d != ROOT and (d / "package.json").exists():
+                yield d / ".env.local"
+    except OSError:
+        pass
+
+def _read_env(key):
+    v = os.environ.get(key)
+    if v and v.strip(): return v.strip()
+    for env in _env_local_files():
+        if not env.is_file(): continue
+        for line in env.read_text("utf-8-sig", errors="ignore").splitlines():
+            line = line.strip()
+            if line.startswith(f"{key}="):
+                val = line.split("=", 1)[1].strip().strip('"').strip("'")
+                if val: return val
+    return None
+
+def get_token(required=True):
+    t = _read_env("GH_TOKEN")
+    if t or not required: return t
     die("GH_TOKEN not found.\nSet it as an environment variable or add GH_TOKEN=xxx to .env.local")
 
 def get_beta_admin_token():
-    t = os.environ.get("BETA_ADMIN_TOKEN")
+    t = _read_env("BETA_ADMIN_TOKEN")
     if t: return t
-    env = ROOT / ".env.local"
-    if env.exists():
-        for line in env.read_text().splitlines():
-            if line.startswith("BETA_ADMIN_TOKEN="):
-                val = line.split("=", 1)[1].strip()
-                if val: return val
-    die("BETA_ADMIN_TOKEN not found.\nAdd BETA_ADMIN_TOKEN=xxx to .env.local — this is the admin secret\n"
-        "for juicewrldapi.com's POST /beta/admin/publish endpoint, separate\n"
-        "from GH_TOKEN. Only needed for beta releases.")
+    die("BETA_ADMIN_TOKEN not found.\nAdd BETA_ADMIN_TOKEN=xxx to .env.local - an administrator's API token\n"
+        "(admin role, 2FA on) for juicewrldapi.com's POST /beta/admin/versions/,\n"
+        "separate from GH_TOKEN.")
 
 def api(method, path, token, data=None, api_base=API_BASE):
     url  = f"{api_base}{path}"
@@ -324,7 +340,7 @@ def upload_beta(url, token, fields, files, on_progress=None):
     wrap = _MultipartUpload(boundary, fields, files, on_progress)
     print(f"\n  Uploading: {_c(', '.join(p.name for p in files.values()), WHT, BOLD)}  ({len(wrap)/1_048_576:.1f} MB)")
     req = urllib.request.Request(url, data=wrap, method="POST", headers={
-        "Authorization":  f"Bearer {token}",
+        "Authorization":  f"Token {token}",
         "Content-Type":   f"multipart/form-data; boundary={boundary}",
         "Content-Length": str(len(wrap)),
         "User-Agent":     "release.py",
@@ -396,6 +412,17 @@ def step_sync_remote(state):
         ok(f"Up to date with origin/{APP_BRANCH}")
 
 
+def auto_beta_version(cur):
+    """Next beta version, no prompt. Betas must carry a pre-release suffix: the
+    installer and updater tell a beta from a stable build by the "-" in the
+    version. 3.0.1-beta.2 -> 3.0.1-beta.3; anything else -> the next patch's
+    first beta (3.0.1 -> 3.0.2-beta.1)."""
+    m = re.fullmatch(r"(\d+\.\d+\.\d+)-beta\.(\d+)", cur)
+    if m:
+        return f"{m.group(1)}-beta.{int(m.group(2)) + 1}"
+    return f"{bump(cur, 'patch')}-beta.1"
+
+
 def prompt_version():
     section(2, TOTAL, "Version")
     cur = load_version()
@@ -433,24 +460,25 @@ def prompt_version():
 def prompt_commit_message(version):
     section(3, TOTAL, f"Commit message")
 
-    if is_dirty():
-        info("Uncommitted changes:")
-        for line in capture("git status --short").splitlines():
-            detail(line)
-        return ask("Commit message", default=f"v{version}")
-    else:
-        ok("Nothing to commit — tree is clean")
+    # Only package.json's version bump is committed; other uncommitted work
+    # stays in the working tree untouched.
+    if version != load_version_head():
+        ok(f"Version bump only: v{version}")
+        return f"v{version}"
+    ok("Version unchanged — nothing to commit")
+    return None
+
+
+def load_version_head():
+    try:
+        return json.loads(capture("git show HEAD:package.json"))["version"]
+    except Exception:
         return None
 
 
 def prompt_release_notes():
     section(4, TOTAL, "Release notes")
-    notes = ask("Release notes  (blank = auto-generate from commits)", default="")
-    # Beta builds are NEVER uploaded to GitHub — they're published privately
-    # to the gated backend (see step_publish_beta), reachable only with a
-    # beta access code. Regular users and stable auto-updates never see them.
-    is_beta = confirm("Publish as beta (gated — not a public GitHub release)?", default=False)
-    return notes, is_beta
+    return ask("Release notes  (blank = auto-generate from commits)", default="")
 
 
 # ── Steps (run only after every prompt above has been answered) ──────────────
@@ -543,10 +571,10 @@ def step_commit(version, msg, state):
     state["pre_commit_sha"] = capture("git rev-parse HEAD")
 
     if msg is not None:
-        run("git add -A")
-        run(f'git commit -m "{msg}"')
+        # `-- package.json` commits that path only, whatever else is staged.
+        run(f'git commit -m "{msg}" -- package.json')
         state["committed"] = True
-        ok(f"Committed: {msg}")
+        ok(f"Committed package.json: {msg}")
     else:
         ok("Nothing to commit — tree is clean")
 
@@ -645,39 +673,29 @@ def step_publish_beta(version, notes):
     if not exe.exists():
         raise RuntimeError(f"No {exe.name} in release/\nDid the build succeed?")
 
-    info("Computing checksum…")
-    sha512 = sha512_base64(exe)
-    size = exe.stat().st_size
-    yml_path = ROOT / "release" / "latest-beta.yml"
-    yml_path.write_text(
-        f"version: {version}\n"
-        f"path: {exe.name}\n"
-        f"sha512: {sha512}\n"
-        f"files:\n"
-        f"  - url: {exe.name}\n"
-        f"    sha512: {sha512}\n"
-        f"    size: {size}\n"
-        f"releaseDate: '{time.strftime('%Y-%m-%dT%H:%M:%S.000Z', time.gmtime())}'\n",
-        "utf-8",
-    )
+    # No git here: a beta never touches it, so there's no commit log to draw
+    # default notes from.
+    notes = notes or f"Beta {tag}"
 
-    if not notes:
-        notes = capture(
-            f'git log $(git describe --tags --abbrev=0 2>nul)..HEAD --pretty="- %s" --no-merges 2>nul'
-            if sys.platform == "win32" else
-            f'git log $(git describe --tags --abbrev=0 2>/dev/null)..HEAD --pretty="- %s" --no-merges 2>/dev/null'
-        ) or f"Beta {tag}"
-
-    info(f"Publishing {_c(tag, WHT, BOLD)} to {BETA_API_BASE}/admin/publish …")
+    url = f"{BETA_API_BASE}/admin/versions/"
+    info(f"Publishing {_c(version, WHT, BOLD)} to {url} …")
     try:
         upload_beta(
-            f"{BETA_API_BASE}/admin/publish", token,
-            fields={"version": version, "tag": tag, "notes": notes},
-            files={"installer": exe, "latest_yml": yml_path},
+            url, token,
+            fields={
+                "version": version, "notes": notes, "is_active": "true",
+                "published_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+            },
+            files={"file": exe},
         )
     except urllib.error.HTTPError as e:
         body = e.read().decode(errors="replace")
-        raise RuntimeError(f"Beta publish failed: HTTP {e.code}\n{body[:300]}")
+        hint = ""
+        if e.code in (401, 403):
+            hint = "\n     BETA_ADMIN_TOKEN must be an administrator's token with 2FA enabled."
+        elif e.code == 409:
+            hint = f"\n     Version {version} already exists - pick a new version, or delete it on the Admin page's Beta tab."
+        raise RuntimeError(f"Beta publish failed: HTTP {e.code}\n{body[:300]}{hint}")
 
     ok("Beta build published — private, not a public GitHub release")
     print()
@@ -777,19 +795,12 @@ def rollback(state):
         detail(f"To undo manually: git reset --hard {state.get('pre_commit_sha')} && "
                f"git push --force origin {APP_BRANCH}")
     elif state.get("committed") and state.get("pre_commit_sha"):
-        # `reset --hard` throws away the commit we just made *and* anything
-        # uncommitted alongside it. Park a branch on it first so recovering is
-        # `git cherry-pick <branch>` rather than digging through the reflog —
-        # this rollback has eaten real work more than once.
-        doomed = capture("git rev-parse --short HEAD")
-        backup = f"backup/{state.get('tag') or 'release'}-{time.strftime('%Y%m%d-%H%M%S')}"
-        if capture(f"git branch {backup} 2>&1") == "":
-            ok(f"Saved the discarded commit ({doomed}) on branch {_c(backup, WHT, BOLD)}")
-            detail(f"Recover with: git cherry-pick {backup}")
-        else:
-            warn(f"Could not create backup branch — recover {doomed} via `git reflog`")
-        run(f"git reset --hard {state['pre_commit_sha']}", check=False)
-        ok(f"Reverted local commit (and version bump) on {APP_BRANCH}")
+        # Soft reset: the working tree may hold the user's uncommitted work,
+        # which a hard reset would destroy. Only package.json is ours to undo.
+        run(f"git reset --soft {state['pre_commit_sha']}", check=False)
+        run("git restore --staged package.json", check=False)
+        set_version(state["original_version"])
+        ok(f"Reverted local version commit on {APP_BRANCH}")
     elif state.get("version_changed") and state.get("original_version"):
         set_version(state["original_version"])
         ok(f"Reverted package.json version to {state['original_version']}")
@@ -799,42 +810,61 @@ def rollback(state):
 
 # ── Entry point ───────────────────────────────────────────────────────────────
 
-def main():
+def main(force_beta=False):
+    """force_beta=True (beta.py) skips the question and goes straight down the
+    beta path; otherwise the first prompt decides."""
     banner()
+    # First question, before anything touches git: a beta skips all of it.
+    if not force_beta:
+        force_beta = confirm("Is this a beta?  (gated - skips all git and GitHub)", default=False)
+    if force_beta:
+        info("Beta: no sync, commit, push, web sync or GitHub release")
     state = {}
     try:
-        token = get_token()
+        # Beta releases never touch GitHub, so GH_TOKEN is only mandatory
+        # for stable ones (checked once we know which this is).
+        token = get_token(required=False)
 
         # Before anything else, and before the version bump makes the tree
         # dirty — a stale app branch is what sinks the push seven steps later.
-        step_sync_remote(state)
+        if not force_beta:
+            step_sync_remote(state)
 
         # Read after the fast-forward: origin may have carried a newer version.
         state["original_version"] = load_version()
 
         # ── Every user prompt happens first — once these are answered, the
         #    rest of the release runs unattended (build, push, sync, commit).
-        version = prompt_version()
+        if force_beta:
+            # A beta asks nothing: version and notes are picked for it.
+            version = auto_beta_version(load_version())
+            ok(f"Version: {state['original_version']}  →  {_c(version, WHT, BOLD)}")
+        else:
+            version = prompt_version()
         step_apply_version(version, state)
-        commit_msg = prompt_commit_message(version)
-        release_notes, is_beta = prompt_release_notes()
+        # A beta never touches git: no sync, commit or push.
+        commit_msg = None if force_beta else prompt_commit_message(version)
+        release_notes = "" if force_beta else prompt_release_notes()
+        is_beta = force_beta
 
-        step_commit(version, commit_msg, state)
+        if not force_beta:
+            step_commit(version, commit_msg, state)
         if is_beta:
             # Stable builds happen in CI (see step_release) — only beta needs
             # a local installer, since it's uploaded straight from here to
             # the gated backend instead of going through a GitHub release.
             step_build()
-        step_push_app(state)
+        if not force_beta:
+            step_push_app(state)
         step_sync_web(version, is_beta, token, state)
         if is_beta:
             step_publish_beta(version, release_notes)
         else:
-            step_release(version, token, release_notes, state)
+            step_release(version, token or get_token(), release_notes, state)
 
         print()
         print(_c("  " + "═" * 46, GRN, BOLD))
-        print(_c(f"  ✓  v{version} released successfully!", GRN, BOLD))
+        print(_c(f"  ✓  v{version} {'published as beta' if is_beta else 'released'} successfully!", GRN, BOLD))
         print(_c("  " + "═" * 46, GRN, BOLD))
         print()
 

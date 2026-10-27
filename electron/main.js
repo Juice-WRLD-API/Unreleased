@@ -1,4 +1,4 @@
-﻿const { app, BrowserWindow, shell, dialog, Menu, Tray, ipcMain, nativeImage, protocol, net, globalShortcut, screen, clipboard, session, powerMonitor } = require('electron')
+﻿const { app, BrowserWindow, shell, dialog, Menu, Tray, ipcMain, nativeImage, protocol, net, globalShortcut, screen, clipboard, session, powerMonitor, desktopCapturer } = require('electron')
 const { autoUpdater } = require('electron-updater')
 const { loadOfflineLibraryFile, updateOfflineLibraryFile } = require('./offlineLibrary')
 const { spawn } = require('child_process')
@@ -9,6 +9,9 @@ const { pathToFileURL, fileURLToPath } = require('url')
 const { Readable } = require('stream')
 const discordRpc = require('./discordRpc')
 const { configureRuntime } = require('./platform')
+const { registerPasskeyIpc } = require('./passkey')
+const { canRequestMicrophone, canCaptureSystemAudio } = require('./microphonePermission')
+const { createLaunchGate } = require('./launchUpdate')
 
 // Response() only accepts web ReadableStreams, not Node streams
 const webStreamFromNode = (stream) => Readable.toWeb(stream)
@@ -86,6 +89,9 @@ let appSettings = {
   // name. Written by rememberSize(); wiped when rememberWindowSizes is turned
   // off so re-enabling starts from the built-in defaults again.
   windowSizes: {},
+  // Set once the user allows microphone access for song recognition, so the
+  // confirmation dialog isn't repeated on every Listen. Cancel is never stored.
+  recognitionMicGranted: false,
 }
 let settingsLoadError = null
 try {
@@ -116,6 +122,63 @@ function log(...args) {
     fs.appendFileSync(logFile, line)
   } catch {}
   if (isDev) console.log(...args)
+}
+
+// ── Launched mid-update ───────────────────────────────────────────────────────
+// Quitting with an update pending hands off to the installer (silently for
+// install-on-quit), which takes several seconds. Launching again inside that
+// window started the OLD exe: it found the same cached update and prompted
+// again, its quit spawned a second installer, and the next launch was killed a
+// few seconds in by that installer's "close the running app" step. So the quit
+// leaves this marker (see the 'quit' handler by the auto-updater events), and
+// a launch that finds it while the installer is still running steps aside: it
+// exits before showing anything and leaves a watcher that starts the app once
+// the installer process is gone, i.e. on the new build.
+const updateInstallingMarkerPath = path.join(app.getPath('userData'), 'update-installing')
+// The version an update install just tried and failed to move us to, if the
+// marker says so. Installs then show the installer's own window this session,
+// and the launch doesn't install by itself (see updateBeforeLaunch).
+let updateInstallDidNotTake = null
+
+function handOffToRunningUpdateInstall() {
+  let marker
+  try { marker = JSON.parse(fs.readFileSync(updateInstallingMarkerPath, 'utf-8')) } catch { return false }
+  const clear = () => { try { fs.rmSync(updateInstallingMarkerPath, { force: true }) } catch {} }
+  // Already on the target build (install done), or a marker too old to be a
+  // live install. Equality rather than "newer": leaving the beta installs a
+  // lower version.
+  if (!marker || !marker.installer || marker.version === app.getVersion() || !(Date.now() - marker.at < 10 * 60 * 1000)) {
+    clear()
+    return false
+  }
+  let pids = []
+  try {
+    const out = require('child_process').execFileSync('tasklist',
+      ['/FI', `IMAGENAME eq ${path.basename(marker.installer)}`, '/FO', 'CSV', '/NH'],
+      { encoding: 'utf8', windowsHide: true, timeout: 5000 })
+    pids = out.split(/\r?\n/).map(l => l.match(/^"[^"]*","(\d+)"/)).filter(Boolean).map(m => m[1])
+  } catch {}
+  // No installer running: it finished without updating us or never started.
+  // Carry on as a normal launch (which will offer the update again).
+  if (!pids.length) {
+    updateInstallDidNotTake = marker.version
+    clear()
+    return false
+  }
+  log(`Launched while the ${marker.version} installer is running (pid ${pids.join(',')}); relaunching when it finishes`)
+  const exe = process.execPath.replace(/'/g, "''")
+  try {
+    spawn('powershell.exe', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-WindowStyle', 'Hidden', '-Command',
+      `Wait-Process -Id ${pids.join(',')} -ErrorAction SilentlyContinue; Start-Process -FilePath '${exe}'`],
+      { detached: true, stdio: 'ignore', windowsHide: true }).unref()
+  } catch (e) {
+    log('Relaunch watcher failed:', e.message)
+  }
+  return true
+}
+
+if (gotSingleInstanceLock && app.isPackaged && process.platform === 'win32' && handOffToRunningUpdateInstall()) {
+  process.exit(0)
 }
 
 // ── Run / crash logging ─────────────────────────────────────────────────────
@@ -169,21 +232,34 @@ process.on('unhandledRejection', (reason) => {
 // dropped connection could leave a truncated file that later passed the
 // offline library's "already downloaded" existence check — or, on a
 // re-download of a changed track, destroy the old good copy with partial data.
-function downloadFile(url, dest, onProgress) {
+// `headers` go on the first request only: a redirect may leave the host, and
+// the one caller that passes any (the beta build download) sends a secret.
+// Aborting `signal` (Sync's pause) drops the request and its `.part` file.
+function downloadFile(url, dest, onProgress, headers, signal) {
   const tmp = dest + '.part'
   return new Promise((resolve, reject) => {
-    function doGet(u) {
+    if (signal?.aborted) return reject(new Error('Cancelled'))
+    let req = null
+    const onAbort = () => req?.destroy(new Error('Cancelled'))
+    signal?.addEventListener('abort', onAbort, { once: true })
+    const settle = (fn) => (value) => {
+      signal?.removeEventListener('abort', onAbort)
+      fn(value)
+    }
+    const ok = settle(resolve)
+    const ko = settle(reject)
+    function doGet(u, extra) {
       const opts = new URL(u)
-      https.get({ hostname: opts.hostname, path: opts.pathname + opts.search, headers: { 'User-Agent': 'Unreleased-App' } }, (res) => {
-        if (res.statusCode === 302 || res.statusCode === 301) return doGet(res.headers.location)
-        if (res.statusCode !== 200) return reject(new Error(`HTTP ${res.statusCode}`))
+      req = https.get({ hostname: opts.hostname, path: opts.pathname + opts.search, headers: { 'User-Agent': 'Unreleased-App', ...extra } }, (res) => {
+        if (res.statusCode === 302 || res.statusCode === 301) { res.resume(); return doGet(res.headers.location, null) }
+        if (res.statusCode !== 200) { res.resume(); return ko(new Error(`HTTP ${res.statusCode}`)) }
         const total = parseInt(res.headers['content-length'] || '0', 10)
         let received = 0
         const out = fs.createWriteStream(tmp)
         const fail = (err) => {
           out.destroy()
           try { fs.unlinkSync(tmp) } catch {}
-          reject(err)
+          ko(err)
         }
         res.on('data', chunk => {
           received += chunk.length
@@ -193,13 +269,16 @@ function downloadFile(url, dest, onProgress) {
         out.on('finish', () => {
           if (total > 0 && received !== total) return fail(new Error(`Truncated download: got ${received} of ${total} bytes`))
           try { fs.renameSync(tmp, dest) } catch (e) { return fail(e) }
-          resolve()
+          ok()
         })
         out.on('error', fail)
         res.on('error', fail)
-      }).on('error', reject)
+        // An abort mid-body may surface on the request alone.
+        req.on('error', fail)
+      })
+      req.on('error', ko)
     }
-    doGet(url)
+    doGet(url, headers)
   })
 }
 
@@ -215,24 +294,25 @@ autoUpdater.autoInstallOnAppQuit = true
 // waiting on "Restart now" — re-checking in either case just wastes a request.
 let updateCheckInProgress = false
 let updateDownloadedPending = false
+// { version, installer } of the downloaded update, for the update-installing
+// marker written on quit (see handOffToRunningUpdateInstall).
+let pendingUpdate = null
 const UPDATE_CHECK_INTERVAL_MS = 4 * 60 * 60 * 1000
 
-// Set for the duration of the app-launch check so 'update-downloaded' can tell
-// a fresh-at-startup download (or a previous session's update that never got
-// installed, e.g. the user declined the restart prompt and later relaunched
-// instead of hitting Restart) apart from one found mid-session. Startup
-// installs silently and relaunches; mid-session still asks before restarting
-// the user's active work.
-let isStartupUpdateCheck = false
-
-function runUpdateCheck(reason) {
+async function runUpdateCheck(reason) {
   if (isDev || updateCheckInProgress || updateDownloadedPending) return
   log(`Checking for updates (${reason})...`)
   updateCheckInProgress = true
-  if (reason === 'startup') isStartupUpdateCheck = true
-  autoUpdater.checkForUpdatesAndNotify()
-    .catch(err => log('checkForUpdates error:', err.message))
-    .finally(() => { updateCheckInProgress = false })
+  try {
+    // A beta user checks the gated beta list first; only when it has nothing
+    // newer does the normal stable check run.
+    if (await checkBetaUpdate()) return
+    await autoUpdater.checkForUpdatesAndNotify()
+  } catch (err) {
+    log('checkForUpdates error:', err.message)
+  } finally {
+    updateCheckInProgress = false
+  }
 }
 // Beta channel — gated server-side by juicewrldapi.com, not by anything
 // baked into this app (see build/fetch-releases.ps1 for the full endpoint
@@ -251,50 +331,146 @@ function readBetaCode() {
 // every stable release here.
 const UPDATE_REPO = { owner: 'Juice-WRLD-API', repo: 'Unreleased' }
 
-// Switches the updater between the normal stable (GitHub) feed and the
-// gated beta feed. electron-updater allows re-pointing the feed at runtime,
-// so join/leave (and switching update source) take effect immediately, no
-// restart needed.
+// electron-updater always follows the stable (GitHub) feed. Betas are not a
+// feed at all: with a code on disk, a check lists /beta/versions, and if the
+// newest build there is higher than this one the installer is downloaded and
+// run ourselves (checkBetaUpdate). Join/leave just changes which code, if any,
+// that check uses, so it takes effect immediately.
 let activeBetaCode = null
 function applyUpdateFeed(code) {
   activeBetaCode = code || null
-  if (code) {
-    autoUpdater.setFeedURL({ provider: 'generic', url: `${BETA_API_BASE}/update-feed`, channel: 'latest' })
-    autoUpdater.requestHeaders = { 'X-Beta-Code': code }
-    autoUpdater.allowPrerelease = true
-  } else {
-    const { owner, repo } = UPDATE_REPO
-    autoUpdater.setFeedURL({ provider: 'github', owner, repo })
-    autoUpdater.requestHeaders = null
-    autoUpdater.allowPrerelease = false
-  }
+  const { owner, repo } = UPDATE_REPO
+  autoUpdater.setFeedURL({ provider: 'github', owner, repo })
+  autoUpdater.requestHeaders = null
+  autoUpdater.allowPrerelease = false
 }
 
-// The beta feed is served by juicewrldapi.com, whose SPA answers unknown paths
-// with index.html at HTTP 200 rather than a 404. So when the /beta endpoints go
-// away, `latest.yml` comes back as a page of HTML, js-yaml throws on it, and the
-// updater fails — with no status code anywhere to reveal that the endpoint is
-// simply gone. Because the marker lives in userData, that state survives
-// uninstall, reinstall, and the force-update path, which is how a user ends up
-// permanently stuck on "check failed" while force-install keeps working.
-//
-// Any failure that means "this feed isn't speaking the update protocol" is
-// therefore treated as "beta is unavailable", not as a fatal update error: we
-// re-point at the stable GitHub feed and finish the check there. The marker is
-// deliberately left on disk, so beta resumes by itself if the backend returns —
-// the cost is one wasted request per launch, which beats bricking the updater.
-// Certificate errors are deliberately excluded: they're the signal of a
-// possible interception attempt, not "the feed is down," so they should
-// surface as a real update error instead of silently falling back to the
-// stable feed.
-function isBetaFeedUnavailable(msg) {
-  return /Cannot parse update info|YAMLException|HTTP 4\d\d|ENOTFOUND|ECONNREFUSED/i.test(msg)
+// Semver precedence (what the beta versions use): major.minor.patch first, then
+// a version with no pre-release part outranks one with it, then the dot-
+// separated pre-release identifiers compare numerically when both are numbers.
+function compareVersions(a, b) {
+  const parse = (v) => {
+    const s = String(v).replace(/^v/i, '')
+    const dash = s.indexOf('-')
+    const core = dash < 0 ? s : s.slice(0, dash)
+    const pre = dash < 0 ? '' : s.slice(dash + 1)
+    return { nums: core.split('.').map(n => parseInt(n, 10) || 0), pre: pre ? pre.split('.') : [] }
+  }
+  const x = parse(a), y = parse(b)
+  for (let i = 0; i < 3; i++) {
+    const d = (x.nums[i] || 0) - (y.nums[i] || 0)
+    if (d) return d < 0 ? -1 : 1
+  }
+  if (!x.pre.length || !y.pre.length) return x.pre.length === y.pre.length ? 0 : x.pre.length ? -1 : 1
+  for (let i = 0; i < Math.max(x.pre.length, y.pre.length); i++) {
+    const p = x.pre[i], q = y.pre[i]
+    if (p === undefined) return -1
+    if (q === undefined) return 1
+    const pn = /^\d+$/.test(p), qn = /^\d+$/.test(q)
+    if (pn && qn) { const d = Number(p) - Number(q); if (d) return d < 0 ? -1 : 1 }
+    else if (pn !== qn) return pn ? -1 : 1
+    else if (p !== q) return p < q ? -1 : 1
+  }
+  return 0
 }
-let betaFallbackDone = false
+
+function fetchBetaVersions(code) {
+  return new Promise((resolve, reject) => {
+    const req = https.get(`${BETA_API_BASE}/versions`, {
+      headers: { 'User-Agent': 'Unreleased-App', 'X-Beta-Code': code }, timeout: 15000,
+    }, (res) => {
+      let data = ''
+      res.on('data', d => { data += d })
+      res.on('end', () => {
+        if (res.statusCode !== 200) return reject(new Error(`HTTP ${res.statusCode}`))
+        // The site's SPA answers unknown paths with an HTML page at 200, so a
+        // missing endpoint shows up here as a parse failure, not a status.
+        try {
+          const list = JSON.parse(data)
+          if (!Array.isArray(list)) throw new Error('not a list')
+          resolve(list)
+        } catch { reject(new Error('unexpected response')) }
+      })
+    })
+    req.on('timeout', () => req.destroy(new Error('timed out')))
+    req.on('error', reject)
+  })
+}
+
+// The installer a beta check downloaded, waiting to be run (see
+// installUpdateAndRestart). Null when the pending update came from the stable feed.
+let betaInstallerPath = null
+
+// Looks for a build newer than this one in the beta list and, if there is one,
+// downloads and installs it. Returns true when it took over the update (so the
+// stable check is skipped), false when there is nothing newer, no code, or the
+// list couldn't be had — a revoked code or an unreachable backend just means
+// "no beta update" and the stable check carries on. Windows only: the beta
+// builds are NSIS installers. `force` ignores the auto-download setting.
+async function checkBetaUpdate({ force = false } = {}) {
+  const code = activeBetaCode
+  if (!code || process.platform !== 'win32') return false
+  let list
+  try {
+    list = await fetchBetaVersions(code)
+  } catch (err) {
+    log('Beta version check failed:', err.message)
+    return false
+  }
+  const newest = list.map(v => v && v.version).filter(Boolean).sort(compareVersions).pop()
+  if (!newest || compareVersions(newest, app.getVersion()) <= 0) return false
+
+  log('Newer beta available:', newest)
+  launchGate?.progress()
+  broadcastToWindows('update-status', { type: 'available', version: newest })
+  if (!appSettings.autoDownload && !force) return true
+
+  const dest = path.join(app.getPath('temp'), `Unreleased-Setup-${newest}.exe`)
+  try {
+    broadcastToWindows('update-status', { type: 'downloading', percent: 0, version: newest })
+    await downloadFile(
+      `${BETA_API_BASE}/download?version=${encodeURIComponent(newest)}`, dest,
+      (percent) => {
+        launchGate?.progress()
+        broadcastToWindows('update-status', { type: 'downloading', percent, version: newest })
+      },
+      { 'X-Beta-Code': code },
+    )
+  } catch (err) {
+    log('Beta download failed:', err.message)
+    broadcastToWindows('update-status', { type: 'error', message: `Beta download failed: ${err.message}` })
+    return true
+  }
+
+  betaInstallerPath = dest
+  updateDownloadedPending = true
+  pendingUpdate = { version: newest, installer: dest }
+  log('Beta installer ready:', dest)
+  broadcastToWindows('update-status', { type: 'downloaded', version: newest })
+
+  // Same rules as a stable download: at launch, before the app is open,
+  // install straight away (see updateBeforeLaunch). Once it is open, never
+  // restart without asking: a background download can finish well after the
+  // user has started listening.
+  if (launchGate?.active) {
+    launchGate.install()
+    return true
+  }
+  const { response } = await dialog.showMessageBox(mainWindow, {
+    type: 'info',
+    title: 'Update ready',
+    message: `Unreleased ${newest} (beta) has been downloaded.`,
+    detail: 'Restart the app to apply the update.',
+    buttons: ['Restart now', 'Later'],
+    defaultId: 0,
+  })
+  if (response === 0) installUpdateAndRestart()
+  return true
+}
 
 const initialBetaCode = readBetaCode()
 applyUpdateFeed(initialBetaCode)
-if (initialBetaCode) log('Beta access marker present — gated beta update feed enabled')
+if (initialBetaCode) log('Beta access marker present — checking the gated beta list for updates')
 
 // On Windows, BrowserWindow/Tray icons are loaded by native code that can't
 // read files packed inside app.asar — it silently falls back to Electron's
@@ -310,6 +486,8 @@ const iconPath = process.platform === 'linux'
 const preloadPath = path.join(__dirname, 'preload.js')
 
 let mainWindow = null
+// Desktop (electron/desktop): the light round the screens and the desktop widgets, Windows only.
+let desktop = null
 let tray = null
 let isQuitting = false
 // Deliberate/programmatic quits (tray "Quit", restart, update install, OS
@@ -405,7 +583,7 @@ function applyAlwaysOnTop(win, on) {
 //
 // Only runs while pinned, visible and unfocused — a focused window is already
 // on top, and re-asserting then would be pure churn.
-const TOP_REASSERT_MS = 3000
+const TOP_REASSERT_MS = 10000
 let miniTopKeeper = null
 
 function startTopKeeper(win) {
@@ -531,7 +709,7 @@ function createFloatWindow(view, params) {
   if (existing && !existing.isDestroyed()) {
     if (existing.isMinimized()) existing.restore()
     existing.show()
-    existing.focus()
+    if (view !== 'mini-player') existing.focus()
     existing.webContents.send('float-params', query)
     if (view === 'mini-player' && appSettings.miniPlayerHidesWindows) hideWindowsForMiniPlayer()
     return
@@ -556,6 +734,7 @@ function createFloatWindow(view, params) {
   broadcastFloatWindows()
   win.once('ready-to-show', () => {
     win.show()
+    if (view !== 'mini-player') win.focus()
     if (view === 'mini-player') {
       // Upgrade from the constructor's default 'floating' level to the one
       // that actually clears fullscreen games, and start holding it there.
@@ -669,8 +848,50 @@ function buildTrayMenu() {
     { type: 'separator' },
     { label: 'Open Unreleased', click: () => showMainWindow() },
     { label: 'Open mini player', click: () => createFloatWindow('mini-player') },
+    ...desktopTrayItems(),
     { label: 'Quit', click: () => { isQuitting = true; app.quit() } },
   ])
+}
+
+// The tray's Desktop menu: the light, how it moves, each widget, and the desk cleared - as Settings > Desktop has them.
+/** @returns {Electron.MenuItemConstructorOptions[]} */
+function desktopTrayItems() {
+  const d = desktop?.settings
+  if (!desktop || !d) return []
+  /** @returns {Electron.MenuItemConstructorOptions} */
+  const motion = (value, label) => ({ label, type: 'radio', checked: d.light.motion === value, click: () => desktop.set({ light: { motion: value } }) })
+  return [{
+    label: 'Desktop',
+    submenu: [
+      { label: 'Screen-edge light', type: 'checkbox', checked: !!d.light.isOn, click: (item) => desktop.set({ light: { isOn: item.checked } }) },
+      { label: 'Motion', submenu: [motion('flow', 'Flow'), motion('music', 'Music Sync'), motion('still', 'Still')] },
+      { type: 'separator' },
+      { label: 'Desktop player', type: 'checkbox', checked: !!d.player.isOn, click: (item) => desktop.set({ player: { isOn: item.checked } }) },
+      { label: 'Desktop playlist', type: 'checkbox', checked: !!d.playlist.isOn, click: (item) => desktop.set({ playlist: { isOn: item.checked } }) },
+      { label: 'Desktop clock', type: 'checkbox', checked: !!d.clock.isOn, click: (item) => desktop.set({ clock: { isOn: item.checked } }) },
+      { type: 'separator' },
+      { label: desktop.isClear ? 'Bring everything back' : 'Clear the desk', click: () => desktop.toggleClear() },
+      { label: 'Visualizer on the cleared desk', type: 'checkbox', checked: d.clear?.visualizer !== false, click: (item) => desktop.set({ clear: { visualizer: item.checked } }) },
+    ],
+  }]
+}
+
+function startDesktop() {
+  if (desktop || process.platform !== 'win32' || !mainWindow) return
+  try {
+    desktop = require('./desktop').createDesktop({
+      isDev,
+      devUrl: 'http://localhost:3018',
+      distDir: path.join(__dirname, '../dist'),
+      getMainWindow: () => mainWindow,
+      showMainWindow,
+      log,
+      onChange: () => updateTray(),
+    })
+  } catch (e) {
+    log('Desktop failed to start:', e.message)
+    desktop = null
+  }
 }
 
 function showMainWindow() {
@@ -760,6 +981,41 @@ function guardNavigation(win) {
     if (!url.startsWith(allowedOrigin)) event.preventDefault()
   })
 }
+
+// electron:dev serves the renderer from http://localhost:3018, so its
+// localStorage (login token, prefs) is a different origin bucket from the
+// installed app's file:// one, even though both share this userData folder.
+// On each dev launch, read the installed app's file:// localStorage through a
+// hidden scriptless window and hand it to the first dev window's preload
+// ('dev-storage-seed'), which mirrors it in before the app boots. One-way:
+// the installed app's storage is never written. UNRELEASED_DEV_SEED=0 opts out.
+let devStorageSeed = null
+let devStorageSeedReady = Promise.resolve()
+
+function readInstalledLocalStorage() {
+  const probePath = path.join(app.getPath('temp'), 'unreleased-dev-storage-probe.html')
+  const probe = new BrowserWindow({
+    show: false,
+    webPreferences: { nodeIntegration: false, contextIsolation: true, sandbox: true },
+  })
+  const read = (async () => {
+    fs.writeFileSync(probePath, '<!doctype html><title>probe</title>')
+    await probe.loadFile(probePath)
+    const entries = await probe.webContents.executeJavaScript('Object.entries(localStorage)')
+    if (entries.length) devStorageSeed = entries
+    runLog('dev-seed', `copied ${entries.length} localStorage keys from the installed app`)
+  })()
+  // Never hold the dev window hostage to the probe.
+  const timeout = new Promise((resolve) => setTimeout(resolve, 5000))
+  return Promise.race([read, timeout])
+    .catch((err) => runLog('dev-seed', `skipped: ${err.message}`))
+    .finally(() => { if (!probe.isDestroyed()) probe.destroy() })
+}
+
+ipcMain.on('dev-storage-seed', (event) => {
+  event.returnValue = devStorageSeed
+  devStorageSeed = null
+})
 
 // ── Window creation ───────────────────────────────────────────────────────────
 function createWindow() {
@@ -901,12 +1157,16 @@ function createWindow() {
   // app running headless (window-all-closed never fires) with handlers still
   // pointed at a destroyed mainWindow.
   mainWindow.on('closed', () => {
+    // The desktop's windows can't outlive the main window either: they'd keep the app running with nothing to drive them.
+    desktop?.dispose()
+    desktop = null
     mainWindow = null
     closeAllFloatWindows()
   })
 
   if (isDev) {
-    mainWindow.loadURL('http://localhost:3018')
+    const win = mainWindow
+    devStorageSeedReady.then(() => { if (!win.isDestroyed()) win.loadURL('http://localhost:3018') })
   } else {
     mainWindow.loadFile(path.join(__dirname, '../dist/index.html'))
   }
@@ -977,6 +1237,10 @@ function createWindow() {
 ipcMain.handle('force-update', async () => {
   const https = require('https')
   log('Force update requested')
+
+  // A beta user's newest build can be a beta the stable GitHub lookup below
+  // would never see.
+  if (await checkBetaUpdate({ force: true })) return
 
   // Linux: hand off to electron-updater. Its AppImageUpdater replaces the
   // installed AppImage in place on quitAndInstall — the manual flow below
@@ -1052,13 +1316,14 @@ ipcMain.handle('force-update', async () => {
   }
 })
 
-ipcMain.handle('check-for-updates', () => {
+ipcMain.handle('check-for-updates', async () => {
   log('Manual update check triggered')
+  if (await checkBetaUpdate()) return
   return autoUpdater.checkForUpdatesAndNotify()
 })
 ipcMain.handle('install-update', () => {
   log('Manual install-update triggered')
-  quitAndInstallSilently()
+  installUpdateAndRestart()
 })
 ipcMain.handle('minimize-window', () => {
   if (appSettings.minimizeTo === 'tray' && tray) {
@@ -1134,6 +1399,7 @@ const KNOWN_GLOBAL_SHORTCUT_IDS = new Set([
   'view-tracker', 'view-playlists', 'view-library', 'view-wrld', 'view-admin',
   'open-settings', 'open-diagnostics', 'toggle-queue', 'focus-search', 'mini-player',
   'close-float-windows', 'restart-app', 'rescan-library', 'discord-status', 'toggle-devtools',
+  'desktop-light', 'desktop-widgets', 'clear-desk', 'next-light', 'next-lyric-style', 'wrld-widgets',
 ])
 const ACCELERATOR_RE = /^(?:Cmd|Command|Ctrl|Control|CommandOrControl|CmdOrCtrl|Alt|Option|AltGr|Shift|Super|Meta)(?:\+(?:Cmd|Command|Ctrl|Control|CommandOrControl|CmdOrCtrl|Alt|Option|AltGr|Shift|Super|Meta))*\+[A-Za-z0-9`~!@#$%^&*()\-=_+[\]{}\\|;:'",.<>/?]$|^(?:F(?:[1-9]|1[0-9]|2[0-4])|[A-Za-z0-9]|Plus|Space|Tab|Backspace|Delete|Insert|Return|Enter|Up|Down|Left|Right|Home|End|PageUp|PageDown|Escape|VolumeUp|VolumeDown|VolumeMute|MediaNextTrack|MediaPreviousTrack|MediaStop|MediaPlayPause|PrintScreen)$/
 ipcMain.handle('register-global-shortcuts', (_, entries) => {
@@ -1605,10 +1871,46 @@ ipcMain.handle('beta-join', async (_, code) => {
   return true
 })
 
+// Leaving the channel while running a beta build would otherwise strand the
+// user on it: the stable check only moves forward, and a beta outranks the
+// latest stable. So fetch the newest stable installer and run it over the top
+// (the same silent install a beta update uses). Windows only, like beta builds.
+async function installLatestStable() {
+  try {
+    const release = await new Promise((resolve, reject) => {
+      https.get('https://api.github.com/repos/' + UPDATE_REPO.owner + '/' + UPDATE_REPO.repo + '/releases/latest', {
+        headers: { 'User-Agent': 'Unreleased-App', 'Accept': 'application/vnd.github+json' }, timeout: 15000,
+      }, (res) => {
+        if (res.statusCode !== 200) { res.resume(); return reject(new Error(`GitHub API HTTP ${res.statusCode}`)) }
+        let data = ''
+        res.on('data', d => { data += d })
+        res.on('end', () => { try { resolve(JSON.parse(data)) } catch (e) { reject(e) } })
+      }).on('error', reject)
+    })
+    const asset = release.assets.find(a => a.name.endsWith('.exe'))
+    if (!asset) throw new Error('No installer found in latest release')
+    const version = String(release.tag_name).replace(/^v/, '')
+    const dest = path.join(app.getPath('temp'), asset.name)
+    log('Leaving beta — installing stable', version)
+    broadcastToWindows('update-status', { type: 'downloading', percent: 0, version })
+    await downloadFile(asset.browser_download_url, dest,
+      (percent) => broadcastToWindows('update-status', { type: 'downloading', percent, version }))
+    betaInstallerPath = dest
+    updateDownloadedPending = true
+    pendingUpdate = { version, installer: dest }
+    broadcastToWindows('update-status', { type: 'downloaded', version })
+    installUpdateAndRestart()
+  } catch (err) {
+    log('Return to stable failed:', err.message)
+    broadcastToWindows('update-status', { type: 'error', message: `Couldn't switch back to stable: ${err.message}` })
+  }
+}
+
 ipcMain.handle('beta-leave', () => {
   try { fs.rmSync(betaMarkerPath, { force: true }) } catch {}
   applyUpdateFeed(null)
   log('Left beta channel')
+  if (!isDev && process.platform === 'win32' && app.getVersion().includes('-')) installLatestStable()
   return true
 })
 
@@ -1903,7 +2205,9 @@ ipcMain.handle('move-library-file', async (event, filePath) => {
 })
 
 ipcMain.handle('copy-text-to-clipboard', (_, text) => {
-  clipboard.writeText(String(text ?? ''))
+  // Electron writes line breaks as bare \n; plenty of Windows apps then paste only the first line.
+  const s = String(text ?? '')
+  clipboard.writeText(process.platform === 'win32' ? s.replace(/\r?\n/g, '\r\n') : s)
   return { ok: true }
 })
 
@@ -1987,6 +2291,78 @@ function updateOfflineLibrary(mutate) {
   })
 }
 
+// Image fetch for covers: follows redirects (incl. 307/308, which a pasted
+// custom-cover URL may well use) and caps the body so a non-image response
+// can't balloon in memory. Shared by fetch-image-as-data-url and the offline
+// cover snapshot below.
+function fetchImageBuffer(url) {
+  return new Promise((resolve, reject) => {
+    const MAX_BYTES = 20 * 1024 * 1024 // guard against a non-image response
+    function doGet(u, redirects) {
+      const opts = new URL(u)
+      https.get({ hostname: opts.hostname, path: opts.pathname + opts.search, headers: { 'User-Agent': 'Unreleased-App' } }, (res) => {
+        if ((res.statusCode === 301 || res.statusCode === 302 || res.statusCode === 307 || res.statusCode === 308) && res.headers.location) {
+          res.resume()
+          if (redirects <= 0) return reject(new Error('Too many redirects'))
+          return doGet(new URL(res.headers.location, u).toString(), redirects - 1)
+        }
+        if (res.statusCode !== 200) { res.resume(); return reject(new Error(`HTTP ${res.statusCode}`)) }
+        const chunks = []
+        let received = 0
+        res.on('data', (c) => {
+          received += c.length
+          if (received > MAX_BYTES) { res.destroy(); return reject(new Error('Image too large')) }
+          chunks.push(c)
+        })
+        res.on('end', () => resolve(Buffer.concat(chunks)))
+        res.on('error', reject)
+      }).on('error', reject)
+    }
+    doGet(url, 5)
+  })
+}
+
+// Offline covers live under userData rather than the (user-movable) audio
+// folder, so offline-set-library-path never has to carry them along. One JPEG
+// per track id, capped at 640px like every other stored cover.
+const offlineCoversDir = path.join(app.getPath('userData'), 'offline-covers')
+
+// Snapshots the track's cover — the user's personalized one when they've set
+// it, else the song's own — to disk so it renders with no network at all.
+// `imageUrl` is the already-resolved URL the renderer displays. Skips the
+// fetch when the same source is already on disk. Best-effort: a failed cover
+// never fails the audio download; the entry just keeps its remote imageUrl.
+async function snapshotOfflineCover(id, imageUrl, existing) {
+  if (!imageUrl) {
+    if (existing?.localImagePath) { try { fs.unlinkSync(existing.localImagePath) } catch {} }
+    return { localImagePath: null, coverSourceUrl: null }
+  }
+  if (existing?.coverSourceUrl === imageUrl && existing.localImagePath && fs.existsSync(existing.localImagePath)) {
+    return { localImagePath: existing.localImagePath, coverSourceUrl: imageUrl }
+  }
+  try {
+    let buf
+    const dataMatch = /^data:[^;,]*;base64,(.*)$/i.exec(imageUrl)
+    if (dataMatch) buf = Buffer.from(dataMatch[1], 'base64')
+    else if (/^https:\/\//i.test(imageUrl)) buf = await fetchImageBuffer(imageUrl)
+    else return { localImagePath: existing?.localImagePath ?? null, coverSourceUrl: existing?.coverSourceUrl ?? null }
+    const dataUri = coverToThumbDataUri(buf, 'image/jpeg', 640)
+    const b64 = dataUri.slice(dataUri.indexOf(',') + 1)
+    fs.mkdirSync(offlineCoversDir, { recursive: true })
+    const localImagePath = path.join(offlineCoversDir, `${id}.jpg`)
+    fs.writeFileSync(localImagePath, Buffer.from(b64, 'base64'))
+    return { localImagePath, coverSourceUrl: imageUrl }
+  } catch (e) {
+    log('offline cover snapshot failed for', id, e instanceof Error ? e.message : String(e))
+    return { localImagePath: existing?.localImagePath ?? null, coverSourceUrl: existing?.coverSourceUrl ?? null }
+  }
+}
+
+function deleteOfflineTrackFiles(entry) {
+  try { fs.unlinkSync(entry.localPath) } catch {}
+  if (entry.localImagePath) { try { fs.unlinkSync(entry.localImagePath) } catch {} }
+}
+
 ipcMain.handle('offline-get-library', () => loadOfflineLibrary())
 
 // Reads actual file sizes off disk (rather than trusting cached metadata)
@@ -2017,7 +2393,37 @@ function isAllowedLibraryDownloadHost(url) {
   }
 }
 
-ipcMain.handle('offline-download-track', async (event, { id, url, ext, path: songPath, meta }) => {
+// Track downloads in flight, by id. A second request for a track that is
+// already downloading (a playlist sync and Sync both wanting it) waits for
+// the first rather than writing the same `.part` file, and Sync's pause
+// aborts its downloads through the controllers here.
+const offlineDownloadsInFlight = new Map()
+
+function downloadOfflineTrackOnce(payload) {
+  const running = offlineDownloadsInFlight.get(payload?.id)
+  if (running) {
+    // A cancelled run belonged to whoever paused it; this caller still wants the track.
+    return running.promise.then((r) => (r?.cancelled ? downloadOfflineTrackOnce(payload) : r?.error ? r : { ...r, skipped: true }))
+  }
+  const controller = new AbortController()
+  const promise = downloadOfflineTrack(payload, controller.signal)
+    .finally(() => { if (offlineDownloadsInFlight.get(payload?.id)?.promise === promise) offlineDownloadsInFlight.delete(payload?.id) })
+  offlineDownloadsInFlight.set(payload?.id, { promise, controller })
+  return promise
+}
+
+ipcMain.handle('offline-download-track', (event, payload) => downloadOfflineTrackOnce(payload))
+
+// Stops the given tracks' downloads (all of them with no list). Each one's
+// offline-download-track call resolves { cancelled: true }.
+ipcMain.handle('offline-cancel-downloads', (_, ids) => {
+  for (const [id, { controller }] of offlineDownloadsInFlight) {
+    if (!Array.isArray(ids) || ids.includes(id)) controller.abort()
+  }
+  return true
+})
+
+async function downloadOfflineTrack({ id, url, ext, path: songPath, meta }, signal) {
   if (!isAllowedLibraryDownloadHost(url)) return { error: 'Download blocked: untrusted host' }
   const existing = loadOfflineLibrary().tracks[id]
   const localPath = path.join(getOfflineAudioDir(), `${id}.${ext || 'mp3'}`)
@@ -2025,36 +2431,88 @@ ipcMain.handle('offline-download-track', async (event, { id, url, ext, path: son
   // Audio unchanged and still on disk — just refresh the display metadata
   // (title/lyrics/art may have been edited without the file itself moving).
   if (existing && existing.path === songPath && fs.existsSync(existing.localPath)) {
+    const cover = await snapshotOfflineCover(id, meta?.imageUrl, existing)
     updateOfflineLibrary((library) => {
-      library.tracks[id] = { ...(library.tracks[id] || existing), ...meta, path: songPath }
+      library.tracks[id] = { ...(library.tracks[id] || existing), ...meta, ...cover, path: songPath }
     })
     let size = 0
     try { size = fs.statSync(existing.localPath).size } catch {}
-    return { localPath: existing.localPath, skipped: true, size }
+    return { localPath: existing.localPath, skipped: true, size, ...cover }
   }
 
   try { fs.mkdirSync(getOfflineAudioDir(), { recursive: true }) } catch {}
   try {
     await downloadFile(url, localPath, (percent, received, total) => {
       mainWindow?.webContents.send('offline-download-progress', { id, percent, received, total })
-    })
+    }, undefined, signal)
   } catch (e) {
+    if (signal?.aborted) return { error: 'Cancelled', cancelled: true }
     return { error: 'Download failed: ' + e.message }
   }
 
+  const cover = await snapshotOfflineCover(id, meta?.imageUrl, existing)
   updateOfflineLibrary((library) => {
-    library.tracks[id] = { ...meta, path: songPath, localPath, ext: ext || 'mp3', downloadedAt: Date.now() }
+    library.tracks[id] = { ...meta, ...cover, path: songPath, localPath, ext: ext || 'mp3', downloadedAt: Date.now() }
   })
+  // The song's audio moved to a file of another type: the old copy is no
+  // longer anyone's.
+  if (existing?.localPath && existing.localPath !== localPath) { try { fs.unlinkSync(existing.localPath) } catch {} }
   let size = 0
   try { size = fs.statSync(localPath).size } catch {}
-  return { localPath, size }
+  return { localPath, size, ...cover }
+}
+
+// On-disk size of every offline track, by id, so Sync can say how much of
+// the library is its own. Missing files are left out.
+ipcMain.handle('offline-get-track-sizes', async () => {
+  const entries = Object.entries(loadOfflineLibrary().tracks)
+  const sizes = {}
+  await Promise.all(entries.map(async ([id, track]) => {
+    try { sizes[id] = (await fs.promises.stat(track.localPath)).size } catch {}
+  }))
+  return sizes
+})
+
+// Free and total space on the drive holding the offline songs folder. The
+// folder itself may not exist before the first download, so this measures
+// its nearest existing parent.
+ipcMain.handle('offline-get-disk-space', async () => {
+  const folder = getOfflineAudioDir()
+  let dir = folder
+  while (!fs.existsSync(dir) && path.dirname(dir) !== dir) dir = path.dirname(dir)
+  try {
+    const s = await fs.promises.statfs(dir)
+    return { path: folder, free: s.bavail * s.bsize, total: s.blocks * s.bsize }
+  } catch (e) {
+    return { path: folder, error: e instanceof Error ? e.message : String(e) }
+  }
+})
+
+// Personalization changed (custom name/cover set or cleared) on a track that's
+// already downloaded — patch the stored snapshot and re-save the cover file
+// without touching the audio. No-op for tracks that aren't offline.
+ipcMain.handle('offline-update-track-meta', async (_, id, patch) => {
+  const existing = loadOfflineLibrary().tracks[id]
+  if (!existing || !patch || typeof patch !== 'object') return null
+  const { title, imageUrl } = patch
+  const cover = imageUrl !== undefined ? await snapshotOfflineCover(id, imageUrl, existing) : {}
+  const library = updateOfflineLibrary((lib) => {
+    if (!lib.tracks[id]) return
+    lib.tracks[id] = {
+      ...lib.tracks[id],
+      ...(typeof title === 'string' ? { title } : {}),
+      ...(imageUrl !== undefined ? { imageUrl } : {}),
+      ...cover,
+    }
+  })
+  return library.tracks[id] ?? null
 })
 
 ipcMain.handle('offline-remove-track', (_, id) => {
   updateOfflineLibrary((library) => {
     const entry = library.tracks[id]
     if (!entry) return
-    try { fs.unlinkSync(entry.localPath) } catch {}
+    deleteOfflineTrackFiles(entry)
     delete library.tracks[id]
   })
   return true
@@ -2069,7 +2527,7 @@ ipcMain.handle('offline-set-playlist', (_, key, songIds, name) => {
     const stillReferenced = new Set(Object.values(library.playlists).flatMap(p => p.songIds))
     for (const trackId of Object.keys(library.tracks)) {
       if (!stillReferenced.has(trackId)) {
-        try { fs.unlinkSync(library.tracks[trackId].localPath) } catch {}
+        deleteOfflineTrackFiles(library.tracks[trackId])
         delete library.tracks[trackId]
       }
     }
@@ -2083,7 +2541,7 @@ ipcMain.handle('offline-remove-playlist', (_, key) => {
     const stillReferenced = new Set(Object.values(library.playlists).flatMap(p => p.songIds))
     for (const trackId of Object.keys(library.tracks)) {
       if (!stillReferenced.has(trackId)) {
-        try { fs.unlinkSync(library.tracks[trackId].localPath) } catch {}
+        deleteOfflineTrackFiles(library.tracks[trackId])
         delete library.tracks[trackId]
       }
     }
@@ -2102,26 +2560,32 @@ ipcMain.handle('offline-set-library-path', async (_, newPath) => {
     return { error: 'Could not create folder: ' + e.message }
   }
 
+  // One file at a time without blocking the main process: with Sync keeping
+  // the whole catalogue, a move to another drive copies gigabytes. The index
+  // is repointed in one write at the end, for the files that made it.
   const failed = []
-  updateOfflineLibrary((library) => {
-    for (const trackId of Object.keys(library.tracks)) {
-      const track = library.tracks[trackId]
-      const oldFile = track.localPath
-      if (!oldFile || !fs.existsSync(oldFile)) continue
-      const newFile = path.join(newPath, path.basename(oldFile))
+  const moved = {}
+  for (const [trackId, track] of Object.entries(loadOfflineLibrary().tracks)) {
+    const oldFile = track.localPath
+    if (!oldFile || !fs.existsSync(oldFile)) continue
+    const newFile = path.join(newPath, path.basename(oldFile))
+    try {
+      await fs.promises.rename(oldFile, newFile)
+      moved[trackId] = newFile
+    } catch (e) {
+      // Cross-device moves can fail with EXDEV — fall back to copy + delete.
       try {
-        fs.renameSync(oldFile, newFile)
-        track.localPath = newFile
-      } catch (e) {
-        // Cross-device moves can fail with EXDEV — fall back to copy + delete.
-        try {
-          fs.copyFileSync(oldFile, newFile)
-          fs.unlinkSync(oldFile)
-          track.localPath = newFile
-        } catch (e2) {
-          failed.push(trackId)
-        }
+        await fs.promises.copyFile(oldFile, newFile)
+        await fs.promises.unlink(oldFile)
+        moved[trackId] = newFile
+      } catch (e2) {
+        failed.push(trackId)
       }
+    }
+  }
+  updateOfflineLibrary((library) => {
+    for (const [trackId, newFile] of Object.entries(moved)) {
+      if (library.tracks[trackId]) library.tracks[trackId].localPath = newFile
     }
   })
 
@@ -3306,6 +3770,10 @@ ipcMain.handle('open-discord-login', (_, authorizeUrl) => {
   })
 })
 
+// Passkey sign-in and setup run in a window of their own that Chromium treats
+// as https://player.juicewrldapi.com (see passkey.js for why and how).
+registerPasskeyIpc({ ipcMain, BrowserWindow, session, getMainWindow: () => mainWindow, iconPath, isDev })
+
 ipcMain.handle('select-image-file', async () => {
   const result = await dialog.showOpenDialog(mainWindow, {
     properties: ['openFile'],
@@ -3330,44 +3798,235 @@ ipcMain.handle('select-image-file', async () => {
 ipcMain.handle('fetch-image-as-data-url', async (_, url) => {
   if (typeof url !== 'string' || !/^https?:\/\//i.test(url)) return { error: 'Invalid image URL' }
   try {
-    const buf = await new Promise((resolve, reject) => {
-      const MAX_BYTES = 20 * 1024 * 1024 // guard against a non-image response
-      function doGet(u, redirects) {
-        const opts = new URL(u)
-        https.get({ hostname: opts.hostname, path: opts.pathname + opts.search, headers: { 'User-Agent': 'Unreleased-App' } }, (res) => {
-          if ((res.statusCode === 301 || res.statusCode === 302 || res.statusCode === 307 || res.statusCode === 308) && res.headers.location) {
-            res.resume()
-            if (redirects <= 0) return reject(new Error('Too many redirects'))
-            return doGet(new URL(res.headers.location, u).toString(), redirects - 1)
-          }
-          if (res.statusCode !== 200) { res.resume(); return reject(new Error(`HTTP ${res.statusCode}`)) }
-          const chunks = []
-          let received = 0
-          res.on('data', (c) => {
-            received += c.length
-            if (received > MAX_BYTES) { res.destroy(); return reject(new Error('Image too large')) }
-            chunks.push(c)
-          })
-          res.on('end', () => resolve(Buffer.concat(chunks)))
-          res.on('error', reject)
-        }).on('error', reject)
-      }
-      doGet(url, 5)
-    })
+    const buf = await fetchImageBuffer(url)
     return { dataUrl: coverToThumbDataUri(buf, 'image/jpeg', 640) }
   } catch (e) {
     return { error: e.message || 'Failed to fetch image' }
   }
 })
 
+// ── Update before launch ──────────────────────────────────────────────────────
+// The app the user sees is always the latest build. A packaged launch shows a
+// small updating window (electron/updating/) instead of the app, checks the
+// feed, and when there is a newer build downloads it and runs its installer
+// right there; the installer reopens the app on the new version (see
+// installUpdateAndRestart). The main window is only created once there is
+// nothing to install. With auto-download off none of this runs: the app opens
+// at once and offers the update the old way. A check that takes too long, a
+// stalled download or an installer that never takes over opens the app
+// anyway (launchUpdate.js), and the work finishes in the background with the
+// usual "Update ready" prompt.
+const LAUNCH_CHECK_TIMEOUT_MS = 10 * 1000
+const LAUNCH_STALL_TIMEOUT_MS = 30 * 1000
+const LAUNCH_INSTALL_TIMEOUT_MS = 20 * 1000
+let updatingWindow = null
+// The gate while a launch waits on the update check (createLaunchGate), else null.
+let launchGate = null
+
+// Resolves once the window has painted, so the user sees every step, or after
+// 2 s so a page that never paints can't hold the launch. `status` opens it in
+// that update-status state instead of "Checking for updates".
+function showUpdatingWindow({ status = '' } = {}) {
+  const win = updatingWindow = new BrowserWindow({
+    width: 300, height: 360,
+    resizable: false, maximizable: false, fullscreenable: false,
+    title: 'Unreleased',
+    backgroundColor: '#0a0a0a', icon: iconPath, frame: false,
+    show: false,
+    webPreferences: {
+      preload: path.join(__dirname, 'updatingPreload.js'),
+      nodeIntegration: false, contextIsolation: true, sandbox: true, webSecurity: true,
+      spellcheck: false, devTools: false,
+      // Keeps painting when covered, for the stand-in's capture of it.
+      backgroundThrottling: false,
+    },
+  })
+  win.on('closed', () => { if (updatingWindow === win) updatingWindow = null })
+  win.webContents.setWindowOpenHandler(() => ({ action: 'deny' }))
+  win.webContents.on('will-navigate', (e) => e.preventDefault())
+  win.once('ready-to-show', () => { if (!win.isDestroyed()) win.show() })
+  win.loadFile(path.join(__dirname, 'updating', 'index.html'), { query: { version: app.getVersion(), ...(status ? { status } : {}) } })
+  return new Promise((resolve) => {
+    win.once('ready-to-show', () => resolve())
+    setTimeout(() => resolve(), 2000)
+  })
+}
+
+function closeUpdatingWindow() {
+  if (updatingWindow && !updatingWindow.isDestroyed()) updatingWindow.close()
+}
+
+// Resolves when the main window may open: true when this launch checked for
+// updates itself, false when it skipped the check.
+async function updateBeforeLaunch() {
+  if (isDev || isSmokeTest || !appSettings.autoDownload) return false
+  // The last update install didn't take (it failed, or its UAC prompt was
+  // turned down). Open the app and leave the update to its prompt this time,
+  // instead of failing out of sight at every launch.
+  if (updateInstallDidNotTake) {
+    log(`Update to ${updateInstallDidNotTake} didn't install last time; opening the app first`)
+    return false
+  }
+  await showUpdatingWindow()
+  // This is the new version on screen, if an update just installed.
+  releaseInstallStandIn()
+  const gate = launchGate = createLaunchGate({
+    check: async () => {
+      log('Checking for updates (launch)...')
+      updateCheckInProgress = true
+      try {
+        // Same order as runUpdateCheck: a beta user's gated list comes first.
+        if (await checkBetaUpdate()) return
+        const result = await autoUpdater.checkForUpdates()
+        // update-downloaded fires before this resolves and hands off to the
+        // installer through launchGate.install().
+        if (result?.downloadPromise) await result.downloadPromise
+      } finally {
+        updateCheckInProgress = false
+      }
+    },
+    install: installUpdateAndRestart,
+    log,
+    checkTimeoutMs: LAUNCH_CHECK_TIMEOUT_MS,
+    stallTimeoutMs: LAUNCH_STALL_TIMEOUT_MS,
+    installTimeoutMs: LAUNCH_INSTALL_TIMEOUT_MS,
+  })
+  await gate.opened
+  if (launchGate === gate) launchGate = null
+  // It stays up as a splash until the app is on screen (launchApp).
+  if (updatingWindow && !updatingWindow.isDestroyed()) updatingWindow.webContents.send('update-status', { type: 'starting' })
+  return true
+}
+
+// The app itself: main window, Desktop, tray, Discord and the background update
+// checks.
+function launchApp(checkedForUpdates) {
+  // Closing the updating window while it waited quits the app.
+  if (isQuitting) return
+  createWindow()
+  mainWindow.once('ready-to-show', () => {
+    closeUpdatingWindow()
+    releaseInstallStandIn()
+  })
+  if (isSmokeTest) return
+  startDesktop()
+  createTray()
+  discordRpc.setEnabled(appSettings.discordRpcEnabled !== false)
+
+  if (!isDev) {
+    if (!checkedForUpdates) mainWindow.once('ready-to-show', () => runUpdateCheck('startup'))
+    // Covers the app being left open for a long session (periodic) and a
+    // laptop waking from sleep after the interval would've otherwise elapsed
+    // unnoticed in the background — resume fires even if the OS suspended
+    // the interval timer along with everything else while asleep.
+    setInterval(() => runUpdateCheck('periodic'), UPDATE_CHECK_INTERVAL_MS)
+    powerMonitor.on('resume', () => runUpdateCheck('resume from sleep'))
+  }
+}
+
 // ── App lifecycle ─────────────────────────────────────────────────────────────
 app.whenReady().then(() => {
   // Deny every permission request by default. Nothing in this app needs
-  // notifications/media/geolocation/etc. granted to loaded web content, and
+  // notifications/geolocation/etc. granted to loaded web content, and
   // Electron's built-in default handler grants most of them — this closes
   // that gap explicitly rather than relying on the default.
-  session.defaultSession.setPermissionRequestHandler((_webContents, _permission, callback) => {
+  // The exceptions are audio-only access from the main app frame:
+  // recognition requests a microphone only on Listen, and on Windows can
+  // record device audio (loopback) instead.
+  const appDocumentUrl = pathToFileURL(path.join(__dirname, '../dist/index.html')).href
+  const microphoneAllowed = (webContents, url, isMainFrame, mediaTypes) => canRequestMicrophone({
+    url, mainUrl: webContents?.getURL() || '', appUrl: appDocumentUrl, isDev,
+    isMainWindow: !!mainWindow && webContents === mainWindow.webContents,
+    isMainFrame, mediaTypes,
+  })
+  const systemAudioAllowed = (webContents, url, isMainFrame) => canCaptureSystemAudio({
+    url, mainUrl: webContents?.getURL() || '', appUrl: appDocumentUrl, isDev,
+    isMainWindow: !!mainWindow && webContents === mainWindow.webContents,
+    isMainFrame, audioRequested: true, platform: process.platform,
+  })
+  session.defaultSession.setPermissionCheckHandler((webContents, permission, _origin, details) => {
+    // Same gate as the request handler below; the user prompt still decides.
+    // getDisplayMedia also checks 'media'/video for its throwaway screen track; the request
+    // handler still refuses real camera requests, so this only unblocks device-audio capture.
+    // Not logged: every enumerateDevices() call runs these checks. Electron's typings
+    // leave 'display-capture' out of check permissions, hence the widened type.
+    if (/** @type {string} */ (permission) === 'display-capture' || (permission === 'media' && details.mediaType === 'video')) {
+      return systemAudioAllowed(webContents, details.requestingUrl || '', details.isMainFrame)
+    }
+    return permission === 'media' && details.mediaType === 'audio'
+      && microphoneAllowed(webContents, details.requestingUrl || '', details.isMainFrame, ['audio'])
+  })
+  session.defaultSession.setPermissionRequestHandler((webContents, permission, callback, details) => {
+    // The display-media handler below asks the user and picks the streams.
+    if (permission === 'display-capture') {
+      const ok = systemAudioAllowed(webContents, details.requestingUrl, details.isMainFrame)
+      if (!ok) runLog('recognition', 'display-capture permission denied', JSON.stringify({ url: details.requestingUrl, isMainFrame: details.isMainFrame, mainUrl: webContents?.getURL() }))
+      callback(ok)
+      return
+    }
+    // getDisplayMedia arrives as 'media' with no device types (no camera or mic);
+    // the display-media handler below then asks the user and picks the streams.
+    if (permission === 'media' && 'mediaTypes' in details && (details.mediaTypes || []).length === 0) {
+      callback(systemAudioAllowed(webContents, details.requestingUrl, details.isMainFrame))
+      return
+    }
+    if (permission === 'media' && 'mediaTypes' in details
+      && microphoneAllowed(webContents, details.requestingUrl, details.isMainFrame, details.mediaTypes)) {
+      if (appSettings.recognitionMicGranted) { callback(true); return }
+      const requestingWindow = mainWindow
+      void dialog.showMessageBox(requestingWindow, {
+        type: 'question', title: 'Allow microphone access?',
+        message: 'Allow Unreleased to use your microphone?',
+        detail: 'Song recognition records a short clip when you choose Listen. You can cancel recording at any time.',
+        buttons: ['Cancel', 'Allow microphone'], defaultId: 0, cancelId: 0,
+      }).then(({ response }) => {
+        const granted = response === 1 && !webContents.isDestroyed()
+          && microphoneAllowed(webContents, details.requestingUrl, details.isMainFrame, details.mediaTypes)
+        if (granted) { appSettings.recognitionMicGranted = true; saveSettings() }
+        callback(granted)
+      }).catch(() => callback(false))
+      return
+    }
+    runLog('permissions', 'request denied', JSON.stringify({
+      permission, mediaTypes: 'mediaTypes' in details ? details.mediaTypes : undefined, url: details.requestingUrl, isMainFrame: details.isMainFrame,
+    }))
     callback(false)
+  })
+  // Grants system audio plus a throwaway screen track (getDisplayMedia cannot
+  // be audio-only); the renderer stops the video as soon as it arrives.
+  session.defaultSession.setDisplayMediaRequestHandler((request, callback) => {
+    runLog('recognition', 'display media requested', JSON.stringify({ audio: request.audioRequested, video: request.videoRequested, gesture: request.userGesture }))
+    const deny = () => { try { callback({}) } catch {} }
+    const allowed = () => {
+      const webContents = mainWindow?.webContents
+      const frame = request.frame
+      if (!webContents || webContents.isDestroyed() || !frame) return false
+      const main = webContents.mainFrame
+      const isMainFrame = frame.processId === main.processId && frame.routingId === main.routingId
+      return canCaptureSystemAudio({
+        url: frame.url, mainUrl: webContents.getURL() || '', appUrl: appDocumentUrl, isDev,
+        isMainWindow: isMainFrame, isMainFrame, audioRequested: request.audioRequested, platform: process.platform,
+      })
+    }
+    if (!allowed()) {
+      const frame = request.frame
+      runLog('recognition', 'device audio denied before prompt', JSON.stringify({
+        hasFrame: !!frame, frameUrl: frame?.url, mainUrl: mainWindow?.webContents?.getURL(),
+        audioRequested: request.audioRequested, platform: process.platform, isDev,
+      }))
+      deny(); return
+    }
+    void dialog.showMessageBox(mainWindow, {
+      type: 'question', title: 'Record device audio?',
+      message: 'Let Unreleased listen to what your computer is playing?',
+      detail: 'Song recognition records 10 seconds of your device audio when you choose Listen. Nothing else on your screen is recorded.',
+      buttons: ['Cancel', 'Allow'], defaultId: 1, cancelId: 0,
+    }).then(async ({ response }) => {
+      if (response !== 1 || !allowed()) { deny(); return }
+      const [screenSource] = await desktopCapturer.getSources({ types: ['screen'], thumbnailSize: { width: 0, height: 0 } })
+      if (!screenSource || !allowed()) { deny(); return }
+      callback({ video: screenSource, audio: 'loopback' })
+    }).catch(deny)
   })
 
   // Sweep partial downloads left by a crash mid-transfer: downloadFile writes
@@ -3410,6 +4069,7 @@ app.whenReady().then(() => {
         '.aif': 'audio/aiff', '.caf': 'audio/x-caf',
         '.mp4': 'video/mp4', '.mov': 'video/quicktime', '.webm': 'video/webm',
         '.m4v': 'video/mp4', '.mkv': 'video/x-matroska',
+        '.jpg': 'image/jpeg', // offline cover snapshots (offline-covers/)
       }
       const mime = mimeByExt[path.extname(filePath).toLowerCase()] || 'application/octet-stream'
 
@@ -3496,23 +4156,14 @@ app.whenReady().then(() => {
     }
   )
 
-  createWindow()
-  if (isSmokeTest) return
-  createTray()
-  discordRpc.setEnabled(appSettings.discordRpcEnabled !== false)
-
-  if (!isDev) {
-    mainWindow.once('ready-to-show', () => runUpdateCheck('startup'))
-    // Covers the app being left open for a long session (periodic) and a
-    // laptop waking from sleep after the interval would've otherwise elapsed
-    // unnoticed in the background — resume fires even if the OS suspended
-    // the interval timer along with everything else while asleep.
-    setInterval(() => runUpdateCheck('periodic'), UPDATE_CHECK_INTERVAL_MS)
-    powerMonitor.on('resume', () => runUpdateCheck('resume from sleep'))
-  }
+  if (isDev && process.env.UNRELEASED_DEV_SEED !== '0') devStorageSeedReady = readInstalledLocalStorage()
+  // A bug in the update gate must never keep the app from opening.
+  updateBeforeLaunch()
+    .catch((err) => { log('Launch update failed:', err.message); return false })
+    .then(launchApp)
 
   app.on('activate', () => {
-    if (BrowserWindow.getAllWindows().length === 0) createWindow()
+    if (BrowserWindow.getAllWindows().length === 0 && !launchGate) createWindow()
   })
 })
 
@@ -3521,6 +4172,10 @@ app.on('second-instance', () => {
     if (mainWindow.isMinimized()) mainWindow.restore()
     mainWindow.show()
     mainWindow.focus()
+  } else if (updatingWindow && !updatingWindow.isDestroyed()) {
+    // Still updating: bring that window forward instead.
+    if (updatingWindow.isMinimized()) updatingWindow.restore()
+    updatingWindow.focus()
   }
 })
 
@@ -3528,6 +4183,36 @@ app.on('before-quit', () => { isQuitting = true; skipCloseConfirm = true; discor
 
 app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') app.quit()
+})
+
+// autoInstallOnAppQuit only covers electron-updater's own download; a beta
+// installer we fetched ourselves would otherwise sit in temp forever. Run it
+// silently on a plain quit, same as a stable install-on-quit: no relaunch
+// marker, so the app stays closed and the next launch is the new build.
+app.on('will-quit', () => {
+  desktop?.dispose()
+  desktop = null
+  if (!betaInstallerPath || installingUpdate) return
+  log('Installing pending beta on quit:', betaInstallerPath)
+  try {
+    spawn(betaInstallerPath, ['--updated', '/S'], { detached: true, stdio: 'ignore' }).unref()
+  } catch (e) {
+    log('Beta install-on-quit failed:', e.message)
+  }
+})
+
+// Every quit with an update pending hands off to its installer: "Restart now",
+// electron-updater's install-on-quit, or the beta install-on-quit above. Mark
+// it so a launch during the install steps aside (handOffToRunningUpdateInstall).
+// A quit that ends up not installing (non-zero exit code) leaves a marker
+// with no installer running, which the next launch just clears.
+app.on('quit', () => {
+  if (process.platform !== 'win32' || !updateDownloadedPending || !pendingUpdate?.installer) return
+  try {
+    fs.writeFileSync(updateInstallingMarkerPath, JSON.stringify({ ...pendingUpdate, at: Date.now() }))
+  } catch (e) {
+    log('Failed to write update-installing marker:', e.message)
+  }
 })
 
 // ── Auto-updater events ───────────────────────────────────────────────────────
@@ -3538,17 +4223,18 @@ autoUpdater.on('checking-for-update', () => {
 
 autoUpdater.on('update-available', (info) => {
   log('Update available:', info.version)
+  launchGate?.progress()
   broadcastToWindows('update-status', { type: 'available', version: info.version })
 })
 
 autoUpdater.on('update-not-available', (info) => {
   log('Up to date:', info.version)
-  isStartupUpdateCheck = false
   broadcastToWindows('update-status', { type: 'not-available', version: info.version })
 })
 
 autoUpdater.on('download-progress', (p) => {
   log(`Downloading update: ${Math.round(p.percent)}%`)
+  launchGate?.progress()
   broadcastToWindows('update-status', {
     type: 'downloading',
     percent: Math.round(p.percent),
@@ -3556,62 +4242,197 @@ autoUpdater.on('download-progress', (p) => {
   })
 })
 
-// electron-builder's assisted (oneClick: false) NSIS installer only relaunches
-// the app from its interactive Finish-page checkbox — the --force-run flag
-// electron-updater passes on quitAndInstall(silent, forceRunAfter) is never
-// read by the template in silent (/S) mode, so a silent install just quits
-// and never comes back. Work around it ourselves: spawn a detached watcher
-// before quitting that waits for this process to exit and for the installer
-// to finish overwriting our exe (detected by the file becoming unlockable
-// again), then starts the app back up.
-function quitAndInstallSilently() {
+// Restarting into an update on Windows is the installer's job, not ours. The
+// old approach relaunched from outside it (a detached PowerShell watcher
+// guessing from process lists and exe file locks when the install was done)
+// and kept getting the timing wrong: it started the OLD exe mid-install, which
+// found the same update again and re-ran the installer. Only the installer
+// knows when the new files are in place, so it relaunches the app itself
+// (customInstall in build/installer.nsh, which runs after extraction). This
+// marker asks it to: we write it right before handing off, it deletes it and
+// starts the new exe. A plain quit with an update pending
+// (autoInstallOnAppQuit) writes no marker, so that install stays quiet and the
+// app stays closed. electron-updater's --force-run isn't used: the template
+// only honours it through a shell launch of the Start-menu shortcut, and it
+// would double-launch alongside ours.
+const relaunchMarkerPath = path.join(app.getPath('userData'), 'relaunch-after-update')
+let installingUpdate = false
+
+// The installer deletes the marker before starting us, so one still here means
+// a handoff whose install never ran or failed. Clear it, or the next quiet
+// install-on-quit would reopen the app. Not in a second instance: the first
+// may be mid-handoff with its marker freshly written.
+if (gotSingleInstanceLock) {
+  try { fs.rmSync(relaunchMarkerPath, { force: true }) } catch {}
+}
+
+// ── Install stand-in ──────────────────────────────────────────────────────────
+// The installer replaces the app's own files, so the app has to quit before it
+// runs, and the updating window goes with it. So the update still reads as one
+// window, a small PowerShell/WPF window (updating/standin.ps1) takes its place
+// first: a capture of the updating window at the same spot, with the sweep
+// drawn live over the captured bar. The installer then runs silently, and the
+// new version deletes the hold file once its own updating window is up
+// (releaseInstallStandIn), which closes the stand-in. Windows only.
+const standInHoldPath = path.join(app.getPath('userData'), 'update-standin')
+// From asking for the stand-in to it being on screen, updating window included.
+const STANDIN_TIMEOUT_MS = 8000
+// How long the app may still be here after handing off to the installer.
+const INSTALL_HANDOFF_TIMEOUT_MS = 15000
+// Windows hidden for an install started from inside the app, to bring back if
+// the handoff never happens.
+let hiddenForInstall = []
+
+function releaseInstallStandIn() {
+  try { fs.rmSync(standInHoldPath, { force: true }) } catch {}
+}
+
+// Resolves true once the stand-in is on screen. False when it couldn't come up
+// in time; the caller then lets the installer show its own window.
+async function showInstallStandIn() {
+  let cancelled = false
+  const giveUp = new Promise((resolve) => setTimeout(() => resolve(false), STANDIN_TIMEOUT_MS))
+  const shown = await Promise.race([startInstallStandIn(() => cancelled), giveUp])
+    .catch((err) => { log('Install stand-in failed:', err.message); return false })
+  if (!shown) {
+    cancelled = true
+    // A stand-in that comes up late sees this and leaves at once.
+    releaseInstallStandIn()
+    log('Install stand-in did not come up; showing the installer instead')
+  }
+  return shown
+}
+
+/** @param {() => boolean} isCancelled */
+async function startInstallStandIn(isCancelled) {
+  if (!updatingWindow || updatingWindow.isDestroyed()) {
+    // Started from inside the app ("Restart now"): put the updating window up
+    // in its installing state, with the rest of the app out of the way.
+    hiddenForInstall = BrowserWindow.getAllWindows().filter((w) => !w.isDestroyed() && w.isVisible())
+    for (const w of hiddenForInstall) w.hide()
+    await showUpdatingWindow({ status: 'downloaded' })
+  }
+  const win = updatingWindow
+  if (!win || win.isDestroyed()) return false
+  const page = await win.webContents.executeJavaScript('describeForStandIn()')
+  const capture = await win.webContents.capturePage()
+  if (capture.isEmpty() || isCancelled()) return false
+
+  // The page measures in CSS pixels (DIPs); the stand-in places itself in
+  // physical ones.
+  const bounds = win.getBounds()
+  const rect = screen.dipToScreenRect(win, bounds)
+  const px = (n) => Math.round(n * (rect.width / bounds.width))
+  const dir = path.join(app.getPath('temp'), `unreleased-update-standin-${Date.now()}`)
+  fs.mkdirSync(dir, { recursive: true })
+  const script = path.join(dir, 'standin.ps1')
+  const config = path.join(dir, 'standin.json')
+  const ready = path.join(dir, 'ready')
+  // PowerShell can't read inside app.asar, so the script runs from the copy.
+  fs.writeFileSync(script, fs.readFileSync(path.join(__dirname, 'updating', 'standin.ps1')))
+  fs.writeFileSync(path.join(dir, 'capture.png'), capture.toPNG())
+  fs.writeFileSync(config, JSON.stringify({
+    image: path.join(dir, 'capture.png'),
+    ready,
+    hold: standInHoldPath,
+    appPid: process.pid,
+    // The installer's process name, to tell when it's done.
+    installer: pendingUpdate?.installer ? path.basename(pendingUpdate.installer, '.exe') : null,
+    x: rect.x, y: rect.y, width: rect.width, height: rect.height,
+    bar: { x: px(page.bar.x), y: px(page.bar.y), width: px(page.bar.width), height: px(page.bar.height), radius: px(page.bar.radius) },
+    sweep: { ...page.sweep, width: px(page.sweep.width) },
+    colors: page.colors,
+    // The new version usually opens within seconds of the installer finishing;
+    // five minutes is the most it stands in for anything.
+    limits: { reopenSeconds: 30, maxSeconds: 300 },
+  }))
+  if (isCancelled()) return false
+  fs.writeFileSync(standInHoldPath, String(Date.now()))
+
+  const powershell = path.join(process.env.SystemRoot || 'C:\\Windows', 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe')
+  const child = spawn(powershell, [
+    '-NoProfile', '-NonInteractive', '-STA', '-ExecutionPolicy', 'Bypass', '-WindowStyle', 'Hidden',
+    '-File', script, '-Config', config,
+  ], { cwd: dir, detached: true, stdio: 'ignore', windowsHide: true })
+  child.on('error', (err) => log('Install stand-in did not start:', err.message))
+  child.unref()
+
+  while (!isCancelled()) {
+    if (fs.existsSync(ready)) return true
+    if (child.exitCode !== null) return false
+    await new Promise((resolve) => setTimeout(resolve, 50))
+  }
+  return false
+}
+
+// The handoff didn't quit the app (the installer failed to start): don't leave
+// it hidden behind the updating window and the stand-in.
+function recoverFromStuckInstall() {
+  log('The app is still running after handing off to the installer')
+  releaseInstallStandIn()
+  // At launch the gate opens the app itself (launchUpdate.js).
+  if (launchGate?.active) return
+  closeUpdatingWindow()
+  for (const w of hiddenForInstall) if (!w.isDestroyed()) w.show()
+  hiddenForInstall = []
+}
+
+async function installUpdateAndRestart() {
+  // Startup install, the "Restart now" prompt and the renderer's install
+  // button can race; a second handoff would start a second installer.
+  if (installingUpdate) return
+  installingUpdate = true
   if (process.platform !== 'win32') {
+    // Squirrel.Mac and the AppImage updater relaunch on their own.
     autoUpdater.quitAndInstall(true, true)
     return
   }
-  const exePath = process.execPath
-  const watcherPath = path.join(app.getPath('temp'), `unreleased-update-relaunch-${process.pid}.ps1`)
-  const script = [
-    `param([int]$AppPid, [string]$AppExePath, [int]$TimeoutSeconds = 120)`,
-    `try { Wait-Process -Id $AppPid -ErrorAction SilentlyContinue -Timeout $TimeoutSeconds } catch {}`,
-    `$deadline = (Get-Date).AddSeconds($TimeoutSeconds)`,
-    `while ((Get-Date) -lt $deadline) {`,
-    `  try { $s = [System.IO.File]::Open($AppExePath, 'Open', 'ReadWrite', 'None'); $s.Close(); break } catch { Start-Sleep -Milliseconds 400 }`,
-    `}`,
-    `Start-Sleep -Milliseconds 500`,
-    `if (Test-Path $AppExePath) { Start-Process -FilePath $AppExePath }`,
-    `Remove-Item -Path $PSCommandPath -Force -ErrorAction SilentlyContinue`,
-  ].join('\n')
   try {
-    fs.writeFileSync(watcherPath, script, 'utf-8')
-    const child = spawn('powershell.exe', [
-      '-NoProfile', '-ExecutionPolicy', 'Bypass', '-WindowStyle', 'Hidden',
-      '-File', watcherPath, '-AppPid', String(process.pid), '-AppExePath', exePath,
-    ], { detached: true, stdio: 'ignore' })
-    child.unref()
+    fs.writeFileSync(relaunchMarkerPath, String(Date.now()))
   } catch (e) {
-    log('Failed to spawn update relaunch watcher:', e.message)
+    log('Failed to write relaunch marker:', e.message)
   }
-  autoUpdater.quitAndInstall(true, false)
+  // Silent behind the stand-in. Without it, or when the last install didn't
+  // take, the installer shows its own window: with --updated it skips every
+  // page but its progress bar (customFinishPage / SetAutoClose in
+  // build/installer.nsh), so the user sees the install happening, and any
+  // error it hits, instead of the app just vanishing. A plain quit with an
+  // update pending (autoInstallOnAppQuit) is always silent.
+  const silent = !updateInstallDidNotTake && await showInstallStandIn()
+  setTimeout(recoverFromStuckInstall, INSTALL_HANDOFF_TIMEOUT_MS)
+  if (betaInstallerPath) {
+    // Run it the way electron-updater would: --updated marks it as an update
+    // (so the installer skips its first-run pages).
+    log('Running installer:', betaInstallerPath)
+    try {
+      spawn(betaInstallerPath, silent ? ['--updated', '/S'] : ['--updated'], { detached: true, stdio: 'ignore' }).unref()
+    } catch (e) {
+      log('Installer spawn failed, opening it instead:', e.message)
+      shell.openPath(betaInstallerPath)
+    }
+    app.quit()
+    return
+  }
+  autoUpdater.quitAndInstall(silent, false)
 }
 
 autoUpdater.on('update-downloaded', (info) => {
   log('Update downloaded:', info.version)
   updateDownloadedPending = true
+  pendingUpdate = { version: info.version, installer: info.downloadedFile }
+  betaInstallerPath = null
   broadcastToWindows('update-status', { type: 'downloaded', version: info.version })
 
-  // At launch there's no in-progress work to interrupt — and this is also the
-  // path that catches an update the user downloaded but declined to restart
-  // into last time (checkForUpdatesAndNotify re-validates the cached
-  // installer against latest.yml and fires this same event without
-  // re-downloading). Install it now instead of prompting again.
-  if (isStartupUpdateCheck) {
-    isStartupUpdateCheck = false
-    log('Update ready at launch — installing silently')
-    quitAndInstallSilently()
+  // At launch the app isn't open yet and nothing is playing: install straight
+  // away (see updateBeforeLaunch).
+  if (launchGate?.active) {
+    launchGate.install()
     return
   }
-
+  // Once it's open, always ask: a background download can finish minutes in,
+  // mid-playback, and restarting then looked like the app updating on its
+  // own. "Later" leaves it to autoInstallOnAppQuit, which installs quietly on
+  // the next quit without reopening the app.
   dialog.showMessageBox(mainWindow, {
     type: 'info',
     title: 'Update ready',
@@ -3620,10 +4441,9 @@ autoUpdater.on('update-downloaded', (info) => {
     buttons: ['Restart now', 'Later'],
     defaultId: 0,
   }).then(({ response }) => {
-    // Silent install: the Windows installer is an assisted (wizard) installer
-    // now, so a non-silent run here would pop the wizard mid-update. Relaunch
-    // is handled ourselves — see quitAndInstallSilently.
-    if (response === 0) quitAndInstallSilently()
+    // The installer runs behind the stand-in window and relaunches the app
+    // itself — see installUpdateAndRestart.
+    if (response === 0) installUpdateAndRestart()
   })
 })
 
@@ -3666,21 +4486,8 @@ autoUpdater.on('error', (err) => {
   if (isCorruptCacheError(msg)) {
     clearUpdaterCache()
     updateDownloadedPending = false
+    pendingUpdate = null
   }
 
-  // Beta feed isn't answering with a usable latest.yml → retry on stable rather
-  // than surfacing a dead end the user can't clear from inside the app.
-  if (activeBetaCode && !betaFallbackDone && isBetaFeedUnavailable(msg)) {
-    betaFallbackDone = true
-    log('Beta update feed unusable — falling back to the stable GitHub feed for this session')
-    applyUpdateFeed(null)
-    broadcastToWindows('update-status', { type: 'checking' })
-    // activeBetaCode is null now, so a failure here takes the normal path below
-    // instead of looping back into the fallback.
-    autoUpdater.checkForUpdates().catch(e => log('Stable-feed retry failed:', e.message))
-    return
-  }
-
-  isStartupUpdateCheck = false
   broadcastToWindows('update-status', { type: 'error', message: msg })
 })

@@ -5,8 +5,17 @@ import FloatApp from './FloatApp'
 import './index.css'
 import { installGlobalErrorLogging } from './lib/runLog'
 import { initWindowSync } from './lib/windowSync'
+import { initDesktopBridge } from './lib/desktopBridge'
+import { installTranslateDomGuard } from './lib/translateDomGuard'
+import { installDebugRecorder } from './lib/debugRecorder'
+import { installHoverScrollTruncated } from './lib/hoverScrollTruncated'
+import { installImageFade } from './lib/imageFade'
 
+installDebugRecorder()
 installGlobalErrorLogging()
+installTranslateDomGuard()
+installHoverScrollTruncated()
+installImageFade()
 
 // Pop-out windows boot this same bundle with ?float=<view> (see main.js
 // createFloatWindow) and mount a single view instead of the full app. Every
@@ -14,6 +23,8 @@ installGlobalErrorLogging()
 const floatView = new URLSearchParams(window.location.search).get('float')
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 if ((window as any).electron) initWindowSync(!!floatView)
+// Desktop (Windows): only the main window drives the light and the desktop widgets.
+if (!floatView) initDesktopBridge()
 declare global {
   interface Window {
     api: {
@@ -43,6 +54,19 @@ declare global {
     }
   }
 }
+// iOS home-screen apps have shipped several WebKit versions that size the
+// viewport as if Safari's bottom toolbar could still appear - chrome that
+// cannot exist outside a browser tab. 100dvh and window.innerHeight both
+// come back short by exactly that phantom toolbar, leaving a dead strip of
+// bare background across the bottom of the screen. 100lvh (the *largest*
+// viewport - every retractable bar retracted) is the real fullscreen height
+// there. index.css keys --app-height off this class; a genuine browser tab
+// keeps dvh, where lvh would instead run content under the visible toolbar.
+document.documentElement.classList.toggle(
+  'standalone',
+  window.matchMedia('(display-mode: standalone)').matches ||
+    (navigator as Navigator & { standalone?: boolean }).standalone === true,
+)
 
 ReactDOM.createRoot(document.getElementById('root') as HTMLElement).render(
   <React.StrictMode>
@@ -50,10 +74,8 @@ ReactDOM.createRoot(document.getElementById('root') as HTMLElement).render(
   </React.StrictMode>
 )
 
-// Register the PWA service worker — web build only. Skipped in Electron (it
-// injects window.electron and loads over file://, where SW registration throws
-// and would only get in the way), and only over http(s). Registered after load
-// so it never competes with first paint. Not registered for pop-out windows.
+// Register the PWA service worker, only over http(s). Registered after load so
+// it never competes with first paint.
 if (
   !floatView &&
   !(window as unknown as { electron?: unknown }).electron &&

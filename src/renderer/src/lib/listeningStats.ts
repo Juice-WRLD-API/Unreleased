@@ -1,7 +1,7 @@
 // Aggregation behind the Wrapped / listening-stats page.
 //
 // The only listening data the app keeps is lib/songPrefs' per-song `playcount`
-// — a running total with no timestamps, so everything here is necessarily
+// - a running total with no timestamps, so everything here is necessarily
 // all-time. There is no play log to slice by year or month; if period-bounded
 // stats are ever wanted, a timestamped event log has to be recorded first.
 //
@@ -29,7 +29,7 @@ export interface PlayedSong {
 
 /** A row in one of the breakdown lists (eras, categories, producers…). */
 export interface RankedEntry {
-  /** Stable identity for React keys — the raw value before display mapping. */
+  /** Stable identity for React keys - the raw value before display mapping. */
   key: string
   label: string
   plays: number
@@ -48,13 +48,13 @@ export interface ListeningStats {
   eras: RankedEntry[]
   categories: RankedEntry[]
   producers: RankedEntry[]
-  /** Credited artists other than Juice WRLD himself — i.e. features. */
+  /** Credited artists other than Juice WRLD himself - i.e. features. */
   collaborators: RankedEntry[]
 }
 
 // Credit strings are free text ("Nick Mira, Sidepce & Charlie Handsome"), so
 // split on the separators that actually appear and leave everything else
-// intact — an aggressive split would shred names that legitimately contain
+// intact - an aggressive split would shred names that legitimately contain
 // "x" or "and".
 const CREDIT_SEPARATORS = /\s*(?:,|&|\/|;)\s*/
 const CREDIT_PREFIX = /^(?:feat\.?|ft\.?|featuring|prod\.?(?:\s+by)?)\s+/i
@@ -79,7 +79,7 @@ export function splitCredits(raw: string | null | undefined): string[] {
 const JUICE = /^juice\s*wrld$/i
 
 /** Aggregates plays by an arbitrary key extracted per song. `keyOf` returns
- *  zero or more keys — a song with three producers counts once for each. */
+ *  zero or more keys - a song with three producers counts once for each. */
 function rank(
   played: PlayedSong[],
   keyOf: (song: StatsSong) => { key: string; label: string }[],
@@ -150,7 +150,7 @@ export function periodDays(period: ListeningPeriod): number {
 }
 
 /** Whether the timestamped log actually reaches back far enough to cover the
- *  selected period — it starts later than "all time" implies and gets evicted
+ *  selected period - it starts later than "all time" implies and gets evicted
  *  from the back once it hits its cap, so a window can ask for more history
  *  than exists. The caller gets `complete: false` plus the date the log
  *  actually starts, and labels the period accordingly rather than silently
@@ -168,7 +168,10 @@ export function periodCoverage(events: ListeningPlayEvent[], period: ListeningPe
 }
 
 export function prefsFromEvents(events: ListeningPlayEvent[]): SongPreference[] {
-  const counts = playcountsFromEvents(events)
+  return prefsFromCounts(playcountsFromEvents(events))
+}
+
+function prefsFromCounts(counts: Map<number, number>): SongPreference[] {
   return [...counts.entries()]
     .map(([song, playcount]) => ({
       song,
@@ -176,6 +179,7 @@ export function prefsFromEvents(events: ListeningPlayEvent[]): SongPreference[] 
       name: null,
       cover_url: null,
       default_version: null,
+      excluded_versions: [],
     }))
     .sort((a, b) => b.playcount - a.playcount)
 }
@@ -185,15 +189,30 @@ export function eventsForPeriod(events: ListeningPlayEvent[], period: ListeningP
   return filterListeningPlaysByDays(events, Number(period))
 }
 
+/** All-time per-song counts. The log is capped (SERVER_LISTENING_PLAYS_LIMIT)
+ *  and evicts its oldest rows, so counting it alone stalls at the cap for a
+ *  heavy listener - songPrefs' aggregate playcounts are the uncapped total.
+ *  Takes the max per song, since a song can sit in the log without having
+ *  had its aggregate synced down yet. */
+export function allTimePrefs(events: ListeningPlayEvent[], songPrefs: Record<number, SongPreference>): SongPreference[] {
+  const counts = playcountsFromEvents(events)
+  for (const pref of Object.values(songPrefs)) {
+    if (pref.playcount > (counts.get(pref.song) ?? 0)) counts.set(pref.song, pref.playcount)
+  }
+  return prefsFromCounts(counts)
+}
+
 export function prefsForPeriod(
   events: ListeningPlayEvent[],
   period: ListeningPeriod,
+  songPrefs?: Record<number, SongPreference>,
 ): SongPreference[] {
+  if (period === 'all' && songPrefs) return allTimePrefs(events, songPrefs)
   return prefsFromEvents(eventsForPeriod(events, period))
 }
 
 /** Seconds → "3 days 4 hr" / "6 hr 12 min" / "45 min". Distinct from
- *  format.ts' formatTotalDuration, which stops at hours — a heavy listener's
+ *  format.ts' formatTotalDuration, which stops at hours - a heavy listener's
  *  all-time total runs to hundreds of hours, where days read better. */
 export function formatListeningTime(seconds: number): string {
   if (!seconds || !isFinite(seconds) || seconds < 0) return '0 min'

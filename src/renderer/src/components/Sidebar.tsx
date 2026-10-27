@@ -1,19 +1,33 @@
-﻿import React, { useState, useEffect } from 'react'
-import { createPortal } from 'react-dom'
-import { Settings, LogIn, LogOut, ChevronLeft, ChevronRight, ChevronDown, ChevronUp, Download, ArrowLeft, Info, Check, EyeOff } from 'lucide-react'
+import React, { useState, useEffect } from 'react'
+import { Settings, LogIn, ChevronLeft, ChevronRight, ChevronDown, Download, Upload, Info, Check, EyeOff, Bell } from 'lucide-react'
 import logo from '../assets/logo.png'
 import { useStore, useStorePick } from '../store/useStore'
 import { ViewType } from '../types'
-import { showStaffProfile, staffProfileView, getToken } from '../lib/userApi'
-import { orderedNavItems, isNavItemVisible, orderedNavControls, isNavControlVisible, navTabFor, tabEntryView, type NavControlId } from '../lib/navItems'
+import { showStaffProfile, getToken } from '../lib/userApi'
 import AppMenu from './AppMenu'
-import PlaylistContextMenu, { PlaylistContextMenuState } from './PlaylistContextMenu'
+import { orderedNavItems, isNavItemVisible, orderedNavControls, isNavControlVisible, navTabFor, tabEntryView, type NavControlId } from '../lib/navItems'
+import { preloadView } from '../lib/lazyViews'
+import { hasChatAccess } from '../lib/chatAccess'
+import type { PlaylistContextMenuState } from './PlaylistContextMenu'
+import { lazyOverlay } from '../lib/lazyView'
+import { accountDisplayName, initial } from '../lib/format'
+import { ELECTRON_TITLEBAR_CLEARANCE_X } from '../lib/platform'
+import ContextMenu from './ContextMenu'
+import NavPillGrip from './NavPillGrip'
+import { useSlidingIndicator } from '../hooks/useSlidingIndicator'
+import { MotionDisclosure } from './MotionDisclosure'
+import { useUnreadNotificationCount } from '../hooks/useNotificationHistory'
+
+// Right-click only - fetched on first open rather than with the app shell.
+const PlaylistContextMenu = lazyOverlay(() => import('./PlaylistContextMenu'))
 
 const LS_COLLAPSED = 'sidebar:collapsed'
 const LS_PLAYLISTS_EXPANDED = 'sidebar:playlistsExpanded'
 
 export default function Sidebar(): JSX.Element {
-  const { activeView, setActiveView, openProfile, openSettings, setShowDiagnostics, developerMode, account, logoutAccount, setShowUserAuth, playlists, setPendingPlaylistId, sidebarPosition, navOrder, setNavOrder, navVisibility, setNavItemVisible, navControlOrder, navControlVisibility, appMenuPosition, offlinePlaylists } = useStorePick('activeView', 'setActiveView', 'openProfile', 'openSettings', 'setShowDiagnostics', 'developerMode', 'account', 'logoutAccount', 'setShowUserAuth', 'playlists', 'setPendingPlaylistId', 'sidebarPosition', 'navOrder', 'setNavOrder', 'navVisibility', 'setNavItemVisible', 'navControlOrder', 'navControlVisibility', 'appMenuPosition', 'offlinePlaylists')
+  const { activeView, setActiveView, openProfile, openOwnPublicProfile, openSettings, setShowDiagnostics, developerMode, account, setShowUserAuth, playlists, setPendingPlaylistId, sidebarPosition, navStyle, navOrder, setNavOrder, navVisibility, setNavItemVisible, navControlOrder, navControlVisibility, setNavControlVisible, downloads, showDownloadManager, setShowDownloadManager, appMenuPosition, offlinePlaylists } = useStorePick('activeView', 'setActiveView', 'openProfile', 'openOwnPublicProfile', 'openSettings', 'setShowDiagnostics', 'developerMode', 'account', 'setShowUserAuth', 'playlists', 'setPendingPlaylistId', 'sidebarPosition', 'navStyle', 'navOrder', 'setNavOrder', 'navVisibility', 'setNavItemVisible', 'navControlOrder', 'navControlVisibility', 'setNavControlVisible', 'downloads', 'showDownloadManager', 'setShowDownloadManager', 'appMenuPosition', 'offlinePlaylists')
+  const { showNotifications, setShowNotifications } = useStorePick('showNotifications', 'setShowNotifications')
+  const unreadNotifications = useUnreadNotificationCount()
   const isElectron = navigator.userAgent.includes('Electron')
 
   const [collapsed, setCollapsed] = useState<boolean>(
@@ -61,10 +75,10 @@ export default function Sidebar(): JSX.Element {
   const [navOverIdx, setNavOverIdx] = useState<number | null>(null)
   // Move a visible row to sit adjacent to a target row. Reordering happens on
   // the FULL saved order (including any hidden items) so their relative spots
-  // are preserved — same approach as Settings' moveNavItem.
+  // are preserved - same approach as Settings' moveNavItem.
   const moveNavItem = (fromRow: number, toRow: number): void => {
     if (fromRow === toRow) return
-    const full = orderedNavItems(navOrder).map((i) => i.view)
+    const full = orderedNavItems(navOrder, true, true).map((i) => i.view)
     const dragView = items[fromRow].view
     const targetView = items[toRow].view
     const from = full.indexOf(dragView)
@@ -75,34 +89,25 @@ export default function Sidebar(): JSX.Element {
     setNavOrder(next)
   }
 
-  // Right-click on a nav tab pops a single "Hide" action — a faster path to
+  // Right-click on a nav tab pops a single "Hide" action - a faster path to
   // the same navVisibility toggle Settings → Appearance → Menu items exposes.
-  const [navMenu, setNavMenu] = useState<{ view: ViewType; label: string; x: number; y: number } | null>(null)
-  const openNavMenu = (view: ViewType, label: string) => (e: React.MouseEvent): void => {
+  const [navMenu, setNavMenu] = useState<{ label: string; hide: () => void; x: number; y: number } | null>(null)
+  const openHideMenu = (label: string, hide: () => void) => (e: React.MouseEvent): void => {
     e.preventDefault()
     e.stopPropagation()
-    setNavMenu({ view, label, x: e.clientX, y: e.clientY })
+    setNavMenu({ label, hide, x: e.clientX, y: e.clientY })
   }
-  const navContextMenu = navMenu && createPortal(
-    <>
-      <div className="fixed inset-0 z-[60]" onClick={() => setNavMenu(null)} onContextMenu={(e) => { e.preventDefault(); setNavMenu(null) }} />
-      <div
-        className="fixed z-[61] bg-surface border border-[var(--border)] rounded-xl shadow-2xl py-1 min-w-[170px]"
-        style={{
-          left: Math.max(8, Math.min(navMenu.x, window.innerWidth - 178)),
-          top: Math.max(8, Math.min(navMenu.y, window.innerHeight - 48)),
-        }}
-      >
-        <button
-          onClick={() => { setNavItemVisible(navMenu.view, false); setNavMenu(null) }}
-          className="w-full flex items-center gap-2.5 px-3.5 py-2 text-sm text-text-primary hover:bg-surface-overlay transition-colors"
-        >
-          <EyeOff size={14} className="text-text-muted" />
-          <span className="flex-1 text-left">Hide "{navMenu.label}"</span>
-        </button>
-      </div>
-    </>,
-    document.body
+  const openNavMenu = (view: ViewType, label: string) => openHideMenu(label, () => setNavItemVisible(view, false))
+  const openControlMenu = (id: NavControlId, label: string) => openHideMenu(label, () => setNavControlVisible(id, false))
+  const navContextMenu = navMenu && (
+    <ContextMenu
+      x={navMenu.x}
+      y={navMenu.y}
+      onClose={() => setNavMenu(null)}
+      zIndex={61}
+      className="min-w-[170px]"
+      items={[{ icon: EyeOff, label: `Hide "${navMenu.label}"`, onSelect: navMenu.hide }]}
+    />
   )
 
   const [tokenCopied, setTokenCopied] = useState(false)
@@ -110,103 +115,127 @@ export default function Sidebar(): JSX.Element {
     e.preventDefault()
     const t = getToken()
     if (!t) return
-    navigator.clipboard.writeText(t)
-    setTokenCopied(true)
-    setTimeout(() => setTokenCopied(false), 1500)
+    // A right-click isn't a user-activation gesture, so navigator.clipboard
+    // has to ask for clipboard-write — which main.js's deny-all permission
+    // handler refuses. Use the native clipboard bridge on Electron instead.
+    const el = (window as any).electron
+    const write: Promise<unknown> = el?.copyTextToClipboard ? el.copyTextToClipboard(t) : navigator.clipboard.writeText(t)
+    write.then(() => {
+      setTokenCopied(true)
+      setTimeout(() => setTokenCopied(false), 1500)
+    }).catch((err: unknown) => console.error('[copy token] failed:', err))
   }
 
   // Order + which tabs appear both come from Settings → Appearance → Menu
   // items. orderedNavItems sanitizes the saved order; isNavItemVisible drops
   // web-only tabs on web and anything the user has toggled off.
-  const items = orderedNavItems(navOrder).filter((i) => isNavItemVisible(i, navVisibility, isElectron))
-  // Which tab reads as current — not always activeView, since some views are
+  const items = orderedNavItems(navOrder, hasChatAccess(account), showStaffProfile(account)).filter((i) => isNavItemVisible(i, navVisibility, isElectron))
+  // Which tab reads as current - not always activeView, since some views are
   // sub-views of a tab (the games inside Games). See navTabFor.
   const activeTab = navTabFor(activeView)
+  // The active tab's highlight slides from tab to tab rather than jumping -
+  // one indicator behind the items, in whichever layout below is rendered.
+  const navLayout = navStyle === 'pill' ? 'pill' : sidebarPosition === 'top' || sidebarPosition === 'bottom' ? 'bar' : 'side'
+  const { containerRef: navRef, indicatorRef: navIndicatorRef } = useSlidingIndicator<HTMLElement>(activeTab, navLayout)
+
+  // Start the view's chunk on hover/focus rather than on click. Pointing at a
+  // menu item precedes clicking it by ~100ms, which is usually the whole
+  // download - so by the time Suspense would need a fallback, there's nothing
+  // left to wait for. Focus covers keyboard navigation. Idempotent and
+  // bandwidth-aware; see preloadView.
+  const warmOnIntent = (view: ViewType): { onPointerEnter: () => void; onFocus: () => void } => ({
+    onPointerEnter: () => preloadView(view),
+    onFocus: () => preloadView(view),
+  })
 
   const navClick = (view: ViewType): void => {
     if (activeView === view && view === 'playlists') {
       window.dispatchEvent(new CustomEvent('playlists:back'))
+    } else if (view === 'editor-profile') {
+      // The Staff tab - which profile page that is depends on the account's roles.
+      openProfile()
     } else {
-      // Not always `view` itself — a tab holding several views reopens on the
+      // Not always `view` itself - a tab holding several views reopens on the
       // one last used. See tabEntryView.
       setActiveView(tabEntryView(view))
     }
   }
 
-  // Foot-of-menu controls (Profile, Log out, Diagnostics, Settings) —
+  // Foot-of-menu controls (Profile, Log out, Diagnostics, Settings) -
   // ordered and filtered to what's both available and toggled on in Settings.
   // Log in and the collapse toggle are rendered separately (never hideable).
-  const controlCtx = { account: !!account, isElectron, developerMode }
+  const controlCtx = { account: !!account, isElectron, developerMode, hasUploads: downloads.length > 0 }
   const controls = orderedNavControls(navControlOrder).filter((c) => isNavControlVisible(c, navControlVisibility, controlCtx))
 
   const rowCls = 'flex items-center w-full py-2 rounded text-sm font-medium text-text-secondary hover:text-text-primary hover:bg-surface-raised transition-colors gap-3 px-3'
   const iconWrap = 'w-6 h-6 flex items-center justify-center shrink-0'
   const labelCls = `truncate transition-opacity duration-200 ${collapsed ? 'opacity-0 pointer-events-none' : 'opacity-100'}`
 
-  const returnToApiVertical = !isElectron ? (
-    <a
-      key="return-api"
-      href="https://juicewrldapi.com"
-      target="_blank"
-      rel="noopener noreferrer"
-      title={collapsed ? 'Return to API' : undefined}
-      className={rowCls}
-    >
-      <span className={iconWrap}><ArrowLeft size={18} /></span>
-      <span aria-hidden={collapsed} className={labelCls}>Return to API</span>
-    </a>
-  ) : null
-
-  const returnToApiHorizontal = !isElectron ? (
-    <a
-      key="return-api"
-      href="https://juicewrldapi.com"
-      target="_blank"
-      rel="noopener noreferrer"
-      title="Return to API"
-      className="flex items-center gap-2 pl-2 pr-3 py-1.5 rounded text-sm font-medium whitespace-nowrap text-text-secondary hover:text-text-primary hover:bg-surface-raised transition-colors"
-    >
-      <span className="w-6 h-6 shrink-0 flex items-center justify-center"><ArrowLeft size={18} /></span>
-      <span>Return to API</span>
-    </a>
-  ) : null
-
   // Full-width control row for the vertical (left/right) side menu.
-  const profileView = staffProfileView(account)
+  // The panel itself (DownloadManager) pops out of this button, found by its
+  // data-transfers-anchor attribute.
+  const activeUploadCount = downloads.filter((u) => u.state === 'downloading').length
 
   const renderControl = (id: NavControlId): JSX.Element | null => {
     switch (id) {
       case 'profile':
         if (!account || !showStaffProfile(account)) return null
         return (
-          <button key="profile" onClick={openProfile} onContextMenu={copyAuthToken} title={collapsed ? (account.display_name || account.discord_username) : undefined} className={rowCls}>
+          <button key="profile" onClick={openOwnPublicProfile} onContextMenu={copyAuthToken} title={collapsed ? accountDisplayName(account) : undefined} className={rowCls}>
             <span className={`${iconWrap} relative`}>
-              {account.discord_avatar
-                ? <img src={account.discord_avatar} alt="" className="w-6 h-6 rounded-full object-cover" />
-                : <div className="w-6 h-6 rounded-full bg-accent/20 text-accent flex items-center justify-center text-[10px] font-semibold">{(account.display_name || account.discord_username || '?').charAt(0).toUpperCase()}</div>}
+              {account.avatar
+                ? <img src={account.avatar} alt="" className="w-6 h-6 rounded-full object-cover" />
+                : <div className="w-6 h-6 rounded-full bg-accent/20 text-accent flex items-center justify-center text-[10px] font-semibold">{initial(accountDisplayName(account))}</div>}
               {tokenCopied && <span className="absolute inset-0 rounded-full bg-black/60 flex items-center justify-center"><Check size={12} className="text-emerald-400" /></span>}
             </span>
-            <span aria-hidden={collapsed} className={labelCls}>{tokenCopied ? 'Token copied!' : (account.display_name || account.discord_username)}</span>
+            <span aria-hidden={collapsed} className={labelCls}>{tokenCopied ? 'Token copied!' : accountDisplayName(account)}</span>
           </button>
         )
-      case 'logout':
-        if (!account) return null
+      case 'uploads':
         return (
-          <button key="logout" onClick={() => logoutAccount()} title={collapsed ? 'Log out' : undefined} className={rowCls}>
-            <span className={iconWrap}><LogOut size={18} /></span>
-            <span aria-hidden={collapsed} className={labelCls}>Log out</span>
+          <button key="uploads" data-transfers-anchor onClick={() => setShowDownloadManager(!showDownloadManager)} onContextMenu={openControlMenu('uploads', 'Transfers')} title={collapsed ? 'Transfers' : undefined} className={rowCls}>
+            <span className={`${iconWrap} relative`}>
+              <Upload size={18} className={activeUploadCount > 0 ? 'animate-pulse text-accent' : ''} />
+              {activeUploadCount > 0 && (
+                <span className="absolute -top-1 -right-1 min-w-[14px] h-[14px] rounded-full bg-accent text-white text-[9px] font-bold flex items-center justify-center px-0.5 leading-none">
+                  {activeUploadCount}
+                </span>
+              )}
+            </span>
+            <span aria-hidden={collapsed} className={labelCls}>Transfers</span>
+          </button>
+        )
+      case 'notifications':
+        return (
+          <button key="notifications" data-notifications-toggle onClick={() => setShowNotifications(!showNotifications)} onContextMenu={openControlMenu('notifications', 'Notifications')} title={collapsed ? 'Notifications' : undefined} aria-label={unreadNotifications > 0 ? `Notifications, ${unreadNotifications} new` : undefined} className={rowCls}>
+            <span className={`${iconWrap} relative`}>
+              <Bell size={18} />
+              {unreadNotifications > 0 && (
+                <span className="absolute -top-1 -right-1 min-w-[14px] h-[14px] rounded-full bg-accent text-white text-[9px] font-bold flex items-center justify-center px-0.5 leading-none">
+                  {unreadNotifications > 99 ? '99+' : unreadNotifications}
+                </span>
+              )}
+            </span>
+            <span aria-hidden={collapsed} className={labelCls}>Notifications</span>
           </button>
         )
       case 'diagnostics':
         return (
-          <button key="diagnostics" onClick={() => setShowDiagnostics(true)} title={collapsed ? 'Diagnostics' : undefined} className={rowCls}>
+          <button key="diagnostics" onClick={() => setShowDiagnostics(true)} onContextMenu={openControlMenu('diagnostics', 'Diagnostics')} title={collapsed ? 'Diagnostics' : undefined} className={rowCls}>
             <span className={iconWrap}><Info size={18} /></span>
             <span aria-hidden={collapsed} className={labelCls}>Diagnostics</span>
           </button>
         )
+      case 'download':
+        return (
+          <button key="download" onClick={() => setActiveView('download')} {...warmOnIntent('download')} onContextMenu={openControlMenu('download', 'Download app')} title={collapsed ? 'Download desktop app' : undefined} className={rowCls}>
+            <span className={iconWrap}><Download size={18} /></span>
+            <span aria-hidden={collapsed} className={labelCls}>Download app</span>
+          </button>
+        )
       case 'settings':
         return (
-          <button key="settings" onClick={() => openSettings()} title={collapsed ? 'Settings' : undefined} className={rowCls}>
+          <button key="settings" onClick={() => openSettings()} {...warmOnIntent('settings')} title={collapsed ? 'Settings' : undefined} className={rowCls}>
             <span className={iconWrap}><Settings size={18} /></span>
             <span aria-hidden={collapsed} className={labelCls}>Settings</span>
           </button>
@@ -221,21 +250,101 @@ export default function Sidebar(): JSX.Element {
       case 'profile':
         if (!account || !showStaffProfile(account)) return null
         return (
-          <button key="profile" onClick={openProfile} onContextMenu={copyAuthToken} title={tokenCopied ? 'Token copied!' : (account.display_name || account.discord_username)} className={`${barIconBtn} hover:bg-transparent hover:opacity-80 relative`}>
-            {account.discord_avatar
-              ? <img src={account.discord_avatar} alt="" className="w-6 h-6 rounded-full object-cover" />
-              : <div className="w-6 h-6 rounded-full bg-accent/20 text-accent flex items-center justify-center text-[10px] font-semibold">{(account.display_name || account.discord_username || '?').charAt(0).toUpperCase()}</div>}
+          <button key="profile" onClick={openOwnPublicProfile} onContextMenu={copyAuthToken} title={tokenCopied ? 'Token copied!' : accountDisplayName(account)} className={`${barIconBtn} hover:bg-transparent hover:opacity-80 relative`}>
+            {account.avatar
+              ? <img src={account.avatar} alt="" className="w-6 h-6 rounded-full object-cover" />
+              : <div className="w-6 h-6 rounded-full bg-accent/20 text-accent flex items-center justify-center text-[10px] font-semibold">{initial(accountDisplayName(account))}</div>}
             {tokenCopied && <span className="absolute inset-0 rounded-full bg-black/60 flex items-center justify-center"><Check size={12} className="text-emerald-400" /></span>}
           </button>
         )
-      case 'logout':
-        if (!account) return null
-        return <button key="logout" onClick={() => logoutAccount()} title="Log out" className={barIconBtn}><LogOut size={16} /></button>
+      case 'uploads':
+        return (
+          <button key="uploads" data-transfers-anchor onClick={() => setShowDownloadManager(!showDownloadManager)} onContextMenu={openControlMenu('uploads', 'Transfers')} title="Transfers" className={`${barIconBtn} relative`}>
+            <Upload size={18} className={activeUploadCount > 0 ? 'animate-pulse text-accent' : ''} />
+            {activeUploadCount > 0 && (
+              <span className="absolute top-0.5 right-0.5 min-w-[13px] h-[13px] rounded-full bg-accent text-white text-[8px] font-bold flex items-center justify-center px-0.5 leading-none">
+                {activeUploadCount}
+              </span>
+            )}
+          </button>
+        )
+      case 'notifications':
+        return (
+          <button key="notifications" data-notifications-toggle onClick={() => setShowNotifications(!showNotifications)} onContextMenu={openControlMenu('notifications', 'Notifications')} title="Notifications" aria-label={unreadNotifications > 0 ? `Notifications, ${unreadNotifications} new` : 'Notifications'} className={`${barIconBtn} relative`}>
+            <Bell size={18} />
+            {unreadNotifications > 0 && (
+              <span className="absolute top-0.5 right-0.5 min-w-[13px] h-[13px] rounded-full bg-accent text-white text-[8px] font-bold flex items-center justify-center px-0.5 leading-none">
+                {unreadNotifications > 99 ? '99+' : unreadNotifications}
+              </span>
+            )}
+          </button>
+        )
       case 'diagnostics':
-        return <button key="diagnostics" onClick={() => setShowDiagnostics(true)} title="Diagnostics" className={barIconBtn}><Info size={18} /></button>
+        return <button key="diagnostics" onClick={() => setShowDiagnostics(true)} onContextMenu={openControlMenu('diagnostics', 'Diagnostics')} title="Diagnostics" className={barIconBtn}><Info size={18} /></button>
+      case 'download':
+        return <button key="download" onClick={() => setActiveView('download')} {...warmOnIntent('download')} onContextMenu={openControlMenu('download', 'Download app')} title="Download desktop app" className={barIconBtn}><Download size={18} /></button>
       case 'settings':
-        return <button key="settings" onClick={() => openSettings()} title="Settings" className={barIconBtn}><Settings size={18} /></button>
+        return <button key="settings" onClick={() => openSettings()} {...warmOnIntent('settings')} title="Settings" className={barIconBtn}><Settings size={18} /></button>
     }
+  }
+
+  // ── Floating pill (Settings → Appearance → Navigation style). Icon-only, rounded,
+  // laid out along the chosen edge; AutoHideNav floats it over the page.
+  if (navStyle === 'pill') {
+    const horizontal = sidebarPosition === 'top' || sidebarPosition === 'bottom'
+    return (
+      // no-drag: on the top edge the pill floats over the window's drag strip
+      // (App.tsx), which would otherwise swallow its clicks.
+      <aside
+        ref={navRef}
+        style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}
+        className={`app-sidebar pointer-events-auto relative isolate flex ${horizontal ? 'flex-row max-w-full overflow-x-auto' : 'flex-col max-h-full overflow-y-auto'} items-center gap-1 p-1.5 rounded-full bg-sidebar border border-[var(--border)] shadow-2xl`}
+      >
+        <NavPillGrip horizontal={horizontal} />
+        {isElectron && appMenuPosition === 'sidebar' && (
+          <>
+            <div className="w-10 h-10 shrink-0 flex items-center justify-center"><AppMenu variant="sidebar-icon" /></div>
+            <div className={`shrink-0 bg-[var(--border)] ${horizontal ? 'w-px h-6 mx-1' : 'h-px w-6 my-1'}`} />
+          </>
+        )}
+        {items.map(({ icon, label, view }, idx) => (
+          <button
+            key={view}
+            draggable
+            onDragStart={(e) => { setNavDragIdx(idx); e.dataTransfer.effectAllowed = 'move' }}
+            onDragOver={(e) => { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; setNavOverIdx(idx) }}
+            onDrop={(e) => { e.preventDefault(); if (navDragIdx !== null) moveNavItem(navDragIdx, idx); setNavDragIdx(null); setNavOverIdx(null) }}
+            onDragEnd={() => { setNavDragIdx(null); setNavOverIdx(null) }}
+            onClick={() => navClick(view)}
+            {...warmOnIntent(view)}
+            onContextMenu={openNavMenu(view, label)}
+            title={label}
+            aria-label={label}
+            data-indicator-key={view}
+            className={`w-10 h-10 shrink-0 flex items-center justify-center rounded-full transition-colors cursor-grab active:cursor-grabbing ${
+              navDragIdx === idx ? 'opacity-40' : ''
+            } ${
+              navOverIdx === idx && navDragIdx !== null && navDragIdx !== idx ? 'ring-1 ring-inset ring-accent' : ''
+            } ${
+              activeTab === view
+                ? 'text-accent'
+                : 'text-text-secondary hover:text-text-primary hover:bg-surface-raised'
+            }`}
+          >
+            {icon}
+          </button>
+        ))}
+        <div className={`shrink-0 bg-[var(--border)] ${horizontal ? 'w-px h-6 mx-1' : 'h-px w-6 my-1'}`} />
+        {!account && (
+          <button onClick={() => setShowUserAuth(true)} title="Log in" aria-label="Log in" className={`${barIconBtn} !w-10 !h-10 !rounded-full`}>
+            <LogIn size={18} />
+          </button>
+        )}
+        {controls.map((c) => renderControlIcon(c.id))}
+        <div ref={navIndicatorRef} className="nav-indicator rounded-full bg-accent/20" aria-hidden />
+        {navContextMenu}
+      </aside>
+    )
   }
 
   // ── Horizontal bar (Settings → Appearance → Navigation position: top/bottom).
@@ -247,20 +356,17 @@ export default function Sidebar(): JSX.Element {
       <aside className={`app-sidebar hidden md:flex flex-col w-full bg-sidebar shrink-0 border-[var(--border)] ${sidebarPosition === 'top' ? 'border-b' : 'border-t'}`}>
         {/* Bar touches the frameless window's top edge, so it carries the
             drag strip that main's overlay provides in the other layouts.
-            mr-[188px] keeps the strip clear of the min/max/close buttons
-            (132px) plus the fixed downloads trigger next to them (right:
-            144px + 36px wide — see DownloadManager) — a drag rect under
-            them would win the draggable-region ordering and swallow their
-            clicks (see WindowControls in App.tsx). */}
+            ELECTRON_TITLEBAR_CLEARANCE_X keeps the strip clear of the
+            min/max/close buttons (132px) — a drag rect under them would win the draggable-region ordering
+            and swallow their clicks (see WindowControls in App.tsx). */}
         {isElectron && sidebarPosition === 'top' && appMenuPosition !== 'title-bar' && (
-          <div className="shrink-0 h-7 mr-[188px] select-none" style={{ WebkitAppRegion: 'drag' } as React.CSSProperties} />
+          <div className="shrink-0 h-7 select-none" style={{ WebkitAppRegion: 'drag', marginRight: ELECTRON_TITLEBAR_CLEARANCE_X } as React.CSSProperties} />
         )}
         <div className="flex items-center gap-1 px-3 py-1.5 min-w-0">
           {isElectron && appMenuPosition === 'sidebar' && (
             <div className="shrink-0 mr-0.5"><AppMenu variant="sidebar-icon" /></div>
           )}
-          <nav className="flex items-center gap-1 flex-1 min-w-0 overflow-x-auto">
-            {returnToApiHorizontal}
+          <nav ref={navRef} className="relative isolate flex items-center gap-1 flex-1 min-w-0 overflow-x-auto">
             {items.map(({ icon, label, view }, idx) => (
               <button
                 key={view}
@@ -270,14 +376,16 @@ export default function Sidebar(): JSX.Element {
                 onDrop={(e) => { e.preventDefault(); if (navDragIdx !== null) moveNavItem(navDragIdx, idx); setNavDragIdx(null); setNavOverIdx(null) }}
                 onDragEnd={() => { setNavDragIdx(null); setNavOverIdx(null) }}
                 onClick={() => navClick(view)}
+                {...warmOnIntent(view)}
                 onContextMenu={openNavMenu(view, label)}
+                data-indicator-key={view}
                 className={`flex items-center gap-2 pl-2 pr-3 py-1.5 rounded text-sm font-medium whitespace-nowrap transition-colors cursor-grab active:cursor-grabbing ${
                   navDragIdx === idx ? 'opacity-40' : ''
                 } ${
                   navOverIdx === idx && navDragIdx !== null && navDragIdx !== idx ? 'ring-1 ring-accent' : ''
                 } ${
                   activeTab === view
-                    ? 'bg-surface-raised text-text-primary'
+                    ? 'text-text-primary'
                     : 'text-text-secondary hover:text-text-primary hover:bg-surface-raised'
                 }`}
               >
@@ -285,6 +393,7 @@ export default function Sidebar(): JSX.Element {
                 <span>{label}</span>
               </button>
             ))}
+            <div ref={navIndicatorRef} className="nav-indicator rounded bg-surface-raised" aria-hidden />
           </nav>
           <div className="flex items-center gap-1 shrink-0">
             {/* Log in stays pinned (never hideable) so signing in is always
@@ -307,23 +416,28 @@ export default function Sidebar(): JSX.Element {
       className={`app-sidebar hidden md:flex flex-col h-full bg-sidebar shrink-0 ${sidebarPosition === 'right' ? 'border-l' : 'border-r'} border-[var(--border)] transition-[width] duration-200 ${collapsed ? 'w-16' : 'w-60'}`}
     >
       {/* On the right, the sidebar's top edge sits under the window buttons
-          (132px) and the fixed downloads trigger next to them (right: 144px
-          + 36px wide — see DownloadManager) — keep the drag strip out of
-          their 188px corner (same ordering pitfall as the top-bar strip
+          (132px) — keep the drag strip out of that corner
+          (ELECTRON_TITLEBAR_CLEARANCE_X; same ordering pitfall as the top-bar strip
           above), and give the first nav item real clearance below them so
           it doesn't visually run into the buttons when the sidebar is wide
           enough to sit under them (expanded width, or any width once
           collapsed still tucks under the min/max/close cluster). */}
       {isElectron && appMenuPosition !== 'title-bar' && (
         <div
-          className={`shrink-0 select-none ${sidebarPosition === 'right' ? 'h-9 mr-[188px]' : 'h-7'}`}
-          style={{ WebkitAppRegion: 'drag' } as React.CSSProperties}
+          className={`shrink-0 select-none ${sidebarPosition === 'right' ? 'h-9' : 'h-7'}`}
+          style={{
+            WebkitAppRegion: 'drag',
+            marginRight: sidebarPosition === 'right' ? ELECTRON_TITLEBAR_CLEARANCE_X : undefined,
+          } as React.CSSProperties}
         />
       )}
       {/* Logo — collapses to zero height (redundant with the WRLD tab icon) */}
+      {/* Logo - collapses to zero height when the sidebar is collapsed. The
+          open cap is in rem like its contents (11.75rem), so a larger app
+          text size doesn't clip the wordmark. */}
       <div
         className="flex flex-col items-center gap-1 shrink-0 px-5 overflow-hidden transition-[max-height,opacity] duration-200 ease-in-out"
-        style={{ maxHeight: collapsed ? '0px' : '200px', opacity: collapsed ? 0 : 1 }}
+        style={{ maxHeight: collapsed ? '0px' : '13rem', opacity: collapsed ? 0 : 1 }}
       >
         <div className="pt-5 pb-4 flex flex-col items-center gap-1">
           <img src={logo} alt="unreleased" className="object-contain h-32 w-auto" />
@@ -345,8 +459,10 @@ export default function Sidebar(): JSX.Element {
       )}
 
       {/* Nav items */}
-      <nav className="space-y-1 flex-1 min-h-0 overflow-y-auto px-3">
-        {returnToApiVertical}
+      <div className="flex-1 min-h-0 overflow-y-auto px-3">
+        {/* Natural height lets the highlight's ResizeObserver follow a
+            disclosure finishing its close, even without a sidebar render. */}
+        <nav ref={navRef} className="relative isolate space-y-1">
         {items.map(({ icon, label, view }, idx) => (
           <div
             key={view}
@@ -359,16 +475,18 @@ export default function Sidebar(): JSX.Element {
             className={`cursor-grab active:cursor-grabbing ${navDragIdx === idx ? 'opacity-40' : ''}`}
           >
             <div
+              data-indicator-key={view}
               className={`flex items-center w-full rounded text-sm font-medium transition-colors ${
                 navOverIdx === idx && navDragIdx !== null && navDragIdx !== idx ? 'ring-1 ring-accent' : ''
               } ${
                 activeTab === view
-                  ? 'bg-surface-raised text-text-primary'
+                  ? 'text-text-primary'
                   : 'text-text-secondary hover:text-text-primary hover:bg-surface-raised'
               }`}
             >
               <button
                 onClick={() => navClick(view)}
+                {...warmOnIntent(view)}
                 title={collapsed ? label : undefined}
                 className="flex items-center flex-1 min-w-0 py-2 pl-2 gap-3"
               >
@@ -383,16 +501,17 @@ export default function Sidebar(): JSX.Element {
               {view === 'playlists' && showExpanded && playlists.length > 0 && (
                 <button
                   onClick={togglePlaylistsExpanded}
+                  aria-expanded={playlistsExpanded}
                   title={playlistsExpanded ? 'Hide playlists' : 'Show playlists'}
                   className="p-2 pr-3 text-text-muted hover:text-text-primary transition-colors shrink-0"
                 >
-                  {playlistsExpanded ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
+                  <ChevronDown size={14} className={`control-motion ${playlistsExpanded ? 'rotate-180' : ''}`} />
                 </button>
               )}
             </div>
 
-            {view === 'playlists' && showExpanded && playlistsExpanded && playlists.length > 0 && (
-              <div className="mt-0.5 ml-[26px] space-y-0.5 border-l border-[var(--border)] pl-2 max-h-64 overflow-y-auto">
+            {view === 'playlists' && showExpanded && playlists.length > 0 && (
+              <MotionDisclosure open={playlistsExpanded} className="mt-0.5 ml-[26px] space-y-0.5 border-l border-[var(--border)] pl-2 max-h-64 overflow-y-auto">
                 {playlists.map((pl) => (
                   <button
                     key={pl.id}
@@ -407,13 +526,15 @@ export default function Sidebar(): JSX.Element {
                     )}
                   </button>
                 ))}
-              </div>
+              </MotionDisclosure>
             )}
           </div>
         ))}
-      </nav>
+        <div ref={navIndicatorRef} className="nav-indicator rounded bg-surface-raised" aria-hidden />
+        </nav>
+      </div>
 
-      {/* Bottom section — Log in stays pinned (never hideable); the rest are
+      {/* Bottom section - Log in stays pinned (never hideable); the rest are
           user-ordered/hideable controls (Settings → Appearance → Menu controls). */}
       <div className="pb-4 space-y-1 px-2">
         {!account && (
@@ -434,7 +555,7 @@ export default function Sidebar(): JSX.Element {
           title={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
           className="flex items-center w-full py-2 rounded text-sm font-medium text-text-muted hover:text-text-primary hover:bg-surface-raised transition-colors gap-3 px-3"
         >
-          {/* Chevron points where the edge will move — mirrored when the
+          {/* Chevron points where the edge will move - mirrored when the
               sidebar sits on the right. */}
           <span className="w-6 h-6 flex items-center justify-center shrink-0">
             {collapsed !== (sidebarPosition === 'right') ? <ChevronRight size={18} /> : <ChevronLeft size={18} />}

@@ -1,10 +1,16 @@
-﻿import { useRef, useState, useEffect } from 'react'
+﻿import { ReactNode, useRef, useState } from 'react'
 import { X, GripVertical, ListMusic, Trash2, History, ChevronDown, Radio, Search, RefreshCw } from 'lucide-react'
 import { useStore, useStorePick } from '../store/useStore'
 import { AlbumArtThumbnail } from './AlbumArtThumbnail'
 import { formatDuration } from '../lib/format'
 import { Track } from '../types'
 import { useResizablePanel } from '../hooks/useResizablePanel'
+import { useListMotion } from '../hooks/useListMotion'
+import { useIsMobile } from '../hooks/useIsMobile'
+import { useSongFieldSearch } from '../hooks/useSongFieldSearch'
+import { trackIdToSongId } from '../lib/userApi'
+import { SearchHelpButton } from './SearchHelpPopover'
+import { MotionDisclosure } from './MotionDisclosure'
 
 const MAX_HISTORY_SHOWN = 10
 const MAX_UPCOMING_SHOWN = 60
@@ -12,41 +18,47 @@ const MAX_UPCOMING_SHOWN = 60
 export default function QueuePanel(): JSX.Element {
   const {
     queue, queueIndex, currentTrack, isPlaying, shuffle, queueFilter, queueLoadingMore,
-    queueMaterializing, queueMaterializeError,
-    radioMode, radioNext,
-    setShowQueue, removeFromQueue, clearQueue, reorderQueue, jumpToTrack, _loadMore, reshuffleQueue,
-  } = useStorePick('queue', 'queueIndex', 'currentTrack', 'isPlaying', 'shuffle', 'queueFilter', 'queueLoadingMore', 'queueMaterializing', 'queueMaterializeError', 'radioMode', 'radioNext', 'setShowQueue', 'removeFromQueue', 'clearQueue', 'reorderQueue', 'jumpToTrack', '_loadMore', 'reshuffleQueue')
+    radioMode, radioNext, playHistory,
+    setShowQueue, removeFromQueue, clearQueue, reorderQueue, jumpToTrack, playFromHistory, _loadMore, reshuffleQueue,
+  } = useStorePick('queue', 'queueIndex', 'currentTrack', 'isPlaying', 'shuffle', 'queueFilter', 'queueLoadingMore', 'radioMode', 'radioNext', 'playHistory', 'setShowQueue', 'removeFromQueue', 'clearQueue', 'reorderQueue', 'jumpToTrack', 'playFromHistory', '_loadMore', 'reshuffleQueue')
 
   const [panelWidth, dragHandle] = useResizablePanel(300, 240, 480)
   const isElectron = navigator.userAgent.includes('Electron')
-  const [isMobile, setIsMobile] = useState(window.innerWidth < 768)
+  const isMobile = useIsMobile()
   const [historyOpen, setHistoryOpen] = useState(false)
-  // How many upcoming rows to render — grows when the user clicks "+N more".
+  // How many upcoming rows to render - grows when the user clicks "+N more".
   const [visibleCount, setVisibleCount] = useState(MAX_UPCOMING_SHOWN)
   const [search, setSearch] = useState('')
-
-  useEffect(() => {
-    const check = (): void => setIsMobile(window.innerWidth < 768)
-    window.addEventListener('resize', check)
-    return () => window.removeEventListener('resize', check)
-  }, [])
+  const upcomingListRef = useRef<HTMLDivElement>(null)
+  useListMotion(upcomingListRef)
 
   // Derived sections
-  const history = queue.slice(0, queueIndex)           // played tracks, oldest first
+  // What was actually played before this song, newest first - not the queue's
+  // own played slice, which a new queue (e.g. playing from the Tracker) wipes.
+  const history = playHistory
   const upcoming = queue.slice(queueIndex + 1)          // unplayed tracks
 
   const query = search.trim().toLowerCase()
-  const matchesQuery = (track: Track): boolean =>
-    !query || track.title.toLowerCase().includes(query) || track.artist.toLowerCase().includes(query)
+  // Plain words match title/artist; field:"value" tokens (Tracker syntax) are
+  // checked against the catalogue by song id - see useSongFieldSearch.
+  const fieldSearch = useSongFieldSearch(search)
+  const matchesQuery = (track: Track): boolean => {
+    const q = fieldSearch.freeText
+    return (!q || track.title.toLowerCase().includes(q) || track.artist.toLowerCase().includes(q))
+      && fieldSearch.matchesFields(trackIdToSongId(track.id))
+  }
   // Pair each track with its original absolute index so onPlay/onRemove keep
-  // working correctly after filtering shrinks the array.
-  const upcomingIndexed = upcoming.map((track, i) => ({ track, i }))
+  // working correctly after filtering shrinks the array - and with a key that
+  // survives edits: the song plus which of its copies this is, not its
+  // position, so removing, reordering or advancing moves the rows below
+  // (useListMotion) instead of remounting every one of them.
+  const copies = new Map<string, number>()
+  const upcomingIndexed = upcoming.map((track, i) => {
+    const n = copies.get(track.id) ?? 0
+    copies.set(track.id, n + 1)
+    return { track, i, key: `${track.id}#${n}` }
+  })
   const filteredUpcoming = query ? upcomingIndexed.filter(({ track }) => matchesQuery(track)) : upcomingIndexed
-  const shownUpcoming = filteredUpcoming.slice(0, visibleCount)
-
-  useEffect(() => {
-    setVisibleCount(MAX_UPCOMING_SHOWN)
-  }, [query])
 
   // Drag state (upcoming indices only)
   const [dragIdx, setDragIdx] = useState<number | null>(null)
@@ -80,13 +92,19 @@ export default function QueuePanel(): JSX.Element {
 
   return (
     <div
-      className="bg-surface-raised flex shrink-0 overflow-hidden animate-slide-in-right"
+      // bg-surface on mobile, not bg-surface-raised: this is `position: fixed;
+      // inset: 0` there, so Safari's Liquid Glass toolbar tinting samples this
+      // element's background directly - bg-surface-raised made the status bar
+      // read visibly darker than the rest of the app while this panel is open.
+      className={`${isMobile ? 'bg-surface' : 'bg-surface-raised'} flex shrink-0 overflow-hidden`}
       style={isMobile
-        ? { position: 'fixed', inset: 0, zIndex: 50 }
+        // Full-screen on a phone, so it sits outside the app shell's
+        // safe-area padding and owns the gesture-bar inset itself.
+        ? { position: 'fixed', inset: 0, zIndex: 50, paddingBottom: 'env(safe-area-inset-bottom, 0px)' }
         : { width: panelWidth, borderLeft: '1px solid var(--border)' }
       }
     >
-      {/* Resize handle — desktop only */}
+      {/* Resize handle - desktop only */}
       {!isMobile && (
         <div className="w-1 shrink-0 relative group/handle" {...dragHandle}>
           <div className="absolute inset-y-0 -left-1 -right-1 group-hover/handle:bg-accent/30 transition-colors rounded-full" />
@@ -123,7 +141,7 @@ export default function QueuePanel(): JSX.Element {
         {/* Search */}
         {queue.length > 0 && (
           <div className="px-4 pt-3 shrink-0">
-            <div className="flex items-center gap-2 px-2.5 py-1.5 rounded-lg bg-surface-overlay">
+            <div className="flex items-center gap-2 px-2.5 py-1.5 rounded-lg bg-surface-overlay focus-within:ring-1 focus-within:ring-accent/50 transition-shadow">
               <Search size={13} className="text-text-muted shrink-0" />
               <input
                 type="text"
@@ -140,48 +158,47 @@ export default function QueuePanel(): JSX.Element {
                   <X size={12} />
                 </button>
               )}
+              <SearchHelpButton
+                size={12}
+                className={(open) => `flex transition-colors ${open ? 'text-accent' : 'text-text-muted hover:text-text-primary'}`}
+              />
             </div>
           </div>
-        )}
-
-        {queueMaterializeError && (
-          <p className="px-4 pt-2 text-[11px] text-amber-400">{queueMaterializeError}</p>
         )}
 
         {/* Scrollable body */}
         <div className="flex-1 overflow-y-auto" style={{ scrollbarWidth: 'thin' }}>
 
-          {/* ── Earlier queue positions ── (collapsible, above now playing) */}
+          {/* ── History ── (collapsible, above now playing) */}
           {history.length > 0 && (
             <div className="px-4 pt-4 pb-2">
               <button
                 onClick={() => setHistoryOpen((o) => !o)}
+                aria-expanded={historyOpen}
                 className="flex items-center gap-1.5 px-1 mb-2 text-text-muted hover:text-text-secondary transition-colors w-full text-left"
               >
                 <History size={11} />
                 <span className="text-xs uppercase tracking-widest flex-1">
-                  Earlier in queue · {history.length}
+                  History · {history.length}
                 </span>
                 <ChevronDown
                   size={12}
-                  className={`transition-transform ${historyOpen ? 'rotate-180' : ''}`}
+                  className={`control-motion ${historyOpen ? 'rotate-180' : ''}`}
                 />
               </button>
-              {historyOpen && (() => {
-                // Displayed newest-first, so reversed index i maps back to
-                // absolute queue position history.length - 1 - i.
-                const reversedIndexed = [...history].reverse().map((track, i) => ({ track, i }))
-                const filtered = query ? reversedIndexed.filter(({ track }) => matchesQuery(track)) : reversedIndexed
+              <MotionDisclosure open={historyOpen}>
+              {(() => {
+                const filtered = query ? history.filter(matchesQuery) : history
                 const shown = query ? filtered : filtered.slice(0, MAX_HISTORY_SHOWN)
                 return (
                   <div className="opacity-50 space-y-0.5">
-                    {shown.map(({ track, i }) => (
+                    {shown.map((track) => (
                       <QueueRow
-                        key={`hist-${track.id}-${i}`}
+                        key={`hist-${track.id}`}
                         track={track}
                         isActive={false}
                         isPlaying={false}
-                        onPlay={() => jumpToTrack(track, history.length - 1 - i)}
+                        onPlay={() => playFromHistory(track)}
                       />
                     ))}
                     {!query && filtered.length > MAX_HISTORY_SHOWN && (
@@ -197,6 +214,7 @@ export default function QueuePanel(): JSX.Element {
                   </div>
                 )
               })()}
+              </MotionDisclosure>
             </div>
           )}
 
@@ -236,8 +254,9 @@ export default function QueuePanel(): JSX.Element {
                   <RefreshCw size={11} />
                 </button>
               </p>
-              {radioNext ? (
-                <QueueRow track={radioNext} isActive={false} isPlaying={false} />
+              {(upcoming[0] ?? radioNext) ? (
+                // After stepping back, the actual next song is the one in history.
+                <QueueRow track={(upcoming[0] ?? radioNext)!} isActive={false} isPlaying={false} />
               ) : (
                 <div className="flex items-center gap-2 px-1 py-2 text-text-muted text-xs opacity-50">
                   <span className="w-1.5 h-1.5 rounded-full bg-accent animate-pulse" />
@@ -249,7 +268,7 @@ export default function QueuePanel(): JSX.Element {
 
           {/* ── Upcoming (non-radio) ── */}
           {!radioMode && filteredUpcoming.length > 0 ? (
-            <div className="px-4 pt-3 pb-6">
+            <div ref={upcomingListRef} className="relative px-4 pt-3 pb-6">
               <p className="text-text-muted text-[10px] uppercase tracking-widest px-1 mb-2 font-semibold flex items-center gap-1.5">
                 {query ? 'Results' : upcomingLabel}
                 <span className="opacity-60">
@@ -271,17 +290,18 @@ export default function QueuePanel(): JSX.Element {
                 </span>
               </p>
 
-              {shownUpcoming.map(({ track, i }) => (
-                <div
-                  key={`up-${track.id}-${queueIndex + 1 + i}`}
-                  draggable={!query}
+              {(query ? filteredUpcoming : filteredUpcoming.slice(0, visibleCount)).map(({ track, i, key }) => (
+                <SwipeableUpcomingRow
+                  key={`up-${key}`}
+                  flipKey={key}
+                  query={!!query}
+                  isDragOver={dragOverIdx === i && dragIdx !== i}
+                  isDragging={dragIdx === i}
                   onDragStart={(e) => handleDragStart(e, i)}
                   onDragOver={(e) => handleDragOver(e, i)}
                   onDrop={() => handleDrop(i)}
                   onDragEnd={handleDragEnd}
-                  className={`transition-transform ${
-                    dragOverIdx === i && dragIdx !== i ? 'translate-y-0.5 opacity-70' : ''
-                  } ${dragIdx === i ? 'opacity-30' : ''}`}
+                  onRemove={() => removeFromQueue(queueIndex + 1 + i)}
                 >
                   <QueueRow
                     track={track}
@@ -294,15 +314,15 @@ export default function QueuePanel(): JSX.Element {
                     onPlay={() => jumpToTrack(track, queueIndex + 1 + i)}
                     onRemove={() => removeFromQueue(queueIndex + 1 + i)}
                   />
-                </div>
+                </SwipeableUpcomingRow>
               ))}
 
-              {filteredUpcoming.length > shownUpcoming.length && (
+              {!query && filteredUpcoming.length > visibleCount && (
                 <button
                   onClick={showMoreUpcoming}
                   className="w-full text-text-muted hover:text-text-primary text-xs text-center py-2 rounded-lg hover:bg-surface-overlay transition-colors"
                 >
-                  +{filteredUpcoming.length - shownUpcoming.length}{hasMore ? '+' : ''} more
+                  +{filteredUpcoming.length - visibleCount}{hasMore ? '+' : ''} more
                 </button>
               )}
             </div>
@@ -310,17 +330,114 @@ export default function QueuePanel(): JSX.Element {
             <p className="text-text-muted text-xs text-center py-4 opacity-50">
               No matches
             </p>
-          ) : !radioMode && currentTrack && queueMaterializing ? (
-            <div className="flex items-center justify-center gap-2 py-4 text-text-muted text-xs">
-              <span className="w-1.5 h-1.5 rounded-full bg-accent animate-pulse" />
-              Preparing full shuffle…
-            </div>
           ) : !radioMode && currentTrack ? (
             <p className="text-text-muted text-xs text-center py-4 opacity-50">
               Nothing up next
             </p>
           ) : null}
         </div>
+      </div>
+    </div>
+  )
+}
+
+// ─── Swipe-to-remove wrapper (mobile) + drag-to-reorder wrapper (desktop) ────
+// Same row, two removal gestures: HTML5 drag events (desktop mouse) never
+// fire from touch, so a phone gets nothing from the reorder wiring above - a
+// leftward swipe uncovers a red delete backdrop instead, mirroring the
+// swipe-to-delete pattern most mail/message apps already teach.
+function SwipeableUpcomingRow({
+  children, flipKey, query, isDragOver, isDragging, onDragStart, onDragOver, onDrop, onDragEnd, onRemove,
+}: {
+  children: ReactNode
+  flipKey: string
+  query: boolean
+  isDragOver: boolean
+  isDragging: boolean
+  onDragStart: (e: React.DragEvent) => void
+  onDragOver: (e: React.DragEvent) => void
+  onDrop: () => void
+  onDragEnd: () => void
+  onRemove: () => void
+}): JSX.Element {
+  // How far left fully reveals the backdrop, and how far past that triggers
+  // removal on release - rubber-banded past REVEAL so the row doesn't just
+  // vanish off-screen as you keep dragging.
+  const REVEAL = 72
+  const THRESHOLD = 56
+  const startRef = useRef<{ x: number; y: number } | null>(null)
+  // Undecided until the touch moves enough to tell a horizontal swipe from a
+  // vertical scroll - committing too early would swallow a scroll attempt
+  // that happens to start with a slightly diagonal touch.
+  const axisRef = useRef<'x' | 'y' | null>(null)
+  const [dragX, setDragX] = useState(0)
+  const [swiping, setSwiping] = useState(false)
+  const [removing, setRemoving] = useState(false)
+
+  const onTouchStart = (e: React.TouchEvent): void => {
+    if (e.touches.length !== 1) return
+    if ((e.target as HTMLElement).closest('button')) return
+    startRef.current = { x: e.touches[0].clientX, y: e.touches[0].clientY }
+    axisRef.current = null
+  }
+  const onTouchMove = (e: React.TouchEvent): void => {
+    if (!startRef.current) return
+    const dx = e.touches[0].clientX - startRef.current.x
+    const dy = e.touches[0].clientY - startRef.current.y
+    if (!axisRef.current) {
+      if (Math.abs(dx) < 6 && Math.abs(dy) < 6) return
+      axisRef.current = Math.abs(dx) > Math.abs(dy) ? 'x' : 'y'
+      if (axisRef.current === 'x') setSwiping(true)
+    }
+    if (axisRef.current !== 'x') return
+    // preventDefault here (not just on the horizontal axis check above) is
+    // what stops the synthetic click iOS/Android fire after touchend - without
+    // it, releasing mid-swipe on the row also triggered its tap-to-play.
+    e.preventDefault()
+    const raw = Math.min(dx, 0)
+    setDragX(raw < -REVEAL ? -REVEAL + (raw + REVEAL) / 4 : raw)
+  }
+  const onTouchEnd = (): void => {
+    if (axisRef.current === 'x' && dragX < -THRESHOLD) {
+      setRemoving(true)
+      setDragX(-window.innerWidth)
+      window.setTimeout(onRemove, 180)
+    } else {
+      setDragX(0)
+    }
+    setSwiping(false)
+    startRef.current = null
+    axisRef.current = null
+  }
+
+  return (
+    <div
+      data-flip-key={flipKey}
+      draggable={!query}
+      onDragStart={onDragStart}
+      onDragOver={onDragOver}
+      onDrop={onDrop}
+      onDragEnd={onDragEnd}
+      onTouchStart={onTouchStart}
+      onTouchMove={onTouchMove}
+      onTouchEnd={onTouchEnd}
+      onTouchCancel={onTouchEnd}
+      className={`relative overflow-hidden transition-transform ${isDragOver ? 'translate-y-0.5 opacity-70' : ''} ${isDragging ? 'opacity-30' : ''}`}
+    >
+      <div
+        className="absolute inset-0 rounded-lg bg-red-500 flex items-center justify-end pr-5 pointer-events-none"
+        style={{ opacity: dragX < 0 ? Math.min(1, -dragX / THRESHOLD) : 0 }}
+      >
+        <Trash2 size={15} className="text-white" />
+      </div>
+      <div
+        style={{
+          transform: dragX ? `translateX(${dragX}px)` : undefined,
+          transition: swiping ? 'none' : 'transform 0.2s ease-out, opacity 0.2s ease-out',
+          opacity: removing ? 0 : 1,
+        }}
+      >
+        {children}
       </div>
     </div>
   )
@@ -344,6 +461,9 @@ function QueueRow({
         isActive ? 'bg-surface-overlay' : 'hover:bg-surface-overlay'
       } ${onPlay && !isActive ? 'cursor-pointer' : ''}`}
       onDoubleClick={onPlay}
+      // Double-click has no touch equivalent worth relying on - same
+      // tap-to-play treatment as the Tracker/Playlists rows.
+      onClick={() => { if (window.matchMedia('(max-width: 767px)').matches && onPlay && !isActive) onPlay() }}
     >
       {/* Drag handle or spacer */}
       {showDrag ? (
@@ -356,7 +476,7 @@ function QueueRow({
 
       {/* Art */}
       <div className="w-9 h-9 rounded shrink-0 overflow-hidden bg-surface-overlay">
-        <AlbumArtThumbnail track={track} size={36} fill className="w-full h-full" shimmer={false} rootMargin="200px" />
+        <AlbumArtThumbnail track={track} size={36} fill className="w-full h-full" shimmer={false} eager />
       </div>
 
       {/* Info */}
@@ -386,11 +506,14 @@ function QueueRow({
           </span>
         )}
         {onRemove && (
+          // Was opacity-0 group-hover:opacity-100 with no touch equivalent -
+          // invisible and undiscoverable on mobile.
           <button
             onClick={(e) => { e.stopPropagation(); onRemove() }}
-            className="opacity-0 group-hover:opacity-100 text-text-muted hover:text-red-400 transition-all ml-1 p-0.5"
+            aria-label="Remove from queue"
+            className="opacity-100 md:opacity-0 md:group-hover:opacity-100 text-text-muted hover:text-red-400 transition-all ml-1 w-8 h-8 md:w-auto md:h-auto flex items-center justify-center md:p-0.5"
           >
-            <X size={11} />
+            <X size={14} className="md:w-[11px] md:h-[11px]" />
           </button>
         )}
       </div>

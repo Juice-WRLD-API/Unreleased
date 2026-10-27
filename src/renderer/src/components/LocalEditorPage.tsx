@@ -5,6 +5,7 @@ import { attachToMainWindow, broadcastLibraryTrackUpdate } from '../lib/windowSy
 import { LibraryTrack } from '../types'
 import { Card, FieldGrid, FieldRow, TextareaRow } from './EditorPage'
 import FilePickerModal from './FilePickerModal'
+import { ELECTRON_TITLEBAR_CLEARANCE_X } from '../lib/platform'
 
 /* ══════════════════════════════════════════════════════════════════════════════
    Local-file metadata editor — the same full-page editor layout the API editor
@@ -246,8 +247,7 @@ export default function LocalEditorPage(): JSX.Element {
     <div className="flex-1 flex flex-col min-h-0">
 
       {/* Top bar */}
-      {/* 188px clears the window controls plus the fixed downloads trigger */}
-      <div className="shrink-0 flex items-center gap-2 px-5 py-3 border-b border-[var(--border)]" style={el ? { paddingRight: '188px' } : undefined}>
+      <div className="shrink-0 flex items-center gap-2 px-5 py-3 border-b border-[var(--border)]" style={el ? { paddingRight: ELECTRON_TITLEBAR_CLEARANCE_X } : undefined}>
         {/* Back — only in the in-app editor; the pop-out window has nowhere to go back to */}
         {!IS_FLOAT_WINDOW && (
           <button onClick={goBack} className="p-1.5 -ml-1.5 rounded-lg text-text-muted hover:text-text-primary hover:bg-surface-overlay transition-colors shrink-0">

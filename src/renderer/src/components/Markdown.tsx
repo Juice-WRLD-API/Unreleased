@@ -3,7 +3,7 @@ import remarkGfm from 'remark-gfm'
 
 // Styled Markdown renderer for post bodies. react-markdown builds real React
 // elements (no dangerouslySetInnerHTML) and, since we don't add rehype-raw,
-// strips any raw HTML in the source — so untrusted-ish editor content can't
+// strips any raw HTML in the source - so untrusted-ish editor content can't
 // inject markup. GFM adds tables, task lists, strikethrough and autolinks.
 
 // Only allow protocols that are safe to open; anything else (javascript:,

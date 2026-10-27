@@ -1,5 +1,21 @@
 const { contextBridge, ipcRenderer, webUtils } = require('electron')
 
+// electron:dev only: mirror the installed app's file:// localStorage into the
+// dev server's origin before the app's scripts run (see main.js
+// readInstalledLocalStorage). Main hands it out once per launch; null means
+// nothing to copy, so dev keeps whatever it already has.
+if (location.origin === 'http://localhost:3018') {
+  const seed = ipcRenderer.sendSync('dev-storage-seed')
+  if (seed) {
+    try {
+      localStorage.clear()
+      for (const [k, v] of seed) localStorage.setItem(k, v)
+    } catch (err) {
+      console.warn('[dev-seed] could not copy installed app storage', err)
+    }
+  }
+}
+
 contextBridge.exposeInMainWorld('electron', {
   // Window controls
   checkForUpdates: () => ipcRenderer.invoke('check-for-updates'),
@@ -93,6 +109,11 @@ contextBridge.exposeInMainWorld('electron', {
   selectImageFile: ()    => ipcRenderer.invoke('select-image-file'),
   fetchImageAsDataUrl: (url) => ipcRenderer.invoke('fetch-image-as-data-url', url),
   openDiscordLogin: (url) => ipcRenderer.invoke('open-discord-login', url),
+  // Passkeys: whether this OS can show the prompt, and the prompt itself in
+  // its own player.juicewrldapi.com window (see passkey.js). Resolves
+  // { ok, credential } | { cancelled } | { error }.
+  passkeySupport: () => ipcRenderer.invoke('passkey-support'),
+  passkeyCeremony: (req) => ipcRenderer.invoke('passkey-ceremony', req),
 
   // App settings
   getAppSettings:  ()           => ipcRenderer.invoke('get-app-settings'),
@@ -118,6 +139,39 @@ contextBridge.exposeInMainWorld('electron', {
     const fn = (_, cmd) => cb(cmd)
     ipcRenderer.on('tray-command', fn)
     return () => ipcRenderer.removeListener('tray-command', fn)
+  },
+
+  // Desktop (electron/desktop, Windows): the light round the screens and the desktop widgets, driven from the main
+  // window - its settings and what's playing go out, the widgets' presses and questions come back.
+  desktop: {
+    setSettings: (settings) => ipcRenderer.send('desktop:settings', settings),
+    setState: (patch) => ipcRenderer.send('desktop:state', patch),
+    meter: (value) => ipcRenderer.send('desktop:meter', value),
+    vizLook: (look) => ipcRenderer.send('desktop:viz-look', look),
+    vizFrame: (frame) => ipcRenderer.send('desktop:viz-frame', frame),
+    displays: () => ipcRenderer.invoke('desktop:displays'),
+    clearDesk: (on) => ipcRenderer.send('desktop:clear', on === undefined ? null : Boolean(on)),
+    reply: (id, value) => ipcRenderer.send('desktop:reply', id, value),
+    onCommand: (cb) => {
+      const fn = (_, cmd, arg) => cb(cmd, arg)
+      ipcRenderer.on('desktop:command', fn)
+      return () => ipcRenderer.removeListener('desktop:command', fn)
+    },
+    onRequest: (cb) => {
+      const fn = (_, id, kind, arg) => cb(id, kind, arg)
+      ipcRenderer.on('desktop:request', fn)
+      return () => ipcRenderer.removeListener('desktop:request', fn)
+    },
+    onPlace: (cb) => {
+      const fn = (_, which, place) => cb(which, place)
+      ipcRenderer.on('desktop:place', fn)
+      return () => ipcRenderer.removeListener('desktop:place', fn)
+    },
+    onClearState: (cb) => {
+      const fn = (_, on) => cb(on)
+      ipcRenderer.on('desktop:clear-state', fn)
+      return () => ipcRenderer.removeListener('desktop:clear-state', fn)
+    },
   },
 
   // Discord Rich Presence
@@ -211,9 +265,13 @@ contextBridge.exposeInMainWorld('electron', {
   offlineGetStats:      ()                        => ipcRenderer.invoke('offline-get-stats'),
   offlineDownloadTrack: (payload)                  => ipcRenderer.invoke('offline-download-track', payload),
   offlineRemoveTrack:   (id)                       => ipcRenderer.invoke('offline-remove-track', id),
+  offlineUpdateTrackMeta: (id, patch)              => ipcRenderer.invoke('offline-update-track-meta', id, patch),
   offlineSetPlaylist:   (key, songIds, name)        => ipcRenderer.invoke('offline-set-playlist', key, songIds, name),
   offlineRemovePlaylist: (key)                     => ipcRenderer.invoke('offline-remove-playlist', key),
   offlineSetLibraryPath: (newPath)                 => ipcRenderer.invoke('offline-set-library-path', newPath),
+  offlineCancelDownloads: (ids)                    => ipcRenderer.invoke('offline-cancel-downloads', ids),
+  offlineGetTrackSizes: ()                         => ipcRenderer.invoke('offline-get-track-sizes'),
+  offlineGetDiskSpace:  ()                         => ipcRenderer.invoke('offline-get-disk-space'),
   onOfflineDownloadProgress: (cb) => {
     const fn = (_, d) => cb(d)
     ipcRenderer.on('offline-download-progress', fn)

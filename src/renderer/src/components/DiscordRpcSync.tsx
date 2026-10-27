@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { useStore } from '../store/useStore'
 import { useShallow } from 'zustand/react/shallow'
-import { discordCoverUrl, matchLocalSongCover, songSearchPageUrl, JWAPI_SITE, type LocalSongCover } from '../lib/juicewrldApi'
+import { discordCoverUrl, matchLocalSongCover, songSearchPageUrl, PLAYER_SITE, type LocalSongCover } from '../lib/juicewrldApi'
 import { eraFullName, loadEraFullNames } from '../lib/eras'
 
 // How far the live playback position is allowed to drift from what we last
@@ -91,11 +91,16 @@ export default function DiscordRpcSync(): JSX.Element | null {
   // has renamed, the matched song's name for a local file — since the site's
   // search only knows the API's own titles. A local file that matched nothing
   // gets no button rather than one leading to an empty search.
+  // API tracks (`jw-<id>`) and matched local files link to the song's own
+  // /track/<id> page on the player; the search link is the fallback.
+  const apiSongId = currentTrack?.id.startsWith('jw-') ? Number(currentTrack.id.slice(3)) : NaN
   const trackLinkUrl = !currentTrack
     ? null
     : isLocalTrack
-      ? (matchedCover ? songSearchPageUrl(matchedCover.name) ?? null : null)
-      : songSearchPageUrl(currentTrack.apiTitle || currentTrack.title) ?? null
+      ? (matchedCover ? `${PLAYER_SITE}/track/${matchedCover.songId}` : null)
+      : Number.isInteger(apiSongId)
+        ? `${PLAYER_SITE}/track/${apiSongId}`
+        : songSearchPageUrl(currentTrack.apiTitle || currentTrack.title) ?? null
 
   useEffect(() => {
     if (!el?.discordRpcSetActivity) return
@@ -131,7 +136,7 @@ export default function DiscordRpcSync(): JSX.Element | null {
         coverUrl: discordCoverUrl(radioFmMatchedSong?.imageUrl ?? radioFmNowPlaying.image_url, radioFmMatchedSong?.path) ?? null,
         // Radio points at the station itself rather than the song — someone
         // clicking through while it's live wants to tune in, not to search.
-        linkUrl: `${JWAPI_SITE}/wrld`,
+        linkUrl: `${PLAYER_SITE}/wrld`,
       })
       return
     }

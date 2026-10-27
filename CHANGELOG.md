@@ -2,7 +2,653 @@
 
 All notable changes to this project are documented here.
 
-> Live at [player.juicewrldapi.com](https://player.juicewrldapi.com) · Source on [GitHub](https://github.com/leanwrldd/unreleased)
+> Live at [player.juicewrldapi.com](https://player.juicewrldapi.com) · Source on [GitHub](https://github.com/Juice-WRLD-API/Unreleased)
+
+---
+
+## [2.5.46] — 2026-10-27
+
+Changes since 2.5.42:
+
+- **Improve** Sync in the song editor opens the Synced lyrics dialog on the song and hands the timed lyrics back to the editor with "Use in the song editor"
+- **Improve** Playlists load at the same time as your account and without lyrics in the list, so they appear sooner on launch
+- **Improve** Version menus in the player, WRLD and the desktop player list the song that's playing, so its own version can be preferred or excluded too
+- **Improve** Session edits match their songs more reliably when several sessions share a name
+- **Improve** The WRLD visualizer uses much less CPU while paused, and 999 FM counts as playing
+- **Improve** Notifications, news and login-approval checks no longer send their launch requests twice, and news subscriptions only sync when they changed
+- **Fix** Synced lyrics stamps land on the right time after seeking in VBR MP3s
+- **Fix** Playlists no longer crash after renaming, changing visibility, editing the description or reordering
+- **Fix** Statistics no longer requests songs for radio plays with no catalogue song
+- **Fix** The equalizer and effects are in place from the first song played on desktop
+- **Fix** The sidebar logo no longer clips at larger text sizes
+- **Fix** Virtual lists that mounted before their scroll area was ready now show their rows
+
+---
+
+## [2.5.42] — 2026-10-26
+
+Changes since 2.5.0:
+
+- **New** **Passkeys** can be managed from your account and used to sign in or complete two-factor sign-in. The desktop app opens the passkey prompt in a separate window on Windows; the website uses the browser prompt
+- **New** **Mixed-source playlists** can hold songs, comp files, donor files and local files. Synced playlists can include donor files too
+- **New** Contributors can propose replacing an existing comp file from the Files tab
+- **New** **Sync** in Home → Tools keeps the released and unreleased catalogue with audio available offline, with controls to start, pause and manage it. The terminal's `offline` command can control it too
+- **New** **On this day** on Home finds songs connected to today's date; the terminal has an `onthisday` command
+- **New** **Sync lyrics** lets anyone time lyrics by line or word against a song or comp file. Open it from Home → Tools or a track's menu; the editor can use it while editing a song. Word timing is saved in enhanced LRC format
+- **New** Settings can remember the queue, current song and position on this device, restoring them paused when the app reopens
+- **New** The admin console has a Logs tab with comp-channel filtering, and the terminal has log commands. The CDN nodes tab shows each node's event and audit history; the terminal can list those events
+- **New** Files has a go-to-folder box (`Ctrl+L`). Folder search is faster, and hovering over folders starts loading them ahead of time
+- **New** Settings → About shows donation addresses
+- **Improve** Desktop and WRLD widgets have a song menu, a lyrics toggle and an equalizer shortcut. The clock and queue can follow 999 FM, and the desktop player has a more-options menu. Right-clicking a WRLD queue card opens that song's menu; clicking the playing card opens its lyrics
+- **Improve** Lyric styles gained Classic and Fisheye options, custom fonts from installed fonts or files, click-to-seek lines and sizing and color controls that follow the app. The WRLD visualizer, Edge light and lyrics controls were refined; shader and widget rendering is smoother
+- **Improve** Color changes cross-fade, menus use a glass style, tab content and disclosures animate, and the desktop notice and mobile dismiss gestures have more polished motion
+- **Improve** The Library tab has a new layout, artist details show the full song list, and playlist quick views and large Tracker lists scroll more smoothly
+- **Improve** Sign-in completes without waiting for account sync, and cached account and playlist data appears sooner on launch
+- **Improve** A DM can reset its encryption key. The notification area loads images as needed and caches chat attachments
+- **Improve** Song and comp file proposals are sent when submitted instead of being staged. The admin profile preview loads its totals and sections independently
+- **Improve** Updates are checked before the main app opens; Windows installs run behind an updating window. The 2FA status is under Settings → Account
+- **Improve** The debug recorder has an anonymous mode and removes known secrets from saved entries. Discord presence links to the player and the song's track page
+- **Fix** Playback recovers when a stream stalls, disconnects or pauses unexpectedly, including after a seek
+- **Fix** Editing and resubmitting a proposal from My proposals works with the server's paged summaries; the app fetches the full proposal before showing its diff or opening the editor
+- **Fix** Encrypted chat room keys are sent to every active device, so a newer device no longer waits indefinitely for a key
+- **Fix** Large ZIP downloads are split into parts before they exceed the in-memory ZIP limit
+- **Fix** Personal covers have a working fallback in Edge light when the image thumbnail endpoint cannot load them
+
+---
+
+## [2.5.0] — 2026-10-20
+
+- **New** **Notifications**: a notification area that keeps the chat messages, news posts, announcements, device alerts and app notices that popped up, grouped by day, with a badge for new ones. Click one to go to its chat room or post. Opens from the Notifications button in the side menu (it can be moved or hidden like the others) or the terminal's `notifications` command. Kept on this device for 30 days; signing out clears the chat ones
+- **New** **Desktop**, in Settings → Desktop: iJWA's light and widgets built into the app, following what Unreleased plays. Everything starts off
+  - **Screen-edge light** (Windows): a glow round your screens in 22 looks (Snake, Lava, Fireflies, Lyrics Ticker, Fire, Snow…), all round or at the bottom, top or corners, moving with the music or flowing on its own, in your colors or the cover's. It can show only while the desktop is in front, and you choose which displays get it
+  - **Desktop player, playlist and clock** (Windows): your queue as glass cards on the desktop with a glass control bar, lyrics beside the playing card, and catalog search with era pages; a tilted see-through list of your queue, liked songs or a playlist; tall glass digits tinted by the cover. Drag them anywhere, lock them, or make the player small
+  - **Widgets in WRLD** (everywhere, the web too): the same player, playlist and clock inside the WRLD tab, over the visualizer, from the toolbar's Widgets button or Layout → Widgets in the visualizer settings. Drag them about the tab; each can be left out in Settings → Desktop
+  - **Clear desk** (Windows): lays the wallpaper over every other window and the taskbar, leaving only the light and the widgets; any other app coming forward brings it all back
+  - **Lyric styles** for the WRLD tab and the desktop player: Fisheye, Spread, Karaoke, Typewriter, Neon, Echo, Glitch and Cinema, sung word by word, each in a font of your choice, with a note through instrumental breaks
+  - An **Edge light** for the WRLD tab: any of the 22 lights round its edges, over the visualizer or on its own with the visualizer off. It's the screen light's look, sized and colored the same way, so a look picked in either place is both
+  - Browse every light and every lyric style playing live before picking one; hotkeys, a `desktop` terminal command and a Desktop menu in the tray reach all of it
+- **New** Browse every WRLD visualizer, classic and shader, playing live before picking one, from the visualizer settings
+- **New** An Edge light can play round the edges on top of any classic or shader WRLD visualizer: Edge on top in the visualizer settings, or `set viz-edge` in the terminal
+- **Change** The lyrics pipe for the standalone iJWA app is gone: Desktop replaces it
+- **Change** WRLD's Cover Flow layout is gone: its queue cards, clock and controls are the Desktop player and clock now, on the desktop or in WRLD's Widgets layout. A saved Cover Flow opens as Aurora
+
+---
+
+## [2.2.0 — 2.5.41]
+
+Patch releases between 2.2.0 and 2.5.41, grouped by area (individual version entries below retain release dates).
+
+### Playback, queues and song versions
+
+- **Improve** Changing versions now replaces the playing song without clearing the queue, including during radio playback and in WRLD
+- **Improve** Explicitly selected versions play as selected; automatically queued songs respect preferred and excluded versions
+- **New** Multiple versions can be preferred, with playback choosing randomly between them
+- **New** Compact playlists show one row per song, expandable to its versions with prefer/exclude controls
+- **New** Recording sessions with playable session edits appear as Session versions and support version preferences
+- **Improve** Community edits include instrumentals; playing an edit preserves the queue
+- **Improve** Instrumentals and sessions display the song title with the filename on the artist line
+- **New** Queue history persists when switching queues, starting radio or playing from Tracker. Available in WRLD and through queue history
+- **Improve** Previous works in radio/shuffle mode
+- **Improve** Shuffle behavior is unified across entry points, and disabling shuffle restores the original order
+- **New** An ended queue can offer to start random radio
+- **Improve** WRLD's Next button follows the same playback behavior as the main player
+- **Improve** Temporary server errors and rate limits receive a retry before a source is treated as unplayable
+- **Fix** Cover and lyrics flashes when replaying the same track
+
+### Equalizer and visualizers
+
+- **New** Expanded audio effects with preamp, stereo width, saturation, compression, cut filters, echo and 8D auto-pan controls
+- **New** Named custom EQ presets, preset deletion and reset-all controls
+- **New** Preference synchronization for the new effects and saved presets
+- **New** 17 visualizers: Rain, Fireworks, Sonar, Embers, Warp, Lasers, Synthwave, Outrun, Neon City, Terrain, Grid Tunnel, Retro Planet, Sunset Beach, Vaporwave, 8-Bit, Night Drive and Black Hole
+- **New** A visualizer picker grouped into Classic and Shaders
+- **Improve** Audio-reactive shader movement
+- **Improve** WRLD panel transitions, cover positioning and lyrics centering
+- **Fix** Toolbar overlap with window controls and top navigation
+- **Improve** Floating navigation hides during WRLD fullscreen
+- **Improve** Lyrics toggles apply immediately, and disabled lyrics stay hidden during song changes
+
+### Search, Tracker and Files
+
+- **New** Customizable Tracker list columns and detail fields, with drag-to-reorder
+- **New** Extended song-field search across playlists, queues, tier lists and 999 FM, with syntax help
+- **Improve** Tracker searches and title sorting account for personal song renames
+- **Improve** Tracker defaults to newest-first Date Leaked sorting; leak/release dates display without times
+- **New** Expanded Files search with any-order words, quoted phrases, exclusions, typo fallback and extension, type, folder and size filters
+- **New** Search scoped to the current folder and its descendants
+- **New** Session-file linking is available to all users
+- **Improve** The session-file picker can switch comps and remembers the selected file's comp
+- **Improve** Session playback, downloads and "Show in Files" resolve the linked file across comps
+- **Fix** Session-edit and cover matching for titles containing `<3` or `</3`
+
+### Playlists, covers and downloads
+
+- **New** Immediate playlist quick-view opening and animated expansion, collapse and switching between cards
+- **Improve** Add-to-playlist and public/private changes update immediately, with rollback and error messages when requests fail
+- **Improve** Clearer errors for playlist creation, deletion, renaming, descriptions and sharing
+- **Fix** Custom playlist covers disappearing after reload
+- **Improve** Personal covers propagate to other versions that have no personal cover
+- **Improve** Cover searches include alternate song names
+- **Fix** Personalized covers stored as plain image paths
+- **Improve** WRLD album displays use personalized and album covers
+- **New** Downloaded songs save covers locally for offline playback; existing downloads receive cover backfills
+- **Improve** Personal name/cover changes refresh offline metadata, and removing a download removes its saved cover
+- **New** MP3 download tagging, expanded to song name, artist, album, cover and plain/synced lyrics
+- **Improve** Tagging integrated into download paths including playlist ZIP handling
+- **New** CDN-routed ZIP downloads
+- **Improve** Cover loading tries alternate resized copies and caps fallbacks at 1024px, avoiding oversized originals
+- **Improve** OS media artwork and chat song cards use resized covers
+
+### Chat, profiles and news
+
+- **New** Chat message search across DMs and servers, with encrypted DMs searched locally. Search supports sender, mentions, content type, room, date, status, exclusions and phrase filters
+- **New** Ctrl+F search and terminal chat-history grep
+- **New** Chat attachments show upload progress and support cancellation in Transfers
+- **New** Channel role-whitelist helpers
+- **Improve** Group chats display stacked member avatars
+- **Improve** Cached profiles appear immediately while refreshing
+- **Fix** Profile lookup failures and chat header overlap with window controls
+- **Fix** Chat starts app-wide, fixing terminal commands stuck on "starting"
+- **Fix** News Copy link and added it to article pages
+- **New** Formatting help with live examples to the news composer
+- **Fix** Notification sockets wait for confirmed account authentication before requesting a ticket
+
+### Editing, proposals and administration
+
+- **Improve** Dropped files are staged before submission; staged changes can be edited
+- **Improve** Folder uploads preserve nesting, merge matching comp-root folders and skip existing paths
+- **Improve** Transfers remains accessible when proposals are staged, with staged changes included in its badge
+- **New** New-leak flags and badges to comp proposals
+- **New** Staff can approve or deny proposals directly from profile cards
+- **New** Approval/denial of your own comp proposals where permitted
+- **New** Parallel acceptance of a user's edits across songs
+- **New** Refresh buttons to profile proposal and comp-file lists
+- **Fix** Large proposal diffs are capped for rendering while retaining full-value copying
+- **New** Admin Feedback tools, including hiding duplicate crash reports
+- **New** CDN node binary uploads with progress
+- **New** CDN world maps, country chips, locations and copyable owner information
+- **Improve** Propagation maps, flags and skipped-state reporting
+- **New** Channel/folder selection for owned CDN nodes
+
+### Settings, navigation and interface
+
+- **New** API-key management in Settings and the terminal
+- **New** Draggable pill navigation that docks to any window edge
+- **Fix** Restored Library navigation and the pill's app-menu button
+- **Change** Pill navigation keeps auto-hide disabled
+- **Fix** Window dragging with top pill or auto-hide navigation
+- **Improve** Unified context menus with consistent flyouts, keyboard navigation and dismissal
+- **Fix** Submenu crashes that could blank the app
+- **Improve** Flyouts wait for pointer movement before opening
+- **New** Themed selects, checkboxes, color pickers and date pickers
+- **Improve** Hover scrolling for truncated text, view transitions and sliding selection indicators
+- **Improve** Home uses the full available width; track pages show larger artwork
+- **Fix** Native clipboard handling fixes copy actions throughout Electron
+- **Improve** Hid the modal-lock control when pop-ups are undocked
+- **Improve** Moved API-server settings into Developer
+- **Improve** Moved credits out of About to the Thank you page
+- **New** Debug-log recording for console/network activity, available in Settings → About and through `debuglog`
+
+### Updates, performance and maintenance
+
+- **Fix** Windows update relaunch failures and repeated-update loops by letting the installer launch the new executable after installation
+- **Improve** Update installation shows progress
+- **Improve** Ready updates ask before restarting, including updates downloaded after startup
+- **Improve** Pending beta updates install on quit; beta auto-download respects its setting
+- **New** Beta administration, startup/periodic beta checks and a beta publishing flow
+- **Improve** Beta codes survive reinstalling; leaving beta returns to stable updates
+- **Improve** Preloaded view code while idle to reduce navigation delays
+- **Improve** Reduced song-response payloads and duplicate requests
+- **Improve** Lazy-load recovery waits for network availability
+- **Fix** Crashes caused by browser translation modifying the DOM
+- **Improve** Moved 1,905 emoji assets out of the module-import graph
+- **Fix** All-time listening totals being capped by the 2,000-entry history log
+- **New** Terminal version-preference controls and clickable usernames in terminal output
+- **New** Development-mode seeding of installed-app preferences/login storage
+- **Improve** Updated dependency overrides, documentation and thumbnail checks
+- **New** A tracker-sheet/API comparison script
+
+---
+
+## [2.4.1] — 2026-10-12
+
+- **Fix** After an update, the installer starts the new version itself once its files are in place. Before, the app could relaunch mid-install and run the same update again
+
+---
+
+## [2.4.0] — 2026-10-12
+
+- **New** **Chat message search** across DMs and servers (encrypted DMs are searched on your device), with filters like `from:`, `in:`, `has:`, `before:`/`after:`, negation and exact phrases. Ctrl+F opens it from any room, and the terminal can `grep` chat history
+
+---
+
+## [2.3.10] — 2026-10-12
+
+- Build pipeline changes only
+
+---
+
+## [2.3.9] — 2026-10-12
+
+- **Improve** The API server settings moved into Settings → Developer
+- **Improve** Your beta access code now survives a reinstall, and leaving the beta switches you back to the stable update channel
+
+---
+
+## [2.3.8] — 2026-10-12
+
+- **Fix** Copy buttons across the app (links, tokens, lyrics, chat messages, playlist shares and more) now go through the system clipboard and work reliably
+
+---
+
+## [2.3.7] — 2026-10-12
+
+- **New** **Beta admin tab**: admins can manage beta access codes and publish, toggle or delete beta builds (also via the terminal's `beta` command)
+- **New** With a beta code, the app checks for newer beta builds on startup and installs them directly
+- **Fix** The modal lock toggle is hidden when pop-ups are undocked, where it had no effect
+
+---
+
+## [2.3.6] — 2026-10-11
+
+- **Fix** Running a browser page translator over the app no longer crashes views
+
+---
+
+## [2.3.5] — 2026-10-11
+
+- **Fix** The app reopens properly after a silent background update
+
+---
+
+## [2.3.4] — 2026-10-11
+
+- **New** Chat attachments upload with a progress bar and can be cancelled from the Transfers panel
+- **New** The admin Feedback tab can hide duplicate crash reports
+- **Improve** Song lists skip fields they don't show (like lyrics), so they load faster
+- **Improve** Larger cover art on track pages
+
+---
+
+## [2.3.3] — 2026-10-11
+
+- **Improve** Tracker fields are reordered by dragging instead of up/down buttons
+- **Improve** Profiles show their cached copy straight away while fresh data loads in the background
+
+---
+
+## [2.3.2] — 2026-10-11
+
+- **Fix** Opening a proposal with a very long change (lyrics, synced lyrics) no longer freezes the computer; large diffs are capped and the copy buttons still copy the full text
+
+---
+
+## [2.3.1] — 2026-10-11
+
+- **Improve** Every view's code is preloaded in the background once the app is idle, so switching tabs is instant
+- **Fix** The terminal's close button no longer sits under the window controls
+
+---
+
+## [2.3.0] — 2026-10-11
+
+- **New** **Customisable Tracker**: choose which fields appear in the song list and the detail panel, and in what order
+- **New** **API keys**: create and revoke personal API keys in Settings or from the terminal
+- **New** **Feedback tab** in the admin console
+- **Improve** Settings and Chat preload in the background so they open without a wait
+
+---
+
+## [2.2.13] — 2026-10-11
+
+- **New** Comp proposals can be marked as a **new leak**, with a badge in review queues and a toggle on pending proposals (also in the terminal's comp commands)
+- **Fix** The terminal no longer hangs on "starting" because the chat client wasn't running yet
+
+---
+
+## [2.2.12] — 2026-10-11
+
+- **Improve** Credits were removed from Settings → About; they now live on the Thank you page
+- **Fix** Copying your token from the sidebar profile's right-click menu works again
+
+---
+
+## [2.2.11] — 2026-10-11
+
+- **New** Admins can approve or deny proposals directly from the proposal cards on a user's profile
+
+---
+
+## [2.2.10] — 2026-10-10
+
+- **New** **Embed lyrics and cover in downloads**: a setting that writes the song's lyrics (plain and synced) and your personal cover into downloaded MP3s
+- **New** Admin CDN nodes tab: a world map of nodes, country chips and node locations
+- **Improve** Previous now works in radio/shuffle mode, stepping back through what the radio played
+- **Improve** Fewer duplicate requests on the profile page and when switching channels
+- **Fix** Opening a submenu in the app menu no longer blanks the screen
+
+---
+
+## [2.2.9] — 2026-10-09
+
+- **New** Admins can upload CDN node binaries (by platform and version, with a progress bar) from the CDN nodes tab
+
+---
+
+## [2.2.8] — 2026-10-09
+
+- **New** Group chats show stacked member avatars in the chat rail
+- **New** A Copy link button on news articles
+- **Fix** Copy link on news posts works again
+- **Change** The Pill nav style now keeps auto-hide turned off
+
+---
+
+## [2.2.7] — 2026-10-09
+
+- **New** Drag the pill nav to any edge of the window
+- **Improve** The Home page uses the full window width
+
+---
+
+## [2.2.6] — 2026-10-09
+
+- Maintenance release, no user-facing changes
+
+---
+
+## [2.2.5] — 2026-10-09
+
+- **Improve** Every right-click and overflow menu now uses one shared menu, so they look and behave the same everywhere
+
+---
+
+## [2.2.4] — 2026-10-09
+
+- **New** The Pill nav style shows the app menu button
+- **Fix** Chat room header buttons and the WRLD visualizer toolbar no longer sit under the window controls
+- **Fix** The app reopens after a silent update on Windows
+
+---
+
+## [2.2.3] — 2026-10-09
+
+- **Fix** "Profile not found" when opening some profiles
+- **Fix** The chat room header overlapping the window buttons
+
+---
+
+## [2.2.1] — 2026-10-09
+
+- **Fix** The Library tab is back in the nav
+
+---
+
+## [2.2.0] — 2026-10-09
+
+The biggest update since 2.0. It brings most of what the web player gained over the past six weeks to the desktop app.
+
+- **New** **Staff chat**: end-to-end encrypted rooms and DMs, device linking, encrypted backups, trust checks, slash commands, command cards, link previews and notifications
+- **New** **Terminal**: a command line inside the app for playback, files, settings, review queues, chat and admin
+- **New** **Home dashboard**, with recently played synced across your devices
+- **New** **WRLD visualizer**, lyrics styling options and a **synced-lyrics timing tool** for editors
+- **New** **Public track pages** with shareable links, a lyrics image card, a now-playing card, and sharing songs, playlists and news into chat
+- **New** **Public user profiles**, and a redesigned staff/contributor profile
+- **New** **Statistics** page with catalogue-wide numbers
+- **New** **Donor file storage**, donor playlists, and a peer-to-peer CDN for downloads (off by default, toggle in Settings)
+- **New** **Tier lists**: several lists per account, synced
+- **New** Sign in with a password, with two-factor authentication and login approval from another device
+- **New** Admin: Eras tab, albums management, broadcasts, and the admin terminal
+- **New** Song editor: BPM and Key fields, a date picker, and linking songs to session edits
+- **New** Hide specific versions of a song, double-click to play, and numeric sorting in Files
+- **New** Drag files into the Files tab to stage file changes; pending comp proposals show as placeholders until approved
+- **New** Playlist export to JSON and M3U, a playlist hero header, and ZIP downloads built in the app
+- **New** Preferences tab in Settings and an auto-hiding nav
+- **Improve** Lower idle CPU and memory use: the cover cache is capped and the player no longer re-renders on every tick
+- **Improve** Queue panels stay mounted so covers don't reload each time you open them
+- **Fix** Pause/play race when toggling quickly
+- **Fix** Mini player stealing focus, Song Info scrolling, and header alignment in Tracker, Library and News
+- **Fix** The equalizer pop-out setting is hidden when pop-out windows are off
+
+---
+
+## [2.1.8] — 2026-08-27
+
+- **Improve** Playback recovery is more reliable: retries keep what you meant to play (including from WRLD), survive track info updates, and all transport buttons go through one path
+
+---
+
+## [2.1.7] — 2026-08-26
+
+- **New** Offline-downloads filter in the Tracker, and an "in the API" filter in the Library
+- **Improve** Turning shuffle off goes back to the playlist's own order, so Next and Previous follow the playlist again
+- **Improve** The catalogue retries automatically if the API fails to load
+- **Fix** Select-all in compact view could select hidden songs
+- **Fix** Songs column alignment
+
+---
+
+## [2.1.6] — 2026-08-25
+
+- **New** A Settings → Window option to turn off docking modals into the top pill
+- **Fix** Offline library changes made at the same time no longer overwrite each other
+- **Fix** The sign-in window can be reopened after it was collapsed
+
+---
+
+## [2.1.5] — 2026-08-24
+
+- **Fix** The app reopens after installing an update silently
+- **Fix** Modal docking, Wordle and playlist card glitches
+
+---
+
+## [2.1.4] — 2026-08-24
+
+- **New** **Queue reshuffle** button
+- **New** Option to show full era names instead of abbreviations, also in the playlist track menu
+- **New** The lyrics panel collapses when a song has no lyrics; Shift+L toggles it
+- **New** Cancel all pending comp uploads at once
+- **New** Play Next in the playlist track menu
+- **Improve** Wayland, X11 and Windows compatibility
+- **Fix** Shuffle starting on the wrong track or position, and reshuffle stopping playback
+- **Fix** The lyrics panel flashing on track change
+- **Fix** Copy path / Copy link silently failing
+- **Fix** Docked modals now open centred and can't be dragged by the pill
+
+---
+
+## [2.1.3] — 2026-08-20
+
+- **New** **Docked modals**: dialogs dock into a pill at the top of the window, where they can stack, lock and resize, and reopen without losing what you typed
+- **Improve** Updates can install on the next startup, plus a manual "install update" option
+
+---
+
+## [2.1.2] — 2026-08-20
+
+- Developer-only change: dev builds use their own Windows app ID
+
+---
+
+## [2.1.1] — 2026-08-20
+
+- **New** Add files from your computer straight into a Local Files folder
+- **New** The Tracker's filters moved into a popover next to the search box
+- **New** Playlist folders sync to your account
+- **Improve** Multi-select (with Ctrl+A) works the same way in Files and the Tracker
+- **Improve** Menus always fit on screen, including their submenus
+- **Improve** News shows the last loaded posts instantly when you switch channels
+- **Improve** Song preferences, listening history and folders sync in one request instead of three
+
+---
+
+## [2.1.0] — 2026-08-20
+
+- **New** "Show Discord Status" setting: choose whether Discord shows the app's name, the artist, or the song title
+- **Improve** Admin approve/reject actions update the list immediately
+- **Improve** Ctrl+A in the Tracker selects every matching song, not just the ones loaded so far
+- **Fix** Opening a file from search results in Files shows the right gallery
+
+---
+
+## [2.0.10] — 2026-08-19
+
+- **New** Search box in Settings that jumps to the matching option
+- **New** Channel switcher on the staff profile
+- **Improve** Redesigned changes feed, grouped by day
+- **Fix** Admin and review lists no longer show another channel's data after an access error
+
+---
+
+## [2.0.9] — 2026-08-19
+
+- **New** A separate News role, so non-admins can post and edit their own news
+- **Fix** Switching channels or folders quickly in Files no longer shows the wrong listing
+
+---
+
+## [2.0.8] — 2026-08-19
+
+- **New** **Channels**: the Files tab can switch between file channels, with per-channel editor, contributor and manager roles, and a Channels admin tab
+- **New** Search in the queue and play history
+
+---
+
+## [2.0.7] — 2026-08-19
+
+- **New** **Era covers**: replace the API's shared placeholder cover for an entire era with one of your own
+- **New** **Volume boost** up to 200% in the equalizer, behind the same limiter so it doesn't clip
+
+---
+
+## [2.0.5] — 2026-08-18
+
+- **New** A "Listen on API" button on your Discord Rich Presence
+
+---
+
+## [2.0.2] — 2026-08-18
+
+- **New** Previews of the proposed file (image, audio, video) on comp proposals
+
+---
+
+## [2.0.1] — 2026-08-17
+
+- **Fix** Playlist grid quick view, equalizer and tier list fixes
+
+---
+
+## [2.0.0] — 2026-08-17
+
+- **New** **Tier List**: rank songs into tiers by dragging them into rows
+- **New** **A-B loop**: set two points in a track and loop between them
+- **New** Link several songs into one version group in one click from bulk edit
+- **New** The Windows installer becomes a maintenance page once installed: update, reinstall, uninstall, switch to any released version, or enter a beta code
+- **New** A small Windows web installer that downloads the rest during setup
+- **Improve** Security hardening: external links and file opening are restricted, navigation away from the app is blocked, permissions are denied by default, and the ffmpeg and yt-dlp downloads are checksum-verified
+
+---
+
+## [1.21.4] — 2026-08-17
+
+- **New** Clicking a playlist in the grid opens a quick view underneath it instead of a new page
+
+---
+
+## [1.21.3] — 2026-08-16
+
+- **Improve** Last.fm no longer scrobbles folder names as album titles for file-browser tracks
+- **Fix** A menu loop that could freeze the Playlists page
+
+---
+
+## [1.21.2] — 2026-08-15
+
+- **Improve** WRLD follows your skin's colours on the theme background, including light skins
+- **Fix** Server-graded Heardle rounds could pick an answer you couldn't type in
+- **Fix** Editing songs from a playlist loads their full details first
+
+---
+
+## [1.21.1] — 2026-08-14
+
+- **Fix** The editor and Song Info now use a song's real title instead of sometimes showing an alias
+- **Fix** A proposal can't be submitted twice by accident
+
+---
+
+## [1.21.0] — 2026-08-14
+
+- **New** Set a version title for several songs at once in bulk edit
+- **Change** Opening a playlist folder expands it in place instead of navigating away
+
+---
+
+## [1.20.17] — 2026-08-14
+
+- **New** Field search in the Tracker, such as `artists:"Juice WRLD"`, with a syntax help popover
+- **New** Autocomplete for album, credits, recording location and leak type in the song editor
+- **New** Ctrl+A selects every visible song in the Tracker
+
+---
+
+## [1.20.16] — 2026-08-13
+
+- **New** Drag a playlist onto a folder to move it in; folders show a mosaic of their playlists
+- **Change** Released songs keep their official artwork instead of rotating suggested covers
+
+---
+
+## [1.20.15] — 2026-08-13
+
+- **Fix** Heardle reveal cards show the song's cover again
+- **Fix** Compact playlist view numbering and sorting
+
+---
+
+## [1.20.14] — 2026-08-12
+
+- **New** Play button on grouped rows in compact view
+- **Improve** A playlist's sort is remembered when you switch tabs
+
+---
+
+## [1.20.13] — 2026-08-12
+
+- **New** On-screen keyboard for Wordle that tracks which letters are ruled out
+- **Improve** Daily and practice rounds of Heardle and Wordle are saved separately, and the Games tab reopens on the last game you played
+
+---
+
+## [1.20.12] — 2026-08-12
+
+- **New** **Wordle**, alongside Heardle in a new **Games** tab
+- **Improve** A pinned mini player stays on top of fullscreen games
+
+---
+
+## [1.20.11] — 2026-08-12
+
+- **New** Era and Category columns in playlists
+
+---
+
+## [1.20.10] — 2026-08-12
+
+- **Change** Global shortcuts are opt-in per action and no longer fire twice while the app is focused
+- **Improve** Shuffling a compact playlist picks by song, so songs with several versions aren't over-represented
+
+---
+
+## [1.20.9] — 2026-08-11
+
+- **New** The staff profile can open in its own window
+- **Improve** Retitling a song that shares a version group splits it into its own group instead of renaming every linked song
+- **Improve** Ad-libs in lyrics are shown dimmer
+- **Fix** The previous song's cover staying on screen after a track change
+- **Fix** A stale tab on the web player reloads instead of erroring after a redeploy
 
 ---
 

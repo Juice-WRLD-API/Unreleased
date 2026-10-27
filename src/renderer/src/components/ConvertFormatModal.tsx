@@ -176,10 +176,10 @@ export default function ConvertFormatModal({ floating = false }: { floating?: bo
       panelClassName="bg-surface border border-[var(--border)] rounded-t-2xl md:rounded-2xl shadow-2xl w-full md:max-w-md max-h-[92svh]"
       minWidth={380} minHeight={440}
     >
-      {({ onHandleMouseDown, locked, toggleLock }) => (
+      {({ onHandleMouseDown, locked, toggleLock, canLock }) => (
       <div className="bg-surface w-full h-full flex flex-col overflow-y-auto">
         <div
-          className={`flex items-center justify-between px-5 py-4 border-b border-[var(--border)] sticky top-0 bg-surface z-10 shrink-0 ${floating ? '' : 'cursor-grab active:cursor-grabbing'}`}
+          className={`flex items-center justify-between px-5 py-4 border-b border-[var(--border)] sticky top-0 bg-surface z-10 shrink-0`}
           style={floating ? ({ WebkitAppRegion: 'drag' } as CSSProperties) : undefined}
           onMouseDown={onHandleMouseDown}
         >
@@ -187,7 +187,7 @@ export default function ConvertFormatModal({ floating = false }: { floating?: bo
             <FileAudio2 size={15} className="text-accent" /> Convert format
           </h2>
           <div className="flex items-center gap-1" style={floating ? ({ WebkitAppRegion: 'no-drag' } as CSSProperties) : undefined}>
-            {!floating && <LockToggle locked={locked} onClick={toggleLock} />}
+            {!floating && canLock && <LockToggle locked={locked} onClick={toggleLock} />}
             <button
               onClick={close}
               disabled={busy}

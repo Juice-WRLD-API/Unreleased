@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self'; font-src 'self'">
+  <title>Unreleased</title>
+  <link rel="stylesheet" href="updating.css">
+  <script src="updating.js" defer></script>
+</head>
+<body>
+  <main>
+    <img class="logo" src="logo.png" alt="" draggable="false">
+    <div class="wordmark">unreleased</div>
+    <div class="status" role="status" aria-live="polite">
+      <p id="title">Checking for updates…</p>
+      <p id="detail"></p>
+    </div>
+    <div id="bar" class="bar indeterminate" aria-hidden="true">
+      <div id="fill" class="fill"></div>
+      <div class="sweep"></div>
+    </div>
+    <p id="version" class="version"></p>
+  </main>
+</body>
+</html>

@@ -1,3 +1,4 @@
+import { SwapIcon } from './PlayerMotion'
 import { useCallback, useEffect, useRef, useState, CSSProperties, ReactNode } from 'react'
 import {
   Play,
@@ -464,9 +465,11 @@ export default function MiniPlayer(): JSX.Element {
                 disabled={controlsDisabled}
                 className="w-8 h-8 rounded-full bg-white flex items-center justify-center hover:scale-105 active:scale-95 transition-transform disabled:opacity-30"
               >
-                {isPlaying
-                  ? <Pause size={14} fill="#000" className="text-black" />
-                  : <Play size={14} fill="#000" className="text-black ml-0.5" />}
+                <SwapIcon swapKey={isPlaying}>
+                  {isPlaying
+                    ? <Pause size={14} fill="#000" className="text-black" />
+                    : <Play size={14} fill="#000" className="text-black ml-0.5" />}
+                </SwapIcon>
               </button>
               <button
                 onClick={() => sendPlayerCommand('next')}

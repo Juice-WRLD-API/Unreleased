@@ -1,0 +1,116 @@
+// Shared data/logic for the equalizer popover (desktop) / sheet (mobile).
+// Both wrap this in their own JSX/controls - see EqualizerPanel.desktop.tsx
+// and .mobile.tsx, which differ only in presentation (native range inputs vs.
+// touch-drag faders, <select> vs. InlineSelect, etc.), not behavior.
+import { useEffect, useState } from 'react'
+import { useStorePick, type AppStore } from '../store/useStore'
+import { instrumentalSongTitle, instrumentalsKey, loadInstrumentals, type Instrumental } from '../lib/instrumentalsApi'
+
+// Short axis labels for the band sliders (32 … 16K).
+export function bandLabel(freq: number): string {
+  return freq >= 1000 ? `${freq / 1000}K` : String(freq)
+}
+
+const EQ_STORE_KEYS = [
+  'eqEnabled', 'setEqEnabled', 'eqGains', 'setEqBand', 'eqPreset', 'setEqPreset',
+  'eqBalance', 'setEqBalance', 'eqMono', 'setEqMono', 'eqBoost', 'setEqBoost',
+  'audioFx', 'setAudioFx', 'eqUserPresets', 'saveEqUserPreset', 'deleteEqUserPreset', 'resetSoundEffects',
+  'skipSilence', 'setSkipSilence', 'playbackSpeed', 'setPlaybackSpeed',
+  'pitchShift', 'setPitchShift', 'reverbEnabled', 'setReverbEnabled',
+  'reverbMix', 'setReverbMix', 'reverbDecay', 'setReverbDecay',
+  'communityEdits', 'playCommunityEdit',
+  'abLoopStart', 'abLoopEnd', 'setAbLoopPoint', 'clearAbLoop',
+  'preferOgVersion', 'setPreferOgVersion',
+  'sleepTimerEnd', 'setSleepTimer',
+  'audioOutput', 'setAudioOutput',
+  'radioFmActive', 'currentTrack',
+] as const
+
+export function useEqualizerPanelData(): Pick<AppStore, typeof EQ_STORE_KEYS[number]> & {
+  balanceLabel: string
+  sleepMinutes: number
+  setSleepMinutes: (v: number) => void
+  outputDevices: MediaDeviceInfo[]
+  /** The song the instrumentals below are for, or null with nothing playing. */
+  instrumentalsSong: string | null
+  /** Null while loading. */
+  instrumentals: Instrumental[] | null
+  playInstrumental: (inst: Instrumental) => void
+} {
+  const store = useStorePick(...EQ_STORE_KEYS)
+  const { eqBalance, sleepTimerEnd, currentTrack, radioFmActive, playCommunityEdit } = store
+
+  // Instrumentals for the playing song. While one of them is playing, its
+  // folder names the song, so the list stays put instead of searching for
+  // the beat's file name. Not during FM - there's no song to swap out.
+  const instrumentalsSong = !currentTrack || radioFmActive
+    ? null
+    : instrumentalSongTitle(currentTrack.path) ?? (currentTrack.apiTitle || currentTrack.title)
+  // Keyed on the title's base, so moving between a song and its instrumentals
+  // keeps the list as it is.
+  const key = instrumentalsSong ? instrumentalsKey(instrumentalsSong) : ''
+  const [instrumentals, setInstrumentals] = useState<{ key: string; list: Instrumental[] } | null>(null)
+  useEffect(() => {
+    if (!key || !instrumentalsSong) return
+    let live = true
+    loadInstrumentals(instrumentalsSong)
+      .catch(() => [] as Instrumental[])
+      .then((list) => { if (live) setInstrumentals({ key, list }) })
+    return () => { live = false }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- instrumentalsSong only matters through its key
+  }, [key])
+
+  // Plays under the song's own title (kept from the song, or from the
+  // instrumental already playing in its place), with the file name as the
+  // artist line. A raw Instrumentals file from the Files tab carries the file
+  // name as its title, so its folder stands in there.
+  const playInstrumental = (inst: Instrumental): void => {
+    const keepTitle = currentTrack
+      && (currentTrack.id.startsWith('community-edit-') || !instrumentalSongTitle(currentTrack.path))
+    playCommunityEdit({
+      id: inst.path,
+      name: keepTitle ? currentTrack.title : inst.folder,
+      path: inst.path,
+      duration: inst.duration,
+      artist: inst.name,
+      // Keeps the song's cover rather than falling back to a blank one.
+      imageUrl: currentTrack?.imageUrl,
+    })
+  }
+
+  const balancePct = Math.round(eqBalance * 100)
+  const balanceLabel = balancePct === 0 ? 'C' : balancePct < 0 ? `L ${-balancePct}` : `R ${balancePct}`
+
+  // Sleep timer - duration picked before starting (mirrors Settings), plus a
+  // periodic re-render while running so the countdown stays fresh.
+  const [sleepMinutes, setSleepMinutes] = useState(30)
+  const [, sleepTick] = useState(0)
+  useEffect(() => {
+    if (!sleepTimerEnd) return
+    const id = setInterval(() => sleepTick((t) => t + 1), 30000)
+    return () => clearInterval(id)
+  }, [sleepTimerEnd])
+
+  // Output devices - same enumeration the player bar's picker uses.
+  const [outputDevices, setOutputDevices] = useState<MediaDeviceInfo[]>([])
+  useEffect(() => {
+    // Absent in some iOS Safari contexts - see Player.tsx's equivalent effect.
+    if (!navigator.mediaDevices) return
+    const enumerate = async (): Promise<void> => {
+      try {
+        const devices = await navigator.mediaDevices.enumerateDevices()
+        setOutputDevices(devices.filter((d) => d.kind === 'audiooutput'))
+      } catch { /* ignore */ }
+    }
+    enumerate()
+    navigator.mediaDevices.addEventListener('devicechange', enumerate)
+    return () => navigator.mediaDevices.removeEventListener('devicechange', enumerate)
+  }, [])
+
+  return {
+    ...store, balanceLabel, sleepMinutes, setSleepMinutes, outputDevices,
+    instrumentalsSong,
+    instrumentals: key && instrumentals?.key === key ? instrumentals.list : null,
+    playInstrumental,
+  }
+}
