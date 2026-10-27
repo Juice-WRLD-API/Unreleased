@@ -365,17 +365,30 @@ export default function App(): JSX.Element {
             {activeView === 'wrld' && (
               <ErrorBoundary>
                 <Suspense fallback={null}>
-                  <div className="absolute inset-0 z-30">
-                    {/* No compensation needed for main's padding here: an
-                        absolutely positioned element's offsets resolve
-                        against its containing block's padding edge, which
-                        sits BEFORE (outside) that padding - so `inset-0`
-                        already reaches the true top of `main` regardless of
-                        whatever padding-top `main` itself has. (An earlier
-                        version of this added a negative top offset to
-                        "compensate," which was wrong and clipped the top of
-                        WRLD - including its header row - behind `main`'s
-                        own overflow-hidden.) */}
+                  <div
+                    // Mobile: pinned over the whole shell, not just `main`,
+                    // so it covers the mini player and BottomNav too - both
+                    // stay mounted underneath instead of being hidden while
+                    // WRLD is open. Hiding them made `main` grow to full
+                    // height for WRLD, so the curtain-drag revealed the page
+                    // with no nav bar, and the bar (and the page reflowing to
+                    // make room for it) only came back once collapse() ran
+                    // after the slide-out. Sized off --app-height, same as
+                    // .app-shell itself.
+                    //
+                    // Desktop: no compensation needed for main's padding
+                    // here: an absolutely positioned element's offsets
+                    // resolve against its containing block's padding edge,
+                    // which sits BEFORE (outside) that padding - so `inset-0`
+                    // already reaches the true top of `main` regardless of
+                    // whatever padding-top `main` itself has. (An earlier
+                    // version of this added a negative top offset to
+                    // "compensate," which was wrong and clipped the top of
+                    // WRLD - including its header row - behind `main`'s own
+                    // overflow-hidden.)
+                    className={isMobile ? 'fixed inset-x-0 top-0 z-30' : 'absolute inset-0 z-30'}
+                    style={isMobile ? { height: 'var(--app-height)' } : undefined}
+                  >
                     <WrldView />
                   </div>
                 </Suspense>

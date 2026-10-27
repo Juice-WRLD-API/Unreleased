@@ -32,8 +32,8 @@ import { trackIdToSongId, showStaffProfile, staffProfileView } from '../lib/user
 import { rememberRecentTrack } from '../lib/recentTracks'
 import { useCanEdit } from '../hooks/useChannelRoles'
 import { toFileUrl } from '../lib/fileTypes'
-import { IS_IOS } from '../lib/platform'
-import { FullTrack } from '../types'
+import { IS_IOS, IS_MOBILE } from '../lib/platform'
+import { FullTrack, Track } from '../types'
 import { lazyOverlay } from '../lib/lazyView'
 import EqualizerPanel from './EqualizerPanel'
 import { Sheet } from './mobile/Sheet'
@@ -142,6 +142,10 @@ const RECOVERY_SETTLE_MS = 10000
 // Ceiling on consecutively skipped unplayable tracks, so an API outage that
 // 404s everything stops the queue instead of racing through it.
 const MAX_CONSECUTIVE_SKIPS = 3
+// How far from the end of a song the next one starts loading into the spare
+// slot for the mobile handoff (see preloadHandoff). Long enough to buffer its
+// start on a slow connection, short enough that a skip wastes little data.
+const HANDOFF_PRELOAD_S = 30
 
 let _seek: ((t: number) => void) | null = null
 let _getAudioDuration: (() => number) | null = null
@@ -538,6 +542,100 @@ export default function Player(): JSX.Element {
     applyRate(na)
   }, [queueIndex, queue.length, isPlaying, repeat, crossfadeEnabled, radioMode, currentTrackReady])
 
+  // ── Mobile handoff ─────────────────────────────────────────────────────────
+  // Without crossfade, the next song normally starts by loading it into the
+  // slot that just finished - from the network, after the music has already
+  // stopped. A phone with its screen off doesn't wait for that download: once
+  // nothing is audible the OS throttles or suspends the page, the load never
+  // completes, and playback stops at the end of the song until the app is
+  // opened again. So on mobile the next song loads into the spare slot during
+  // the last stretch of this one, and playback hands over to it the moment
+  // this one ends, from data that's already there.
+  const handoffActive = (): boolean => IS_MOBILE && !useStore.getState().crossfadeEnabled
+
+  // The song nextTrack() will move to, when that's knowable ahead of time.
+  const upcomingTrack = (): Track | null => {
+    const { queue, queueIndex, repeat, shuffle, radioMode, radioNext } = useStore.getState()
+    if (radioMode) return queueIndex < queue.length - 1 ? queue[queueIndex + 1] : radioNext
+    if (repeat === 'one') return null  // replays in the same slot
+    if (queueIndex + 1 < queue.length) return queue[queueIndex + 1]
+    // Wrapping round: shuffle reshuffles first, so only plain repeat-all knows.
+    return repeat === 'all' && !shuffle ? queue[0] ?? null : null
+  }
+
+  const preloadHandoff = (): void => {
+    const next = upcomingTrack()
+    const spare = getNext()
+    if (!next || !spare || next.id === useStore.getState().currentTrack?.id) return
+    // Empty for a donor file not downloaded yet - that one starts as usual.
+    const url = resolvePlaybackUrl(next)
+    if (!url || spare.getAttribute('src') === url) return
+    // preload="none" would leave it waiting for play() like the active slot
+    // (see pendingPlays); this one has to load while it waits.
+    spare.preload = 'auto'
+    spare.src = url
+    applyRate(spare)
+  }
+
+  // Moves playback onto the spare slot if it already holds `next`. Called
+  // between nextTrack() and the render it causes, so the load effect finds
+  // skipNextLoad set and leaves the slots alone.
+  const handOffToSpare = (next: Track): void => {
+    const spare = getNext()
+    const finished = getActive()
+    const url = resolvePlaybackUrl(next)
+    if (!spare || !finished || !url || !handoffActive() || spare.getAttribute('src') !== url
+      || spare.error || spare.readyState < HTMLMediaElement.HAVE_METADATA) return
+    activeSlot.current = activeSlot.current === 'A' ? 'B' : 'A'
+    skipNextLoad.current = true
+    spare.volume = volumeRef.current
+    applyRate(spare)
+    playSlot(spare, (err) => {
+      const name = (err as DOMException | null)?.name
+      if (name !== 'NotAllowedError') { if (name !== 'AbortError') console.error(err); return }
+      // iOS refusing an element no tap has unlocked (see the unlock effect
+      // below). Start the song in the slot that just finished instead, the
+      // way it would have gone without a handoff.
+      if (getActive() !== spare || useStore.getState().currentTrack?.id !== next.id) return
+      console.warn('Handoff to the preloaded slot was refused - loading the next song the usual way')
+      activeSlot.current = activeSlot.current === 'A' ? 'B' : 'A'
+      spare.removeAttribute('src')
+      spare.load()
+      finished.src = url
+      finished.volume = volumeRef.current
+      applyRate(finished)
+      if (useStore.getState().isPlaying) playSlot(finished)
+    })
+  }
+
+  // iOS lets an <audio> element play without a tap only once a tap has
+  // played it - per element, not per page. Taps only ever play the active
+  // slot, so a handoff to the spare would be refused. Unlock the spare on the
+  // user's taps instead: play() and straight back to pause() while it's
+  // empty, which makes no sound. Only while nothing is playing, so it can't
+  // disturb a song - the first tap of a session (the one that starts the
+  // music, if nothing before it) is enough, and it lasts the session.
+  useEffect(() => {
+    if (!IS_IOS) return
+    const unlocked = new WeakSet<HTMLAudioElement>()
+    const unlock = (): void => {
+      const spare = getNext()
+      if (!spare || unlocked.has(spare) || spare.getAttribute('src') || getActive()?.paused === false) return
+      // An emptied slot (src="") carries an error that makes play() refuse
+      // before the tap counts; reloading with no source clears it.
+      if (spare.error) { spare.removeAttribute('src'); spare.load() }
+      const p = spare.play()
+      spare.pause()
+      p.then(() => unlocked.add(spare), (err: DOMException) => { if (err?.name !== 'NotAllowedError') unlocked.add(spare) })
+    }
+    document.addEventListener('touchend', unlock, true)
+    document.addEventListener('click', unlock, true)
+    return () => {
+      document.removeEventListener('touchend', unlock, true)
+      document.removeEventListener('click', unlock, true)
+    }
+  }, [])
+
   // Route both slots through the shared Web Audio effects chain (EQ, balance,
   // mono, silence detection). Elements keep their own volume/rate handling.
   //
@@ -653,8 +751,9 @@ export default function Player(): JSX.Element {
     fillSessionArtist(currentTrack.id, currentTrack.streamUrl)
 
     if (skipNextLoad.current) {
-      // Crossfade just swapped - audio already playing on active slot, and it
-      // was the preload target this same track just finished loading as.
+      // Crossfade or the mobile handoff just swapped - audio already playing
+      // on active slot, and it was the preload target this same track just
+      // finished loading as.
       skipNextLoad.current = false
       audio.volume = volumeRef.current
       // This slot was loaded by the crossfade preload, which never ran the
@@ -935,6 +1034,13 @@ export default function Player(): JSX.Element {
       recoveryLoading.current = { audio: a, generation }
       a.src = url
       a.load()
+      // The slots are preload="none", so load() on its own fetches nothing -
+      // not even the metadata onReady waits for (WebKit holds the load until
+      // play()). Every reload then sat idle until the watchdog's next tick
+      // happened to call play(), and a phone with its screen off may never
+      // run that tick, so the music just stayed stopped. Ask for playback
+      // now; onReady still restores the position once the metadata is in.
+      playSlot(a, () => {})
       // Fresh stall budget so the reload itself isn't immediately judged.
       lastProgressAt.current = Date.now()
     }, delay)
@@ -1453,6 +1559,10 @@ export default function Player(): JSX.Element {
       return
     }
 
+    // Mobile handoff: get the next song loading while this one still plays.
+    if (!abLooping && dur > 0 && dur - audio.currentTime <= HANDOFF_PRELOAD_S
+      && useStore.getState().isPlaying && handoffActive()) preloadHandoff()
+
     // Start crossfade when approaching end. A queued timeupdate event can
     // still fire right after the user pauses (it was already in flight),
     // so without this guard a crossfade - and the next song's playback -
@@ -1628,7 +1738,9 @@ export default function Player(): JSX.Element {
       const a = getActive()
       recoveryResumeAt.current = 0
       if (a) { try { a.currentTime = 0 } catch {}; a.volume = volumeRef.current; playSlot(a) }
+      return
     }
+    handOffToSpare(next)
   }
 
   const restartCurrentTrack = (shouldPlay = isPlaying): void => {
@@ -1999,11 +2111,10 @@ export default function Player(): JSX.Element {
         document.body
       ))}
 
-      {/* Bottom bar hidden on the WRLD page - it has its own full playback controls.
-          Audio elements above stay mounted regardless so playback is unaffected. */}
-      {activeView !== 'wrld' && (
-      <>
       {/* ── Mobile player ── */}
+      {/* Stays mounted on WRLD too: mobile WRLD is a sheet over the whole
+          shell (see App.tsx), so this bar just sits underneath it, already in
+          place when WRLD is dragged down - same as BottomNav. */}
       {/* No safe-area-inset-bottom padding here: the BottomNav sits directly
           below this bar and already reserves the home-indicator space for the
           whole stack. Adding it here too (it reads ~0 in Safari, where the URL
@@ -2128,6 +2239,9 @@ export default function Player(): JSX.Element {
       </div>
 
       {/* ── Desktop player ── */}
+      {/* Hidden on the WRLD page - it has its own full playback controls.
+          Audio elements above stay mounted regardless so playback is unaffected. */}
+      {activeView !== 'wrld' && (
       <div className={`app-player hidden md:flex bg-surface border-t border-[var(--border)] items-center shrink-0 relative ${playerCollapsed ? 'h-7' : 'h-[90px] px-4 gap-4'}`} onContextMenu={(e) => { e.preventDefault(); if (currentTrack) { setCtxMenuPos({ x: e.clientX, y: e.clientY }); setShowContextMenu(true) } }}>
         {playerCollapsed ? (
         <>
@@ -2438,7 +2552,6 @@ export default function Player(): JSX.Element {
           />
         )}
       </div>
-      </>
       )}
     </>
   )
