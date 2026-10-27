@@ -38,6 +38,7 @@ import { useHeardleGuessing } from '../hooks/useHeardleGuessing'
 import { useHeardleStats } from '../hooks/useHeardleStats'
 import { useHeardleLeaderboard } from '../hooks/useHeardleLeaderboard'
 import { useHeardleSettingsPanel } from '../hooks/useHeardleSettingsPanel'
+import { Segmented as IosSegmented } from './mobile/Segmented'
 
 // ─── Settings panel ───────────────────────────────────────────────────────────
 
@@ -61,27 +62,27 @@ function SettingsPanel({ settings, onChange, eras, mode, onClose }: {
         <div className="px-5 pt-2 flex justify-end">
           <button
             onClick={() => onChange({ ...DEFAULT_SETTINGS })}
-            className="flex items-center gap-1.5 h-9 px-3 rounded-full text-xs font-semibold text-text-muted active:bg-surface-overlay transition-colors"
+            className="flex items-center gap-1.5 h-9 px-1 text-subhead text-accent active:opacity-60 transition-opacity"
           >
-            <RotateCcw size={12} /> Reset to defaults
+            <RotateCcw size={14} /> Reset to defaults
           </button>
         </div>
       }
     >
       <div className="px-5 pb-2">
-        <p className="text-xs text-text-muted mb-3">
-          These apply to <span className="text-text-secondary font-semibold">Unlimited</span> only. Daily and
+        <p className="text-footnote text-text-secondary mb-3">
+          These apply to <span className="text-text-primary font-semibold">Unlimited</span> only. Daily and
           Personal always run the standard rules - their results are headed for a leaderboard, and a
           six-try round and a ten-try round aren't the same achievement.
         </p>
         {mode !== 'unlimited' && (
-          <p className="text-xs text-accent bg-accent/10 border border-accent/25 rounded-lg px-3 py-2 mb-4">
+          <p className="text-footnote text-accent bg-accent/10 rounded-xl px-3 py-2 mb-4">
             You're playing {mode === 'personal' ? 'Personal' : 'Daily'} right now - nothing here changes
             that round. Switch to Unlimited to play by these.
           </p>
         )}
 
-        <h3 className="text-[10px] font-bold uppercase tracking-widest text-text-muted mb-1">Difficulty</h3>
+        <h3 className="text-footnote font-semibold text-text-secondary mb-1">Difficulty</h3>
         <Field label="Tries" hint={`${MIN_TRIES}–${MAX_TRIES} guesses per song`}>
           <input
             type="number"
@@ -138,22 +139,22 @@ function SettingsPanel({ settings, onChange, eras, mode, onClose }: {
             onChange={(v) => set('eraHint', v === 'on')}
           />
         </Field>
-        <p className="text-xs text-text-muted py-3">
+        <p className="text-footnote text-text-muted py-3">
           Ladder: {ladder.map((s) => `${s}s`).join(' → ')}
         </p>
 
-        <h3 className="text-[10px] font-bold uppercase tracking-widest text-text-muted mt-4 mb-1">Song pool</h3>
-        <div className="py-3 border-b border-[var(--border)]">
-          <div className="text-sm text-text-primary font-medium mb-2">Catalogues</div>
+        <h3 className="text-footnote font-semibold text-text-secondary mt-5 mb-1">Song pool</h3>
+        <div className="py-3 border-b border-[var(--separator)]">
+          <div className="text-body text-text-primary mb-2">Catalogues</div>
           <div className="flex flex-wrap gap-1.5">
             {(Object.keys(POOL_LABELS) as PoolId[]).map((c) => (
               <button
                 key={c}
                 onClick={() => toggleCategory(c)}
-                className={`px-3 py-1 rounded-full text-xs font-semibold border transition-colors ${
+                className={`h-8 px-3 rounded-full text-footnote font-semibold transition-colors ${
                   settings.categories.includes(c)
-                    ? 'border-accent/50 bg-accent/15 text-accent'
-                    : 'border-[var(--border)] text-text-muted active:text-text-primary'
+                    ? 'bg-accent/15 text-accent'
+                    : 'bg-[var(--fill)] text-text-secondary active:text-text-primary'
                 }`}
               >
                 {POOL_LABELS[c]}
@@ -163,12 +164,12 @@ function SettingsPanel({ settings, onChange, eras, mode, onClose }: {
         </div>
         <div className="py-3">
           <div className="flex items-center gap-2 mb-2">
-            <div className="text-sm text-text-primary font-medium">Eras</div>
-            <span className="text-xs text-text-muted">
+            <div className="text-body text-text-primary">Eras</div>
+            <span className="text-footnote text-text-muted">
               {settings.eras.length === 0 ? 'All' : `${settings.eras.length} selected`}
             </span>
             {settings.eras.length > 0 && (
-              <button onClick={() => set('eras', [])} className="ml-auto text-xs text-accent active:opacity-70">
+              <button onClick={() => set('eras', [])} className="ml-auto text-subhead text-accent active:opacity-60">
                 Clear
               </button>
             )}
@@ -179,16 +180,16 @@ function SettingsPanel({ settings, onChange, eras, mode, onClose }: {
                 key={era}
                 onClick={() => toggleEra(era)}
                 title={eraFullName(era) ?? era}
-                className={`px-2.5 py-1 rounded-full text-xs font-semibold border transition-colors ${
+                className={`h-8 px-3 rounded-full text-footnote font-semibold transition-colors ${
                   settings.eras.includes(era)
-                    ? 'border-accent/50 bg-accent/15 text-accent'
-                    : 'border-[var(--border)] text-text-muted active:text-text-primary'
+                    ? 'bg-accent/15 text-accent'
+                    : 'bg-[var(--fill)] text-text-secondary active:text-text-primary'
                 }`}
               >
                 {era} <span className="opacity-60">{count}</span>
               </button>
             ))}
-            {eras.length === 0 && <span className="text-xs text-text-muted">Loading…</span>}
+            {eras.length === 0 && <span className="text-footnote text-text-muted">Loading…</span>}
           </div>
         </div>
       </div>
@@ -205,20 +206,14 @@ function StatsPanel({ initialMode, onClose }: { initialMode: DailyMode; onClose:
   return (
     <Sheet onClose={onClose} title="Statistics">
       <div className="px-5 pb-2">
-        <div className="flex rounded-lg border border-[var(--border)] overflow-hidden mb-4">
-          {(['daily', 'personal'] as DailyMode[]).map((m) => (
-            <button
-              key={m}
-              onClick={() => setTab(m)}
-              className={`flex-1 h-9 text-xs font-semibold capitalize transition-colors ${
-                tab === m ? 'bg-accent text-white' : 'text-text-muted active:text-text-primary'
-              }`}
-            >
-              {m}
-            </button>
-          ))}
+        <div className="mb-4">
+          <IosSegmented
+            value={tab}
+            options={[{ value: 'daily' as DailyMode, label: 'Daily' }, { value: 'personal' as DailyMode, label: 'Personal' }]}
+            onChange={setTab}
+          />
         </div>
-        <div className="grid grid-cols-4 gap-2 mb-5 text-center">
+        <div className="grid grid-cols-4 gap-2 mb-5 text-center rounded-[20px] bg-[var(--fill)] py-3">
           {[
             { label: 'Played', value: stats.played },
             { label: 'Win %', value: winRate },
@@ -226,8 +221,8 @@ function StatsPanel({ initialMode, onClose }: { initialMode: DailyMode; onClose:
             { label: 'Best', value: stats.maxStreak },
           ].map((s) => (
             <div key={s.label}>
-              <div className="text-text-primary text-xl font-bold">{s.value}</div>
-              <div className="text-[10px] uppercase tracking-wider text-text-muted">{s.label}</div>
+              <div className="text-title2 text-text-primary tabular-nums">{s.value}</div>
+              <div className="text-caption1 text-text-secondary">{s.label}</div>
             </div>
           ))}
         </div>
@@ -237,13 +232,13 @@ function StatsPanel({ initialMode, onClose }: { initialMode: DailyMode; onClose:
         <div className="space-y-1.5">
           {stats.distribution.slice(0, Math.max(DEFAULT_SETTINGS.tries, lastUsedBucket(stats))).map((n, i) => (
             <div key={i} className="flex items-center gap-2">
-              <span className="w-3 text-xs text-text-muted">{i + 1}</span>
-              <div className="flex-1 h-5 rounded bg-[var(--surface-overlay)] overflow-hidden">
+              <span className="w-3 text-footnote text-text-secondary tabular-nums">{i + 1}</span>
+              <div className="flex-1 h-6 rounded-md bg-[var(--fill)] overflow-hidden">
                 <div
-                  className="h-full bg-accent/70 flex items-center justify-end px-1.5"
+                  className="h-full rounded-md bg-accent flex items-center justify-end px-2"
                   style={{ width: `${Math.max(6, (n / max) * 100)}%` }}
                 >
-                  <span className="text-[10px] font-bold text-white">{n}</span>
+                  <span className="text-caption1 font-semibold text-white tabular-nums">{n}</span>
                 </div>
               </div>
             </div>
@@ -273,57 +268,45 @@ function LeaderboardPanel({ initialMode, signedIn, onClose }: {
     <div
       key={`${e.user_id}-${e.rank}`}
       onClick={(ev) => openUserCard({ id: e.user_id, username: e.display_name, display_name: e.display_name, avatar: e.discord_avatar ?? '', role: '' }, ev)}
-      className={`cursor-pointer flex items-center gap-3 px-3 py-2 rounded-lg ${
-        isMe ? 'bg-accent/15 border border-accent/30' : ''
+      className={`cursor-pointer flex items-center gap-3 px-3 py-2.5 rounded-xl transition-colors ${
+        isMe ? 'bg-accent/15' : 'active:bg-[var(--fill)]'
       }`}
     >
-      <span className="w-6 shrink-0 text-xs font-bold tabular-nums text-text-muted text-right">{e.rank}</span>
+      <span className="w-6 shrink-0 text-subhead font-semibold tabular-nums text-text-secondary text-right">{e.rank}</span>
       <Avatar src={e.discord_avatar ?? undefined} name={e.display_name} size={7} />
-      <span className="min-w-0 flex-1 text-sm text-text-primary truncate">{e.display_name}</span>
+      <span className="min-w-0 flex-1 text-body text-text-primary truncate">{e.display_name}</span>
       {board === 'streak' && e.max_streak != null && (
-        <span className="shrink-0 text-[10px] text-text-muted">best {e.max_streak}</span>
+        <span className="shrink-0 text-footnote text-text-muted">best {e.max_streak}</span>
       )}
-      <span className="shrink-0 text-sm font-bold tabular-nums text-text-primary">{score(e)}</span>
+      <span className="shrink-0 text-body font-semibold tabular-nums text-text-primary">{score(e)}</span>
     </div>
   )
 
   return (
     <Sheet onClose={onClose} title="Leaderboard">
       <div className="px-5 pb-2">
-        <div className="flex gap-2 mb-4">
-          <div className="flex rounded-lg border border-[var(--border)] overflow-hidden">
-            {([['today', 'Today'], ['streak', 'Streaks'], ['versus', '1v1']] as [LeaderboardBoard, string][]).map(([id, label]) => (
-              <button
-                key={id}
-                onClick={() => setBoard(id)}
-                className={`h-9 px-3 text-xs font-semibold transition-colors ${
-                  board === id ? 'bg-accent text-white' : 'text-text-muted active:text-text-primary'
-                }`}
-              >
-                {label}
-              </button>
-            ))}
-          </div>
-          <div className={`flex rounded-lg border border-[var(--border)] overflow-hidden ml-auto ${board === 'versus' ? 'opacity-40 pointer-events-none' : ''}`}>
-            {(['daily', 'personal'] as DailyMode[]).map((m) => (
-              <button
-                key={m}
-                onClick={() => setMode(m)}
-                className={`h-9 px-3 text-xs font-semibold capitalize transition-colors ${
-                  mode === m ? 'bg-accent text-white' : 'text-text-muted active:text-text-primary'
-                }`}
-              >
-                {m}
-              </button>
-            ))}
+        {/* Board over mode, each a full-width segmented control - side by
+            side they don't fit a phone's sheet. */}
+        <div className="space-y-2 mb-4">
+          <IosSegmented
+            value={board}
+            options={([['today', 'Today'], ['streak', 'Streaks'], ['versus', '1v1']] as [LeaderboardBoard, string][]).map(([value, label]) => ({ value, label }))}
+            onChange={setBoard}
+          />
+          <div className={board === 'versus' ? 'opacity-40 pointer-events-none' : ''}>
+            <IosSegmented
+              value={mode}
+              options={[{ value: 'daily' as DailyMode, label: 'Daily' }, { value: 'personal' as DailyMode, label: 'Personal' }]}
+              onChange={setMode}
+            />
           </div>
         </div>
 
         {needsSignIn ? (
           <div className="py-8 text-center">
-            <p className="text-sm text-text-muted">Sign in to appear on the leaderboard.</p>
+            <p className="text-subhead text-text-secondary">Sign in to appear on the leaderboard.</p>
             {pending > 0 && (
-              <p className="text-xs text-text-muted mt-2 leading-relaxed">
+              <p className="text-footnote text-text-muted mt-2">
                 {pending} finished {pending === 1 ? 'round is' : 'rounds are'} saved on this device and
                 will be sent when you do, so you won&apos;t start from zero.
               </p>
@@ -332,9 +315,9 @@ function LeaderboardPanel({ initialMode, signedIn, onClose }: {
         ) : loading ? (
           <div className="py-8 flex justify-center"><Loader2 size={20} className="animate-spin text-text-muted" /></div>
         ) : error ? (
-          <p className="py-8 text-center text-sm text-red-400">{error}</p>
+          <p className="py-8 text-center text-subhead text-red-500">{error}</p>
         ) : entries.length === 0 ? (
-          <p className="py-8 text-center text-sm text-text-muted">{emptyMessage}</p>
+          <p className="py-8 text-center text-subhead text-text-secondary">{emptyMessage}</p>
         ) : (
           <>
             <div className="space-y-0.5">
@@ -342,7 +325,7 @@ function LeaderboardPanel({ initialMode, signedIn, onClose }: {
             </div>
             {/* Your own row again when you placed outside the page. */}
             {me && !entries.some((e) => e.user_id === me.user_id) && (
-              <div className="mt-2 pt-2 border-t border-[var(--border)]">{row(me, true)}</div>
+              <div className="mt-2 pt-2 border-t border-[var(--separator)]">{row(me, true)}</div>
             )}
           </>
         )}
@@ -691,35 +674,35 @@ export default function HeardleView(): JSX.Element {
           // hardcoded destination that no longer makes sense here.
           onClick={() => setActiveView(previousView ?? 'home')}
           aria-label="Back"
-          className="w-11 h-11 flex items-center justify-center rounded-full text-text-primary active:bg-surface-overlay transition-colors"
+          className="glass-button w-11 h-11 flex items-center justify-center rounded-full text-text-primary active:opacity-60 transition-opacity"
         >
-          <ChevronLeft size={20} />
+          <ChevronLeft size={24} strokeWidth={2.25} className="-ml-0.5" />
         </button>
       </div>
       <div
-        className="absolute right-2 z-20 flex items-center gap-1"
+        className="absolute right-2 z-20 flex items-center gap-2"
         style={{ top: ownsTopInset ? 'calc(var(--top-inset) + 0.5rem)' : '0.5rem' }}
       >
         <button
           onClick={() => setShowSettings(true)}
           aria-label="Game settings"
-          className="w-11 h-11 flex items-center justify-center rounded-full text-text-muted active:bg-surface-overlay transition-colors"
+          className="glass-button w-11 h-11 flex items-center justify-center rounded-full text-text-primary active:opacity-60 transition-opacity"
         >
-          <SlidersHorizontal size={17} />
+          <SlidersHorizontal size={19} />
         </button>
         <button
           onClick={() => setShowLeaderboard(true)}
           aria-label="Leaderboard"
-          className="w-11 h-11 flex items-center justify-center rounded-full text-text-muted active:bg-surface-overlay transition-colors"
+          className="glass-button w-11 h-11 flex items-center justify-center rounded-full text-text-primary active:opacity-60 transition-opacity"
         >
-          <Trophy size={17} />
+          <Trophy size={19} />
         </button>
         <button
           onClick={() => setShowStats(true)}
           aria-label="Statistics"
-          className="w-11 h-11 flex items-center justify-center rounded-full text-text-muted active:bg-surface-overlay transition-colors"
+          className="glass-button w-11 h-11 flex items-center justify-center rounded-full text-text-primary active:opacity-60 transition-opacity"
         >
-          <BarChart3 size={17} />
+          <BarChart3 size={19} />
         </button>
       </div>
 
@@ -736,37 +719,27 @@ export default function HeardleView(): JSX.Element {
 
           {/* Hero */}
           <div className="text-center mb-5">
-            <h1 className="text-text-primary text-3xl font-black tracking-tight inline-flex items-start gap-1">
+            <h1 className="text-title1 text-text-primary inline-flex items-start gap-1">
               Juice WRLD Heardle
-              <span className="text-accent text-sm font-mono font-bold mt-1">999</span>
+              <span className="text-accent text-footnote font-bold mt-0.5">999</span>
             </h1>
-            <p className="mt-2 text-[11px] font-mono lowercase tracking-[0.18em] text-text-muted">
-              name the song from its opening seconds
+            <p className="mt-1 text-subhead text-text-secondary">
+              Name the song from its opening seconds
             </p>
           </div>
 
-          {/* Mode tabs - a scrollable pill row rather than underline tabs, same
-              idiom as the other rewritten tabs' chip switchers. */}
-          <div className="flex items-center justify-center gap-2 mb-2 overflow-x-auto scrollbar-none">
-            {MODES.map((m) => (
-              <button
-                key={m.id}
-                onClick={() => setMode(m.id)}
-                title={m.hint}
-                className={`shrink-0 h-9 px-3.5 rounded-full text-xs font-bold uppercase tracking-[0.14em] transition-colors ${
-                  mode === m.id
-                    ? 'bg-accent text-white'
-                    : 'bg-[var(--surface-overlay)] text-text-muted active:text-text-secondary'
-                }`}
-              >
-                {m.label}
-              </button>
-            ))}
+          {/* Mode - an iOS segmented control; all four fit a phone's width. */}
+          <div className="mb-2">
+            <IosSegmented
+              value={mode}
+              options={MODES.map((m) => ({ value: m.id, label: m.label }))}
+              onChange={setMode}
+            />
           </div>
 
           {/* The three modes are easy to confuse at a glance, so spell out what
               you're playing rather than leaving it to the tab labels. */}
-          <p className="text-center text-[10px] font-mono tracking-wider text-text-muted mb-3">
+          <p className="text-center text-footnote text-text-muted mb-3">
             {mode === 'daily' && `#${puzzleNumber(day)} · `}
             {MODES.find((m) => m.id === mode)?.hint.toLowerCase()}
             {mode !== 'versus' && ` · ${ladder.length} tries · up to ${formatSeconds(fullWindow)}`}
@@ -784,12 +757,12 @@ export default function HeardleView(): JSX.Element {
                 onClick={newRound}
                 disabled={playablePool.length === 0}
                 title="Skip this song and draw another"
-                className="inline-flex items-center gap-2 h-9 px-4 rounded-full bg-[var(--surface-overlay)] text-text-muted active:text-text-primary text-[10px] font-bold uppercase tracking-[0.18em] transition-colors disabled:opacity-40"
+                className="inline-flex items-center gap-1.5 h-9 px-4 rounded-full bg-[var(--fill)] text-accent text-subhead font-semibold active:bg-[var(--fill-strong)] transition-colors disabled:opacity-40"
               >
-                <RefreshCw size={12} /> Reroll
+                <RefreshCw size={14} /> Reroll
               </button>
             ) : (
-              <div className="h-[30px]" aria-hidden />
+              <div className="h-9" aria-hidden />
             )}
           </div>
 
@@ -798,18 +771,18 @@ export default function HeardleView(): JSX.Element {
           ) : poolLoading ? (
             <div className="flex flex-col items-center gap-3 py-24 text-text-muted">
               <Loader2 size={20} className="animate-spin" />
-              <p className="text-sm">
+              <p className="text-subhead">
                 Loading the {categories.map((c) => POOL_LABELS[c].toLowerCase()).join(' + ')} catalogue…
               </p>
             </div>
           ) : poolError ? (
             <div className="flex flex-col items-center gap-3 py-24 text-center">
               <AlertCircle size={22} className="text-red-400" />
-              <p className="text-sm text-text-secondary">Couldn't load the catalogue - {poolError}</p>
+              <p className="text-subhead text-text-secondary">Couldn't load the catalogue - {poolError}</p>
             </div>
           ) : !answer && !(useServerRound && serverClipUrl) ? (
             <div className="flex flex-col items-center gap-3 py-24 text-center">
-              <p className="text-sm text-text-muted">
+              <p className="text-subhead text-text-secondary">
                 {rules.eras.length > 0
                   ? 'No songs match the eras you picked.'
                   : 'No playable songs in this pool.'}
@@ -817,7 +790,7 @@ export default function HeardleView(): JSX.Element {
               {rules.eras.length > 0 && (
                 <button
                   onClick={() => setSettings((s) => ({ ...s, eras: [] }))}
-                  className="text-xs font-semibold text-accent active:opacity-70"
+                  className="text-subhead font-semibold text-accent active:opacity-60"
                 >
                   Clear era filter
                 </button>
@@ -826,7 +799,7 @@ export default function HeardleView(): JSX.Element {
           ) : (
             <>
               {/* Play card */}
-              <div className="rounded-2xl border border-[var(--border)] bg-[var(--surface-raised)]/60 p-4 space-y-4">
+              <div className="rounded-[20px] bg-[var(--grouped)] p-4 space-y-4">
                 <SlotRow ladder={ladder} guesses={guesses} status={status} showEraHint={rules.eraHint} />
 
                 <Waveform
@@ -842,7 +815,7 @@ export default function HeardleView(): JSX.Element {
                   <button
                     onClick={() => (playing ? stopPlayback() : startPlayback())}
                     title={playing ? 'Stop' : `Play ${unlocked}s${startAt > 0 ? ' from the clip start' : ' from the beginning'}`}
-                    className="w-full h-12 rounded-xl border border-accent/40 bg-accent/10 active:bg-accent/20 text-text-primary text-sm font-bold uppercase tracking-[0.2em] flex items-center justify-center gap-2 transition-colors"
+                    className="w-full h-12 rounded-full bg-accent text-white text-headline flex items-center justify-center gap-2 active:opacity-80 transition-opacity"
                   >
                     {preparing
                       ? <><Loader2 size={16} className="animate-spin" /> Loading</>
@@ -852,7 +825,7 @@ export default function HeardleView(): JSX.Element {
                   </button>
                   {/* Thin readout under the button - the scope shows the same
                       thing, this just gives it an exact edge to read against. */}
-                  <div className="mt-2 h-1 w-full rounded-full bg-[var(--surface-overlay)] overflow-hidden">
+                  <div className="mt-2 h-1 w-full rounded-full bg-[var(--fill)] overflow-hidden">
                     <div
                       className="h-full bg-accent/30"
                       style={{ width: `${(unlocked / fullWindow) * 100}%` }}
@@ -881,7 +854,7 @@ export default function HeardleView(): JSX.Element {
                 </div>
 
                 {audioError && (
-                  <p className="text-center text-xs text-red-400">
+                  <p className="text-center text-footnote text-red-500">
                     Couldn't stream this one. {mode === 'unlimited' ? 'Try a new song.' : 'Check your connection.'}
                   </p>
                 )}
@@ -890,17 +863,17 @@ export default function HeardleView(): JSX.Element {
                   <>
                     {/* Guess input */}
                     <div className="relative">
-                      <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-text-muted pointer-events-none" />
+                      <Search size={17} className="absolute left-3 top-1/2 -translate-y-1/2 text-text-muted pointer-events-none" />
                       <input
                         value={query}
                         onChange={(e) => { setQuery(e.target.value); setDropdownOpen(true) }}
                         onFocus={() => setDropdownOpen(true)}
                         onKeyDown={handleKeyDown}
-                        placeholder="guess the track…"
-                        className="w-full h-12 pl-9 pr-3 rounded-xl bg-[var(--surface-overlay)]/50 border border-[var(--border)] text-sm text-text-primary placeholder:text-text-muted focus:outline-none focus:border-accent/50"
+                        placeholder="Guess the track…"
+                        className="w-full h-12 pl-9 pr-3 rounded-full bg-[var(--fill)] border border-transparent text-body text-text-primary placeholder:text-text-muted focus:outline-none focus:border-accent/50"
                       />
                       {dropdownOpen && suggestions.length > 0 && (
-                        <div className="absolute bottom-full mb-1 left-0 right-0 max-h-64 overflow-y-auto rounded-xl border border-[var(--border)] bg-[var(--surface-raised)] shadow-xl z-20">
+                        <div className="absolute bottom-full mb-2 left-0 right-0 max-h-64 overflow-y-auto rounded-2xl glass-thick z-20">
                           {suggestions.map((s, i) => {
                             const alias = matchedAlias(s, query)
                             return (
@@ -908,19 +881,19 @@ export default function HeardleView(): JSX.Element {
                                 key={s.id}
                                 onMouseEnter={() => setHighlighted(i)}
                                 onClick={() => submitGuess(s)}
-                                className={`w-full text-left px-3 py-3 flex items-center gap-2 transition-colors ${
-                                  i === highlighted ? 'bg-accent/15' : 'active:bg-surface-overlay'
+                                className={`w-full text-left px-4 py-3 flex items-center gap-2 transition-colors ${
+                                  i === highlighted ? 'bg-accent/15' : 'active:bg-[var(--fill)]'
                                 }`}
                               >
                                 <span className="min-w-0">
-                                  <span className="block text-sm text-text-primary truncate">{s.name}</span>
+                                  <span className="block text-body text-text-primary truncate">{s.name}</span>
                                   {/* Why this row is here when the name doesn't
                                       match what was typed. */}
                                   {alias && (
-                                    <span className="block text-[10px] text-text-muted truncate">aka {alias}</span>
+                                    <span className="block text-caption1 text-text-muted truncate">aka {alias}</span>
                                   )}
                                 </span>
-                                {s.era && <span className="ml-auto shrink-0 text-[10px] text-text-muted uppercase tracking-wider">{s.era}</span>}
+                                {s.era && <span className="ml-auto shrink-0 text-footnote text-text-muted">{s.era}</span>}
                               </button>
                             )
                           })}
@@ -931,7 +904,7 @@ export default function HeardleView(): JSX.Element {
                     <div className="grid grid-cols-2 gap-2 sm:gap-3">
                       <button
                         onClick={skip}
-                        className="h-12 rounded-xl border border-[var(--border)] text-text-secondary active:text-text-primary text-xs font-bold uppercase tracking-[0.18em] transition-colors"
+                        className="h-12 rounded-full bg-[var(--fill)] text-text-primary text-headline active:bg-[var(--fill-strong)] transition-colors"
                       >
                         Skip
                         {guesses.length < ladder.length - 1 &&
@@ -940,7 +913,7 @@ export default function HeardleView(): JSX.Element {
                       <button
                         onClick={() => { const s = suggestions[highlighted]; if (s) submitGuess(s) }}
                         disabled={suggestions.length === 0}
-                        className="h-12 rounded-xl border border-accent/40 bg-accent/10 active:bg-accent/20 text-text-primary text-xs font-bold uppercase tracking-[0.18em] transition-colors disabled:opacity-40"
+                        className="h-12 rounded-full bg-[var(--fill)] text-accent text-headline active:bg-[var(--fill-strong)] transition-colors disabled:opacity-40"
                       >
                         Submit
                       </button>
@@ -966,23 +939,23 @@ export default function HeardleView(): JSX.Element {
               )}
 
               {finished && answer && (
-                <div className="mt-4 rounded-2xl border border-[var(--border)] bg-[var(--surface-raised)] p-4">
+                <div className="mt-4 rounded-[20px] bg-[var(--grouped)] p-4">
                   <div className="flex gap-4">
                     {/* Art stays hidden until the round is over - era covers are
                         shared, so showing one early would narrow the field. */}
-                    <div className="w-20 h-20 sm:w-24 sm:h-24 shrink-0 rounded-xl border border-[var(--border)] bg-[var(--surface-overlay)] overflow-hidden flex items-center justify-center">
+                    <div className="w-20 h-20 sm:w-24 sm:h-24 shrink-0 rounded-xl bg-[var(--fill)] overflow-hidden flex items-center justify-center">
                       {revealCoverUrl(answer)
                         ? <img src={smallCoverUrl(revealCoverUrl(answer))} alt="" className="w-full h-full object-cover" />
                         : <Music2 size={28} className="text-text-muted" />}
                     </div>
                     <div className="min-w-0 flex-1">
-                      <p className={`text-[10px] font-bold uppercase tracking-[0.2em] mb-1 ${status === 'won' ? 'text-accent' : 'text-red-400'}`}>
+                      <p className={`text-footnote font-semibold mb-0.5 ${status === 'won' ? 'text-accent' : 'text-red-500'}`}>
                         {status === 'won'
                           ? `Got it in ${guesses.length} ${guesses.length === 1 ? 'try' : 'tries'}`
                           : 'Out of guesses'}
                       </p>
-                      <h2 className="text-text-primary text-lg font-bold leading-snug">{answer.name}</h2>
-                      <p className="text-sm text-text-secondary mt-0.5">
+                      <h2 className="text-title3 text-text-primary">{answer.name}</h2>
+                      <p className="text-subhead text-text-secondary mt-0.5">
                         {[answer.era, CATEGORY_LABELS[answer.category] ?? answer.category, answer.length,
                           versions.get(answer.id)?.version]
                           .filter(Boolean).join(' · ')}
@@ -990,7 +963,7 @@ export default function HeardleView(): JSX.Element {
                       {/* Won on a different row - say why it counted, or it looks
                           like the game accepted a song you didn't guess. */}
                       {status === 'won' && guesses[guesses.length - 1]?.viaVersion && (
-                        <p className="text-xs text-text-muted mt-1.5">
+                        <p className="text-footnote text-text-muted mt-1.5">
                           Counted “{guesses[guesses.length - 1].label}” - same song, different version.
                         </p>
                       )}
@@ -999,7 +972,7 @@ export default function HeardleView(): JSX.Element {
                   <div className="flex flex-wrap items-center gap-2 mt-4">
                     <button
                       onClick={playFullSong}
-                      className="inline-flex items-center gap-1.5 h-10 px-3.5 rounded-lg text-sm font-semibold bg-accent text-white active:opacity-90 transition-opacity"
+                      className="inline-flex items-center gap-1.5 h-11 px-4 rounded-full text-subhead font-semibold bg-accent text-white active:opacity-80 transition-opacity"
                     >
                       <Volume2 size={15} /> Play full song
                     </button>
@@ -1007,14 +980,14 @@ export default function HeardleView(): JSX.Element {
                       <button
                         onClick={share}
                         title="Share"
-                        className="inline-flex items-center gap-1.5 h-10 px-3.5 rounded-lg text-sm font-semibold bg-[var(--surface-overlay)] text-text-secondary active:text-text-primary transition-colors"
+                        className="inline-flex items-center gap-1.5 h-11 px-4 rounded-full text-subhead font-semibold bg-[var(--fill)] text-text-primary active:bg-[var(--fill-strong)] transition-colors"
                       >
                         <Share2 size={15} /> {copied ? 'Copied!' : 'Share'}
                       </button>
                     ) : (
                       <button
                         onClick={newRound}
-                        className="inline-flex items-center gap-1.5 h-10 px-3.5 rounded-lg text-sm font-semibold bg-[var(--surface-overlay)] text-text-secondary active:text-text-primary transition-colors"
+                        className="inline-flex items-center gap-1.5 h-11 px-4 rounded-full text-subhead font-semibold bg-[var(--fill)] text-text-primary active:bg-[var(--fill-strong)] transition-colors"
                       >
                         <RefreshCw size={15} /> Next song
                       </button>
@@ -1022,13 +995,13 @@ export default function HeardleView(): JSX.Element {
                     {isDaily && (
                       <button
                         onClick={() => setShowLeaderboard(true)}
-                        className="inline-flex items-center gap-1.5 h-10 px-3.5 rounded-lg text-sm font-semibold bg-[var(--surface-overlay)] text-text-secondary active:text-text-primary transition-colors"
+                        className="inline-flex items-center gap-1.5 h-11 px-4 rounded-full text-subhead font-semibold bg-[var(--fill)] text-text-primary active:bg-[var(--fill-strong)] transition-colors"
                       >
                         <Trophy size={15} /> Leaderboard
                       </button>
                     )}
                     {isDaily && (
-                      <span className="ml-auto text-xs text-text-muted tabular-nums">
+                      <span className="ml-auto text-footnote text-text-muted tabular-nums">
                         Next {mode === 'personal' ? 'song' : 'puzzle'} in {formatCountdown(countdown)}
                       </span>
                     )}
@@ -1037,7 +1010,7 @@ export default function HeardleView(): JSX.Element {
               )}
 
               {!finished && (
-                <p className="text-center text-[10px] font-mono tracking-wider text-text-muted mt-4">
+                <p className="text-center text-footnote text-text-muted mt-4">
                   {ladder.length - guesses.length} {ladder.length - guesses.length === 1 ? 'guess' : 'guesses'} left ·
                   {' '}each miss unlocks more of the {startAt > 0 ? 'clip' : 'intro'}
                 </p>

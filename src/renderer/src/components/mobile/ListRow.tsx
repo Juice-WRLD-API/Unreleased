@@ -20,11 +20,14 @@ interface ListRowProps extends Omit<HTMLAttributes<HTMLDivElement>, 'title'> {
   dimArt?: boolean
   /** Laid over the artwork (a select-mode check). */
   artOverlay?: ReactNode
+  /** A chart position between the artwork and the title, as Apple Music's
+   *  charts number their rows. */
+  rank?: number
   trailing?: ReactNode
 }
 
 export function ListRow({
-  art, title, subtitle, current, selected, dimArt, artOverlay, trailing, className = '', ...rest
+  art, title, subtitle, current, selected, dimArt, artOverlay, rank, trailing, className = '', ...rest
 }: ListRowProps): JSX.Element {
   return (
     <div
@@ -37,6 +40,7 @@ export function ListRow({
         {art}
         {artOverlay}
       </div>
+      {rank != null && <span className="shrink-0 min-w-[1.25rem] text-center text-headline text-text-primary tabular-nums">{rank}</span>}
       <div className="flex-1 min-w-0">
         <p className={`text-body truncate ${current ? 'text-accent font-semibold' : 'text-text-primary'}`}>{title}</p>
         {subtitle && <p className="text-subhead text-text-secondary truncate">{subtitle}</p>}

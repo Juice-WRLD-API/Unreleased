@@ -7,7 +7,7 @@
 import { useCallback, useEffect, useRef, useState, useId } from 'react'
 import type { ReactNode } from 'react'
 import {
-  ChevronLeft, ChevronUp, ChevronDown, Settings2, Music2, Plus, RotateCcw, Search, X, Disc3, Library,
+  ChevronLeft, ChevronUp, ChevronDown, Settings2, Music2, Plus, RotateCcw, Disc3, Library,
 } from 'lucide-react'
 import { useStorePick } from '../store/useStore'
 import type { HeardleSong } from '../lib/heardle'
@@ -19,6 +19,7 @@ import { GameSwitcher, GameBackdrop } from './gameShell'
 import { useTierlistData, MAX_TIERS } from '../hooks/useTierlistData'
 import { ListsPanelBody, FiltersPanelBody, TierlistViewer } from './TierlistPanels'
 import { SearchHelpButton } from './SearchHelpPopover'
+import { SearchField } from './mobile/SearchField'
 
 // Drop-zone id used for the "Unranked" pool, since tier ids are already
 // unique strings and null can't be stuffed into a DOM dataset attribute.
@@ -55,19 +56,19 @@ function SongChip({ song, selected, dragging, dropSide, onClick, onPointerDown }
         />
       )}
       <div
-        className={`relative w-16 h-16 rounded-lg overflow-hidden border-2 transition-all ${
-          selected ? 'border-accent ring-2 ring-accent/50 scale-95' : 'border-[var(--border)]'
+        className={`relative w-16 h-16 rounded-[10px] overflow-hidden border-2 transition-[transform,border-color] ${
+          selected ? 'border-accent ring-2 ring-accent/50 scale-95' : 'border-transparent'
         }`}
       >
         {song.imageUrl ? (
           <img src={smallCoverUrl(song.imageUrl)} alt="" draggable={false} className="w-full h-full object-cover" />
         ) : (
-          <div className="w-full h-full bg-[var(--surface-overlay)] flex items-center justify-center">
+          <div className="w-full h-full bg-[var(--fill)] flex items-center justify-center">
             <Music2 size={18} className="text-text-muted" />
           </div>
         )}
       </div>
-      <div className="mt-1 text-[9px] leading-tight text-text-muted text-center line-clamp-2 break-words">
+      <div className="mt-1 text-caption2 text-text-secondary text-center line-clamp-2 break-words">
         {song.name}
       </div>
     </div>
@@ -87,11 +88,11 @@ function TierRow({ tier, isFirst, isLast, selectedSongId, isDropTarget, onClickR
   children: ReactNode
 }): JSX.Element {
   return (
-    <div className="flex rounded-xl overflow-hidden border border-[var(--border)]">
+    <div className="flex rounded-[14px] overflow-hidden bg-[var(--grouped)]">
       <button
         onClick={onEdit}
         title="Edit tier"
-        className="w-16 shrink-0 flex items-center justify-center text-center px-1.5 py-3 font-black text-sm leading-tight active:opacity-80 transition-opacity"
+        className="w-16 shrink-0 flex items-center justify-center text-center px-1.5 py-3 text-headline leading-tight active:opacity-80 transition-opacity"
         style={{ background: tier.color, color: 'rgba(0,0,0,0.75)' }}
       >
         {tier.label}
@@ -99,13 +100,13 @@ function TierRow({ tier, isFirst, isLast, selectedSongId, isDropTarget, onClickR
       <div
         onClick={onClickRow}
         data-drop-zone={tier.id}
-        className={`flex-1 min-h-[6.5rem] bg-[var(--surface-overlay)]/30 p-1.5 flex flex-wrap gap-1.5 content-start transition-colors ${
+        className={`flex-1 min-h-[6.5rem] p-1.5 flex flex-wrap gap-1.5 content-start transition-colors ${
           selectedSongId !== null ? 'cursor-copy' : ''
         } ${isDropTarget ? 'bg-accent/20 outline outline-2 outline-accent/60 -outline-offset-2' : ''}`}
       >
         {children}
       </div>
-      <div className="w-9 shrink-0 flex flex-col border-l border-[var(--border)]">
+      <div className="w-9 shrink-0 flex flex-col border-l border-[var(--separator)]">
         <button
           onClick={onMoveUp}
           disabled={isFirst}
@@ -118,7 +119,7 @@ function TierRow({ tier, isFirst, isLast, selectedSongId, isDropTarget, onClickR
           onClick={onMoveDown}
           disabled={isLast}
           title="Move tier down"
-          className="flex-1 flex items-center justify-center text-text-muted active:text-text-primary disabled:opacity-20 transition-colors border-t border-[var(--border)]"
+          className="flex-1 flex items-center justify-center text-text-muted active:text-text-primary disabled:opacity-20 transition-colors border-t border-[var(--separator)]"
         >
           <ChevronDown size={14} />
         </button>
@@ -138,15 +139,15 @@ function TierEditPopover({ tier, canDelete, onChange, onDelete, onClose }: {
   return (
     <Sheet onClose={onClose} title="Edit tier">
       <div className="px-5 pb-2">
-        <label className="block"><span className="text-xs text-text-muted mb-1 block">Label</span>
+        <label className="block"><span className="text-footnote text-text-secondary mb-1.5 px-1 block">Label</span>
         <input
           value={tier.label}
           maxLength={20}
           onChange={(e) => onChange({ ...tier, label: e.target.value })}
-          className="w-full mb-4 px-3 py-2.5 rounded-xl bg-[var(--surface-overlay)] border border-[var(--border)] text-sm text-text-primary focus:outline-none focus:border-accent/50"
+          className="w-full mb-5 px-4 h-11 rounded-xl bg-[var(--fill)] border border-transparent text-body text-text-primary focus:outline-none focus:border-accent/50"
         />
         </label>
-        <span className="text-xs text-text-muted mb-1 block" id={colorLabelId}>Color</span>
+        <span className="text-footnote text-text-secondary mb-1.5 px-1 block" id={colorLabelId}>Color</span>
         <div role="group" aria-labelledby={colorLabelId} className="flex flex-wrap gap-2.5 mb-5">
           {TIER_COLOR_PRESETS.map((c) => (
             <button
@@ -161,7 +162,7 @@ function TierEditPopover({ tier, canDelete, onChange, onDelete, onClose }: {
         {canDelete && (
           <button
             onClick={onDelete}
-            className="w-full h-11 rounded-xl border border-red-500/30 text-red-400 text-sm font-semibold active:bg-red-500/10 transition-colors"
+            className="w-full h-12 rounded-full bg-[var(--fill)] text-red-500 text-headline active:bg-[var(--fill-strong)] transition-colors"
           >
             Delete tier
           </button>
@@ -316,33 +317,33 @@ export default function TierlistView(): JSX.Element {
           // not WRLD, is where mobile actually enters this game from now.
           onClick={() => setActiveView(previousView ?? 'home')}
           aria-label="Back"
-          className="w-11 h-11 flex items-center justify-center rounded-full text-text-primary active:bg-surface-overlay transition-colors"
+          className="glass-button w-11 h-11 flex items-center justify-center rounded-full text-text-primary active:opacity-60 transition-opacity"
         >
-          <ChevronLeft size={20} />
+          <ChevronLeft size={24} strokeWidth={2.25} className="-ml-0.5" />
         </button>
       </div>
       <div
-        className="absolute right-2 z-20 flex items-center gap-1"
+        className="absolute right-2 z-20 flex items-center gap-2"
         style={{ top: ownsTopInset ? 'calc(var(--top-inset) + 0.5rem)' : '0.5rem' }}
       >
         <button
           onClick={() => setShowLists(true)}
           aria-label="Your tier lists"
-          className="w-11 h-11 flex items-center justify-center rounded-full text-text-muted active:bg-surface-overlay transition-colors"
+          className="glass-button w-11 h-11 flex items-center justify-center rounded-full text-text-primary active:opacity-60 transition-opacity"
         >
           <Library size={18} />
         </button>
         <button
           onClick={() => setShowFilters(true)}
           aria-label="Song pool"
-          className="w-11 h-11 flex items-center justify-center rounded-full text-text-muted active:bg-surface-overlay transition-colors"
+          className="glass-button w-11 h-11 flex items-center justify-center rounded-full text-text-primary active:opacity-60 transition-opacity"
         >
           <Settings2 size={18} />
         </button>
         <button
           onClick={handleReset}
           aria-label="Clear this tier list's rankings"
-          className="w-11 h-11 flex items-center justify-center rounded-full text-text-muted active:bg-surface-overlay transition-colors"
+          className="glass-button w-11 h-11 flex items-center justify-center rounded-full text-text-primary active:opacity-60 transition-opacity"
         >
           <RotateCcw size={18} />
         </button>
@@ -364,18 +365,18 @@ export default function TierlistView(): JSX.Element {
           ) : (
           <>
           <div className="text-center mb-5">
-            <h1 className="text-text-primary text-3xl font-black tracking-tight">Tier List</h1>
+            <h1 className="text-title1 text-text-primary">Tier List</h1>
             <button
               onClick={() => setShowLists(true)}
-              className="mt-3 inline-flex items-center gap-1.5 px-3 h-9 rounded-full border border-[var(--border)] bg-[var(--surface-raised)]/60 active:border-accent/40 transition-colors max-w-full"
+              className="mt-3 inline-flex items-center gap-1.5 px-4 h-9 rounded-full bg-[var(--fill)] active:bg-[var(--fill-strong)] transition-colors max-w-full"
             >
-              <span className="text-sm font-semibold text-text-primary truncate">{list.name}</span>
+              <span className="text-subhead font-semibold text-text-primary truncate">{list.name}</span>
               {!poolLoading && (
-                <span className="text-xs text-text-muted shrink-0">{rankedInFilter}/{filteredCount}</span>
+                <span className="text-footnote text-text-secondary shrink-0 tabular-nums">{rankedInFilter}/{filteredCount}</span>
               )}
-              <ChevronDown size={14} className="text-text-muted shrink-0" />
+              <ChevronDown size={14} className="text-text-secondary shrink-0" />
             </button>
-            <p className="text-text-muted text-xs mt-2">
+            <p className="text-footnote text-text-muted mt-2">
               {selectedSongId !== null
                 ? 'Tap a row to place it, or a ranked song to put it before that one.'
                 : 'Drag a song into a row, or onto another song to put it next to it.'}
@@ -383,12 +384,12 @@ export default function TierlistView(): JSX.Element {
           </div>
 
           {poolError && (
-            <div className="mb-4 px-4 py-3 rounded-xl border border-red-500/30 bg-red-500/10 text-red-400 text-sm text-center">
+            <div className="mb-4 px-4 py-3 rounded-xl bg-red-500/10 text-red-500 text-subhead text-center">
               {poolError}
             </div>
           )}
 
-          <div className="space-y-1.5 mb-2">
+          <div className="space-y-2 mb-3">
             {tiers.map((tier, i) => (
               <TierRow
                 key={tier.id}
@@ -421,61 +422,48 @@ export default function TierlistView(): JSX.Element {
             onClick={addTier}
             disabled={tiers.length >= MAX_TIERS}
             title={tiers.length >= MAX_TIERS ? `A tier list can have at most ${MAX_TIERS} tiers` : undefined}
-            className="w-full mb-8 h-11 rounded-xl disabled:opacity-40 border border-dashed border-[var(--border)] text-text-muted active:text-text-primary active:border-accent/40 transition-colors text-xs font-bold uppercase tracking-widest flex items-center justify-center gap-1.5"
+            className="w-full mb-8 h-11 rounded-full disabled:opacity-40 bg-[var(--fill)] text-accent active:bg-[var(--fill-strong)] transition-colors text-subhead font-semibold flex items-center justify-center gap-1.5"
           >
-            <Plus size={14} /> Add tier
+            <Plus size={16} /> Add tier
           </button>
 
-          <div className="rounded-xl border border-[var(--border)] bg-[var(--surface-raised)]/40 p-3">
-            <div className="flex items-center gap-2 mb-3">
-              <Music2 size={14} className="text-text-muted shrink-0" />
-              <span className="text-xs font-bold uppercase tracking-widest text-text-muted">Unranked</span>
-              <span className="text-xs text-text-muted">({visiblePool.length})</span>
+          <div className="rounded-[20px] bg-[var(--grouped)] p-3">
+            <div className="flex items-center gap-2 mb-3 px-1">
+              <span className="text-headline text-text-primary">Unranked</span>
+              <span className="text-subhead text-text-secondary tabular-nums">{visiblePool.length}</span>
               {poolLabel && (
                 <button
                   onClick={() => setShowFilters(true)}
-                  className="ml-auto flex items-center gap-1 px-2 h-7 rounded-full border border-accent/30 bg-accent/10 text-[11px] text-text-primary min-w-0"
+                  className="ml-auto flex items-center gap-1 px-2.5 h-7 rounded-full bg-accent/15 text-footnote text-accent min-w-0"
                 >
-                  {album && <Disc3 size={11} className="shrink-0" />}
+                  {album && <Disc3 size={12} className="shrink-0" />}
                   <span className="truncate">{poolLabel}</span>
                 </button>
               )}
             </div>
-            <div className="flex items-center gap-1.5 mb-3">
-              <div className="relative flex-1 min-w-0">
-                <Search size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-text-muted pointer-events-none" />
-                <input
-                  value={search}
-                  onChange={(e) => setSearch(e.target.value)}
-                  placeholder="Search songs or eras"
-                  className="w-full pl-8 pr-9 py-2 rounded-lg bg-[var(--surface-overlay)] border border-[var(--border)] text-xs text-text-primary focus:outline-none focus:border-accent/50"
+            <SearchField
+              value={search}
+              onChange={setSearch}
+              placeholder="Search songs or eras"
+              className="mb-3"
+              trailing={
+                <SearchHelpButton
+                  size={16}
+                  className={(open) => `w-9 h-9 flex items-center justify-center rounded-full transition-colors ${open ? 'text-accent' : 'text-text-muted'}`}
                 />
-                {search && (
-                  <button
-                    onClick={() => setSearch('')}
-                    aria-label="Clear search"
-                    className="absolute right-0 top-0 h-full w-9 flex items-center justify-center text-text-muted"
-                  >
-                    <X size={13} />
-                  </button>
-                )}
-              </div>
-              <SearchHelpButton
-                size={14}
-                className={(open) => `p-2 rounded-lg border border-[var(--border)] transition-colors ${open ? 'bg-accent/15 text-accent' : 'bg-[var(--surface-overlay)] text-text-muted'}`}
-              />
-            </div>
+              }
+            />
             <div
               onClick={clickRow(null)}
               data-drop-zone={POOL_DROP_ZONE}
-              className={`min-h-[7.5rem] flex flex-wrap gap-1.5 content-start rounded-lg transition-colors ${
+              className={`min-h-[7.5rem] flex flex-wrap gap-1.5 content-start rounded-xl transition-colors ${
                 selectedSongId !== null ? 'cursor-copy' : ''
               } ${dropTarget === POOL_DROP_ZONE ? 'bg-accent/20 outline outline-2 outline-accent/60 -outline-offset-2' : ''}`}
             >
               {poolLoading ? (
-                <span className="text-xs text-text-muted py-4">Loading songs…</span>
+                <span className="text-subhead text-text-muted py-4 px-1">Loading songs…</span>
               ) : visiblePool.length === 0 ? (
-                <span className="text-xs text-text-muted py-4">
+                <span className="text-subhead text-text-muted py-4 px-1">
                   {search
                     ? 'No songs match that search.'
                     : filters.albumId !== null && !album
@@ -506,11 +494,11 @@ export default function TierlistView(): JSX.Element {
           className="fixed z-[300] pointer-events-none w-16"
           style={{ left: drag.x - 32, top: drag.y - 32 }}
         >
-          <div className="relative w-16 h-16 rounded-lg overflow-hidden border-2 border-accent shadow-xl scale-110">
+          <div className="relative w-16 h-16 rounded-[10px] overflow-hidden border-2 border-accent shadow-xl scale-110">
             {drag.song.imageUrl ? (
               <img src={smallCoverUrl(drag.song.imageUrl)} alt="" className="w-full h-full object-cover" />
             ) : (
-              <div className="w-full h-full bg-[var(--surface-overlay)] flex items-center justify-center">
+              <div className="w-full h-full bg-[var(--fill)] flex items-center justify-center">
                 <Music2 size={18} className="text-text-muted" />
               </div>
             )}

@@ -83,10 +83,9 @@ export function Sheet({ onClose, title, header, children }: SheetProps): JSX.Ele
         onClick={requestClose}
         onContextMenu={(e) => { e.preventDefault(); requestClose() }}
       />
-      {/* iOS 26's floating sheet: inset from the screen edges on every side,
-          its corners following the phone's, frosted over the page. */}
+      {/* Docked to the bottom edge with a flat bottom, frosted over the page. */}
       <div
-        className={`fixed z-[81] inset-x-2 bottom-2 flex flex-col max-h-[82svh] glass-thick rounded-[32px] overflow-hidden ${
+        className={`fixed z-[81] inset-x-0 bottom-0 flex flex-col max-h-[82svh] glass-thick rounded-t-[28px] overflow-hidden ${
           closing ? 'animate-sheet-out' : entered ? '' : 'animate-sheet-in'
         }`}
         style={dragStyle}
@@ -99,9 +98,7 @@ export function Sheet({ onClose, title, header, children }: SheetProps): JSX.Ele
         </div>
         <div
           className="overflow-y-auto overscroll-contain py-1"
-          // The sheet already sits 8px off the bottom edge, so only the part
-          // of the home-indicator inset past that needs clearing.
-          style={{ paddingBottom: 'calc(max(env(safe-area-inset-bottom, 0px) - 0.5rem, 0px) + 0.5rem)' }}
+          style={{ paddingBottom: 'calc(env(safe-area-inset-bottom, 0px) + 0.5rem)' }}
         >
           {children}
         </div>

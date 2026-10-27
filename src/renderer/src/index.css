@@ -478,15 +478,13 @@ input[type='range']:active::-moz-range-thumb {
    sheet-out composites (`add`) onto that inline offset instead of replacing
    it, so a sheet swiped away carries on down from where the finger let go
    rather than jumping back up to its resting spot first. */
-/* Past 100% by a margin: the sheet floats a few px above the bottom edge, so
-   its own height alone would leave a sliver showing. */
 @keyframes sheet-in {
-  from { transform: translateY(calc(100% + 1rem)); }
+  from { transform: translateY(100%); }
   to   { transform: translateY(0); }
 }
 @keyframes sheet-out {
   from { transform: translateY(0); }
-  to   { transform: translateY(calc(100% + 1rem)); }
+  to   { transform: translateY(100%); }
 }
 @keyframes scrim-in {
   from { opacity: 0; }
@@ -894,6 +892,19 @@ input[type='range']:active::-moz-range-thumb {
    useIsMobile), so a view desktop shares keeps its own padding there. */
 @media (max-width: 767px) {
   .pb-dock { padding-bottom: calc(var(--dock-h, 0px) + 1rem); }
+  /* The same inset hairline for rows a view shares with desktop (chat lists,
+     admin queues): drawn on phones only, starting --row-inset in. */
+  .m-hairline { position: relative; }
+  .m-hairline::after {
+    content: '';
+    position: absolute;
+    left: var(--row-inset, 1rem);
+    right: 0;
+    bottom: 0;
+    height: 0.5px;
+    background: var(--separator);
+    pointer-events: none;
+  }
 }
 
 /* The copy a closing modal or menu leaves behind to animate out on

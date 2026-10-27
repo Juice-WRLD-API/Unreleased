@@ -978,13 +978,14 @@ const FmLikeButton = memo(function FmLikeButton({ light }: { light: boolean }): 
 // "···" for the current track. SongContextMenu is the app-wide one and already
 // comes up as a bottom sheet on a phone, so the x/y it takes are ignored here.
 const SongMenu = memo(function SongMenu({ light }: { light: boolean }): JSX.Element {
-  const { currentTrack, radioFmActive, radioFmNowPlaying, radioFmMatchedSong, likedTrackIds, toggleLike, setActiveView, setPendingEditorSongId } = useStore(useShallow(s => ({
+  const { currentTrack, radioFmActive, radioFmNowPlaying, radioFmMatchedSong, likedTrackIds, toggleLike, playNext, setActiveView, setPendingEditorSongId } = useStore(useShallow(s => ({
     currentTrack: s.currentTrack,
     radioFmActive: s.radioFmActive,
     radioFmNowPlaying: s.radioFmNowPlaying,
     radioFmMatchedSong: s.radioFmMatchedSong,
     likedTrackIds: s.likedTrackIds,
     toggleLike: s.toggleLike,
+    playNext: s.playNext,
     setActiveView: s.setActiveView,
     setPendingEditorSongId: s.setPendingEditorSongId,
   })))
@@ -1067,6 +1068,7 @@ const SongMenu = memo(function SongMenu({ light }: { light: boolean }): JSX.Elem
           onClose={() => setOpen(false)}
           canEdit={canEdit}
           onInfo={() => currentSongId != null && openInfo(currentSongId)}
+          onPlayNext={() => playNext(currentTrack)}
           liked={likedTrackIds.includes(currentTrack.id)}
           onToggleLike={() => toggleLike(currentTrack.id)}
         />,
@@ -1196,7 +1198,7 @@ function QueueSheet({ open, onClose }: { open: boolean; onClose: () => void }): 
         onContextMenu={(e) => { e.preventDefault(); requestClose() }}
       />
       <div
-        className={`fixed z-[81] inset-x-2 bottom-2 flex flex-col max-h-[82svh] glass-thick rounded-[32px] overflow-hidden ${
+        className={`fixed z-[81] inset-x-0 bottom-0 flex flex-col max-h-[82svh] glass-thick rounded-t-[28px] overflow-hidden ${
           closing ? 'animate-sheet-out' : entered ? '' : open ? 'animate-sheet-in' : ''
         }`}
         style={{ ...dragStyle, ...(showing ? {} : { display: 'none' }) }}
@@ -1222,9 +1224,7 @@ function QueueSheet({ open, onClose }: { open: boolean; onClose: () => void }): 
         </div>
         <div
           className="overflow-y-auto overscroll-contain py-1"
-          // Floats 8px off the bottom edge, like the shared Sheet - only the
-          // home-indicator inset past that needs clearing.
-          style={{ paddingBottom: 'calc(max(env(safe-area-inset-bottom, 0px) - 0.5rem, 0px) + 0.5rem)' }}
+          style={{ paddingBottom: 'calc(env(safe-area-inset-bottom, 0px) + 0.5rem)' }}
         >
       {/* History - during radio the queue holds *only* played history, so
           without this the sheet looks empty in radio mode. */}

@@ -9,6 +9,8 @@ import { useEffect } from 'react'
 import { useStorePick } from '../store/useStore'
 import { rememberTabView } from '../lib/navItems'
 import type { ViewType } from '../types'
+import { useIsMobile } from '../hooks/useIsMobile'
+import { Segmented as IosSegmented } from './mobile/Segmented'
 
 export type GameId = Extract<ViewType, 'heardle' | 'wordle' | 'tierlist'>
 
@@ -23,8 +25,21 @@ const GAMES: { id: GameId; label: string }[] = [
  *  the scroll flow rather than another floating layer to dodge them. */
 export function GameSwitcher({ current }: { current: GameId }): JSX.Element {
   const { setActiveView } = useStorePick('setActiveView')
+  const isMobile = useIsMobile()
   // Whichever game is on screen is the one the Games tab reopens on.
   useEffect(() => { rememberTabView(current) }, [current])
+  // Phones get the iOS segmented control the rest of the mobile UI uses.
+  if (isMobile) {
+    return (
+      <div className="mb-6">
+        <IosSegmented
+          value={current}
+          options={GAMES.map((g) => ({ value: g.id, label: g.label }))}
+          onChange={(id) => setActiveView(id)}
+        />
+      </div>
+    )
+  }
   // No offset for the floating nav pill: it always auto-hides on desktop
   // (see App.tsx), so it never covers this row.
   return (
@@ -84,11 +99,11 @@ export function Field({ label, hint, children }: {
   label: string; hint?: string; children: React.ReactNode
 }): JSX.Element {
   return (
-    <div className="py-3 border-b border-[var(--border)] last:border-b-0">
+    <div className="py-3 border-b border-[var(--separator)] md:border-[var(--border)] last:border-b-0">
       <div className="flex items-center gap-3">
         <div className="min-w-0">
-          <div className="text-sm text-text-primary font-medium">{label}</div>
-          {hint && <div className="text-xs text-text-muted mt-0.5">{hint}</div>}
+          <div className="text-body md:text-sm md:tracking-normal text-text-primary md:font-medium">{label}</div>
+          {hint && <div className="text-footnote md:text-xs md:tracking-normal text-text-muted mt-0.5">{hint}</div>}
         </div>
         <div className="ml-auto shrink-0">{children}</div>
       </div>
@@ -102,13 +117,17 @@ export function Segmented<T extends string>({ options, value, onChange }: {
   onChange: (v: T) => void
 }): JSX.Element {
   return (
-    <div className="flex rounded-lg border border-[var(--border)] overflow-hidden">
+    // Phones: an iOS segmented capsule (raised thumb, no accent fill);
+    // desktop keeps its bordered accent toggle.
+    <div className="flex p-0.5 md:p-0 rounded-full md:rounded-lg bg-[var(--fill)] md:bg-transparent md:border md:border-[var(--border)] overflow-hidden">
       {options.map((o) => (
         <button
           key={o.id}
           onClick={() => onChange(o.id)}
-          className={`px-2.5 py-1 text-xs font-semibold transition-colors ${
-            value === o.id ? 'bg-accent text-white' : 'text-text-muted hover:text-text-primary'
+          className={`px-3.5 md:px-2.5 py-1.5 md:py-1 rounded-full md:rounded-none text-footnote md:text-xs md:tracking-normal font-semibold transition-colors ${
+            value === o.id
+              ? 'bg-[var(--control-thumb)] text-text-primary shadow-[0_3px_8px_rgb(0_0_0/0.12)] md:shadow-none md:bg-accent md:text-white'
+              : 'text-text-secondary md:text-text-muted hover:text-text-primary'
           }`}
         >
           {o.label}
@@ -118,4 +137,4 @@ export function Segmented<T extends string>({ options, value, onChange }: {
   )
 }
 
-export const numberInput = 'w-16 h-8 px-2 rounded-lg bg-[var(--surface-overlay)] border border-[var(--border)] text-sm text-text-primary text-right focus:outline-none focus:border-accent/50'
+export const numberInput = 'w-16 h-9 md:h-8 px-2.5 md:px-2 rounded-[10px] md:rounded-lg bg-[var(--fill)] md:bg-[var(--surface-overlay)] border border-transparent md:border-[var(--border)] text-body md:text-sm md:tracking-normal text-text-primary text-right focus:outline-none focus:border-accent/50'

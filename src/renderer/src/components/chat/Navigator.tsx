@@ -14,6 +14,8 @@ import { ChannelIcon, ChatAvatar, CountBadge, errorText, ServerGlyph, shortStamp
 import { UserCardBody } from './UserCard'
 import { ConfirmDialog } from './MessageItem'
 import ContextMenu, { AnchoredContextMenu } from '../ContextMenu'
+import { useIsMobile } from '../../hooks/useIsMobile'
+import { SearchField } from '../mobile/SearchField'
 
 interface RoomMenuItem {
   label: string
@@ -548,11 +550,11 @@ export function ChannelList({ serverId, onPicked, showFooter = true }: { serverI
         <button
           ref={menuBtnRef}
           onClick={() => setMenu((v) => !v)}
-          className="w-full h-14 flex items-center gap-2 px-4 border-b border-[var(--border)] text-left hover:bg-surface-raised/50 transition-colors"
+          className="w-full h-14 flex items-center gap-2 px-4 border-b border-[var(--separator)] text-left hover:bg-surface-raised/50 max-md:active:bg-[var(--fill)] transition-colors"
         >
           <span className="flex-1 min-w-0">
-            <span className="block text-[15px] font-bold text-text-primary truncate">{server.name}</span>
-            <span className="block text-[11px] text-text-muted truncate">{server.member_count} {server.member_count === 1 ? 'member' : 'members'}</span>
+            <span className="block text-headline md:text-[15px] md:font-bold md:tracking-normal text-text-primary truncate">{server.name}</span>
+            <span className="block text-footnote md:text-[11px] md:tracking-normal text-text-muted truncate">{server.member_count} {server.member_count === 1 ? 'member' : 'members'}</span>
           </span>
           <ChevronDown size={16} className={`text-text-muted transition-transform ${menu ? 'rotate-180' : ''}`} />
         </button>
@@ -571,8 +573,8 @@ export function ChannelList({ serverId, onPicked, showFooter = true }: { serverI
         )}
       </div>
 
-      <div className="chat-scroll flex-1 min-h-0 overflow-y-auto px-2 py-3 space-y-3">
-        {server.description && <p className="px-2 text-xs text-text-muted leading-relaxed">{server.description}</p>}
+      <div className="chat-scroll flex-1 min-h-0 overflow-y-auto px-2 py-3 space-y-4 md:space-y-3">
+        {server.description && <p className="px-2 text-footnote md:text-xs md:tracking-normal text-text-muted leading-relaxed">{server.description}</p>}
         {groups.map(([category, channels]) => (
           <div
             key={category || '_'}
@@ -589,7 +591,7 @@ export function ChannelList({ serverId, onPicked, showFooter = true }: { serverI
                   setCatMenu({ category, x: e.clientX, y: e.clientY })
                 }}
               >
-                <button onClick={() => setCollapsed((c) => ({ ...c, [category]: !c[category] }))} className="flex-1 flex items-center gap-1 px-1 py-1 text-[11px] font-bold uppercase tracking-wider text-text-muted hover:text-text-secondary text-left">
+                <button onClick={() => setCollapsed((c) => ({ ...c, [category]: !c[category] }))} className="flex-1 flex items-center gap-1 px-1 py-1 text-footnote font-semibold text-text-secondary md:text-[11px] md:font-bold md:uppercase md:tracking-wider md:text-text-muted hover:text-text-secondary text-left">
                   <ChevronDown size={12} className={`transition-transform ${collapsed[category] ? '-rotate-90' : ''}`} />
                   <span className="truncate">{category}</span>
                 </button>
@@ -644,12 +646,12 @@ export function ChannelList({ serverId, onPicked, showFooter = true }: { serverI
                     >
                       <button
                         onClick={() => { openRoom({ kind: 'channel', id: c.id }); onPicked?.() }}
-                        className={`w-full flex items-center gap-2 rounded-lg px-2 py-1.5 text-left transition-colors ${
-                          isActive ? 'bg-surface-highest text-text-primary' : count > 0 ? 'text-text-primary hover:bg-surface-raised/70' : 'text-text-muted hover:text-text-secondary hover:bg-surface-raised/70'
+                        className={`w-full flex items-center gap-2.5 md:gap-2 rounded-xl md:rounded-lg px-3 md:px-2 py-2.5 md:py-1.5 text-left transition-colors ${
+                          isActive ? 'bg-[var(--fill)] md:bg-surface-highest text-text-primary' : count > 0 ? 'text-text-primary hover:bg-surface-raised/70 max-md:active:bg-[var(--fill)]' : 'text-text-secondary md:text-text-muted hover:text-text-secondary hover:bg-surface-raised/70 max-md:active:bg-[var(--fill)]'
                         }`}
                       >
                         <ChannelIcon isPrivate={c.is_private} className="shrink-0 opacity-80" />
-                        <span className={`flex-1 min-w-0 truncate text-[15px] md:text-sm ${count > 0 ? 'font-semibold' : 'font-medium'}`}>{c.name}</span>
+                        <span className={`flex-1 min-w-0 truncate text-body md:text-sm md:tracking-normal ${count > 0 ? 'font-semibold' : 'md:font-medium'}`}>{c.name}</span>
                         {mention > 0 ? <CountBadge count={mention} mention /> : count > 0 && !isActive ? <span className="w-2 h-2 rounded-full bg-text-primary" /> : null}
                       </button>
                       {canManage && (
@@ -788,6 +790,10 @@ function DmRow({ conv, pinned, muted, onPicked, onContextMenu, draggable, isDrag
   const others = conv.participants.filter((p) => p.user.id !== meId)
   const isActive = active?.kind === 'conversation' && active.id === conv.id
   const author = last && last.author.id === meId ? 'You: ' : last && conv.is_group ? `${displayName(last.author)}: ` : ''
+  // Phones get Messages-style rows: bigger avatars, edge-to-edge with a
+  // hairline under the text instead of rounded hover cells.
+  const isMobile = useIsMobile()
+  const avatar = isMobile ? 48 : 40
 
   return (
     <button
@@ -798,10 +804,11 @@ function DmRow({ conv, pinned, muted, onPicked, onContextMenu, draggable, isDrag
       onDragEnd={onDragEnd}
       onDragOver={onDragOver}
       onDrop={onDrop}
-      className={`w-full flex items-center gap-3 rounded-xl px-2 py-2 text-left transition-colors ${isActive ? 'bg-surface-highest' : 'hover:bg-surface-raised/70'} ${isDragging ? 'opacity-40' : ''} ${isDropTarget ? 'ring-2 ring-accent' : ''}`}
+      className={`m-hairline w-full flex items-center gap-3 rounded-none md:rounded-xl px-4 md:px-2 py-2.5 md:py-2 text-left transition-colors ${isActive ? 'md:bg-surface-highest' : 'hover:bg-surface-raised/70'} max-md:active:bg-[var(--fill)] ${isDragging ? 'opacity-40' : ''} ${isDropTarget ? 'ring-2 ring-accent' : ''}`}
+      style={{ ['--row-inset' as string]: `${16 + avatar + 12}px` }}
     >
       {conv.is_group || others.length !== 1 ? (
-        <span className="relative w-10 h-10 shrink-0">
+        <span className="relative shrink-0" style={{ width: avatar, height: avatar }}>
           {others.slice(0, 2).map((p, i) => (
             // Position the wrapper, not ChatAvatar itself - ChatAvatar's own
             // base classes always include `relative`, which in Tailwind's
@@ -810,22 +817,22 @@ function DmRow({ conv, pinned, muted, onPicked, onContextMenu, draggable, isDrag
             // sticky, so the later `relative` rule wins no matter the order
             // in the class string) and the avatars overflow their box.
             <span key={p.id} className={`absolute ${i === 0 ? 'top-0 left-0' : 'bottom-0 right-0'}`}>
-              <ChatAvatar user={p.user} size={28} className={i === 1 ? 'ring-2 ring-[var(--surface)]' : ''} />
+              <ChatAvatar user={p.user} size={Math.round(avatar * 0.7)} className={i === 1 ? 'ring-2 ring-[var(--surface)]' : ''} />
             </span>
           ))}
         </span>
       ) : (
-        <ChatAvatar user={others[0].user} size={40} presence listening={!!nowPlaying?.[others[0].user.id]} />
+        <ChatAvatar user={others[0].user} size={avatar} presence listening={!!nowPlaying?.[others[0].user.id]} />
       )}
       <span className="flex-1 min-w-0">
         <span className="flex items-baseline gap-2">
           {pinned && <Pin size={11} className="shrink-0 text-text-muted" />}
           {muted && <BellOff size={11} className="shrink-0 text-text-muted" />}
-          <span className={`flex-1 min-w-0 truncate text-[15px] md:text-sm ${count > 0 ? 'font-bold text-text-primary' : 'font-medium text-text-primary'}`}>{conversationTitle(conv, meId)}</span>
-          {last && <span className="text-[10px] text-text-muted shrink-0">{shortStamp(last.created_at)}</span>}
+          <span className={`flex-1 min-w-0 truncate text-body md:text-sm md:tracking-normal text-text-primary ${count > 0 ? 'font-bold' : 'font-semibold md:font-medium'}`}>{conversationTitle(conv, meId)}</span>
+          {last && <span className="text-subhead md:text-[10px] md:tracking-normal text-text-muted shrink-0">{shortStamp(last.created_at)}</span>}
         </span>
         <span className="flex items-center gap-2">
-          <span className={`flex-1 min-w-0 truncate text-xs ${typing ? 'text-accent' : count > 0 ? 'text-text-secondary' : 'text-text-muted'}`}>
+          <span className={`flex-1 min-w-0 truncate text-subhead md:text-xs md:tracking-normal ${typing ? 'text-accent' : count > 0 ? 'text-text-secondary' : 'text-text-muted'}`}>
             {typing ? 'typing…' : preview ? `${author}${preview}` : <span className="inline-flex items-center gap-1"><Lock size={10} />Encrypted conversation</span>}
           </span>
           <CountBadge count={count} />
@@ -852,6 +859,7 @@ export function DmList({ onPicked, showFooter = true }: { onPicked?: () => void;
   const [confirmDeleteConvId, setConfirmDeleteConvId] = useState<number | null>(null)
   const [dragConvId, setDragConvId] = useState<number | null>(null)
   const [dropConvTarget, setDropConvTarget] = useState<number | null>(null)
+  const isMobile = useIsMobile()
 
   const sorted = useMemo(() => {
     const q = query.trim().toLowerCase()
@@ -908,23 +916,30 @@ export function DmList({ onPicked, showFooter = true }: { onPicked?: () => void;
 
   return (
     <div className="flex-1 min-h-0 flex flex-col" style={{ ['--chat-ring' as string]: 'var(--surface)' }}>
-      <div className="h-14 shrink-0 flex items-center gap-2 px-4 border-b border-[var(--border)]">
+      {/* Phones put "new message" on the Chat screen's large title instead. */}
+      <div className="h-14 shrink-0 hidden md:flex items-center gap-2 px-4 border-b border-[var(--border)]">
         <h2 className="flex-1 text-[15px] font-bold text-text-primary">Direct messages</h2>
         <button onClick={() => openModal({ kind: 'new-dm' })} title="New message" className="w-8 h-8 rounded-lg flex items-center justify-center text-text-muted hover:text-text-primary hover:bg-surface-overlay">
           <SquarePen size={17} />
         </button>
       </div>
-      <div className="px-3 pt-3">
-        <input
-          value={query}
-          onChange={(e) => setQuery(e.target.value)}
-          placeholder="Find a conversation"
-          className="w-full rounded-lg bg-surface-raised border border-[var(--border)] px-2.5 py-1.5 text-sm text-text-primary placeholder:text-text-muted focus:outline-none focus:border-accent/50"
-        />
-      </div>
-      <div className="chat-scroll flex-1 min-h-0 overflow-y-auto px-2 py-2 space-y-0.5">
+      {isMobile ? (
+        <div className="px-4 pt-3 pb-1">
+          <SearchField value={query} onChange={setQuery} placeholder="Search" />
+        </div>
+      ) : (
+        <div className="px-3 pt-3">
+          <input
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder="Find a conversation"
+            className="w-full rounded-lg bg-surface-raised border border-[var(--border)] px-2.5 py-1.5 text-sm text-text-primary placeholder:text-text-muted focus:outline-none focus:border-accent/50"
+          />
+        </div>
+      )}
+      <div className="chat-scroll flex-1 min-h-0 overflow-y-auto px-0 md:px-2 py-2 md:space-y-0.5">
         {pinnedCount > 0 && (
-          <div className="px-2 pt-1 pb-1 text-[11px] font-bold uppercase tracking-wider text-text-muted">Pinned</div>
+          <div className="px-4 md:px-2 pt-1 pb-1 text-footnote font-semibold text-text-secondary md:text-[11px] md:font-bold md:uppercase md:tracking-wider md:text-text-muted">Pinned</div>
         )}
         {sorted.map((c, i) => (
           <div key={c.id}>
@@ -937,7 +952,7 @@ export function DmList({ onPicked, showFooter = true }: { onPicked?: () => void;
                     onDrop={(e) => { e.preventDefault(); dropConversation() }}
                   />
                 )}
-                <div className="px-2 pt-2 pb-1 text-[11px] font-bold uppercase tracking-wider text-text-muted">All chats</div>
+                <div className="px-4 md:px-2 pt-4 md:pt-2 pb-1 text-footnote font-semibold text-text-secondary md:text-[11px] md:font-bold md:uppercase md:tracking-wider md:text-text-muted">All chats</div>
               </>
             )}
             <DmRow
@@ -967,9 +982,9 @@ export function DmList({ onPicked, showFooter = true }: { onPicked?: () => void;
         {conversations.length === 0 && (
           <div className="px-4 py-10 text-center">
             <span className="mx-auto w-12 h-12 rounded-2xl bg-accent/15 text-accent flex items-center justify-center mb-3"><ShieldCheck size={22} /></span>
-            <p className="text-sm font-semibold text-text-primary">Private, encrypted DMs</p>
-            <p className="text-xs text-text-muted mt-1 leading-relaxed">Message any staff member one-on-one or in a group. Only participants can read them.</p>
-            <button onClick={() => openModal({ kind: 'new-dm' })} className="mt-3 px-3 py-1.5 rounded-lg bg-accent text-white text-xs font-bold hover:brightness-110">Start a conversation</button>
+            <p className="text-headline md:text-sm md:font-semibold md:tracking-normal text-text-primary">Private, encrypted DMs</p>
+            <p className="text-subhead md:text-xs md:tracking-normal text-text-muted mt-1 leading-relaxed">Message any staff member one-on-one or in a group. Only participants can read them.</p>
+            <button onClick={() => openModal({ kind: 'new-dm' })} className="mt-4 md:mt-3 h-11 md:h-auto px-5 md:px-3 md:py-1.5 rounded-full md:rounded-lg bg-accent text-white text-headline md:text-xs md:font-bold md:tracking-normal hover:brightness-110 active:opacity-80">Start a conversation</button>
           </div>
         )}
       </div>

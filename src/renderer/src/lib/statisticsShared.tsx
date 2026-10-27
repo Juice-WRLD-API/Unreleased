@@ -1,4 +1,4 @@
-import { Play, Radio, Music2, MoreVertical } from 'lucide-react'
+import { Play, Radio, Music2, MoreHorizontal } from 'lucide-react'
 import { CATEGORY_LABELS, CATEGORY_COLORS, type JWApiTopSong, type JWApiRecentPlay } from './juicewrldApi'
 import { statsSongToTrack, type StatsSong } from './statsCatalog'
 import { relativeTime } from '../components/adminShared'
@@ -277,9 +277,9 @@ export function TopSongRow({ song, cover, rank, max, onPlay, onContextMenu, isMo
       {isMobile && (
         <button
           onClick={(e) => { e.stopPropagation(); onContextMenu(song.id, cover, e) }}
-          className="w-9 h-9 -mr-1.5 shrink-0 flex items-center justify-center text-text-muted active:text-accent"
+          className="w-9 h-9 -mr-1.5 shrink-0 flex items-center justify-center text-text-primary active:opacity-50"
           aria-label="More options"
-        ><MoreVertical size={16} /></button>
+        ><MoreHorizontal size={20} /></button>
       )}
     </div>
   )
@@ -322,9 +322,9 @@ export function RecentPlayRow({ play, cover, onPlay, onContextMenu, isMobile }: 
       {isMobile && id != null && (
         <button
           onClick={(e) => { e.stopPropagation(); onContextMenu(id, cover, e) }}
-          className="w-9 h-9 -mr-1.5 shrink-0 flex items-center justify-center text-text-muted active:text-accent"
+          className="w-9 h-9 -mr-1.5 shrink-0 flex items-center justify-center text-text-primary active:opacity-50"
           aria-label="More options"
-        ><MoreVertical size={16} /></button>
+        ><MoreHorizontal size={20} /></button>
       )}
     </div>
   )
