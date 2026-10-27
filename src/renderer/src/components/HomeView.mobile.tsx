@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { ChevronRight, MoreHorizontal, Play, Flame, Heart, User, Newspaper, Radio, Music, Search, MicVocal, Bell, BarChart3 } from 'lucide-react'
+import { ChevronRight, MoreHorizontal, Play, Flame, Heart, User, Newspaper, Radio, Music, Search, MicVocal, AudioLines, Bell, BarChart3 } from 'lucide-react'
 import { useStore } from '../store/useStore'
 import * as userApi from '../lib/userApi'
 import { AlbumArtThumbnail } from './AlbumArtThumbnail'
@@ -346,6 +346,7 @@ export default function HomeViewMobile(): JSX.Element {
                 />
               )}
               {showTools && (
+                <>
                 <GroupedRow
                   icon={MicVocal}
                   iconColor={PURPLE}
@@ -353,6 +354,14 @@ export default function HomeViewMobile(): JSX.Element {
                   sub="Time a song's lyrics by the line or the word"
                   onClick={() => useStore.getState().openLyricsGen()}
                 />
+                <GroupedRow
+                  icon={AudioLines}
+                  iconColor={PURPLE}
+                  label="Identify Song"
+                  sub="Name a song from the mic or a file"
+                  onClick={() => useStore.getState().setShowRecognition(true)}
+                />
+                </>
               )}
             </GroupedSection>
           )}

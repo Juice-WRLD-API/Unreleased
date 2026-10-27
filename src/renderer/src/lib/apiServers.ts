@@ -42,6 +42,7 @@ export const KNOWN_ROUTE_PREFIXES: { prefix: string; label: string }[] = [
   { prefix: '/library/tierlists', label: 'Tier lists' },
   { prefix: '/news', label: 'News' },
   { prefix: '/radio', label: 'Radio' },
+  { prefix: '/recognition', label: 'Song recognition' },
   { prefix: '/reports', label: 'Reports' },
   { prefix: '/songs', label: 'Songs' },
 ]

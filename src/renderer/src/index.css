@@ -1023,3 +1023,22 @@ img[data-img-fade="in"] { animation: img-fade-in 0.42s cubic-bezier(0.33, 0, 0.1
   opacity: 0;
   pointer-events: none;
 }
+
+/* Song recognition (RecognitionModal). Ripples spread from the listen button
+   while recording; the level-driven glow is a transform set inline. */
+@keyframes recog-ripple {
+  from { transform: scale(1); opacity: 0.4; }
+  to   { transform: scale(1.85); opacity: 0; }
+}
+.recog-ripple { animation: recog-ripple 2.4s cubic-bezier(0.4, 0, 0.2, 1) infinite; }
+@keyframes recog-in {
+  from { opacity: 0; transform: translateY(6px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+.animate-recog-in { animation: recog-in 0.45s cubic-bezier(0.33, 0, 0.15, 1) both; }
+.recog-level { transition: transform 0.18s cubic-bezier(0.4, 0, 0.2, 1), opacity 0.18s cubic-bezier(0.4, 0, 0.2, 1); }
+@media (prefers-reduced-motion: reduce) {
+  .recog-ripple { animation: none; opacity: 0; }
+  .animate-recog-in { animation-duration: 0.01ms; }
+  .recog-level { transition: none; }
+}

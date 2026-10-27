@@ -1,5 +1,5 @@
 import { useRef, useState } from 'react'
-import { ChevronRight, Play, ListMusic, Gamepad2, Flame, Music2, Disc3, User, Newspaper, Radio, Heart, Search, MoreHorizontal, Album, Music, Wrench, MicVocal } from 'lucide-react'
+import { ChevronRight, Play, ListMusic, Gamepad2, Flame, Music2, Disc3, User, Newspaper, Radio, Heart, Search, MoreHorizontal, Album, Music, Wrench, MicVocal, AudioLines } from 'lucide-react'
 import { AlbumArtThumbnail } from './AlbumArtThumbnail'
 import { ProgressiveCover } from './ProgressiveCover'
 import { Tile } from './Tile'
@@ -399,6 +399,12 @@ export default function HomeViewDesktop(): JSX.Element {
     title: 'Synced lyrics',
     subtitle: "Time a song's lyrics by the line or the word",
     onClick: () => useStore.getState().openLyricsGen(),
+  }, {
+    id: 'identify',
+    icon: <AudioLines size={18} className="text-accent" />,
+    title: 'Identify song',
+    subtitle: 'Name a song from the mic, this device or a file',
+    onClick: () => useStore.getState().setShowRecognition(true),
   }]
   const showTools = showSection('tools')
 

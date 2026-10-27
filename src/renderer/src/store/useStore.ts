@@ -172,6 +172,7 @@ interface AppState {
   /** Desktop Settings modal. Mobile widths still use the 'settings' view. */
   showSettings: boolean
   showDiagnostics: boolean
+  showRecognition: boolean
   showQueue: boolean
   // The bottom nav's overflow sheet - its trigger button lives on Home now,
   // not in the nav bar itself, so the open/close state has to live somewhere
@@ -595,6 +596,7 @@ interface AppActions {
    *  clicks in chat messages and member lists. */
   openPublicProfile: (userId: number) => void
   setShowDiagnostics: (show: boolean) => void
+  setShowRecognition: (show: boolean) => void
   setShowQueue: (show: boolean) => void
   setShowMoreNav: (show: boolean) => void
   setShowEqPanel: (show: boolean) => void
@@ -1310,6 +1312,7 @@ export const useStore = create<AppStore>((set, get, store) => ({
   settingsTab: null,
   showSettings: typeof window !== 'undefined' && window.location.pathname === '/settings' && !isMobileViewport(),
   showDiagnostics: false,
+  showRecognition: false,
   showQueue: false,
   showMoreNav: false,
   showEqPanel: false,
@@ -1496,6 +1499,7 @@ export const useStore = create<AppStore>((set, get, store) => ({
     set((s) => ({ activeView: 'public-profile', previousView: s.activeView === 'public-profile' ? s.previousView : s.activeView }))
   },
   setShowDiagnostics: (showDiagnostics) => set({ showDiagnostics }),
+  setShowRecognition: (showRecognition) => set({ showRecognition }),
   setShowQueue: (showQueue) => set({ showQueue }),
   setShowMoreNav: (showMoreNav) => set({ showMoreNav }),
   setShowEqPanel: (showEqPanel) => set({ showEqPanel }),

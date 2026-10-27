@@ -3,7 +3,7 @@ import { useContentMotion } from '../hooks/useContentMotion'
 import { MotionOverlay } from './MotionOverlay'
 import { useState, useEffect, useCallback, useRef, useMemo, memo, Suspense } from 'react'
 import {
-  Search, Play, Loader2, Music2, X, Check,
+  Search, Play, Loader2, Music2, X, Check, AudioLines,
   LayoutList, Rows3, Info, ListPlus, ListFilter,
   ChevronUp, ChevronDown, MoreHorizontal, Plus, ListMusic, PackageOpen,
   CheckSquare2, Square, Link2, Layers, LayoutGrid, Mic2, CalendarDays, ChevronLeft, ChevronRight, Users,
@@ -2727,6 +2727,9 @@ export default function ApiTrackerView(): JSX.Element {
                 </button>
               )}
             </div>
+            <button onClick={() => useStore.getState().setShowRecognition(true)} title="Identify song" aria-label="Identify song" className="shrink-0 p-2.5 md:p-2 rounded-lg bg-surface-overlay text-text-muted hover:text-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent">
+              <AudioLines size={16} />
+            </button>
             <div className="relative shrink-0 hidden md:block">
               <button
                 onClick={() => setShowFilterMenu((v) => !v)}
