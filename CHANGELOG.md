@@ -6,6 +6,25 @@ All notable changes to this project are documented here.
 
 ---
 
+## [2.5.46] — 2026-10-27
+
+Changes since 2.5.42:
+
+- **Improve** Sync in the song editor opens the Synced lyrics dialog on the song and hands the timed lyrics back to the editor with "Use in the song editor"
+- **Improve** Playlists load at the same time as your account and without lyrics in the list, so they appear sooner on launch
+- **Improve** Version menus in the player, WRLD and the desktop player list the song that's playing, so its own version can be preferred or excluded too
+- **Improve** Session edits match their songs more reliably when several sessions share a name
+- **Improve** The WRLD visualizer uses much less CPU while paused, and 999 FM counts as playing
+- **Improve** Notifications, news and login-approval checks no longer send their launch requests twice, and news subscriptions only sync when they changed
+- **Fix** Synced lyrics stamps land on the right time after seeking in VBR MP3s
+- **Fix** Playlists no longer crash after renaming, changing visibility, editing the description or reordering
+- **Fix** Statistics no longer requests songs for radio plays with no catalogue song
+- **Fix** The equalizer and effects are in place from the first song played on desktop
+- **Fix** The sidebar logo no longer clips at larger text sizes
+- **Fix** Virtual lists that mounted before their scroll area was ready now show their rows
+
+---
+
 ## [2.5.42] — 2026-10-26
 
 Changes since 2.5.0:
