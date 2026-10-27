@@ -1,7 +1,7 @@
 import React, { useEffect, useState, useCallback, useRef, useMemo, memo } from 'react'
 import {
-  ListMusic, Play, Loader2, Plus, Trash2, Pencil, ArrowLeft, X, Check, Heart, Shuffle,
-  Music2, ListPlus, Archive, FolderInput, MoreVertical, Search, ChevronUp, ChevronDown, ChevronRight,
+  ListMusic, Play, Loader2, Plus, Trash2, Pencil, ChevronLeft, X, Check, Heart, Shuffle,
+  Music2, ListPlus, Archive, FolderInput, MoreHorizontal, Search, ChevronUp, ChevronDown, ChevronRight,
   ImageOff, Globe, Lock, Link, ListEnd, HardDrive, Layers, LayoutGrid, Rows3, Download,
   Image as ImageIcon, ArrowUpDown, AlignLeft, GripVertical, Rss,
 } from 'lucide-react'
@@ -46,10 +46,16 @@ import { usePlaylistZipDownload } from '../hooks/usePlaylistZipDownload'
 import { downloadBlob, playlistJsonPayload, playlistM3uContent } from '../lib/playlistExport'
 import { usePlaylistBulkDeletePlaylists, usePlaylistBulkAddPlaylistsTo } from '../hooks/usePlaylistBulkOps'
 import { HeroBackdrop, PlayShuffleRow, appBarButton } from './mobile/DetailChrome'
+import { CompactBar, LARGE_TITLE_COLLAPSE, LargeTitle, useScrolledPast } from './mobile/NavBar'
+import { ListRow, RowDuration, RowMenuButton } from './mobile/ListRow'
+import { SearchField } from './mobile/SearchField'
 
 // Row strides for the windowed lists, scaled by the app text-size setting
 // (absolute px offsets have to grow with the rem-sized covers inside them).
 const TRACK_ROW_H = 64
+// Scroll distance at which a detail screen's 240px cover and the title under
+// it have passed beneath the app bar.
+const DETAIL_TITLE_SCROLL = 280
 
 // ── Covers ────────────────────────────────────────────────────────────────────
 
@@ -129,7 +135,7 @@ function totalDurationLabel(tracks: Track[]): string {
 // ── Small shared pieces ───────────────────────────────────────────────────────
 
 function SectionLabel({ children }: { children: React.ReactNode }): JSX.Element {
-  return <p className="px-4 pt-4 pb-1.5 text-[11px] font-semibold uppercase tracking-wider text-text-muted">{children}</p>
+  return <h2 className="px-4 pt-6 pb-2 text-title2 text-text-primary">{children}</h2>
 }
 
 function TrackSkeleton(): JSX.Element {
@@ -137,7 +143,7 @@ function TrackSkeleton(): JSX.Element {
     <div className="px-4 pt-1">
       {Array.from({ length: 8 }).map((_, i) => (
         <div key={i} className="flex items-center gap-3 py-2" style={{ height: TRACK_ROW_H }}>
-          <div className="w-12 h-12 rounded-xl bg-surface-overlay animate-pulse shrink-0" />
+          <div className="w-12 h-12 rounded-lg bg-surface-overlay animate-pulse shrink-0" />
           <div className="flex-1 space-y-2">
             <div className="h-3 rounded bg-surface-overlay animate-pulse" style={{ width: `${55 + (i * 17) % 35}%` }} />
             <div className="h-2.5 rounded bg-surface-overlay animate-pulse w-1/3" />
@@ -181,47 +187,31 @@ const TrackRow = memo(function TrackRow({
     onLongPress,
   })
   return (
-    <div
-      className={`flex items-center gap-3 px-4 h-full rounded-2xl transition-colors ${selected ? 'bg-accent/15' : 'active:bg-surface-overlay'}`}
+    <ListRow
       {...press}
-    >
-      <div className="relative shrink-0 w-12 h-12 rounded-xl overflow-hidden bg-surface-overlay">
-        {libTrack
-          ? <AlbumArtThumb track={libTrack} size={48} />
-          : <AlbumArtThumbnail track={track} size={48} className="rounded-xl" shimmer={false} eager />}
-        {selectMode && <SelectOverlay selected={selected} />}
-      </div>
-      <div className="flex-1 min-w-0">
-        <p className={`text-[15px] leading-snug truncate ${current ? 'text-accent font-semibold' : 'text-text-primary'}`}>
-          {track.title}
-        </p>
-        <p className="text-text-muted text-xs truncate mt-0.5 flex items-center gap-1">
-          <span className="truncate">
-            {[track.artist || 'Unknown Artist', track.album].filter(Boolean).join(' · ')}
-          </span>
-        </p>
-      </div>
-      <span className="text-text-muted text-[11px] tabular-nums shrink-0">{formatDuration(track.duration, '--:--')}</span>
-      {expander && !selectMode && (
-        <button
-          onClick={(e) => { e.stopPropagation(); expander.onToggle() }}
-          className={`shrink-0 w-9 h-11 -mr-2 flex items-center justify-center ${expander.expanded ? 'text-text-primary' : 'text-text-muted'} active:text-accent`}
-          aria-label={`${expander.expanded ? 'Hide' : 'Show'} ${expander.count} versions`}
-          aria-expanded={expander.expanded}
-        >
-          <ChevronDown size={18} className={`transition-transform ${expander.expanded ? 'rotate-180' : ''}`} />
-        </button>
-      )}
-      {!selectMode && (
-        <button
-          onClick={(e) => { e.stopPropagation(); onMenu(e) }}
-          className="shrink-0 w-10 h-11 -mr-2 flex items-center justify-center text-text-muted active:text-accent"
-          aria-label="More options"
-        >
-          <MoreVertical size={18} />
-        </button>
-      )}
-    </div>
+      art={libTrack
+        ? <AlbumArtThumb track={libTrack} size={48} />
+        : <AlbumArtThumbnail track={track} size={48} shimmer={false} eager />}
+      artOverlay={selectMode ? <SelectOverlay selected={selected} /> : undefined}
+      title={track.title}
+      subtitle={[track.artist || 'Unknown Artist', track.album].filter(Boolean).join(' · ')}
+      current={current}
+      selected={selected}
+      trailing={<>
+        <RowDuration>{formatDuration(track.duration, '--:--')}</RowDuration>
+        {expander && !selectMode && (
+          <button
+            onClick={(e) => { e.stopPropagation(); expander.onToggle() }}
+            className={`shrink-0 w-9 h-11 flex items-center justify-center ${expander.expanded ? 'text-text-primary' : 'text-text-muted'} active:text-accent`}
+            aria-label={`${expander.expanded ? 'Hide' : 'Show'} ${expander.count} versions`}
+            aria-expanded={expander.expanded}
+          >
+            <ChevronDown size={18} className={`transition-transform ${expander.expanded ? 'rotate-180' : ''}`} />
+          </button>
+        )}
+        {!selectMode ? <RowMenuButton onClick={onMenu} /> : <span className="w-2 shrink-0" />}
+      </>}
+    />
   )
 })
 
@@ -241,7 +231,7 @@ function ReorderRow({ title, dragging, style, handleProps }: {
       style={style}
       className={`flex items-center gap-2 px-2 h-full bg-surface rounded-xl transition-shadow ${dragging ? 'shadow-xl' : ''}`}
     >
-      <span className="flex-1 min-w-0 text-text-primary text-[15px] truncate pl-2">{title}</span>
+      <span className="flex-1 min-w-0 text-text-primary text-body truncate pl-2">{title}</span>
       <button
         {...handleProps}
         aria-label={`Drag to reorder ${title}`}
@@ -286,7 +276,7 @@ function PromptSheet({ config, onClose }: { config: PromptConfig; onClose: () =>
             value={value}
             onChange={e => setValue(e.target.value)}
             placeholder={config.placeholder}
-            className="w-full bg-surface-overlay rounded-2xl px-4 py-3 text-[15px] text-text-primary placeholder:text-text-muted focus:outline-none focus:ring-1 focus:ring-accent/50 resize-none"
+            className="w-full bg-[var(--fill)] rounded-2xl px-4 py-3 text-body text-text-primary placeholder:text-text-muted focus:outline-none focus:ring-1 focus:ring-accent/50 resize-none"
           />
         ) : (
           <input
@@ -296,13 +286,13 @@ function PromptSheet({ config, onClose }: { config: PromptConfig; onClose: () =>
             onKeyDown={e => { if (e.key === 'Enter') submit() }}
             placeholder={config.placeholder}
             enterKeyHint="done"
-            className="w-full h-12 bg-surface-overlay rounded-2xl px-4 text-[15px] text-text-primary placeholder:text-text-muted focus:outline-none focus:ring-1 focus:ring-accent/50"
+            className="w-full h-12 bg-[var(--fill)] rounded-2xl px-4 text-body text-text-primary placeholder:text-text-muted focus:outline-none focus:ring-1 focus:ring-accent/50"
           />
         )}
         <button
           onClick={submit}
           disabled={!value.trim() && !config.allowEmpty}
-          className="w-full h-12 rounded-full bg-accent text-white text-[15px] font-semibold disabled:opacity-40 active:opacity-80"
+          className="w-full h-12 rounded-full bg-accent text-white text-headline disabled:opacity-40 active:opacity-80"
         >
           {config.submitLabel}
         </button>
@@ -553,6 +543,14 @@ export default function PlaylistsView(): JSX.Element {
   // Element-state refs (not RefObjects) because the detail view mounts long
   // after this component does - see useVirtualWindowEl.
   const [listScrollEl, setListScrollEl] = useState<HTMLDivElement | null>(null)
+  // The library root's scroller, for its collapsing large title; and how far
+  // a detail screen's list has to scroll before its hero title is under the
+  // app bar and the bar should show the name instead.
+  const [libraryScrollEl, setLibraryScrollEl] = useState<HTMLDivElement | null>(null)
+  const libraryCollapsed = useScrolledPast(libraryScrollEl, LARGE_TITLE_COLLAPSE)
+  const detailTitleUnder = useScrolledPast(listScrollEl, DETAIL_TITLE_SCROLL)
+  const [guestScrollEl, setGuestScrollEl] = useState<HTMLDivElement | null>(null)
+  const guestTitleUnder = useScrolledPast(guestScrollEl, DETAIL_TITLE_SCROLL)
   const [listContentEl, setListContentEl] = useState<HTMLDivElement | null>(null)
   const trackRowH = Math.round(TRACK_ROW_H * appTextScale)
   const { start: rowStart, end: rowEnd, totalHeight: rowsTotalHeight } =
@@ -1068,7 +1066,7 @@ export default function PlaylistsView(): JSX.Element {
         cover={lp.coverImage
           ? <img src={lp.coverImage} alt="" className="w-full h-full object-cover" />
           : <LocalPlaylistMosaic trackIds={lp.trackIds} className="w-full h-full" />}
-        badge={<span className="flex items-center gap-1 bg-black/60 text-white text-[10px] px-1.5 py-0.5 rounded-md"><HardDrive size={9} /> Local</span>}
+        badge={<span className="flex items-center gap-1 bg-black/60 text-white text-caption2 px-1.5 py-0.5 rounded-md"><HardDrive size={9} /> Local</span>}
         selected={selectedPlaylistKeys.has(key)}
         selectMode={plSelectMode}
         onOpen={() => openLocalPlaylist(lp.id)}
@@ -1089,7 +1087,7 @@ export default function PlaylistsView(): JSX.Element {
       cover={f.coverUrl
         ? <img src={f.coverUrl} alt="" className="w-full h-full object-cover" />
         : <div className="w-full h-full bg-gradient-to-br from-accent/40 to-accent/10 flex items-center justify-center"><Rss className="text-accent/50 w-1/3 h-1/3" /></div>}
-      badge={<span className="flex items-center gap-1 bg-black/60 text-accent text-[10px] px-1.5 py-0.5 rounded-md"><Rss size={9} /> Following</span>}
+      badge={<span className="flex items-center gap-1 bg-black/60 text-accent text-caption2 px-1.5 py-0.5 rounded-md"><Rss size={9} /> Following</span>}
       selected={false}
       selectMode={false}
       onOpen={() => openFollowedPlaylist(f.id)}
@@ -1187,71 +1185,60 @@ export default function PlaylistsView(): JSX.Element {
     return parts.join(' · ') || 'Nothing here yet'
   }
 
+  // The root screen's large title collapses into a glass bar as it scrolls
+  // under (see mobile/NavBar). Library is in App's MOBILE_BLEED_TOP, so the
+  // title pads itself below the status bar.
   const renderLibrary = (): JSX.Element => (
-    <>
-      <div className="shrink-0">
-        <div className="flex items-center gap-1 px-2">
-          <div className="flex-1 min-w-0 pl-2.5">
-            <h1 className="text-text-primary text-[20px] font-bold leading-tight truncate">Your Library</h1>
-            <p className="text-text-muted text-xs truncate">{librarySubtitle()}</p>
-          </div>
-          {appBarButton(
-            layout === 'grid' ? 'Show as list' : 'Show as grid',
-            layout === 'grid' ? <Rows3 size={19} /> : <LayoutGrid size={19} />,
-            () => setLayout(l => (l === 'grid' ? 'list' : 'grid')),
-          )}
-          {appBarButton('New playlist', <Plus size={21} />, () => setSheet({ kind: 'create' }))}
-        </div>
-
-        <div className="px-4 pt-2.5">
-          <div className="relative flex items-center">
-            <Search size={16} className="absolute left-3.5 text-text-muted pointer-events-none" />
-            <input
-              type="search"
-              value={libSearch}
-              onChange={e => setLibSearch(e.target.value)}
-              placeholder="Find a playlist"
-              enterKeyHint="search"
-              autoCorrect="off"
-              autoCapitalize="off"
-              spellCheck={false}
-              className="w-full h-11 bg-surface-overlay rounded-full pl-10 pr-10 text-[15px] text-text-primary placeholder:text-text-muted focus:outline-none focus:ring-1 focus:ring-accent/50 [&::-webkit-search-cancel-button]:hidden"
-            />
-            {libSearch && (
-              <button
-                onClick={() => setLibSearch('')}
-                className="absolute right-1 w-9 h-9 flex items-center justify-center rounded-full text-text-muted active:text-text-primary"
-                aria-label="Clear search"
-              ><X size={16} /></button>
+    <div className="relative flex-1 flex flex-col min-h-0">
+      <CompactBar title="Your Library" shown={libraryCollapsed} />
+      <div
+        ref={setLibraryScrollEl}
+        className="flex-1 overflow-y-auto overscroll-contain pb-dock"
+        // Room to scroll past the floating selection bar in select mode.
+        style={plSelectMode ? { paddingBottom: 'calc(var(--dock-h, 0px) + 8rem)' } : undefined}
+      >
+        <LargeTitle
+          title="Your Library"
+          subtitle={librarySubtitle()}
+          trailing={<>
+            {appBarButton(
+              layout === 'grid' ? 'Show as list' : 'Show as grid',
+              layout === 'grid' ? <Rows3 size={20} /> : <LayoutGrid size={20} />,
+              () => setLayout(l => (l === 'grid' ? 'list' : 'grid')),
             )}
-          </div>
-        </div>
-      </div>
+            {appBarButton('New playlist', <Plus size={22} />, () => setSheet({ kind: 'create' }))}
+          </>}
+        />
 
-      <div className="flex-1 overflow-y-auto overscroll-contain pb-6">
+        {/* Scrolls away with the title, as iOS's search fields do. */}
+        <div className="px-4 pt-1 pb-1">
+          <SearchField value={libSearch} onChange={setLibSearch} placeholder="Find in Library" />
+        </div>
+
         {libQuery ? (
           searchHits.length === 0
-            ? <p className="text-text-muted text-sm text-center py-16">No playlist matches “{libSearch}”</p>
+            ? <p className="text-text-muted text-subhead text-center py-16">No playlist matches “{libSearch}”</p>
             : <div className="pt-3">{cardContainer(searchHits)}</div>
         ) : (
           <>
             {/* Liked Songs is a playlist you never created and can't delete, so
                 it sits above the library proper rather than inside the grid
                 where it used to be indistinguishable from the rest. */}
-            <button
-              onClick={() => setShowLiked(true)}
-              className="w-full flex items-center gap-3 px-4 py-2.5 mt-1 active:bg-surface-overlay transition-colors text-left"
-            >
-              <div className="w-14 h-14 shrink-0 rounded-xl bg-gradient-to-br from-accent/60 to-accent/15 flex items-center justify-center">
-                <Heart size={24} className="text-accent" fill="currentColor" />
-              </div>
-              <div className="flex-1 min-w-0">
-                <p className="text-text-primary text-[15px] leading-snug truncate">Liked Songs</p>
-                <p className="text-text-muted text-xs truncate mt-0.5">
-                  {likedTrackIds.length} {likedTrackIds.length === 1 ? 'track' : 'tracks'}
-                </p>
-              </div>
-            </button>
+            <div className="h-[68px] mt-2">
+              <ListRow
+                onClick={() => setShowLiked(true)}
+                role="button"
+                tabIndex={0}
+                art={
+                  <div className="w-full h-full bg-gradient-to-br from-accent/70 to-accent/20 flex items-center justify-center">
+                    <Heart size={22} className="text-white" fill="currentColor" />
+                  </div>
+                }
+                title="Liked Songs"
+                subtitle={`${likedTrackIds.length} ${likedTrackIds.length === 1 ? 'track' : 'tracks'}`}
+                trailing={<ChevronRight size={18} strokeWidth={2.5} className="shrink-0 mr-2 text-text-muted opacity-60" />}
+              />
+            </div>
 
             {renderFolders(!account)}
 
@@ -1308,20 +1295,20 @@ export default function PlaylistsView(): JSX.Element {
             )}
 
             {!account && (
-              <div className="flex flex-col items-center text-center gap-3 px-8 py-8 mt-4 border-t border-[var(--border)]">
-                <p className="text-text-muted text-sm max-w-xs">
+              <div className="flex flex-col items-center text-center gap-3 px-8 py-8 mt-4">
+                <p className="text-text-secondary text-subhead max-w-xs">
                   Log in to create synced playlists that follow you to every device.
                 </p>
                 <button
                   onClick={() => setShowUserAuth(true)}
-                  className="h-11 px-6 rounded-full bg-accent/15 text-accent text-[15px] font-semibold active:bg-accent/25"
-                >Log in</button>
+                  className="h-11 px-6 rounded-full bg-[var(--fill)] text-accent text-headline active:bg-[var(--fill-strong)] transition-colors"
+                >Log In</button>
               </div>
             )}
           </>
         )}
       </div>
-    </>
+    </div>
   )
 
   // ── Open playlist ─────────────────────────────────────────────────────────
@@ -1363,31 +1350,38 @@ export default function PlaylistsView(): JSX.Element {
             it out mid-long-press moves the list under the finger; the selection
             controls live in the bottom bar instead. */}
         <div
-          className="relative shrink-0 flex items-center gap-1 px-2"
+          className="relative shrink-0 flex items-center gap-2 px-3"
           style={{ paddingTop: ownsTopInset ? 'max(0.25rem, var(--top-inset))' : '0.25rem' }}
         >
-          <button
-            onClick={() => (reorderMode ? setReorderMode(false) : goBackToLibrary())}
-            aria-label="Back"
-            className={`w-11 h-11 shrink-0 flex items-center justify-center rounded-full active:bg-surface-overlay ${heroLight ? 'text-white' : 'text-text-primary'}`}
-          ><ArrowLeft size={20} /></button>
-          <span className={`flex-1 min-w-0 text-[15px] font-semibold truncate ${heroLight ? 'text-white' : 'text-text-primary'}`}>
+          {appBarButton('Back', <ChevronLeft size={24} strokeWidth={2.25} className="-ml-0.5" />, () => (reorderMode ? setReorderMode(false) : goBackToLibrary()), false, heroLight)}
+          {/* The name joins the bar only once the hero's own title has
+              scrolled under it, as an iOS detail screen's does. */}
+          <span
+            className={`flex-1 min-w-0 px-1 text-headline text-center truncate transition-opacity duration-200 ${heroLight ? 'text-white' : 'text-text-primary'}`}
+            style={{ opacity: reorderMode || detailTitleUnder ? 1 : 0 }}
+          >
             {reorderMode ? 'Reorder' : (name ?? '')}
           </span>
           {reorderMode ? (
             <button
               onClick={() => setReorderMode(false)}
-              className="px-4 h-10 rounded-full text-accent text-[14px] font-semibold active:bg-accent/10"
+              className="glass-button px-4 h-11 rounded-full text-accent text-headline active:opacity-60 transition-opacity"
             >Done</button>
           ) : (
             <>
-              {tracks.length > 0 && appBarButton('Search tracks', <Search size={19} />, () => setSearchOpen(v => !v), searchOpen, heroLight)}
-              {appBarButton('Playlist options', <MoreVertical size={19} />, () => setSheet({ kind: 'detail' }), false, heroLight)}
+              {tracks.length > 0 && appBarButton('Search tracks', <Search size={20} />, () => setSearchOpen(v => !v), searchOpen, heroLight)}
+              {appBarButton('Playlist options', <MoreHorizontal size={20} />, () => setSheet({ kind: 'detail' }), false, heroLight)}
             </>
           )}
         </div>
 
-        <div ref={setListScrollEl} className="relative flex-1 overflow-y-auto overscroll-contain pb-6">
+        <div
+          ref={setListScrollEl}
+          className="relative flex-1 overflow-y-auto overscroll-contain pb-dock"
+          // The selection bar floats over the end of the list in select mode
+          // (see the track selection bar below); leave room to scroll past it.
+          style={selectMode ? { paddingBottom: 'calc(var(--dock-h, 0px) + 8rem)' } : undefined}
+        >
           {/* Hidden file input (API cover upload) */}
           <input
             ref={coverInputRef}
@@ -1402,8 +1396,8 @@ export default function PlaylistsView(): JSX.Element {
               width for a title that then wrapped anyway. Light-on-dark text
               only when there's art to sit on. ── */}
           <div className="relative px-4 pb-4 overflow-hidden">
-            <div className="relative flex flex-col items-center text-center pt-1 pb-4">
-              <div className="relative w-44 h-44 rounded-2xl overflow-hidden shadow-2xl bg-surface-overlay">
+            <div className="relative flex flex-col items-center text-center pt-2 pb-5">
+              <div className="relative w-60 h-60 rounded-xl overflow-hidden shadow-2xl bg-surface-overlay">
                 {isLocal ? (
                   localCover
                     ? <img src={localCover} alt="" className="w-full h-full object-cover" />
@@ -1426,10 +1420,10 @@ export default function PlaylistsView(): JSX.Element {
                 )}
               </div>
 
-              <h1 className={`text-[22px] font-bold leading-tight mt-4 line-clamp-2 ${heroLight ? 'text-white' : 'text-text-primary'}`}>
+              <h1 className={`text-title2 mt-4 line-clamp-2 ${heroLight ? 'text-white' : 'text-text-primary'}`}>
                 {name || <span className="bg-white/10 rounded animate-pulse text-transparent select-none">Loading…</span>}
               </h1>
-              <p className={`text-xs mt-1.5 ${heroLight ? 'text-white/70' : 'text-text-muted'}`}>
+              <p className={`text-subhead mt-0.5 ${heroLight ? 'text-white/70' : 'text-text-secondary'}`}>
                 {isLocal ? 'This device' : (isSharedView ? 'Shared playlist' : account?.discord_username ?? 'Playlist')}
                 {!loading && <> · {tracks.length} {tracks.length === 1 ? 'track' : 'tracks'}{durLabel ? ` · ${durLabel}` : ''}</>}
                 {loading && ' · loading…'}
@@ -1443,7 +1437,7 @@ export default function PlaylistsView(): JSX.Element {
                     title: 'Description', initial: detail.description ?? '', multiline: true, allowEmpty: true,
                     placeholder: 'Add a description…', submitLabel: 'Save', onSubmit: saveDescription,
                   })}
-                  className={`text-xs mt-2 line-clamp-3 px-2 ${heroLight ? 'text-white/70' : 'text-text-muted'}`}
+                  className={`text-footnote mt-2 line-clamp-3 px-2 ${heroLight ? 'text-white/70' : 'text-text-secondary'}`}
                 >{detail.description}</button>
               ) : !isSharedView && detail ? (
                 <button
@@ -1451,8 +1445,8 @@ export default function PlaylistsView(): JSX.Element {
                     title: 'Description', initial: '', multiline: true, allowEmpty: true,
                     placeholder: 'Add a description…', submitLabel: 'Save', onSubmit: saveDescription,
                   })}
-                  className={`text-xs mt-2 italic ${heroLight ? 'text-white/50' : 'text-text-muted'}`}
-                >+ Add description</button>
+                  className={`text-footnote mt-2 ${heroLight ? 'text-white/60' : 'text-accent'}`}
+                >Add Description</button>
               ) : null)}
             </div>
 
@@ -1471,25 +1465,18 @@ export default function PlaylistsView(): JSX.Element {
                 app bar, so it reads as part of this playlist's controls
                 instead of a page-level search. */}
             {searchOpen && !reorderMode && (
-              <div className="relative mt-3">
-                <Search size={16} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-text-muted pointer-events-none" />
-                <input
-                  ref={searchInputRef}
-                  type="search"
+              <div className="flex items-center gap-3 mt-4">
+                <SearchField
+                  className="flex-1 min-w-0"
+                  inputRef={searchInputRef}
                   value={search}
-                  onChange={e => setSearch(e.target.value)}
+                  onChange={setSearch}
                   placeholder={`Search ${tracks.length} tracks`}
-                  enterKeyHint="search"
-                  autoCorrect="off"
-                  autoCapitalize="off"
-                  spellCheck={false}
-                  className="w-full h-11 bg-surface-overlay rounded-full pl-10 pr-10 text-[15px] text-text-primary placeholder:text-text-muted focus:outline-none focus:ring-1 focus:ring-accent/50 [&::-webkit-search-cancel-button]:hidden"
                 />
                 <button
                   onClick={() => { setSearch(''); setSearchOpen(false) }}
-                  className="absolute right-1 top-1/2 -translate-y-1/2 w-9 h-9 flex items-center justify-center rounded-full text-text-muted active:text-text-primary"
-                  aria-label="Close search"
-                ><X size={16} /></button>
+                  className={`shrink-0 text-body active:opacity-60 transition-opacity ${heroLight ? 'text-white' : 'text-accent'}`}
+                >Cancel</button>
               </div>
             )}
 
@@ -1509,8 +1496,8 @@ export default function PlaylistsView(): JSX.Element {
                   })
                 }}
                 title={isFollowingCurrent ? 'Unfollow - stop showing this in your Playlists' : 'Follow - always shows the owner\'s current tracks, kept on this device only'}
-                className={`w-full h-12 mt-2 flex items-center justify-center gap-2 rounded-full text-[15px] font-semibold transition-colors ${
-                  isFollowingCurrent ? 'bg-accent/15 text-accent' : 'bg-surface-raised text-text-primary active:bg-surface-overlay'
+                className={`w-full h-12 mt-3 flex items-center justify-center gap-2 rounded-full text-headline transition-colors ${
+                  isFollowingCurrent ? 'bg-accent/15 text-accent' : 'bg-[var(--fill)] text-text-primary active:bg-[var(--fill-strong)]'
                 }`}
               >
                 {isFollowingCurrent ? <Check size={17} /> : <Rss size={17} />}
@@ -1521,7 +1508,7 @@ export default function PlaylistsView(): JSX.Element {
               <button
                 onClick={handleImportPlaylist}
                 disabled={importState === 'loading' || importState === 'done'}
-                className={`w-full h-12 mt-2 flex items-center justify-center gap-2 rounded-full text-[15px] font-semibold transition-colors disabled:opacity-70 ${
+                className={`w-full h-12 mt-3 flex items-center justify-center gap-2 rounded-full text-headline transition-colors disabled:opacity-70 ${
                   importState === 'done' ? 'bg-accent/15 text-accent'
                     : importState === 'error' ? 'bg-red-500/15 text-red-400'
                       : 'bg-accent text-white'
@@ -1571,7 +1558,7 @@ export default function PlaylistsView(): JSX.Element {
             ) : compactRows.length === 0 ? (
               <p className="text-text-muted text-sm text-center py-10">No tracks match “{search}”</p>
             ) : (
-              <div className="px-2">
+              <div>
                 {compactRows.map(({ lead, unit }) => {
                   const hasVersions = unit.versions.length > 1
                   const open = hasVersions && expandedGroups.has(unit.groupId!)
@@ -1610,7 +1597,7 @@ export default function PlaylistsView(): JSX.Element {
             // Windowed rows - absolutely positioned at index * trackRowH inside
             // a container sized to the full list, so only the visible slice is
             // mounted (see useVirtualWindowEl).
-            <div ref={setListContentEl} className="px-2" style={{ height: rowsTotalHeight, position: 'relative' }}>
+            <div ref={setListContentEl} style={{ height: rowsTotalHeight, position: 'relative' }}>
               {displayTracks.slice(rowStart, rowEnd).map((track, sliceIdx) => {
                 const idx = rowStart + sliceIdx
                 return (
@@ -1651,26 +1638,25 @@ export default function PlaylistsView(): JSX.Element {
       <div className="relative flex-1 flex flex-col min-h-0 overflow-hidden">
         {art && playlistHeroEnabled && <HeroBackdrop src={art} isDarkSkin={isDarkSkin} />}
         <div
-          className="relative shrink-0 flex items-center gap-1 px-2"
+          className="relative shrink-0 flex items-center gap-2 px-3"
           style={{ paddingTop: ownsTopInset ? 'max(0.25rem, var(--top-inset))' : '0.25rem' }}
         >
-          <button
-            onClick={() => setGuestSelectedId(null)}
-            aria-label="Back"
-            className={`w-11 h-11 shrink-0 flex items-center justify-center rounded-full active:bg-surface-overlay ${heroLight ? 'text-white' : 'text-text-primary'}`}
-          ><ArrowLeft size={20} /></button>
-          <span className={`flex-1 min-w-0 text-[15px] font-semibold truncate ${heroLight ? 'text-white' : 'text-text-primary'}`}>{gp.name}</span>
-          {appBarButton('Playlist options', <MoreVertical size={19} />, () => setSheet({ kind: 'guest', id: gp.id }), false, heroLight)}
+          {appBarButton('Back', <ChevronLeft size={24} strokeWidth={2.25} className="-ml-0.5" />, () => setGuestSelectedId(null), false, heroLight)}
+          <span
+            className={`flex-1 min-w-0 px-1 text-headline text-center truncate transition-opacity duration-200 ${heroLight ? 'text-white' : 'text-text-primary'}`}
+            style={{ opacity: guestTitleUnder ? 1 : 0 }}
+          >{gp.name}</span>
+          {appBarButton('Playlist options', <MoreHorizontal size={20} />, () => setSheet({ kind: 'guest', id: gp.id }), false, heroLight)}
         </div>
 
-        <div className="relative flex-1 overflow-y-auto overscroll-contain pb-6">
+        <div ref={setGuestScrollEl} className="relative flex-1 overflow-y-auto overscroll-contain pb-dock">
           <div className="relative px-4 pb-4 overflow-hidden">
-            <div className="relative flex flex-col items-center text-center pt-1 pb-4">
-              <div className="w-44 h-44 rounded-2xl overflow-hidden shadow-2xl bg-surface-overlay">
+            <div className="relative flex flex-col items-center text-center pt-2 pb-5">
+              <div className="w-60 h-60 rounded-xl overflow-hidden shadow-2xl bg-surface-overlay">
                 <GuestPlaylistMosaic tracks={gp.tracks} className="w-full h-full" />
               </div>
-              <h1 className={`text-[22px] font-bold leading-tight mt-4 line-clamp-2 ${heroLight ? 'text-white' : 'text-text-primary'}`}>{gp.name}</h1>
-              <p className={`text-xs mt-1.5 ${heroLight ? 'text-white/70' : 'text-text-muted'}`}>
+              <h1 className={`text-title2 mt-4 line-clamp-2 ${heroLight ? 'text-white' : 'text-text-primary'}`}>{gp.name}</h1>
+              <p className={`text-subhead mt-0.5 ${heroLight ? 'text-white/70' : 'text-text-secondary'}`}>
                 Not signed in · {gp.tracks.length} {gp.tracks.length === 1 ? 'track' : 'tracks'}
               </p>
             </div>
@@ -1689,7 +1675,7 @@ export default function PlaylistsView(): JSX.Element {
               No songs yet - use a song’s “Add to playlist” menu to add one here.
             </p>
           ) : (
-            <div className="px-2">
+            <div>
               {gp.tracks.map(t => (
                 <div key={t.id} style={{ height: trackRowH }}>
                   <TrackRow
@@ -2113,8 +2099,8 @@ export default function PlaylistsView(): JSX.Element {
       {zipState !== 'idle' && (
         <div
           role="status"
-          className="fixed left-1/2 -translate-x-1/2 z-50 flex items-center gap-2 px-4 py-2 rounded-full bg-surface-overlay border border-[var(--border)] shadow-2xl text-[13px] text-text-primary"
-          style={{ bottom: 'calc(var(--bottom-inset, 0px) + 5rem)' }}
+          className="fixed left-1/2 -translate-x-1/2 z-50 flex items-center gap-2 px-4 py-2.5 rounded-full glass text-footnote font-medium text-text-primary"
+          style={{ bottom: 'calc(var(--dock-h, 0px) + 0.5rem)' }}
         >
           {zipState === 'loading' ? <Loader2 size={15} className="animate-spin" />
             : zipState === 'done' ? <Check size={15} /> : <X size={15} />}
@@ -2126,34 +2112,29 @@ export default function PlaylistsView(): JSX.Element {
         </div>
       )}
       {showLiked ? (
-        <>
-          <div className="shrink-0 flex items-center gap-1 px-2">
-            <button
-              onClick={() => setShowLiked(false)}
-              aria-label="Back"
-              className="w-11 h-11 shrink-0 flex items-center justify-center rounded-full text-text-primary active:bg-surface-overlay"
-            ><ArrowLeft size={20} /></button>
-            <span className="flex-1 min-w-0 text-text-primary text-[15px] font-semibold truncate">Liked Songs</span>
-          </div>
-          <LikedSongsView />
-        </>
+        // LikedSongsView brings its own back button and title; it only needs
+        // pointing back here, and the status-bar strip this view draws under
+        // (App's MOBILE_BLEED_TOP) kept clear.
+        <div className="flex-1 flex flex-col min-h-0" style={{ paddingTop: 'var(--top-inset, 0px)' }}>
+          <LikedSongsView onBack={() => setShowLiked(false)} />
+        </div>
       ) : guestSelectedId !== null ? renderGuestDetail()
         : inDetail ? renderDetail()
           : renderLibrary()}
 
       {/* ── Track selection bar ── */}
       {selectMode && inDetail && (
-        <div className="shrink-0 border-t border-[var(--border)]">
+        <div className="fixed left-3 right-3 z-20 glass rounded-[28px] overflow-hidden" style={{ bottom: 'var(--dock-h, 0px)' }}>
           <div className="flex items-center gap-1 pl-1 pr-2 pt-1">
             <button
               onClick={exitSelectMode}
-              className="w-10 h-10 flex items-center justify-center rounded-full text-text-primary active:bg-surface-overlay"
+              className="w-10 h-10 flex items-center justify-center rounded-full text-text-primary active:bg-[var(--fill)]"
               aria-label="Cancel selection"
             ><X size={19} /></button>
-            <span className="flex-1 min-w-0 text-text-primary font-semibold text-[15px] truncate">{selectedTracks.size} selected</span>
+            <span className="flex-1 min-w-0 text-text-primary text-headline truncate">{selectedTracks.size} selected</span>
             <button
               onClick={() => setSelectedTracks(new Map(displayTracks.map(t => [t.id, t])))}
-              className="px-3 h-10 rounded-full text-accent text-[13px] font-semibold active:bg-accent/10"
+              className="px-3 h-10 rounded-full text-accent text-subhead font-semibold active:opacity-60"
             >Select all</button>
           </div>
           <div className="flex items-stretch px-2 py-1.5">
@@ -2161,18 +2142,18 @@ export default function PlaylistsView(): JSX.Element {
               { key: 'queue', icon: ListPlus, label: 'Queue', onClick: bulkAddToQueue },
               { key: 'add', icon: Plus, label: 'Add to', onClick: () => setSheet({ kind: 'pick', for: 'selectedTracks' }) },
               { key: 'remove', icon: Trash2, label: 'Remove', hidden: isSharedView, onClick: bulkRemove },
-              { key: 'more', icon: MoreVertical, label: 'More', onClick: () => setSheet({ kind: 'bulkTracks' }) },
+              { key: 'more', icon: MoreHorizontal, label: 'More', onClick: () => setSheet({ kind: 'bulkTracks' }) },
             ] as const).filter(a => !('hidden' in a && a.hidden)).map(action => (
               <button
                 key={action.key}
                 onClick={action.onClick}
                 disabled={selectedTracks.size === 0 || (action.key === 'remove' && bulkRemoving)}
-                className="flex-1 flex flex-col items-center justify-center gap-1 py-2 rounded-2xl text-text-primary disabled:opacity-35 active:bg-surface-overlay"
+                className="flex-1 flex flex-col items-center justify-center gap-1 py-2 rounded-2xl text-text-primary disabled:opacity-35 active:bg-[var(--fill)]"
               >
                 {action.key === 'remove' && bulkRemoving
                   ? <Loader2 size={20} className="animate-spin" />
                   : <action.icon size={20} />}
-                <span className="text-[11px] font-medium">{action.label}</span>
+                <span className="text-caption2 font-medium">{action.label}</span>
               </button>
             ))}
           </div>
@@ -2181,45 +2162,45 @@ export default function PlaylistsView(): JSX.Element {
 
       {/* ── Playlist selection bar ── */}
       {plSelectMode && !inDetail && !showLiked && (
-        <div className="shrink-0 border-t border-[var(--border)]">
+        <div className="fixed left-3 right-3 z-20 glass rounded-[28px] overflow-hidden" style={{ bottom: 'var(--dock-h, 0px)' }}>
           <div className="flex items-center gap-1 pl-1 pr-2 pt-1">
             <button
               onClick={exitPlaylistSelectMode}
-              className="w-10 h-10 flex items-center justify-center rounded-full text-text-primary active:bg-surface-overlay"
+              className="w-10 h-10 flex items-center justify-center rounded-full text-text-primary active:bg-[var(--fill)]"
               aria-label="Cancel selection"
             ><X size={19} /></button>
-            <span className="flex-1 min-w-0 text-text-primary font-semibold text-[15px] truncate">{selectedPlaylistKeys.size} selected</span>
+            <span className="flex-1 min-w-0 text-text-primary text-headline truncate">{selectedPlaylistKeys.size} selected</span>
             <button
               onClick={() => setSelectedPlaylistKeys(new Set([
                 ...playlists.map(p => `api:${p.id}`),
                 ...localPlaylists.map(lp => `local:${lp.id}`),
               ]))}
-              className="px-3 h-10 rounded-full text-accent text-[13px] font-semibold active:bg-accent/10"
+              className="px-3 h-10 rounded-full text-accent text-subhead font-semibold active:opacity-60"
             >Select all</button>
           </div>
           <div className="flex items-stretch px-2 py-1.5">
             <button
               onClick={() => setSheet({ kind: 'pick', for: 'selectedPlaylists' })}
               disabled={!selectedPlaylistKind || bulkAddingPlaylists}
-              className="flex-1 flex flex-col items-center justify-center gap-1 py-2 rounded-2xl text-text-primary disabled:opacity-35 active:bg-surface-overlay"
+              className="flex-1 flex flex-col items-center justify-center gap-1 py-2 rounded-2xl text-text-primary disabled:opacity-35 active:bg-[var(--fill)]"
             >
               {bulkAddingPlaylists ? <Loader2 size={20} className="animate-spin" /> : <FolderInput size={20} />}
-              <span className="text-[11px] font-medium">Merge into</span>
+              <span className="text-caption2 font-medium">Merge into</span>
             </button>
             <button
               onClick={() => setSheet({ kind: 'moveToFolder', keys: [...selectedPlaylistKeys] })}
-              className="flex-1 flex flex-col items-center justify-center gap-1 py-2 rounded-2xl text-text-primary active:bg-surface-overlay"
+              className="flex-1 flex flex-col items-center justify-center gap-1 py-2 rounded-2xl text-text-primary active:bg-[var(--fill)]"
             >
               <Folder size={20} />
-              <span className="text-[11px] font-medium">Folder</span>
+              <span className="text-caption2 font-medium">Folder</span>
             </button>
             <button
               onClick={bulkDeletePlaylists}
               disabled={bulkDeletingPlaylists}
-              className="flex-1 flex flex-col items-center justify-center gap-1 py-2 rounded-2xl text-red-400 disabled:opacity-35 active:bg-surface-overlay"
+              className="flex-1 flex flex-col items-center justify-center gap-1 py-2 rounded-2xl text-red-500 disabled:opacity-35 active:bg-[var(--fill)]"
             >
               {bulkDeletingPlaylists ? <Loader2 size={20} className="animate-spin" /> : <Trash2 size={20} />}
-              <span className="text-[11px] font-medium">Delete</span>
+              <span className="text-caption2 font-medium">Delete</span>
             </button>
           </div>
         </div>

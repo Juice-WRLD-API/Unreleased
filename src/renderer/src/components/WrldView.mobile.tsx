@@ -337,24 +337,30 @@ export default function WrldView(): JSX.Element {
             "nudge" vertically while dragging. */}
         <div className="flex-1 min-h-0 flex flex-col touch-none" {...dragHandlers}>
         {/* ── Header ─────────────────────────────────────────────────────── */}
+        {/* iOS's grabber in place of a chevron: the sheet already drags down
+            from anywhere up here, and the grabber says so. Still a button -
+            a tap (or a screen reader) collapses the player too. It sits in
+            the breathing room --top-inset leaves under the status bar, so
+            the header row below keeps its old position. */}
         <div
-          className="shrink-0 flex items-center gap-1 px-2"
-          style={{ paddingTop: ownsTopInset ? 'max(0.25rem, var(--top-inset))' : '0.25rem' }}
+          className="shrink-0 flex justify-center"
+          style={{ paddingTop: ownsTopInset ? 'max(0.25rem, calc(var(--top-inset) - 1rem))' : '0.25rem' }}
         >
-          {/* Three equal flex-1 columns, not a fixed-width button flanking a
-              flex-1 middle - SongMenu self-hides when there's nothing to act
-              on, and a fixed-width left button would then push the "centered"
-              pill off-center. Equal columns keep it centered regardless of
-              what the other two hold. The like heart lives by the title
+          <button
+            onClick={dismiss}
+            aria-label="Collapse player"
+            title="Collapse player"
+            className="w-20 h-4 flex items-center justify-center"
+          >
+            <span className="w-9 h-[5px] rounded-full" style={{ background: txtTer }} />
+          </button>
+        </div>
+        <div className="shrink-0 flex items-center gap-1 px-2">
+          {/* Three equal flex-1 columns, so the FM pill stays centered
+              whether or not SongMenu (which self-hides when there's nothing
+              to act on) shows on the right. The like heart lives by the title
               below, where people look for it, not up here. */}
-          <div className="flex-1 flex justify-start">
-            <button
-              onClick={dismiss}
-              aria-label="Collapse player"
-              className="w-11 h-11 shrink-0 flex items-center justify-center rounded-full active:scale-90 transition-transform"
-              style={{ color: txtPri }}
-            ><ChevronDown size={22} /></button>
-          </div>
+          <div className="flex-1" />
 
           <div className="flex-1 flex justify-center min-w-0">
             <FmPill active={radioFmActive} live={radioFmIsLive} disabled={fmDisabled} onClick={toggleFm} light={textIsDark} />
@@ -375,7 +381,7 @@ export default function WrldView(): JSX.Element {
         <div className="flex-1 min-h-0 flex flex-col items-center px-8 py-2 gap-2">
           <div ref={coverRowRef} className="flex-1 min-h-0 w-full flex items-center justify-center">
             <div
-              className="rounded-3xl overflow-hidden shadow-[0_28px_70px_rgba(0,0,0,0.65)] touch-none"
+              className="rounded-2xl overflow-hidden shadow-[0_28px_70px_rgba(0,0,0,0.65)] touch-none"
               style={{
                 width: coverSize, height: coverSize,
                 transform: isPlaying || radioFmActive ? 'scale(1)' : 'scale(0.92)',
@@ -429,10 +435,10 @@ export default function WrldView(): JSX.Element {
               player's does. */}
           <div className="flex items-center gap-3">
             <TrackSwap swapKey={swapKey} order={swapOrder} className="flex-1 min-w-0">
-              <p className="font-bold text-[22px] leading-tight tracking-tight truncate" style={{ color: txtPri }}>
-                {displayTitle || (radioFmActive ? 'Tuning in…' : 'Not playing')}
+              <p className="text-title2 truncate" style={{ color: txtPri }}>
+                {displayTitle || (radioFmActive ? 'Tuning in…' : 'Not Playing')}
               </p>
-              <p className="text-[15px] mt-1 truncate" style={{ color: txtSec }}>
+              <p className="text-headline font-normal mt-0.5 truncate" style={{ color: txtSec }}>
                 {[displayArtist, displayAlbum].filter(Boolean).join(' · ') || ' '}
               </p>
             </TrackSwap>
@@ -479,33 +485,35 @@ export default function WrldView(): JSX.Element {
                 label={shuffle ? 'Shuffle on' : 'Shuffle off'}
                 txtPri={txtPri} txtSec={txtSec}
               ><Shuffle size={18} /></ModeToggle>
+              {/* Plain glyphs, as Apple Music's are - no filled disc behind
+                  play. The hit areas stay large. */}
               <button
                 onClick={() => runPlayerCommand('previous')}
                 disabled={noTrack}
                 aria-label="Previous"
-                className="w-12 h-12 flex items-center justify-center rounded-full active:scale-90 transition-transform"
+                className="w-14 h-14 flex items-center justify-center rounded-full active:scale-90 transition-transform"
                 style={{ color: txtPri }}
-              ><SkipBack size={26} fill="currentColor" /></button>
+              ><SkipBack size={34} fill="currentColor" strokeWidth={0} /></button>
               <button
                 onClick={() => setIsPlaying(!isPlaying)}
                 disabled={noTrack}
                 aria-label={isPlaying ? 'Pause' : 'Play'}
-                className="w-16 h-16 rounded-full flex items-center justify-center shadow-xl active:scale-95 transition-transform"
-                style={{ background: txtPri, color: textIsDark ? 'white' : 'black' }}
+                className="w-16 h-16 rounded-full flex items-center justify-center active:scale-90 transition-transform"
+                style={{ color: txtPri }}
               >
                 <SwapIcon swapKey={isPlaying}>
                   {isPlaying
-                    ? <Pause size={28} fill="currentColor" />
-                    : <Play size={28} fill="currentColor" className="ml-0.5" />}
+                    ? <Pause size={44} fill="currentColor" strokeWidth={0} />
+                    : <Play size={44} fill="currentColor" strokeWidth={0} className="ml-1" />}
                 </SwapIcon>
               </button>
               <button
                 onClick={() => runPlayerCommand('next')}
                 disabled={noTrack}
                 aria-label="Next"
-                className="w-12 h-12 flex items-center justify-center rounded-full active:scale-90 transition-transform"
+                className="w-14 h-14 flex items-center justify-center rounded-full active:scale-90 transition-transform"
                 style={{ color: txtPri }}
-              ><SkipFwd size={26} fill="currentColor" /></button>
+              ><SkipFwd size={34} fill="currentColor" strokeWidth={0} /></button>
               <ModeToggle
                 on={repeat !== 'none'}
                 onClick={toggleRepeat}
@@ -522,9 +530,9 @@ export default function WrldView(): JSX.Element {
 
           {/* Everything that used to occupy a second column now hangs off
               these - each opens a sheet over the player rather than replacing
-              it, so what's playing never leaves the screen. Icon-over-label
-              and sharing the row evenly: as text pills, four of them (Lyrics,
-              Queue, Versions, EQ) were wider than a 360px phone. */}
+              it, so what's playing never leaves the screen. Icons only, like
+              the row under Apple Music's player; each keeps its name as its
+              accessible label and tooltip. */}
           <div className="-mx-2 flex items-stretch">
             <ActionChip icon={Mic2} label="Lyrics" onClick={() => setLyricsOpen(true)} light={textIsDark} />
             {radioFmActive
@@ -810,11 +818,13 @@ function ActionChip({ icon: Icon, label, onClick, active, light }: {
   return (
     <button
       onClick={onClick}
-      className="relative flex-1 min-w-0 h-14 flex flex-col items-center justify-center gap-1 active:scale-95 transition-transform"
+      aria-label={label}
+      title={label}
+      aria-pressed={active}
+      className="relative flex-1 min-w-0 h-12 flex items-center justify-center active:scale-90 transition-transform"
       style={{ color: fg }}
     >
-      <Icon size={20} />
-      <span className="max-w-full px-1 text-[11px] font-semibold leading-none truncate">{label}</span>
+      <Icon size={22} />
       <OnDot on={!!active} color={fg} />
     </button>
   )
@@ -1160,7 +1170,7 @@ function QueueSheet({ open, onClose }: { open: boolean; onClose: () => void }): 
 
   useEffect(() => {
     if (!open) return
-    dimThemeColorMeta(0.5)
+    dimThemeColorMeta(0.4)
     return () => syncThemeColorMeta()
   }, [open])
 
@@ -1180,39 +1190,41 @@ function QueueSheet({ open, onClose }: { open: boolean; onClose: () => void }): 
   return createPortal(
     <>
       <div
-        className={`fixed inset-0 z-[80] bg-black/50 ${closing ? 'animate-scrim-out' : open ? 'animate-scrim-in' : ''}`}
+        className={`fixed inset-0 z-[80] bg-black/40 ${closing ? 'animate-scrim-out' : open ? 'animate-scrim-in' : ''}`}
         style={showing ? undefined : { display: 'none' }}
         onClick={requestClose}
         onContextMenu={(e) => { e.preventDefault(); requestClose() }}
       />
       <div
-        className={`fixed z-[81] left-0 right-0 bottom-0 flex flex-col max-h-[82svh] bg-surface rounded-t-[22px] border-t border-[var(--border)] shadow-2xl ${
+        className={`fixed z-[81] inset-x-2 bottom-2 flex flex-col max-h-[82svh] glass-thick rounded-[32px] overflow-hidden ${
           closing ? 'animate-sheet-out' : entered ? '' : open ? 'animate-sheet-in' : ''
         }`}
         style={{ ...dragStyle, ...(showing ? {} : { display: 'none' }) }}
         onAnimationEnd={(e) => { if (e.target === e.currentTarget) setEntered(true) }}
       >
-        <div className="shrink-0 pt-3 pb-1 touch-none" {...dragHandlers}>
-          <div className="mx-auto w-9 h-1 rounded-full bg-[var(--text-muted)] opacity-40" />
-          <h3 className="px-5 pt-3 text-text-primary font-semibold text-[15px]">Playing next</h3>
+        <div className="shrink-0 pt-2 pb-1 touch-none" {...dragHandlers}>
+          <div className="mx-auto w-9 h-[5px] rounded-full bg-[var(--fill-strong)]" />
+          <h3 className="px-5 pt-2.5 text-headline text-text-primary">Playing Next</h3>
           <div className="flex items-center gap-2 px-5 pt-2">
             {shuffle && upcoming.length > 0 && (
               <button
                 onClick={reshuffleQueue}
-                className="h-8 px-3 rounded-full text-xs font-semibold bg-surface-overlay text-text-secondary flex items-center gap-1.5"
+                className="h-8 px-3 rounded-full text-footnote font-semibold bg-[var(--fill)] text-text-primary flex items-center gap-1.5 active:bg-[var(--fill-strong)] transition-colors"
               ><RefreshCw size={13} /> Reshuffle</button>
             )}
             {upcoming.length > 0 && (
               <button
                 onClick={clearQueue}
-                className="h-8 px-3 rounded-full text-xs font-semibold bg-surface-overlay text-red-400 flex items-center gap-1.5"
+                className="h-8 px-3 rounded-full text-footnote font-semibold bg-[var(--fill)] text-red-500 flex items-center gap-1.5 active:bg-[var(--fill-strong)] transition-colors"
               ><Trash2 size={13} /> Clear</button>
             )}
           </div>
         </div>
         <div
           className="overflow-y-auto overscroll-contain py-1"
-          style={{ paddingBottom: 'calc(env(safe-area-inset-bottom, 0px) + 8px)' }}
+          // Floats 8px off the bottom edge, like the shared Sheet - only the
+          // home-indicator inset past that needs clearing.
+          style={{ paddingBottom: 'calc(max(env(safe-area-inset-bottom, 0px) - 0.5rem, 0px) + 0.5rem)' }}
         >
       {/* History - during radio the queue holds *only* played history, so
           without this the sheet looks empty in radio mode. */}
@@ -1422,7 +1434,7 @@ function QueueRow({ track, active, playing, dragging, anyDragging, rowStyle, onD
         onTouchEnd={handleTouchEnd}
         onTouchCancel={handleTouchEnd}
         className={`flex items-center gap-3 px-5 py-2 transition-colors ${
-          active ? 'bg-accent/10' : dragging ? 'bg-white/10 shadow-xl rounded-xl' : onPlay ? 'active:bg-surface-overlay' : ''
+          active ? 'bg-accent/10' : dragging ? 'bg-white/10 shadow-xl rounded-xl' : onPlay ? 'active:bg-[var(--fill)]' : ''
         }`}
         style={{
           transform: dragX ? `translateX(${dragX}px)` : undefined,
@@ -1553,12 +1565,12 @@ const FmProgressBar = memo(function FmProgressBar({ txtPri, txtSec, trackBg }: {
 
   return (
     <div className="w-full flex flex-col gap-1.5 select-none">
-      <div className="relative h-1.5 rounded-full" style={{ background: trackBg }}>
-        <div className="h-full rounded-full" style={{ width: `${pct}%`, background: txtPri }} />
+      <div className="relative h-1 rounded-full overflow-hidden" style={{ background: trackBg }}>
+        <div className="h-full" style={{ width: `${pct}%`, background: txtPri }} />
       </div>
       <div className="flex justify-between">
-        <span className="text-[11px] tabular-nums" style={{ color: txtSec }}>{formatDuration(elapsedMs / 1000)}</span>
-        <span className="text-[11px] tabular-nums" style={{ color: txtSec }}>{durationMs > 0 ? formatDuration(durationMs / 1000) : '-∞'}</span>
+        <span className="text-caption2 font-medium tabular-nums" style={{ color: txtSec }}>{formatDuration(elapsedMs / 1000)}</span>
+        <span className="text-caption2 font-medium tabular-nums" style={{ color: txtSec }}>{durationMs > 0 ? formatDuration(durationMs / 1000) : '-∞'}</span>
       </div>
     </div>
   )
@@ -1587,7 +1599,7 @@ const ProgressBar = memo(function ProgressBar({ txtPri, txtSec, trackBg }: { txt
     <div className="w-full flex flex-col gap-1.5 select-none">
       <div
         ref={barRef}
-        // The hit area is 24px tall so it's grabbable; only the inner 6px
+        // The hit area is 24px tall so it's grabbable; only the inner 4px
         // paints. touch-none stops the browser claiming the drag as a scroll,
         // which is what used to make seeking do nothing here.
         className="relative h-6 flex items-center touch-none"
@@ -1610,17 +1622,22 @@ const ProgressBar = memo(function ProgressBar({ txtPri, txtSec, trackBg }: { txt
           document.addEventListener('touchend', onEnd)
         }}
       >
-        <div className="w-full h-1.5 rounded-full" style={{ background: trackBg }}>
-          <div className="h-full rounded-full" style={{ width: `${pct}%`, background: txtPri }} />
-        </div>
+        {/* Apple Music's scrubber: no thumb at rest, just a thin line that
+            swells under the finger (scaleY, so nothing reflows) and brightens
+            from its resting dim. */}
         <div
-          className="absolute w-3.5 h-3.5 rounded-full shadow pointer-events-none transition-transform"
-          style={{ left: `${pct}%`, transform: `translateX(-50%) scale(${dragPct !== null ? 1.35 : 1})`, background: txtPri }}
-        />
+          className="w-full h-1 rounded-full overflow-hidden transition-transform duration-200 motion-reduce:transition-none"
+          style={{ background: trackBg, transform: dragPct !== null ? 'scaleY(1.75)' : 'none' }}
+        >
+          <div
+            className="h-full transition-opacity duration-200"
+            style={{ width: `${pct}%`, background: txtPri, opacity: dragPct !== null ? 1 : 0.75 }}
+          />
+        </div>
       </div>
       <div className="flex justify-between">
-        <span className="text-[11px] tabular-nums" style={{ color: txtSec }}>{formatDuration(displayTime)}</span>
-        <span className="text-[11px] tabular-nums" style={{ color: txtSec }}>{duration > 0 ? `-${formatDuration(remaining)}` : '-∞'}</span>
+        <span className="text-caption2 font-medium tabular-nums" style={{ color: txtSec }}>{formatDuration(displayTime)}</span>
+        <span className="text-caption2 font-medium tabular-nums" style={{ color: txtSec }}>{duration > 0 ? `-${formatDuration(remaining)}` : '-∞'}</span>
       </div>
     </div>
   )
@@ -1685,8 +1702,8 @@ function LyricsScreen({
           style={{ color: txtPri }}
         ><ChevronDown size={22} /></button>
         <div className="flex-1 min-w-0 text-center">
-          <p className="text-[13px] font-semibold truncate" style={{ color: txtPri }}>{title || 'Lyrics'}</p>
-          {artist && <p className="text-[11px] truncate" style={{ color: txtTer }}>{artist}</p>}
+          <p className="text-subhead font-semibold truncate" style={{ color: txtPri }}>{title || 'Lyrics'}</p>
+          {artist && <p className="text-footnote truncate" style={{ color: txtSec }}>{artist}</p>}
         </div>
         {rawLyrics && (
           <button
@@ -1736,20 +1753,20 @@ function LyricsScreen({
           style={{ paddingBottom: 'max(1rem, env(safe-area-inset-bottom, 0px))' }}
         >
           <button onClick={() => runPlayerCommand('previous')} aria-label="Previous" className="w-12 h-12 flex items-center justify-center active:scale-90 transition-transform" style={{ color: txtPri }}>
-            <SkipBack size={24} fill="currentColor" />
+            <SkipBack size={28} fill="currentColor" strokeWidth={0} />
           </button>
           <button
             onClick={() => setIsPlaying(!isPlaying)}
             aria-label={isPlaying ? 'Pause' : 'Play'}
-            className="w-14 h-14 rounded-full flex items-center justify-center active:scale-95 transition-transform"
-            style={{ background: txtPri, color: textIsDark ? 'white' : 'black' }}
+            className="w-14 h-14 rounded-full flex items-center justify-center active:scale-90 transition-transform"
+            style={{ color: txtPri }}
           >
             <SwapIcon swapKey={isPlaying}>
-              {isPlaying ? <Pause size={24} fill="currentColor" /> : <Play size={24} fill="currentColor" className="ml-0.5" />}
+              {isPlaying ? <Pause size={36} fill="currentColor" strokeWidth={0} /> : <Play size={36} fill="currentColor" strokeWidth={0} className="ml-1" />}
             </SwapIcon>
           </button>
           <button onClick={() => runPlayerCommand('next')} aria-label="Next" className="w-12 h-12 flex items-center justify-center active:scale-90 transition-transform" style={{ color: txtPri }}>
-            <SkipFwd size={24} fill="currentColor" />
+            <SkipFwd size={28} fill="currentColor" strokeWidth={0} />
           </button>
         </div>
       )}

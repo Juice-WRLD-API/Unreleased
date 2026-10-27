@@ -12,7 +12,9 @@ import SongContextMenu, { SongContextMenuState } from './SongContextMenu'
 import { formatDuration } from '../lib/format'
 import { clickable } from '../lib/a11y'
 
-export default function LikedSongsView(): JSX.Element {
+/** `onBack` replaces the back button's default (the previous view) - for a
+ *  host that shows this inside one of its own screens, like mobile Library. */
+export default function LikedSongsView({ onBack }: { onBack?: () => void } = {}): JSX.Element {
   const { account, playTrack, playCollection, playNext, toggleLike, setShowUserAuth, setActiveView, previousView, setPendingEditorSongId, libraryTracks, likedTrackIds } = useStorePick('account', 'playTrack', 'playCollection', 'playNext', 'toggleLike', 'setShowUserAuth', 'setActiveView', 'previousView','setPendingEditorSongId', 'libraryTracks', 'likedTrackIds')
   const canEdit = useCanEdit()
   const [apiTracks, setApiTracks] = useState<Track[]>([])
@@ -89,10 +91,10 @@ export default function LikedSongsView(): JSX.Element {
 
   return (
     <>
-    <div className="flex-1 flex flex-col min-h-0 overflow-y-auto">
+    <div className="flex-1 flex flex-col min-h-0 overflow-y-auto pb-dock">
       <div className="px-5 pt-5 pb-8">
         <button
-          onClick={() => setActiveView(previousView && previousView !== 'liked' ? previousView : 'wrld')}
+          onClick={onBack ?? (() => setActiveView(previousView && previousView !== 'liked' ? previousView : 'wrld'))}
           title="Back"
           aria-label="Back"
           className="p-1 -ml-1 mb-3 rounded-lg text-text-muted hover:text-text-primary hover:bg-surface-overlay transition-colors"

@@ -23,7 +23,7 @@ export default function StatisticsPanelMobile({ onOpenEra }: { onOpenEra: (eraNa
 
   return (
     <div className="flex-1 flex flex-col min-h-0 overflow-hidden">
-      <div className="flex-1 min-h-0 overflow-y-auto overscroll-contain pt-3 pb-6">
+      <div className="flex-1 min-h-0 overflow-y-auto overscroll-contain pt-3 pb-dock">
         {loading ? (
           <div className="px-4 space-y-3">
             <div className="h-20 bg-surface-raised animate-pulse rounded-xl" />

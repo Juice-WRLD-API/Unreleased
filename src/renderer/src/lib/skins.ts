@@ -17,6 +17,8 @@ export type BuiltinSkinId =
   | 'mocha'
   | 'forest'
   | 'blossom'
+  | 'glass-dark'
+  | 'glass-light'
   | 'song'
 
 // eslint-disable-next-line @typescript-eslint/ban-types
@@ -262,6 +264,49 @@ export const SKINS: Skin[] = [
       '--text-muted': '#a17f8d',
       '--border': 'rgba(190, 24, 93, 0.12)',
       '--scrollbar': '#e3bfcd',
+    },
+  },
+  {
+    // iOS system colors: true black with the grouped grays for raised
+    // surfaces, and the music-app red accent. Pairs with the glass mobile
+    // chrome, where the black lets the frosted bars read most clearly.
+    id: 'glass-dark',
+    name: 'Glass Dark',
+    dark: true,
+    accent: '#fa2d48',
+    vars: {
+      '--surface': '#000000',
+      '--surface-raised': '#1c1c1e',
+      '--surface-overlay': '#2c2c2e',
+      '--surface-highest': '#3a3a3c',
+      '--sidebar': '#000000',
+      '--titlebar': '#000000',
+      '--text-primary': '#ffffff',
+      '--text-secondary': '#aeaeb2',
+      '--text-muted': '#8e8e93',
+      '--border': 'rgba(84, 84, 88, 0.6)',
+      '--scrollbar': '#3a3a3c',
+    },
+  },
+  {
+    // Light counterpart. Muted text is #6e6e73 rather than iOS's #8e8e93,
+    // which misses 4.5:1 on white at caption sizes.
+    id: 'glass-light',
+    name: 'Glass Light',
+    dark: false,
+    accent: '#fa2d48',
+    vars: {
+      '--surface': '#ffffff',
+      '--surface-raised': '#f2f2f7',
+      '--surface-overlay': '#e9e9eb',
+      '--surface-highest': '#d1d1d6',
+      '--sidebar': '#f2f2f7',
+      '--titlebar': '#f2f2f7',
+      '--text-primary': '#000000',
+      '--text-secondary': '#3c3c43',
+      '--text-muted': '#6e6e73',
+      '--border': 'rgba(60, 60, 67, 0.29)',
+      '--scrollbar': '#c7c7cc',
     },
   },
 ]

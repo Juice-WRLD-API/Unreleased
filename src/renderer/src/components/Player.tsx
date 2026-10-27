@@ -2115,25 +2115,94 @@ export default function Player(): JSX.Element {
       {/* Stays mounted on WRLD too: mobile WRLD is a sheet over the whole
           shell (see App.tsx), so this bar just sits underneath it, already in
           place when WRLD is dragged down - same as BottomNav. */}
-      {/* No safe-area-inset-bottom padding here: the BottomNav sits directly
-          below this bar and already reserves the home-indicator space for the
-          whole stack. Adding it here too (it reads ~0 in Safari, where the URL
-          bar occupies the inset, but the real ~34px once installed as a
-          standalone PWA) injected a dead gap between the player and the nav. */}
-      <div className="app-player md:hidden bg-surface border-t border-[var(--border)] shrink-0" onContextMenu={(e) => { e.preventDefault(); if (currentTrack) setShowContextMenu(v => !v) }}>
-        {/* Thin progress bar */}
+      {/* A floating glass capsule parked just above the nav bar, out of the
+          layout like the bar itself, so the page scrolls beneath both. Placed
+          off --nav-h (the bar's real height, never zeroed while WRLD covers
+          it), so it doesn't jump as WRLD's curtain drag reveals it. 56px in
+          px rather than rem: BottomNav reserves exactly that much room for it
+          (MINI_PLAYER_SLOT). Play/pause and next only, as plain glyphs -
+          shuffle, repeat and previous live on Now Playing. */}
+      <div
+        className="app-player md:hidden fixed left-4 right-4 z-20 h-[56px] glass rounded-full overflow-hidden"
+        style={{ bottom: 'calc(var(--nav-h, 0px) + 8px)' }}
+        onContextMenu={(e) => { e.preventDefault(); if (currentTrack) setShowContextMenu(v => !v) }}
+      >
+        {/* Track row - whole row opens WRLD, not just the cover; the
+            transport buttons stopPropagation so tapping them doesn't also
+            navigate. */}
+        <div className="flex items-center h-full pl-2 pr-1.5 gap-3" {...clickable(() => setActiveView('wrld'))}>
+          <div className="w-10 h-10 rounded-lg bg-[var(--fill)] shrink-0 overflow-hidden">
+            {radioFmActive ? (
+              radioFmMatchedSong?.imageUrl
+                ? <CoverFade src={radioFmMatchedSong.imageUrl} />
+                : <div className="w-full h-full bg-gradient-to-br from-red-900/70 to-black flex items-center justify-center"><Radio size={16} className="text-red-400 opacity-80" /></div>
+            ) : (!coverArtError && (currentTrackFull?.albumArt ?? currentTrack?.imageUrl)) ? (
+              // Crossfades per cover - the old art fades straight out, so it
+              // never stays painted next to the new title while the new one
+              // loads.
+              <CoverFade src={smallCoverUrl(currentTrackFull?.albumArt ?? currentTrack?.imageUrl) ?? ''} onError={() => setCoverArtError(true)} />
+            ) : (
+              <div className="w-full h-full flex items-center justify-center text-text-muted">
+                <svg viewBox="0 0 24 24" fill="currentColor" className="w-5 h-5">
+                  <path d="M12 3v10.55c-.59-.34-1.27-.55-2-.55-2.21 0-4 1.79-4 4s1.79 4 4 4 4-1.79 4-4V7h4V3h-6z" />
+                </svg>
+              </div>
+            )}
+          </div>
+          <TrackSwap swapKey={swapKey} order={swapOrder} className="flex-1 min-w-0">
+            <p
+              className="text-subhead font-semibold text-text-primary truncate"
+              title={radioFmActive && radioFmNowPlaying ? radioFmNowPlaying.title : (currentTrack?.title || undefined)}
+            >
+              {radioFmActive && radioFmNowPlaying
+                ? radioFmNowPlaying.title
+                : (currentTrack?.title || 'Not Playing')}
+            </p>
+            {(radioFmActive ? radioFmNowPlaying?.artist : currentTrack?.artist) && (
+              <p className="text-footnote text-text-secondary truncate">
+                {radioFmActive ? radioFmNowPlaying?.artist : currentTrack?.artist}
+              </p>
+            )}
+          </TrackSwap>
+          <div className="flex items-center shrink-0" onClick={(e) => e.stopPropagation()}>
+            <button
+              onClick={() => setIsPlaying(!isPlaying)}
+              disabled={!currentTrack || radioFmActive}
+              title={isPlaying ? 'Pause' : 'Play'}
+              aria-label={isPlaying ? 'Pause' : 'Play'}
+              className="w-11 h-11 rounded-full flex items-center justify-center text-text-primary active:bg-[var(--fill)] transition-colors disabled:opacity-30"
+            >
+              <SwapIcon swapKey={isPlaying}>
+                {isPlaying
+                  ? <Pause size={24} fill="currentColor" strokeWidth={0} />
+                  : <Play size={24} fill="currentColor" strokeWidth={0} className="ml-0.5" />}
+              </SwapIcon>
+            </button>
+            <button
+              onClick={handleNext}
+              disabled={radioFmActive}
+              title="Next"
+              aria-label="Next"
+              className="w-11 h-11 rounded-full flex items-center justify-center text-text-primary active:bg-[var(--fill)] transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
+            >
+              <SkipForward size={24} fill="currentColor" strokeWidth={0} />
+            </button>
+          </div>
+        </div>
+        {/* Progress, as a hairline along the bottom of the capsule, inset
+            clear of its rounded ends. */}
         {radioFmActive ? (
-          <div className="h-[2px] bg-red-900/40 relative">
+          <div className="absolute left-6 right-6 bottom-[3px] h-[2px] rounded-full bg-red-900/40 overflow-hidden pointer-events-none">
             <div className="h-full bg-red-400 absolute left-0 top-0 transition-none" style={{ width: `${fmProgress * 100}%` }} />
           </div>
         ) : (
-        // Seekable. The visible line is 2px but the hit area is padded taller
-        // (py-2 -my-2) so it's grabbable on touch, and touch-none stops the
-        // browser from treating a horizontal drag as a scroll. Commits on
-        // release via seekToPercent(last) rather than the seekDrag state, so a
-        // stale closure in the document listeners can't seek to the wrong spot.
+        // Seekable. The visible line is 2px but the hit area is taller so
+        // it's grabbable on touch, and touch-none stops the browser from
+        // treating a horizontal drag as a scroll. Commits on release via
+        // seekToPercent(last) rather than the seekDrag state, so a stale
+        // closure in the document listeners can't seek to the wrong spot.
         <div
-          className="relative py-2 -my-2 cursor-pointer touch-none"
+          className="absolute left-6 right-6 bottom-0 h-2.5 cursor-pointer touch-none"
           onMouseDown={e => {
             const rect = e.currentTarget.getBoundingClientRect()
             const pctAt = (x: number): number => Math.max(0, Math.min(1, (x - rect.left) / rect.width))
@@ -2163,79 +2232,11 @@ export default function Player(): JSX.Element {
             document.addEventListener('touchend', onEnd)
           }}
         >
-          <div className="h-[2px] bg-surface-overlay relative">
-            <ProgressFill seekDrag={seekDrag} className="h-full bg-accent absolute left-0 top-0 transition-none" />
+          <div className="absolute inset-x-0 bottom-[3px] h-[2px] rounded-full bg-[var(--fill)] overflow-hidden">
+            <ProgressFill seekDrag={seekDrag} className="h-full bg-text-primary absolute left-0 top-0 transition-none" />
           </div>
         </div>
         )}
-        {/* Track row - whole row opens WRLD, not just the cover; the
-            transport buttons stopPropagation so tapping them doesn't also
-            navigate. */}
-        <div className="flex items-center px-3 py-2 gap-3 h-14" {...clickable(() => setActiveView('wrld'))}>
-          <div className="w-10 h-10 rounded bg-surface-overlay shrink-0 overflow-hidden">
-            {radioFmActive ? (
-              radioFmMatchedSong?.imageUrl
-                ? <CoverFade src={radioFmMatchedSong.imageUrl} />
-                : <div className="w-full h-full bg-gradient-to-br from-red-900/70 to-black flex items-center justify-center"><Radio size={16} className="text-red-400 opacity-80" /></div>
-            ) : (!coverArtError && (currentTrackFull?.albumArt ?? currentTrack?.imageUrl)) ? (
-              // Crossfades per cover - the old art fades straight out, so it
-              // never stays painted next to the new title while the new one
-              // loads.
-              <CoverFade src={smallCoverUrl(currentTrackFull?.albumArt ?? currentTrack?.imageUrl) ?? ''} onError={() => setCoverArtError(true)} />
-            ) : (
-              <div className="w-full h-full flex items-center justify-center text-text-muted">
-                <svg viewBox="0 0 24 24" fill="currentColor" className="w-5 h-5">
-                  <path d="M12 3v10.55c-.59-.34-1.27-.55-2-.55-2.21 0-4 1.79-4 4s1.79 4 4 4 4-1.79 4-4V7h4V3h-6z" />
-                </svg>
-              </div>
-            )}
-          </div>
-          <TrackSwap swapKey={swapKey} order={swapOrder} className="flex-1 min-w-0">
-            <p
-              className="text-sm font-medium text-text-primary truncate"
-              title={radioFmActive && radioFmNowPlaying ? radioFmNowPlaying.title : (currentTrack?.title || undefined)}
-            >
-              {radioFmActive && radioFmNowPlaying
-                ? radioFmNowPlaying.title
-                : (currentTrack?.title || 'Not playing')}
-            </p>
-            <p className="text-xs text-text-muted truncate">
-              {radioFmActive && radioFmNowPlaying
-                ? radioFmNowPlaying.artist
-                : (currentTrack?.artist || '')}
-            </p>
-          </TrackSwap>
-          <div className="flex items-center gap-0.5 shrink-0" onClick={(e) => e.stopPropagation()}>
-            {!radioFmActive && (
-              <button onClick={toggleShuffle} title={shuffleTitle} className={`p-1.5 transition-colors ${shuffle ? 'text-accent' : 'text-text-secondary hover:text-text-primary'}`}>
-                <Shuffle size={15} />
-              </button>
-            )}
-            <button onClick={handlePrev} disabled={radioFmActive} title="Previous" className="p-2 text-text-secondary hover:text-text-primary transition-colors disabled:opacity-30 disabled:cursor-not-allowed">
-              <SkipBack size={18} fill="currentColor" />
-            </button>
-            <button
-              onClick={() => setIsPlaying(!isPlaying)}
-              disabled={!currentTrack || radioFmActive}
-              title={isPlaying ? 'Pause' : 'Play'}
-              className="w-9 h-9 rounded-full bg-white flex items-center justify-center hover:scale-105 active:scale-95 transition-transform disabled:opacity-30"
-            >
-              <SwapIcon swapKey={isPlaying}>
-                {isPlaying
-                  ? <Pause size={16} fill="#000" className="text-black" />
-                  : <Play  size={16} fill="#000" className="text-black ml-0.5" />}
-              </SwapIcon>
-            </button>
-            <button onClick={handleNext} disabled={radioFmActive} title="Next" className="p-2 text-text-secondary hover:text-text-primary transition-colors disabled:opacity-30 disabled:cursor-not-allowed">
-              <SkipForward size={18} fill="currentColor" />
-            </button>
-            {!radioFmActive && (
-              <button onClick={toggleRepeat} title={repeatTitle} className={`p-1.5 transition-colors ${repeat !== 'none' ? 'text-accent' : 'text-text-secondary hover:text-text-primary'}`}>
-                {repeat === 'one' ? <Repeat1 size={15} /> : <Repeat size={15} />}
-              </button>
-            )}
-          </div>
-        </div>
       </div>
 
       {/* ── Desktop player ── */}

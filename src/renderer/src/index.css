@@ -478,13 +478,15 @@ input[type='range']:active::-moz-range-thumb {
    sheet-out composites (`add`) onto that inline offset instead of replacing
    it, so a sheet swiped away carries on down from where the finger let go
    rather than jumping back up to its resting spot first. */
+/* Past 100% by a margin: the sheet floats a few px above the bottom edge, so
+   its own height alone would leave a sliver showing. */
 @keyframes sheet-in {
-  from { transform: translateY(100%); }
+  from { transform: translateY(calc(100% + 1rem)); }
   to   { transform: translateY(0); }
 }
 @keyframes sheet-out {
   from { transform: translateY(0); }
-  to   { transform: translateY(100%); }
+  to   { transform: translateY(calc(100% + 1rem)); }
 }
 @keyframes scrim-in {
   from { opacity: 0; }
@@ -769,6 +771,129 @@ input[type='range']:active::-moz-range-thumb {
     -webkit-backdrop-filter: none;
     backdrop-filter: none;
   }
+}
+
+/* ─── iOS-style mobile chrome ─────────────────────────────────────────────────
+   Fills and hairlines mixed from the skin's own text color, the way iOS's
+   systemFill/separator are, so every skin (custom ones included) gets them
+   without new skin vars. --fill backs search fields, gray buttons, chips and
+   the tab bar's selection pill; --fill-strong is their pressed state. */
+:root {
+  --fill: color-mix(in srgb, var(--text-primary) 9%, transparent);
+  --fill-strong: color-mix(in srgb, var(--text-primary) 16%, transparent);
+  --separator: var(--border);
+  /* Inset-grouped cells (mobile/Grouped) and the raised thumb of a segmented
+     control. Light skins: a faint gray card, a surface-colored thumb. Dark
+     skins lift both further off the page, as iOS does (#1c1c1e cells and a
+     #636366-ish thumb on black). */
+  --grouped: color-mix(in srgb, var(--text-primary) 5%, var(--surface));
+  --control-thumb: var(--surface);
+}
+.dark {
+  --grouped: color-mix(in srgb, var(--text-primary) 11%, var(--surface));
+  --control-thumb: color-mix(in srgb, var(--text-primary) 36%, var(--surface));
+}
+
+/* The floating glass of the mobile tab bar, mini player, sheets and collapsed
+   title bars: a see-through pane over whatever scrolls beneath it, a thin
+   light rim with a brighter top edge, and a soft shadow lifting it off the
+   page. */
+.glass {
+  background: var(--surface-raised);
+  background: color-mix(in srgb, var(--surface) 62%, transparent);
+  -webkit-backdrop-filter: blur(22px) saturate(1.8);
+  backdrop-filter: blur(22px) saturate(1.8);
+  box-shadow:
+    inset 0 0 0 0.5px color-mix(in srgb, var(--text-primary) 12%, transparent),
+    inset 0 1px 0 color-mix(in srgb, #fff 14%, transparent),
+    0 8px 28px rgb(0 0 0 / 0.22);
+}
+/* Denser variant for panels that carry body text (sheets): still frosted, but
+   busy artwork behind can't fight the rows for legibility. */
+.glass-thick {
+  background: var(--surface-raised);
+  background: color-mix(in srgb, var(--surface) 84%, transparent);
+  -webkit-backdrop-filter: blur(30px) saturate(1.8);
+  backdrop-filter: blur(30px) saturate(1.8);
+  box-shadow:
+    inset 0 0 0 0.5px color-mix(in srgb, var(--text-primary) 12%, transparent),
+    inset 0 1px 0 color-mix(in srgb, #fff 12%, transparent),
+    0 12px 40px rgb(0 0 0 / 0.3);
+}
+/* Bar backgrounds only (no lift): the collapsed large-title bar. */
+.glass-bar {
+  background: var(--surface);
+  background: color-mix(in srgb, var(--surface) 72%, transparent);
+  -webkit-backdrop-filter: blur(22px) saturate(1.8);
+  backdrop-filter: blur(22px) saturate(1.8);
+}
+/* Round toolbar buttons (back, ⋯, the large-title actions): the same glass at
+   button scale, with a lighter shadow so a row of them doesn't smudge. */
+.glass-button {
+  background: var(--surface-raised);
+  background: color-mix(in srgb, var(--surface) 55%, transparent);
+  -webkit-backdrop-filter: blur(16px) saturate(1.8);
+  backdrop-filter: blur(16px) saturate(1.8);
+  box-shadow:
+    inset 0 0 0 0.5px color-mix(in srgb, var(--text-primary) 14%, transparent),
+    inset 0 1px 0 color-mix(in srgb, #fff 14%, transparent),
+    0 2px 10px rgb(0 0 0 / 0.12);
+}
+@media (prefers-reduced-transparency: reduce) {
+  .glass, .glass-thick, .glass-bar, .glass-button {
+    background: var(--surface-raised);
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+  }
+}
+
+/* iOS hairlines: inset to where a row's text starts and running to its right
+   edge, drawn between rows only. --row-inset is the leading content's width
+   (an icon badge plus its gap); grouped rows bleed to the card's edges with
+   -mx-4 px-4, so their line starts after that padding too. */
+.grouped-row { position: relative; }
+.grouped-row::after {
+  content: '';
+  position: absolute;
+  left: calc(1rem + var(--row-inset, 0px));
+  right: 0;
+  bottom: 0;
+  height: 0.5px;
+  background: var(--separator);
+  pointer-events: none;
+}
+.grouped-row:last-child::after { display: none; }
+/* Song and playlist rows (mobile/ListRow): virtualized rows aren't DOM
+   siblings in order, so every row draws its own line under the text. */
+.list-row::after {
+  content: '';
+  position: absolute;
+  left: 4.75rem;
+  right: 0;
+  bottom: 0;
+  height: 0.5px;
+  background: var(--separator);
+  pointer-events: none;
+}
+/* Sheet action rows: a line between neighbours, none above a group gap. */
+.sheet-item { position: relative; }
+.sheet-item + .sheet-item::before {
+  content: '';
+  position: absolute;
+  left: var(--row-inset, 1.25rem);
+  right: 0;
+  top: 0;
+  height: 0.5px;
+  background: var(--separator);
+  pointer-events: none;
+}
+
+/* Room for the floating tab bar + mini player at the end of a mobile
+   scroller, so its last rows can scroll clear of the glass. --dock-h is
+   published by BottomNav. Mobile widths only (the same cutoff as
+   useIsMobile), so a view desktop shares keeps its own padding there. */
+@media (max-width: 767px) {
+  .pb-dock { padding-bottom: calc(var(--dock-h, 0px) + 1rem); }
 }
 
 /* The copy a closing modal or menu leaves behind to animate out on

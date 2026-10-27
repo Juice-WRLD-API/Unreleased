@@ -40,32 +40,28 @@ export function HeroBackdrop({ src, isDarkSkin }: { src: string; isDarkSkin: boo
   )
 }
 
+/** Apple Music's pair under a detail header: two equal gray capsules with the
+ *  label and glyph in the accent, rather than one loud filled button. */
 export function PlayShuffleRow({ onPlay, onShuffle, disabled }: {
   onPlay: () => void; onShuffle: () => void; disabled?: boolean
 }): JSX.Element {
+  const cls = 'flex-1 h-12 flex items-center justify-center gap-2 rounded-full bg-[var(--fill)] text-accent text-headline disabled:opacity-40 active:bg-[var(--fill-strong)] transition-colors'
   return (
-    <div className="flex items-center gap-2">
-      <button
-        onClick={onPlay}
-        disabled={disabled}
-        className="flex-1 h-12 flex items-center justify-center gap-2 rounded-full bg-accent text-white text-[15px] font-semibold disabled:opacity-40 active:opacity-80"
-      >
-        <Play size={18} fill="currentColor" /> Play
+    <div className="flex items-center gap-3">
+      <button onClick={onPlay} disabled={disabled} className={cls}>
+        <Play size={18} fill="currentColor" strokeWidth={0} /> Play
       </button>
-      <button
-        onClick={onShuffle}
-        disabled={disabled}
-        className="flex-1 h-12 flex items-center justify-center gap-2 rounded-full bg-surface-overlay text-text-primary text-[15px] font-semibold disabled:opacity-40 active:bg-surface-highest"
-      >
-        <Shuffle size={17} /> Shuffle
+      <button onClick={onShuffle} disabled={disabled} className={cls}>
+        <Shuffle size={18} strokeWidth={2.5} /> Shuffle
       </button>
     </div>
   )
 }
 
-/** One app-bar icon button. `light` matches text-white/90 to a hero backdrop
- *  behind it (see HeroBackdrop) instead of the normal text-muted, which is a
- *  dark tone in a light theme and unreadable over darkened art. */
+/** One app-bar button: a round glass toolbar button, iOS 26-style (see
+ *  BarButton in NavBar). `light` puts the glyph in white over a hero backdrop
+ *  (see HeroBackdrop) - only ever set on dark skins, where the glass behind it
+ *  is dark too. */
 export function appBarButton(
   label: string,
   icon: React.ReactNode,
@@ -77,8 +73,9 @@ export function appBarButton(
     <button
       onClick={onClick}
       aria-label={label}
-      className={`w-11 h-11 shrink-0 flex items-center justify-center rounded-full active:bg-surface-overlay ${
-        active ? 'text-accent' : light ? 'text-white/90' : 'text-text-muted'
+      title={label}
+      className={`glass-button w-11 h-11 shrink-0 flex items-center justify-center rounded-full transition-opacity active:opacity-60 ${
+        active ? 'text-accent' : light ? 'text-white' : 'text-text-primary'
       }`}
     >{icon}</button>
   )

@@ -1,19 +1,18 @@
-import { createPortal } from 'react-dom'
 import { Upload } from 'lucide-react'
 import { useStorePick } from '../store/useStore'
 import { navTabFor, tabEntryView } from '../lib/navItems'
 import { useMobileNavSplit } from '../hooks/useMobileNavTabs'
-import { useBackToClose } from '../hooks/useBackToClose'
 import { preloadView } from '../lib/lazyViews'
+import { Sheet, SheetDivider, SheetItem } from './mobile/Sheet'
 
 // The bottom sheet for nav items that don't fit the bar directly - opened
 // from a button on Home rather than a tab of its own; see BottomNav's
-// removal of the in-bar "More" button for why.
+// removal of the in-bar "More" button for why. Built on the shared Sheet, so
+// it drags, animates and answers the back button like every other sheet.
 export default function MoreNavSheet(): JSX.Element | null {
   const { activeView, setActiveView, showMoreNav, setShowMoreNav, setShowUploadManager, uploads } =
     useStorePick('activeView', 'setActiveView', 'showMoreNav', 'setShowMoreNav', 'setShowUploadManager', 'uploads')
   const { moreTabs } = useMobileNavSplit()
-  useBackToClose(() => setShowMoreNav(false), showMoreNav)
 
   if (!showMoreNav) return null
 
@@ -30,50 +29,31 @@ export default function MoreNavSheet(): JSX.Element | null {
     setShowMoreNav(false)
   }
 
-  return createPortal(
-    <>
-      <div className="fixed inset-0 z-[60] bg-black/40" onClick={() => setShowMoreNav(false)} />
-      <div
-        className="fixed z-[61] left-0 right-0 bottom-0 rounded-t-2xl bg-surface border border-[var(--border)] border-b-0 shadow-2xl max-h-[75svh] overflow-y-auto"
-        style={{ paddingBottom: 'env(safe-area-inset-bottom, 0px)' }}
-      >
-        <div className="px-4 pt-4 pb-1">
-          <h3 className="text-text-primary font-bold text-base">More</h3>
-        </div>
-        <div className="pb-2">
-          {moreTabs.map((tab) => {
-            const active = navTabFor(activeView) === tab.view
-            return (
-              <button
-                key={tab.view}
-                onPointerDown={() => preloadView(tab.view)}
-                onClick={() => navigateTo(tab.view)}
-                className={`w-full flex items-center gap-3 px-4 py-3.5 text-left transition-colors ${
-                  active ? 'text-accent bg-accent/10' : 'text-text-primary hover:bg-[var(--surface-overlay)] active:bg-[var(--surface-overlay)]'
-                }`}
-              >
-                <span className="[&_svg]:w-6 [&_svg]:h-6 [&_img]:w-7 [&_img]:h-7 flex items-center justify-center">{tab.icon}</span>
-                <span className="text-sm font-medium">{tab.label}</span>
-              </button>
-            )
-          })}
-          {/* Not a view - opens the Transfers panel (UploadManager), which on
-              desktop hangs off the Sidebar. Staged proposals live there. */}
-          <button
-            onClick={() => { setShowMoreNav(false); setShowUploadManager(true) }}
-            className="w-full flex items-center gap-3 px-4 py-3.5 text-left transition-colors text-text-primary hover:bg-[var(--surface-overlay)] active:bg-[var(--surface-overlay)]"
-          >
-            <span className="[&_svg]:w-6 [&_svg]:h-6 flex items-center justify-center"><Upload /></span>
-            <span className="text-sm font-medium flex-1">Transfers</span>
-            {pendingCount > 0 && (
-              <span className="min-w-[20px] h-5 rounded-full bg-accent text-white text-[11px] font-bold flex items-center justify-center px-1.5 leading-none">
-                {pendingCount}
-              </span>
-            )}
-          </button>
-        </div>
-      </div>
-    </>,
-    document.body,
+  return (
+    <Sheet title="More" onClose={() => setShowMoreNav(false)}>
+      {moreTabs.map((tab) => (
+        <SheetItem
+          key={tab.view}
+          glyph={tab.icon}
+          label={tab.label}
+          active={navTabFor(activeView) === tab.view}
+          onPointerDown={() => preloadView(tab.view)}
+          onClick={() => navigateTo(tab.view)}
+        />
+      ))}
+      {moreTabs.length > 0 && <SheetDivider />}
+      {/* Not a view - opens the Transfers panel (UploadManager), which on
+          desktop hangs off the Sidebar. Staged proposals live there. */}
+      <SheetItem
+        icon={Upload}
+        label="Transfers"
+        onClick={() => { setShowMoreNav(false); setShowUploadManager(true) }}
+        trailing={pendingCount > 0 ? (
+          <span className="min-w-[20px] h-5 rounded-full bg-accent text-white text-caption2 font-bold flex items-center justify-center px-1.5">
+            {pendingCount}
+          </span>
+        ) : undefined}
+      />
+    </Sheet>
   )
 }

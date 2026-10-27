@@ -11,6 +11,7 @@ import SongContextMenu from './SongContextMenu'
 import { relativeTime } from './adminShared'
 import { useStatsViewData, PERIOD_OPTIONS, PLAY_TOP_N, TOP_SONGS_COLLAPSED, TIMELINE_LIMIT } from '../hooks/useStatsViewData'
 import { clickable } from '../lib/a11y'
+import { Segmented } from './mobile/Segmented'
 
 // "Your Wrapped" - a listening summary built entirely from lib/listeningPlays'
 // timestamped events, rolled back up into playcounts for each period
@@ -120,19 +121,12 @@ export default function StatsView(): JSX.Element {
         <div className="flex-1 min-h-0 overflow-y-auto overscroll-contain px-4 pt-3 pb-6">
 
           {/* ── Period switcher ── */}
-          <div className="flex items-center gap-1 p-1 rounded-xl bg-[var(--surface-highest)] mb-3">
-            {PERIOD_OPTIONS.map((opt) => (
-              <button
-                key={opt.id}
-                onClick={() => { setPeriod(opt.id); setExpanded(false) }}
-                aria-pressed={period === opt.id}
-                className={`flex-1 min-w-0 h-9 rounded-lg text-[13px] font-medium transition-colors ${
-                  period === opt.id ? 'bg-accent text-white' : 'text-text-secondary active:bg-[var(--surface-overlay)]'
-                }`}
-              >
-                {opt.label}
-              </button>
-            ))}
+          <div className="mb-3">
+            <Segmented
+              value={period}
+              options={PERIOD_OPTIONS.map((opt) => ({ value: opt.id, label: opt.label }))}
+              onChange={(id) => { setPeriod(id); setExpanded(false) }}
+            />
           </div>
 
           {loading && (

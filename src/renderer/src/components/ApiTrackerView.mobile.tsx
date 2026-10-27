@@ -2,7 +2,7 @@ import { playlistSongIds } from '../lib/playlistItems'
 import { useState, useEffect, useCallback, useRef, useMemo, memo, Suspense } from 'react'
 import {
   Search, Loader2, Music2, X, Check, ListPlus, ChevronDown, ChevronLeft,
-  ChevronRight, MoreVertical, Plus, ListMusic, PackageOpen, Link2, Layers, LayoutGrid,
+  ChevronRight, MoreHorizontal, Plus, ListMusic, PackageOpen, Link2, Layers, LayoutGrid,
   LayoutList, Rows3, Mic2, CalendarDays, Users, AlertTriangle, Pencil, SlidersHorizontal,
   Filter, CheckCircle2, Circle, ArrowLeft, ArrowUp, ArrowDown, MapPin, BarChart3,
 } from 'lucide-react'
@@ -48,6 +48,9 @@ import {
   extractDateKeys, dateKey,
 } from '../lib/apiTrackerShared'
 import { useLyricSearch } from '../lib/useLyricSearch'
+import { BackButton, BarButton, LargeTitle } from './mobile/NavBar'
+import { ListRow, RowDuration, RowMenuButton } from './mobile/ListRow'
+import { SearchField } from './mobile/SearchField'
 
 const StatisticsPanel = lazyView(() => import('./StatisticsPanel.mobile'))
 
@@ -180,40 +183,24 @@ const SongRow = memo(function SongRow({
   })
 
   return (
-    <div
-      className={`flex items-center gap-3 px-4 py-1.5 h-full rounded-2xl transition-colors ${
-        selected ? 'bg-accent/15' : 'active:bg-surface-overlay'
-      }`}
+    <ListRow
       {...press}
-    >
-      <div className={`relative shrink-0 w-12 h-12 rounded-xl overflow-hidden bg-surface-overlay ${canPlay ? '' : 'opacity-60'}`}>
-        <AlbumArtThumbnail track={track} size={48} shimmer={false} eager />
-        {selectMode && <ArtSelectOverlay selected={selected} />}
-      </div>
-
-      <div className="flex-1 min-w-0">
-        <p className={`text-[15px] leading-snug truncate ${isCurrent ? 'text-accent font-semibold' : 'text-text-primary'}`}>
-          {title}
-          {versionLabel && <span className="text-text-muted font-normal"> ({versionLabel})</span>}
-        </p>
-        <p className="text-text-muted text-xs truncate mt-0.5">{songSubtitle(song, fullEraNames)}</p>
-      </div>
-
-      {isCurrent && <EqBars paused={!isPlaying} />}
-      <span className="text-text-muted text-[11px] tabular-nums shrink-0">
-        {formatDuration(parseDuration(song.length), '--:--')}
-      </span>
-
-      {!selectMode && (
-        <button
-          className="shrink-0 w-10 h-11 -mr-2 flex items-center justify-center text-text-muted active:text-accent"
-          onClick={(e) => { e.stopPropagation(); onMenu(song, e) }}
-          aria-label="More options"
-        >
-          <MoreVertical size={18} />
-        </button>
-      )}
-    </div>
+      art={<AlbumArtThumbnail track={track} size={48} shimmer={false} eager />}
+      artOverlay={selectMode ? <ArtSelectOverlay selected={selected} /> : undefined}
+      dimArt={!canPlay}
+      title={<>
+        {title}
+        {versionLabel && <span className="text-text-muted font-normal"> ({versionLabel})</span>}
+      </>}
+      subtitle={songSubtitle(song, fullEraNames)}
+      current={isCurrent}
+      selected={selected}
+      trailing={<>
+        {isCurrent && <EqBars paused={!isPlaying} />}
+        <RowDuration>{formatDuration(parseDuration(song.length), '--:--')}</RowDuration>
+        {!selectMode ? <RowMenuButton onClick={(e) => onMenu(song, e)} /> : <span className="w-2 shrink-0" />}
+      </>}
+    />
   )
 })
 // Memoized so toggling one selection only re-renders that row, not every
@@ -254,29 +241,29 @@ const DetailedSongRow = memo(function DetailedSongRow({
 
   return (
     <div
-      className={`flex flex-col gap-2 mx-3 px-3 py-2.5 h-full overflow-hidden rounded-2xl border transition-colors ${
-        selected ? 'bg-accent/15 border-accent' : 'border-[var(--border)] active:bg-surface-overlay'
+      className={`flex flex-col gap-2 mx-3 px-3 py-2.5 h-full overflow-hidden rounded-[20px] transition-colors ${
+        selected ? 'bg-accent/15 ring-2 ring-accent' : 'bg-[var(--grouped)] active:bg-[var(--fill-strong)]'
       }`}
       {...press}
     >
       <div className="flex items-center gap-3 min-w-0">
-        <div className="relative shrink-0 w-12 h-12 rounded-xl overflow-hidden bg-surface-overlay">
+        <div className="relative shrink-0 w-12 h-12 rounded-lg overflow-hidden bg-[var(--fill)]">
           <AlbumArtThumbnail track={track} size={48} shimmer={false} eager />
           {selectMode && <ArtSelectOverlay selected={selected} />}
         </div>
         <div className="flex-1 min-w-0">
           <p className={`text-[15px] leading-snug truncate ${isCurrent ? 'text-accent font-semibold' : 'text-text-primary'}`}>{title}</p>
-          <p className="text-text-muted text-xs truncate mt-0.5">{songSubtitle(song, fullEraNames)}</p>
+          <p className="text-text-secondary text-xs truncate mt-0.5">{songSubtitle(song, fullEraNames)}</p>
         </div>
         {isCurrent && <EqBars paused={!isPlaying} />}
         <span className="text-text-muted text-[11px] tabular-nums shrink-0">{formatDuration(parseDuration(song.length), '--:--')}</span>
         {!selectMode && (
           <button
-            className="shrink-0 w-9 h-10 -mr-1.5 flex items-center justify-center text-text-muted active:text-accent"
+            className="shrink-0 w-9 h-10 -mr-1.5 flex items-center justify-center text-text-primary active:opacity-50"
             onClick={(e) => { e.stopPropagation(); onMenu(song, e) }}
             aria-label="More options"
           >
-            <MoreVertical size={18} />
+            <MoreHorizontal size={20} />
           </button>
         )}
       </div>
@@ -315,8 +302,8 @@ const SongCard = memo(function SongCard({
 
   return (
     <div
-      className={`flex flex-col h-full overflow-hidden rounded-2xl transition-colors ${
-        selected ? 'bg-accent/15 ring-2 ring-accent' : 'bg-surface-raised active:bg-surface-overlay'
+      className={`flex flex-col h-full overflow-hidden rounded-[14px] transition-colors ${
+        selected ? 'bg-accent/15 ring-2 ring-accent' : 'bg-[var(--grouped)] active:bg-[var(--fill-strong)]'
       }`}
       {...press}
     >
@@ -349,11 +336,11 @@ const SongCard = memo(function SongCard({
         </div>
         {!selectMode && (
           <button
-            className="shrink-0 w-9 h-9 flex items-center justify-center text-text-muted active:text-accent"
+            className="shrink-0 w-9 h-9 flex items-center justify-center text-text-primary active:opacity-50"
             onClick={(e) => { e.stopPropagation(); onMenu(song, e) }}
             aria-label="More options"
           >
-            <MoreVertical size={16} />
+            <MoreHorizontal size={18} />
           </button>
         )}
       </div>
@@ -375,22 +362,21 @@ const GroupRow = memo(function GroupRow({
   const cat = groupCategory(group.members)
   const press = useLongPress({ onTap: onToggle, onLongPress })
   return (
-    <div className="flex items-center gap-3 px-4 py-1.5 h-full rounded-2xl active:bg-surface-overlay transition-colors" {...press}>
-      <div className="relative shrink-0 w-12 h-12 rounded-xl overflow-hidden bg-surface-overlay">
-        <AlbumArtThumbnail track={songToTrack(group.members[0].item)} size={48} shimmer={false} eager />
+    <ListRow
+      {...press}
+      art={<AlbumArtThumbnail track={songToTrack(group.members[0].item)} size={48} shimmer={false} eager />}
+      artOverlay={
         <span className="absolute inset-x-0 bottom-0 h-4 bg-black/55 flex items-center justify-center">
           <Layers size={10} className="text-white" />
         </span>
-      </div>
-      <div className="flex-1 min-w-0">
-        <p className="text-text-primary text-[15px] leading-snug truncate">{group.title}</p>
-        <p className="text-text-muted text-xs truncate mt-0.5 flex items-center gap-1.5">
-          <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${CATEGORY_DOTS[cat] ?? 'bg-text-muted'}`} />
-          {CATEGORY_LABELS[cat] ?? cat} · {group.members.length} version{group.members.length === 1 ? '' : 's'}
-        </p>
-      </div>
-      <ChevronDown size={18} className={`text-text-muted shrink-0 transition-transform ${expanded ? 'rotate-180' : ''}`} />
-    </div>
+      }
+      title={group.title}
+      subtitle={<span className="flex items-center gap-1.5">
+        <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${CATEGORY_DOTS[cat] ?? 'bg-text-muted'}`} />
+        <span className="truncate">{CATEGORY_LABELS[cat] ?? cat} · {group.members.length} version{group.members.length === 1 ? '' : 's'}</span>
+      </span>}
+      trailing={<ChevronDown size={18} className={`text-text-muted shrink-0 mr-2.5 transition-transform ${expanded ? 'rotate-180' : ''}`} />}
+    />
   )
 }, (prev, next) =>
   // Compare by value: callers pass inline closures every render, and those
@@ -424,37 +410,29 @@ const LyricResultRow = memo(function LyricResultRow({
 
   return (
     <div
-      className={`flex items-start gap-3 px-4 py-2.5 rounded-2xl transition-colors ${
-        selected ? 'bg-accent/15' : 'active:bg-surface-overlay'
+      className={`list-row relative flex items-start gap-3 pl-4 pr-2 py-2.5 transition-colors ${
+        selected ? 'bg-accent/15' : 'active:bg-[var(--fill)]'
       }`}
       {...press}
     >
-      <div className="relative shrink-0 w-12 h-12 rounded-xl overflow-hidden bg-surface-overlay">
+      <div className="relative shrink-0 w-12 h-12 rounded-lg overflow-hidden bg-[var(--fill)]">
         <AlbumArtThumbnail track={track} size={48} shimmer={false} eager />
         {selectMode && <ArtSelectOverlay selected={selected} />}
       </div>
       <div className="flex-1 min-w-0">
-        <p className="text-text-primary text-[15px] leading-snug truncate">{title}</p>
-        <p className="text-text-muted text-xs truncate mt-0.5">{songSubtitle(song, fullEraNames)}</p>
+        <p className="text-body text-text-primary truncate">{title}</p>
+        <p className="text-subhead text-text-secondary truncate">{songSubtitle(song, fullEraNames)}</p>
         {snippet ? (
-          <p className="mt-1.5 text-xs text-text-secondary italic leading-relaxed line-clamp-2">
+          <p className="mt-1.5 text-footnote text-text-secondary italic line-clamp-2">
             {snippet.before}
             <mark className="bg-accent/20 text-accent not-italic rounded px-0.5">{snippet.match}</mark>
             {snippet.after}
           </p>
         ) : (
-          <p className="mt-1.5 text-xs text-text-muted italic">Lyric preview unavailable</p>
+          <p className="mt-1.5 text-footnote text-text-muted italic">Lyric preview unavailable</p>
         )}
       </div>
-      {!selectMode && (
-        <button
-          className="shrink-0 w-10 h-10 -mr-2 flex items-center justify-center text-text-muted active:text-accent"
-          onClick={(e) => { e.stopPropagation(); onMenu(song, e) }}
-          aria-label="More options"
-        >
-          <MoreVertical size={18} />
-        </button>
-      )}
+      {!selectMode && <RowMenuButton onClick={(e) => onMenu(song, e)} />}
     </div>
   )
 })
@@ -1468,15 +1446,11 @@ export default function ApiTrackerView(): JSX.Element {
           selection controls live in the bottom bar instead, which only shortens
           the scroller (top-anchored content doesn't move). */}
       {detail ? (
-        <div className="shrink-0 flex items-center gap-1 px-2 pb-1">
-          <button
-            onClick={() => setDetail(null)}
-            className="w-11 h-11 shrink-0 flex items-center justify-center rounded-full text-text-primary active:bg-surface-overlay"
-            aria-label="Back"
-          ><ArrowLeft size={20} /></button>
-          <div className="flex-1 min-w-0 px-0.5">
-            <h1 className="text-text-primary text-[19px] font-bold leading-tight truncate">{detail.name}</h1>
-            <p className="text-text-muted text-xs truncate">
+        <div className="shrink-0 flex items-center gap-3 px-3 pt-1 pb-2">
+          <BackButton onClick={() => setDetail(null)} />
+          <div className="flex-1 min-w-0">
+            <h1 className="text-title3 text-text-primary truncate">{detail.name}</h1>
+            <p className="text-footnote text-text-secondary truncate">
               {detail.kind === 'studio' ? 'Recorded here' : detail.kind === 'producer' ? 'Produced' : 'Engineered'}
               {' · '}{detailSongs.length} song{detailSongs.length === 1 ? '' : 's'}
             </p>
@@ -1484,51 +1458,44 @@ export default function ApiTrackerView(): JSX.Element {
         </div>
       ) : (
         <div className="shrink-0">
-          <div className="flex items-center gap-1 px-2">
-            <div className="flex-1 min-w-0 pl-2.5">
-              <h1 className="text-text-primary text-[20px] font-bold leading-tight truncate">Tracker</h1>
-              <p className="text-text-muted text-xs truncate">{subtitle}</p>
-            </div>
-            {trackerTab === 'songs' && (
-              <>
-                <button
-                  onClick={() => setSheet('view')}
-                  className="w-11 h-11 shrink-0 flex items-center justify-center rounded-full text-text-muted active:bg-surface-overlay"
-                  aria-label={`View: ${viewLabel}`}
-                >
-                  {compactView ? <Layers size={19} /> : viewMode === 'list' ? <LayoutList size={19} /> : viewMode === 'detail' ? <Rows3 size={19} /> : <LayoutGrid size={19} />}
-                </button>
-                <button
-                  onClick={() => setSheet('sort')}
-                  className={`w-11 h-11 shrink-0 flex items-center justify-center rounded-full active:bg-surface-overlay ${orderField ? 'text-accent' : 'text-text-muted'}`}
-                  aria-label="Sort"
-                ><SlidersHorizontal size={19} /></button>
-                <button
-                  onClick={() => setSheet('filters')}
-                  className={`relative w-11 h-11 shrink-0 flex items-center justify-center rounded-full active:bg-surface-overlay ${filterCount > 0 ? 'text-accent' : 'text-text-muted'}`}
-                  aria-label="Filters"
-                >
-                  <Filter size={19} />
-                  {filterCount > 0 && (
-                    <span className="absolute top-1.5 right-1.5 min-w-[15px] h-[15px] px-1 rounded-full bg-accent text-white text-[9px] font-bold flex items-center justify-center">
-                      {filterCount}
-                    </span>
-                  )}
-                </button>
-              </>
-            )}
-          </div>
+          {/* A large title that stays put: the tabs and search under it are
+              tools you reach for mid-scroll, so this header doesn't scroll
+              away or collapse like Home's and Library's. */}
+          <LargeTitle
+            inset="none"
+            title="Tracker"
+            subtitle={subtitle}
+            trailing={trackerTab === 'songs' ? <>
+              <BarButton label={`View: ${viewLabel}`} onClick={() => setSheet('view')}>
+                {compactView ? <Layers size={20} /> : viewMode === 'list' ? <LayoutList size={20} /> : viewMode === 'detail' ? <Rows3 size={20} /> : <LayoutGrid size={20} />}
+              </BarButton>
+              <BarButton label="Sort" onClick={() => setSheet('sort')} active={!!orderField}>
+                <SlidersHorizontal size={20} />
+              </BarButton>
+              <BarButton label="Filters" onClick={() => setSheet('filters')} active={filterCount > 0}>
+                <Filter size={20} />
+                {filterCount > 0 && (
+                  <span className="absolute -top-0.5 -right-0.5 min-w-[18px] h-[18px] px-1 rounded-full bg-accent text-white text-caption2 font-bold flex items-center justify-center">
+                    {filterCount}
+                  </span>
+                )}
+              </BarButton>
+            </> : undefined}
+          />
 
-          {/* Tabs */}
-          <div className="flex items-center gap-2 px-4 pt-2.5 overflow-x-auto no-scrollbar">
+          {/* Tabs. Chips rather than a segmented control: five don't fit one
+              at phone width. The chosen one is inverted, as iOS filter chips
+              are. */}
+          <div className="flex items-center gap-2 px-4 pt-1 overflow-x-auto no-scrollbar">
             {TABS.map(({ key, label, icon: Icon }) => {
               const active = trackerTab === key
               return (
                 <button
                   key={key}
                   onClick={() => { setTrackerTab(key); setDetail(null) }}
-                  className={`shrink-0 flex items-center gap-1.5 h-9 px-3.5 rounded-full text-[13px] font-medium transition-colors ${
-                    active ? 'bg-accent text-white' : 'bg-surface-overlay text-text-secondary active:bg-surface-highest'
+                  aria-pressed={active}
+                  className={`shrink-0 flex items-center gap-1.5 h-8 px-3.5 rounded-full text-subhead font-medium transition-colors ${
+                    active ? 'bg-text-primary text-surface' : 'bg-[var(--fill)] text-text-primary active:bg-[var(--fill-strong)]'
                   }`}
                 >
                   <Icon size={14} />{label}
@@ -1539,51 +1506,34 @@ export default function ApiTrackerView(): JSX.Element {
 
           {/* Search */}
           {(trackerTab === 'songs' || trackerTab === 'lyrics') && (
-            <div className="px-4 pt-2.5 pb-2">
-              <div className="relative flex items-center">
-                {trackerTab === 'songs'
-                  ? <Search size={16} className="absolute left-3.5 text-text-muted pointer-events-none" />
-                  : <Mic2 size={16} className="absolute left-3.5 text-text-muted pointer-events-none" />}
-                <input
-                  ref={trackerTab === 'songs' ? searchInputRef : undefined}
-                  type="search"
-                  value={trackerTab === 'songs' ? search : lyricsQuery}
-                  onChange={(e) => trackerTab === 'songs' ? setSearch(e.target.value) : setLyricsQuery(e.target.value)}
-                  placeholder={trackerTab === 'songs' ? 'Songs, artists, producers, or artist:"name"' : 'Search lyrics'}
-                  enterKeyHint="search"
-                  autoCorrect="off"
-                  autoCapitalize="off"
-                  spellCheck={false}
-                  className={`w-full h-11 bg-surface-overlay rounded-full pl-10 ${trackerTab === 'songs' ? (search ? 'pr-20' : 'pr-10') : 'pr-10'} text-[15px] text-text-primary placeholder:text-text-muted focus:outline-none focus:ring-1 focus:ring-accent/50 [&::-webkit-search-cancel-button]:hidden`}
-                />
-                {(trackerTab === 'songs' ? search : lyricsQuery) && (
-                  <button
-                    onClick={() => trackerTab === 'songs' ? setSearch('') : setLyricsQuery('')}
-                    className={`absolute ${trackerTab === 'songs' ? 'right-10' : 'right-1'} w-9 h-9 flex items-center justify-center rounded-full text-text-muted active:text-text-primary`}
-                    aria-label="Clear search"
-                  ><X size={16} /></button>
-                )}
-                {trackerTab === 'songs' && (
-                  <span className="absolute right-1 w-9 h-9 flex items-center justify-center">
+            <div className="px-4 pt-3 pb-2">
+              <SearchField
+                icon={trackerTab === 'songs' ? Search : Mic2}
+                inputRef={trackerTab === 'songs' ? searchInputRef : undefined}
+                value={trackerTab === 'songs' ? search : lyricsQuery}
+                onChange={(v) => trackerTab === 'songs' ? setSearch(v) : setLyricsQuery(v)}
+                placeholder={trackerTab === 'songs' ? 'Songs, artists, producers, or artist:"name"' : 'Search lyrics'}
+                trailing={trackerTab === 'songs' ? (
+                  <span className="w-9 h-9 flex items-center justify-center">
                     <SearchHelpButton
-                      size={16}
+                      size={17}
                       className={(open) => `flex transition-colors ${open ? 'text-accent' : 'text-text-muted active:text-text-primary'}`}
                     />
                   </span>
-                )}
-              </div>
+                ) : undefined}
+              />
             </div>
           )}
 
           {/* Active filter chips - individually removable, so a multi-select can
               be trimmed one at a time instead of all-or-nothing. */}
           {trackerTab === 'songs' && filterCount > 0 && (
-            <div className="flex items-center gap-2 px-4 pt-2.5 overflow-x-auto no-scrollbar">
+            <div className="flex items-center gap-2 px-4 pt-1 pb-1 overflow-x-auto no-scrollbar">
               {[...categoryFilter].map((cat) => (
                 <button
                   key={cat}
                   onClick={() => { toggleCategoryFilter(cat); resetSongs() }}
-                  className="shrink-0 flex items-center gap-1.5 h-8 pl-3 pr-2.5 rounded-full bg-accent/15 text-accent text-[13px] font-medium"
+                  className="shrink-0 flex items-center gap-1.5 h-8 pl-3 pr-2.5 rounded-full bg-accent/15 text-accent text-footnote font-medium"
                 >
                   {CATEGORY_LABELS[cat] ?? cat}<X size={13} />
                 </button>
@@ -1592,7 +1542,7 @@ export default function ApiTrackerView(): JSX.Element {
                 <button
                   key={eraName}
                   onClick={() => { toggleEraFilter(eraName); resetSongs() }}
-                  className="shrink-0 flex items-center gap-1.5 h-8 pl-3 pr-2.5 rounded-full bg-accent/15 text-accent text-[13px] font-medium"
+                  className="shrink-0 flex items-center gap-1.5 h-8 pl-3 pr-2.5 rounded-full bg-accent/15 text-accent text-footnote font-medium"
                 >
                   {eraName}<X size={13} />
                 </button>
@@ -1604,9 +1554,9 @@ export default function ApiTrackerView(): JSX.Element {
 
       {/* ── Body ───────────────────────────────────────────────────────────── */}
       {detail ? (
-        <div className="flex-1 overflow-y-auto overscroll-contain pt-2 pb-6">{songList(detailSongs)}</div>
+        <div className="flex-1 overflow-y-auto overscroll-contain pt-2 pb-dock">{songList(detailSongs)}</div>
       ) : trackerTab === 'lyrics' ? (
-        <div className="flex-1 overflow-y-auto overscroll-contain pt-2 pb-6">
+        <div className="flex-1 overflow-y-auto overscroll-contain pt-2 pb-dock">
           {!debouncedLyricsQuery.trim() ? emptyState(<Mic2 size={24} className="text-text-muted" />, 'Search for a lyric to find matching songs')
             : lyricsLoading && lyricsResults.length === 0 ? spinner('Searching…')
             : lyricsError ? emptyState(<X size={24} className="text-text-muted" />, `Failed to search: ${lyricsError}`)
@@ -1642,7 +1592,7 @@ export default function ApiTrackerView(): JSX.Element {
             )}
         </div>
       ) : trackerTab === 'calendar' ? (
-        <div className="flex-1 overflow-y-auto overscroll-contain px-4 pt-3 pb-6">
+        <div className="flex-1 overflow-y-auto overscroll-contain px-4 pt-3 pb-dock">
           {calendarLoading ? spinner('Loading recording dates…')
             : calendarError ? emptyState(<X size={24} className="text-text-muted" />, `Failed to load: ${calendarError}`)
             : calendarByDate.size === 0 ? emptyState(<CalendarDays size={24} className="text-text-muted" />, 'No recording dates found')
@@ -1654,7 +1604,7 @@ export default function ApiTrackerView(): JSX.Element {
                     className="w-11 h-11 flex items-center justify-center rounded-full text-text-muted active:bg-surface-overlay"
                     aria-label="Previous month"
                   ><ChevronLeft size={20} /></button>
-                  <p className="text-text-primary text-[15px] font-semibold">{MONTH_LABELS[calendarMonth.month]} {calendarMonth.year}</p>
+                  <p className="text-headline text-text-primary">{MONTH_LABELS[calendarMonth.month]} {calendarMonth.year}</p>
                   <button
                     onClick={() => shiftCalendarMonth(1)}
                     className="w-11 h-11 flex items-center justify-center rounded-full text-text-muted active:bg-surface-overlay"
@@ -1710,7 +1660,7 @@ export default function ApiTrackerView(): JSX.Element {
 
                 {selectedDateKey && (
                   <div className="mt-4 -mx-4">
-                    <p className="px-4 text-text-muted text-[11px] font-semibold uppercase tracking-wider mb-1">
+                    <p className="px-4 text-footnote font-semibold text-text-secondary mb-1">
                       {new Date(selectedDateKey + 'T00:00:00').toLocaleDateString(undefined, { month: 'long', day: 'numeric', year: 'numeric' })}
                       {' · '}{(calendarByDate.get(selectedDateKey) ?? []).length} songs
                     </p>
@@ -1731,7 +1681,7 @@ export default function ApiTrackerView(): JSX.Element {
 
                 {calendarByStudio.length > 0 && (
                   <div className="mt-4 pt-3 border-t border-[var(--border)]">
-                    <p className="text-[11px] font-semibold uppercase tracking-wider text-text-muted mb-1">Studios</p>
+                    <p className="text-footnote font-semibold text-text-secondary mb-1">Studios</p>
                     {calendarByStudio.map(([studio, list]) => (
                       <button
                         key={studio}
@@ -1754,7 +1704,7 @@ export default function ApiTrackerView(): JSX.Element {
           <StatisticsPanel onOpenEra={(era) => { setEraFilter(new Set([era])); setTrackerTab('songs') }} />
         </Suspense>
       ) : trackerTab === 'producers' ? (
-        <div className="flex-1 overflow-y-auto overscroll-contain px-4 pt-2 pb-6">
+        <div className="flex-1 overflow-y-auto overscroll-contain px-4 pt-2 pb-dock">
           {calendarLoading ? spinner('Loading credits…')
             : calendarError ? emptyState(<X size={24} className="text-text-muted" />, `Failed to load: ${calendarError}`)
             : producersByName.length === 0 && engineersByName.length === 0
@@ -1764,7 +1714,7 @@ export default function ApiTrackerView(): JSX.Element {
                 {([['producer', 'Producers', producersByName], ['engineer', 'Engineers', engineersByName]] as const).map(([kind, label, list]) => (
                   list.length > 0 && (
                     <div key={kind} className="mb-4">
-                      <p className="text-[11px] font-semibold uppercase tracking-wider text-text-muted mb-1">{label}</p>
+                      <p className="text-footnote font-semibold text-text-secondary mb-1">{label}</p>
                       {list.map(([name, songsFor]) => (
                         <button
                           key={name}
@@ -1787,7 +1737,11 @@ export default function ApiTrackerView(): JSX.Element {
         </div>
       ) : (
         /* ── Songs ─────────────────────────────────────────────────────────── */
-        <div ref={listScrollRef} className="relative flex-1 overflow-y-auto overscroll-contain pt-2 pb-6">
+        <div
+          ref={listScrollRef}
+          className="relative flex-1 overflow-y-auto overscroll-contain pt-2 pb-dock"
+          style={selectMode ? { paddingBottom: 'calc(var(--dock-h, 0px) + 8rem)' } : undefined}
+        >
           {compactView ? (
             loadingCompact ? spinner('Loading version groups…')
               : filteredCompactGroups.length === 0
@@ -1847,20 +1801,23 @@ export default function ApiTrackerView(): JSX.Element {
       )}
 
       {/* ── Selection action bar ───────────────────────────────────────────── */}
+      {/* Floats as a glass panel just above the mini player, like the dock
+          under it, so the list keeps running underneath (the songs scroller
+          pads its end for it in select mode). */}
       {selectMode && (
-        <div className="shrink-0 border-t border-[var(--border)]">
+        <div className="fixed left-3 right-3 z-20 glass rounded-[28px] overflow-hidden" style={{ bottom: 'var(--dock-h, 0px)' }}>
           <div className="flex items-center gap-1 pl-1 pr-2 pt-1">
             <button
               onClick={exitSelectMode}
-              className="w-10 h-10 flex items-center justify-center rounded-full text-text-primary active:bg-surface-overlay"
+              className="w-10 h-10 flex items-center justify-center rounded-full text-text-primary active:bg-[var(--fill)]"
               aria-label="Cancel selection"
             ><X size={19} /></button>
-            <span className="flex-1 min-w-0 text-text-primary font-semibold text-[15px] truncate">
+            <span className="flex-1 min-w-0 text-text-primary text-headline truncate">
               {selected.size} selected
             </span>
             <button
               onClick={() => setSelected(new Map(sortedSongs.map(s => [s.id, s])))}
-              className="px-3 h-10 rounded-full text-accent text-[13px] font-semibold active:bg-accent/10"
+              className="px-3 h-10 rounded-full text-accent text-subhead font-semibold active:opacity-60"
             >Select all</button>
           </div>
           {bulkZipStatus === 'zipping' && (
@@ -1889,16 +1846,16 @@ export default function ApiTrackerView(): JSX.Element {
                 onClick: bulkDownloadZip,
                 spin: bulkZipStatus === 'zipping',
               },
-              { key: 'more', icon: MoreVertical, label: 'More', disabled: false, onClick: () => { setBulkSheetPage('main'); setSheet('bulk') } },
+              { key: 'more', icon: MoreHorizontal, label: 'More', disabled: false, onClick: () => { setBulkSheetPage('main'); setSheet('bulk') } },
             ] as const).map((action) => (
               <button
                 key={action.key}
                 onClick={action.onClick}
                 disabled={action.disabled}
-                className="flex-1 flex flex-col items-center justify-center gap-1 py-2 rounded-2xl text-text-primary disabled:opacity-35 active:bg-surface-overlay"
+                className="flex-1 flex flex-col items-center justify-center gap-1 py-2 rounded-2xl text-text-primary disabled:opacity-35 active:bg-[var(--fill)]"
               >
                 <action.icon size={20} className={'spin' in action && action.spin ? 'animate-spin' : ''} />
-                <span className="text-[11px] font-medium">{action.label}</span>
+                <span className="text-caption2 font-medium">{action.label}</span>
               </button>
             ))}
           </div>
@@ -2012,7 +1969,7 @@ export default function ApiTrackerView(): JSX.Element {
             >Clear all</button>
           ) : undefined}
         >
-          <p className="px-5 pt-2 pb-1 text-[11px] font-semibold uppercase tracking-wider text-text-muted">Category</p>
+          <p className="px-5 pt-2 pb-1 text-footnote font-semibold text-text-secondary">Category</p>
           {CATEGORY_OPTIONS.map((opt) => {
             const checked = categoryFilter.has(opt.key)
             const n = stats?.category_stats[opt.key as keyof typeof stats.category_stats]
@@ -2030,7 +1987,7 @@ export default function ApiTrackerView(): JSX.Element {
           {eras.length > 0 && (
             <>
               <SheetDivider />
-              <p className="px-5 pt-1 pb-1 text-[11px] font-semibold uppercase tracking-wider text-text-muted">Era</p>
+              <p className="px-5 pt-1 pb-1 text-footnote font-semibold text-text-secondary">Era</p>
               {eras.map((era) => {
                 const checked = eraFilter.has(era.name)
                 return (

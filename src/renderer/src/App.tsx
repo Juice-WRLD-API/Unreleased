@@ -22,6 +22,16 @@ const FOCUS_REFRESH_MIN_INTERVAL_MS = 60 * 1000
 // Wordle play audio, so those are left to remount.
 const HOLD_UNDER_TERMINAL: ViewType[] = ['editor', 'contributor', 'albums-admin', 'playlists', 'settings', 'chat']
 
+// Mobile views that run their scrollers under the floating glass dock (tab bar
+// + mini player) and pad their own ends for it (.pb-dock). Every other view
+// gets that room reserved on `main` instead, so its layout ends above the dock
+// exactly as it did when the dock took up space in the column.
+const MOBILE_SCROLL_UNDER: ViewType[] = ['home', 'playlists', 'liked', 'api-tracker', 'api-files', 'settings']
+// Of those, the ones whose large title draws under the status bar: their own
+// nav bar pads itself by --top-inset (mobile/NavBar). Tracker and Files keep
+// the reserved strip - their search and tabs stay pinned at the top.
+const MOBILE_BLEED_TOP: ViewType[] = ['home', 'playlists', 'settings']
+
 function getViewFromPath(pathname: string): ViewType {
   if (pathname === '/home') return 'home'
   // Desktop and installed apps land on Home; a mobile browser tab still gets
@@ -308,10 +318,19 @@ export default function App(): JSX.Element {
           // needed there.
           // Mobile's nav bar is bottom-only (no per-platform top option any
           // more - see BottomNav), so on mobile this only ever depends on
-          // heroBleedTop. sidebarPosition still gates it on desktop, where
-          // Sidebar itself can sit at the top and already reserves the space.
-          style={(isMobile || sidebarPosition !== 'top' || autoHideNav || navStyle === 'pill') && !heroBleedTop
-            ? { paddingTop: 'var(--top-inset)' } : undefined}
+          // heroBleedTop and the large-title views (MOBILE_BLEED_TOP).
+          // sidebarPosition still gates it on desktop, where Sidebar itself
+          // can sit at the top and already reserves the space.
+          //
+          // The bottom: the mobile dock floats over `main` rather than
+          // sitting under it, so views that don't scroll beneath it get its
+          // height reserved here instead.
+          style={{
+            paddingTop: (isMobile || sidebarPosition !== 'top' || autoHideNav || navStyle === 'pill') && !heroBleedTop
+              && !(isMobile && MOBILE_BLEED_TOP.includes(bgView))
+              ? 'var(--top-inset)' : undefined,
+            paddingBottom: isMobile && !MOBILE_SCROLL_UNDER.includes(bgView) ? 'var(--dock-h)' : undefined,
+          }}
         >
           <div className="flex-1 overflow-hidden flex">
             <ErrorBoundary>
