@@ -21,9 +21,11 @@
 ;  - customInstall: after an auto-update, restarts the app when it asked for
 ;    that (the relaunch-after-update marker, see electron/main.js).
 ;  - customFinishPage: the stock finish page, skipped on auto-updates. The app
-;    runs update installers non-silently so the install progress bar shows;
-;    every other page already skips itself for updates, and this plus
-;    SetAutoClose in customInstall lets the installer close on its own.
+;    runs update installers silently behind a stand-in window of its own, and
+;    non-silently (only the progress bar) when that window can't come up or
+;    the last install failed. Every other page already skips itself for
+;    updates, and this plus SetAutoClose in customInstall lets the installer
+;    close on its own.
 
 !include "LogicLib.nsh"
 !include "WinMessages.nsh"
@@ -446,7 +448,7 @@
   ; leftover pre-2.4.1 watcher script (see customInit) counts as the same
   ; request.
   ${if} ${isUpdated}
-    ; Non-silent update runs (the progress-bar install, see customFinishPage)
+    ; Non-silent update runs (the progress-bar fallback, see customFinishPage)
     ; move past the progress page by themselves instead of waiting on Next.
     SetAutoClose true
 

@@ -2,6 +2,7 @@ import { Music2 } from 'lucide-react'
 import { useState } from 'react'
 import { Track } from '../types'
 import { fullCoverUrl, smallCoverUrl, sizedCoverUrl } from '../lib/juicewrldApi'
+import { imageLoadAttrs, markImageLoaded } from '../lib/loadedImages'
 
 interface Props {
   track: Track
@@ -66,8 +67,8 @@ function Thumbnail({ track, size = 40, className = '', fill = false, eager = fal
         alt={track.title}
         style={sizeStyle}
         className={`object-cover shrink-0 ${className}`}
-        loading={eager ? 'eager' : 'lazy'}
-        decoding="async"
+        {...imageLoadAttrs(src, !eager)}
+        onLoad={() => markImageLoaded(src)}
         onError={() => setAttempt(attempt + 1)}
       />
     )

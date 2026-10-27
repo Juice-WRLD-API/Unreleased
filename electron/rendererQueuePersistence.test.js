@@ -19,6 +19,24 @@ function harness(saved = new Map(), search = '') {
   const requests = []
   const microtasks = []
   const warnings = []
+  // Fake timers: the fake requests below never settle, so the radio prefetch's
+  // give-up-and-retry timeout would otherwise keep the test process alive.
+  const timers = new Map()
+  let now = 0
+  let nextTimer = 1
+  const setTimeout = (fn, ms = 0) => { timers.set(nextTimer, { at: now + ms, fn }); return nextTimer++ }
+  const clearTimeout = (id) => { timers.delete(id) }
+  const advance = (ms) => {
+    const end = now + ms
+    for (;;) {
+      const due = [...timers].filter(([, t]) => t.at <= end).sort((a, b) => a[1].at - b[1].at)[0]
+      if (!due) break
+      timers.delete(due[0])
+      now = due[1].at
+      due[1].fn()
+    }
+    now = end
+  }
   const window = Object.assign(new EventTarget(), { location: { search } })
   const document = Object.assign(new EventTarget(), { visibilityState: 'visible' })
   const localStorage = {
@@ -45,8 +63,9 @@ function harness(saved = new Map(), search = '') {
       }
       return {}
     }
-    Function('require', 'module', 'exports', 'localStorage', 'window', 'document', 'queueMicrotask', 'console', sources.get(file))(
+    Function('require', 'module', 'exports', 'localStorage', 'window', 'document', 'queueMicrotask', 'console', 'setTimeout', 'clearTimeout', sources.get(file))(
       mockRequire, loaded, loaded.exports, localStorage, window, document, (fn) => microtasks.push(fn), { warn: (...args) => warnings.push(args) },
+      setTimeout, clearTimeout,
     )
     modules.set(file, loaded.exports)
     return loaded.exports
@@ -55,7 +74,7 @@ function harness(saved = new Map(), search = '') {
   const { createQueueSlice } = load('store/queueSlice.ts')
   const store = createStore((set, get, api) => ({ ...createQueueSlice(set, get, api), preferOgVersion: false, currentTrackFull: null }))
   return {
-    store, storage, writes, requests, persistence, localStorage, warnings,
+    store, storage, writes, requests, persistence, localStorage, warnings, advance,
     flushStartup: () => { while (microtasks.length) microtasks.shift()() },
     hide: () => { document.visibilityState = 'hidden'; document.dispatchEvent(new Event('visibilitychange')) },
     close: () => window.dispatchEvent(new Event('beforeunload')),
@@ -221,6 +240,15 @@ test('reopening resumes lazy page preparation and random-radio preparation witho
   radio.flushStartup()
   assert.equal(radio.requests[0][0], '/radio/random/')
   assert.equal(radio.store.getState().radioMode, true)
+  assert.equal(radio.store.getState().isPlaying, false)
+  // A pick that never answers is abandoned after 15 s and asked for again.
+  assert.equal(radio.requests.length, 1)
+  radio.advance(14999)
+  assert.equal(radio.requests.length, 1)
+  radio.advance(1)
+  assert.equal(radio.requests[0][2].aborted, true)
+  assert.equal(radio.requests.length, 2)
+  assert.equal(radio.requests[1][0], '/radio/random/')
   assert.equal(radio.store.getState().isPlaying, false)
 })
 

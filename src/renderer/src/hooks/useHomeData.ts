@@ -68,27 +68,24 @@ export function useHomeData() {
     account, playlists, guestPlaylists, followedPlaylists, likedTrackIds,
     listeningPlays, songPrefs, setActiveView, setPendingPlaylistId, playTrack, openProfile, openOwnPublicProfile,
     radioFmActive, setRadioFmActive, radioFmIsLive, radioFmNowPlaying,
-    homeSectionVisibility, refreshPlaylists, setIsPlaying, recentTracksRev,
+    homeSectionVisibility, ensurePlaylists, setIsPlaying, recentTracksRev,
   } = useStorePick(
     'account', 'playlists', 'guestPlaylists', 'followedPlaylists', 'likedTrackIds',
     'listeningPlays', 'songPrefs', 'setActiveView', 'setPendingPlaylistId', 'playTrack', 'openProfile', 'openOwnPublicProfile',
     'radioFmActive', 'setRadioFmActive', 'radioFmIsLive', 'radioFmNowPlaying',
-    'homeSectionVisibility', 'refreshPlaylists', 'setIsPlaying', 'recentTracksRev',
+    'homeSectionVisibility', 'ensurePlaylists', 'setIsPlaying', 'recentTracksRev',
   )
 
   const showSection = (id: string): boolean => isHomeSectionVisible(id, homeSectionVisibility)
 
-  // On a fresh app launch, playlists load as one step of loadAccount()'s long
-  // sequential chain (getMe → favorites → prefs → folders → reports → THEN
-  // playlists) - Home routinely finishes mounting before that chain gets to
-  // its playlists step, and it's just one more await away from never getting
-  // there at all if an earlier step throws. Rather than depend on that chain,
-  // Home asks for its own copy directly; refreshPlaylists() already no-ops
-  // without an account and collapses concurrent callers (see its _inFlight
-  // guard), so this is free when the chain already covered it.
+  // loadAccount() starts the playlist fetch alongside getMe, and the last list
+  // is painted from the offline cache before that. If that fetch failed, Home
+  // tries again: ensurePlaylists() no-ops without an account, once this
+  // session has loaded them, and joins a fetch already in flight, so this
+  // costs nothing on later visits.
   useEffect(() => {
-    if (account) refreshPlaylists()
-  }, [account, refreshPlaylists])
+    if (account) ensurePlaylists()
+  }, [account, ensurePlaylists])
 
   // localStorage-backed, so read once per mount rather than per render. Home is
   // remounted on every visit (it's a route), which is exactly when this should

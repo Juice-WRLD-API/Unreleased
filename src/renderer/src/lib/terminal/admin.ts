@@ -2,7 +2,7 @@ import { relativeTime } from '../../components/adminShared'
 import { useChatStore } from '../../store/chatStore'
 import { listSiteModeration } from '../chatApi'
 import {
-  adminCompProposalCounts, adminListApplications, adminListCompProposals, adminListProposals, adminListUsers,
+  adminCompProposalCounts, adminListApplications, adminListCompProposals, adminListProposals, adminListUsers, adminUserCounts,
   adminProposalCounts, adminReverseCompProposal, adminReverseProposal, adminReviewApplication, adminReviewCompProposal,
   adminReviewProposal, type ApplicationStatus, type ProposalStatus,
 } from '../userApi'
@@ -53,6 +53,14 @@ async function review(kind: Kind, id: number, action: 'approve' | 'reject', note
 }
 
 export const ADMIN_COMMANDS: TermCommand[] = [
+  {
+    name: 'user-counts', group: 'Admin', usage: 'user-counts', description: 'Account totals without loading user details',
+    covers: ['userApi.adminUserCounts'],
+    run: async (_args, ctx) => {
+      const counts = await adminUserCounts()
+      ctx.print(`users ${counts.total}\neditors ${counts.editors}\nmanagers ${counts.managers}\napplicants ${counts.applicants}`)
+    },
+  },
   {
     name: 'pending', group: 'Admin', usage: 'pending', description: 'How much is waiting in each review queue',
     run: async (_a, ctx) => {

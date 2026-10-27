@@ -1,6 +1,6 @@
 # Agent guide: Juice WRLD API and Unreleased
 
-**Version 1.23** · updated 2026-10-24. Bump the version and date whenever you
+**Version 1.36** · updated 2026-10-27. Bump the version and date whenever you
 change this file (minor for fixes and additions, major for rewrites).
 
 **Keep this file current.** If you find something in the docs or this file that
@@ -35,8 +35,8 @@ checkout as a sibling.
 | `iJWA/` | Retired. Its features now live in the app as **Desktop** (see section 6) | `Juice-WRLD-API/iJWA` |
 
 Branches in the player repo **do not sync automatically**. Each one has its own
-version number (desktop 2.5.x, web 2.3.x, android/ios 2.0.x, beta 3.0.x-beta as of
-2026-10-21) and its own history. Work moves between them by hand ("porting" or
+version number (desktop 2.5.x, web 2.3.x, Android/iOS 3.2.x, beta 3.0.x-beta as of
+2026-10-25) and its own history. Work moves between them by hand ("porting" or
 "relaying"), see section 2.
 
 ---
@@ -272,6 +272,18 @@ under the app CSP: no inline `style` attributes or `<style>` tags. Don't bring
 back WRLD's Cover Flow layout or iJWA's live wallpaper, artwork tray icon or
 energy rules.
 
+**Updates at launch** (`app`): a packaged launch shows the updating window
+(`electron/updating/`) first and only creates the main window once there is
+nothing to install. A newer build is downloaded and installed right there,
+with no prompt, and the installer reopens the app. Timeouts that open the app
+anyway live in `electron/launchUpdate.js`. Once the app is open, a background
+download still asks with "Restart now / Later". Auto-download off skips the
+launch check. On Windows every install from the app runs the NSIS installer
+silently behind a stand-in (`electron/updating/standin.ps1`, PowerShell + WPF):
+a capture of the updating window with a live sweep, kept up until the new
+version deletes `update-standin` in userData. If the stand-in can't start, or
+the last install didn't take, the installer shows its own progress window.
+
 **Sync** (Home → Tools, `app` only, off by default) keeps every released and
 unreleased song with audio offline. It is one more entry in the offline
 library (`catalog-sync`), registered with the whole chosen catalogue before
@@ -284,9 +296,11 @@ concurrent downloads of one track and aborts them on pause
 **Synced lyrics** (Tools menu, Home → Tools, a song's or comp file's menu) is
 one tool for timing lyrics by the line or the word. Model:
 `lib/syncedLyrics.ts` (untouched lines are written back byte for byte); UI:
-`components/SyncedLyricsTool.tsx`, edited in two places only: the song
-editor's Sync (on the app's player) and the dialog's Sync tab (on its own
-`<audio>`, for anyone; it opens big). A Whisper job's result shows it
+`components/SyncedLyricsTool.tsx`, edited in one place only: the dialog's
+Sync tab (`LyricsGenModal`, on its own `<audio>`, for anyone; it opens big).
+The song editor's Sync opens that dialog on the song and the editor's lyrics
+(`LyricsGenTarget.sync`), and "Use in the song editor" hands the result back;
+don't embed the tool in the editor again. A Whisper job's result shows it
 `readOnly` as a play-along preview, and Edit in Sync opens the result in the
 Sync tab; don't add timing controls back to the preview. Whisper stays
 donor-only, under Generate. Word timing
@@ -377,6 +391,74 @@ Node 22.
 
 Newest first. One entry each: date, what went wrong, what to do instead. Delete
 entries that stop being true.
+
+- 2026-10-27: Playlists showed up seconds after launch. Every song in playlist
+  and favorites responses carried full `lyrics`/`synced_lyrics` (7.1M of a
+  1,235-track library's characters; 0.8M without), so the `include_items`
+  list went over `apiCache`'s 2M-character cap, was never cached, and launch
+  waited behind getMe and favorites for it. `userApi` now sends
+  `omit=lyrics,synced_lyrics` (backend support in `library/views.py`) and strips
+  them again before caching; `loadAccount` starts the playlist fetch alongside
+  getMe. Keep lyrics out of list payloads you cache, and check an entry's size
+  against `MAX_ENTRY_CHARS`: `cacheSet` drops anything bigger without saying so.
+
+- 2026-10-27: `/plays/stats/` `recent_plays` rows have `song_id: null` and
+  `public_id: null` for radio plays of files with no catalog song, and
+  Statistics asked for `/songs/null/`. Both are typed nullable now; skip null
+  ids before resolving songs.
+
+- 2026-10-27: To profile the renderer, serve a `vite build --sourcemap` copy on
+  port 3018 and launch `electron . --user-data-dir=<scratch> --remote-debugging-port=9223`
+  (see the 2026-10-21 entry for the profile copy). The dev window navigates
+  before CDP setup lands even with `waitForDebuggerOnStart`, so expect to
+  reload it once, and synthetic wheel input stalls while the window is hidden
+  behind others. The API slows sharply under parallel load (one request
+  ~0.1 s, 20 at once a median of 2 s), so count startup requests before
+  blaming the renderer.
+
+- 2026-10-26: Synced lyrics stamps were off after any jump on a VBR MP3: Chromium
+  seeks those by estimate and reports the time it was asked for (11 of 12 jumps
+  landed 0.1 to 1.7 s off on a test file; CBR and playing from 0 are exact). The
+  dialog's `useAudioClock` now plays VBR MP3s as a decoded WAV
+  (`lib/exactSeekAudio.ts`), and the song editor's Sync opens that dialog
+  rather than stamping on the app's player. To measure seek accuracy, correlate against seeded
+  noise from ffmpeg, never music: repeated bars give false matches whole bars off.
+  The typed-time box also read `0:01:26` as m:ss:cc (1.26 s); it is h:mm:ss now.
+
+- 2026-10-26: Playlist PATCH responses (rename, public toggle, reorder,
+  description) omit `items`, but `updatePlaylist`/`renamePlaylist`/`reorderPlaylistItems`
+  replaced the detail cache and React state with the bare PATCH body. Playlists
+  then crashed in `playlistItemsToTracks` (`undefined.some`). Merge PATCH bodies
+  into cached detail via `storePlaylistDetail` in `userApi.ts`; treat missing
+  `items` as “keep previous”.
+
+- 2026-10-26: A bidirectional `port-c` left relevant uncommitted source changes
+  behind because they appeared during the relay. Include source changes from
+  both working trees in the review and relay; do not assume they are out of
+  scope. Keep machine-local settings, locks and generated reports out of commits.
+
+- 2026-10-26: The profile admin preview fetched every user with proposal counts
+  and badges just for totals, and waited for all sections together. Use
+  `adminUserCounts` (`admin/users/?counts=1`) and publish sections independently;
+  unavailable counts stay unknown. Deploy backend support before the renderer.
+
+- 2026-10-25: Remote iOS Siri changes referenced `SiriRadioDonation` and
+  `PlayMediaIntentHandler` without their definitions, breaking the Xcode archive.
+  Both live in the already-compiled `SiriIntents.swift`; the media handler returns
+  `continueInApp` with the activity handled by the app/scene delegates. JS bridge
+  tests do not compile Swift; only a macOS Xcode archive confirms native builds.
+
+- 2026-10-25: The iOS release script fast-forwards `origin/ios` before building.
+  A web port left local URL-shortcut edits overlapping a remote Siri fix, so
+  release stopped at that first step. Reconcile incoming commits before handing
+  off a port: preserve local edits, fast-forward, and merge both the URL-context
+  and Siri user-activity handlers in `SceneDelegate.swift`.
+
+- 2026-10-25: Android offline playlist downloads take catalogue song ids, but
+  mixed playlists include entries with `song: null`. Use `playlistSongIds`
+  from `lib/playlistItems.ts` for both manual download and background sync.
+  When porting web ZIP/download helpers, await Android's `saveFile` or
+  `triggerDownload` so completion reflects the native write and failures surface.
 
 - 2026-10-24: `GET /accounts/editor/proposals/` (My proposals) now returns
   paginated summaries (`count`, 50 per page by default, 200 max) without

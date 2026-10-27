@@ -226,8 +226,10 @@ export const EFFECTS_SUPPORTED = !IS_IOS
 // frozen - at which point nothing is left running to resume it. A bare element
 // survives all of that. So on mobile the graph is built lazily: elements stay
 // unrouted until the user actually switches an effect on, which is the only
-// point where the trade is worth making. Desktop attaches eagerly as before.
-let effectsWanted = !IS_MOBILE
+// point where the trade is worth making. Desktop builds it on the first play
+// (resumeEffectsContext): creating the context and its nodes at mount cost
+// 115-150 ms of every launch, before anything had played.
+let effectsWanted = false
 
 let ctx: AudioContext | null = null
 let chainInput: GainNode | null = null
@@ -513,7 +515,7 @@ function flushPendingAttachments(): void {
 // that registered before now. One-way by nature: a MediaElementSource can't be
 // un-created, so an element routed once stays routed until the page reloads.
 export function setEffectsChainWanted(wanted: boolean): void {
-  if (!wanted || effectsWanted) return
+  if (!wanted || effectsWanted || !IS_MOBILE) return
   effectsWanted = true
   flushPendingAttachments()
 }
@@ -632,7 +634,8 @@ export function getCurrentPeak(): number {
 
 // The mixed player signal (pre-EQ, post element volume), for analysis taps
 // like the fullscreen visualizer. Null while the graph isn't built - never on
-// iOS, and on Android not until an effect is switched on - so callers must
+// iOS, on Android not until an effect is switched on, on desktop not until the
+// first play - so callers must
 // cope without it rather than forcing the graph, which would cost background
 // playback. Read-only by contract: connect analysers to it, never anything
 // that reaches ctx.destination (that plays the audio twice and skips the EQ),
@@ -642,8 +645,14 @@ export function getAnalysisTap(): { ctx: AudioContext; node: AudioNode } | null 
 }
 
 // Autoplay policies can leave a fresh context suspended - call on every
-// play so audio never sits routed into a dead graph.
+// play so audio never sits routed into a dead graph. On desktop the first
+// call is also what builds the graph (see effectsWanted), so it has to come
+// before the element's play().
 export function resumeEffectsContext(): void {
+  if (!IS_MOBILE && !effectsWanted) {
+    effectsWanted = true
+    flushPendingAttachments()
+  }
   if (ctx && ctx.state === 'suspended') ctx.resume().catch(() => {})
 }
 

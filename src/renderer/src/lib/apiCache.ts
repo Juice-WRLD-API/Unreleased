@@ -54,6 +54,15 @@ export function cacheGet<T>(key: string): T | undefined {
   }
 }
 
+// Whether an entry exists, without parsing it.
+export function cacheHas(key: string): boolean {
+  try {
+    return localStorage.getItem(PREFIX + key) !== null
+  } catch {
+    return false
+  }
+}
+
 export function cacheSet<T>(key: string, data: T): void {
   const raw = JSON.stringify({ data, ts: Date.now() } as CacheEntry<T>)
   // Too big to ever fit - skip entirely rather than evict-and-retry a write

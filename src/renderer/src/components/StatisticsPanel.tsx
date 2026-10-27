@@ -115,7 +115,7 @@ export default function StatisticsPanelDesktop({ onOpenEra }: { onOpenEra: (eraN
                     <div className={`space-y-0.5 ${LIST_MAX_HEIGHT_DESKTOP} overflow-y-auto`}>
                       {playStats.recent_plays.map((play) => (
                         <RecentPlayRow
-                          key={play.id} play={play} cover={songMap.get(play.song_id)}
+                          key={play.id} play={play} cover={play.song_id != null ? songMap.get(play.song_id) : undefined}
                           onPlay={playById} onContextMenu={openContextMenu} isMobile={false}
                         />
                       ))}

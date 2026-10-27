@@ -13,12 +13,14 @@ const EditorPage = lazy(() => import('./components/EditorPage'))
 const LocalEditorPage = lazy(() => import('./components/LocalEditorPage'))
 const MiniPlayer = lazy(() => import('./components/MiniPlayer'))
 const EqualizerPanel = lazy(() => import('./components/EqualizerPanel'))
+const LyricsGenModal = lazy(() => import('./components/LyricsGenModal'))
 // Not lazy: every list view already imports the info modal statically, so
 // it lives in the main chunk regardless — a dynamic import here would just
 // trigger Vite's mixed-import warning without splitting anything.
 import SongInfoModal from './components/SongInfoModal'
 import ReportModal from './components/ReportModal'
 import ConvertFormatModal from './components/ConvertFormatModal'
+import AppToastHost from './components/AppToastHost'
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const el = (window as any).electron
@@ -103,9 +105,19 @@ function FloatEditor(): JSX.Element {
     if (p?.songId) useStore.setState({ pendingEditorSongId: Number(p.songId) })
   }), [])
 
+  // The lyrics box's Sync opens the Synced lyrics dialog, which hands its
+  // result back to this editor, so it opens in this window, toasts and all.
+  const lyricsGenOpen = useStore((s) => s.lyricsGenModal !== null)
+
   return (
     <div className="flex-1 min-h-0 overflow-hidden flex">
       <EditorPage initialSongId={bootSongId} />
+      {lyricsGenOpen && (
+        <ErrorBoundary variant="overlay" onDismiss={() => useStore.getState().closeLyricsGen()}>
+          <Suspense fallback={null}><LyricsGenModal /></Suspense>
+        </ErrorBoundary>
+      )}
+      <AppToastHost />
     </div>
   )
 }

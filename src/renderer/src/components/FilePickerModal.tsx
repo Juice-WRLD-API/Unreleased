@@ -2,11 +2,11 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { ModalOverlay, LockToggle } from './Modal'
 import { X, Folder, FolderOpen, ArrowLeft, Home, ChevronRight, Loader2, ImageIcon, Search, Check, Music2, File, FolderCheck, FolderPlus } from 'lucide-react'
 import {
-  apiFetch, apiPeek, buildStreamUrl, smallCoverUrl, parseBrowseEntries, cleanTitleForSearch, titleVariants, filterSearchResults, searchFiles,
+  apiFetch, apiPeek, buildStreamUrl, smallCoverUrl, parseBrowseEntries, cleanTitleForSearch, coverSearchQueries, filterSearchResults, searchFiles,
   JWApiFileEntry, JWApiBrowseResponse,
 } from '../lib/juicewrldApi'
 import { getMediaType } from '../lib/fileTypes'
-import { loadFileIndex, runFileSearch } from '../lib/fileSearch'
+import { folderFromIndex, loadFileIndex, runFileSearch } from '../lib/fileSearch'
 import { SearchHelpButton } from './SearchHelpPopover'
 import { breadcrumbs, parentFolder } from '../lib/apiFilesShared'
 import { useStore } from '../store/useStore'
@@ -104,9 +104,7 @@ export default function FilePickerModal({ kind = 'image', songTitle, altTitles =
   const initialQuery = songTitle ? cleanTitleForSearch(songTitle) : ''
   // Alt titles searched alongside the primary one on mount (deduped, and never
   // repeating a name the primary search already covers).
-  const altQueries = [...(songTitle ? titleVariants(songTitle).slice(1) : []), ...altTitles.flatMap(titleVariants)]
-    .map(cleanTitleForSearch)
-    .filter((q, i, arr) => q && q.toLowerCase() !== initialQuery.toLowerCase() && arr.indexOf(q) === i)
+  const altQueries = songTitle ? coverSearchQueries(songTitle, altTitles).filter((q) => q.toLowerCase() !== initialQuery.toLowerCase()) : []
   const [currentPath, setCurrentPath] = useState('')
   const [entries, setEntries] = useState<JWApiFileEntry[]>([])
   const [loading, setLoading] = useState(!initialQuery)
@@ -138,9 +136,11 @@ export default function FilePickerModal({ kind = 'image', songTitle, altTitles =
 
   const navigate = useCallback(async (path: string, pushHistory = true, resetSearch = true) => {
     if (resetSearch) { setSearch(''); setDebouncedSearch('') }
-    const cached = apiPeek<JWApiBrowseResponse>('/files/browse/', browseParams(path))
+    // Cached listing, else the channel's file index if search already loaded it.
+    const peeked = apiPeek<JWApiBrowseResponse>('/files/browse/', browseParams(path))
+    const cached = peeked ? parseBrowseEntries(peeked) : folderFromIndex(activeChannel, path)
     if (cached) {
-      setEntries(parseBrowseEntries(cached))
+      setEntries(cached)
       setCurrentPath(path)
       setError(null)
       if (resetSearch) setLoading(false)
@@ -158,7 +158,7 @@ export default function FilePickerModal({ kind = 'image', songTitle, altTitles =
     } finally {
       if (resetSearch) setLoading(false)
     }
-  }, [currentPath, browseParams])
+  }, [currentPath, browseParams, activeChannel])
 
   // Always prefetch the root listing (silently, without touching the search
   // box) so clearing the initial title search drops straight into a populated

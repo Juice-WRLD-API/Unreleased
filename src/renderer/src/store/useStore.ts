@@ -8,6 +8,7 @@ import type { AccountUser, PlaylistSummary, UserSettings } from '../lib/userApi'
 import { signInWithPasskey } from '../lib/passkeyApi'
 import { clearDonorPlaybackCache } from '../lib/donorPlayback'
 import { clearDonorImageCache } from '../lib/donorImageCache'
+import { clearDecryptedAttachments } from '../lib/chatAttachmentCache'
 import { clearDonorCoverCache } from '../lib/donorCoverArt'
 import * as preferencesApi from '../lib/preferencesApi'
 import * as profilePushApi from '../lib/profilePushApi'
@@ -60,6 +61,7 @@ import { getLastfmSession } from '../lib/lastfm'
 import { runWhenIdle } from '../lib/platform'
 import { useSandboxStore } from '../components/Modal'
 import { showAppToast } from '../lib/appToast'
+import { clearNotifications } from '../lib/notificationHistory'
 import { setNotificationsSignedIn } from '../lib/notificationSocket'
 import { migrateDonorPlaylists } from '../lib/donorPlaylistEntries'
 
@@ -551,6 +553,9 @@ interface AppState {
   // Downloads (Electron only)
   downloads: DownloadItem[]
   showDownloadManager: boolean
+  // The notification area (NotificationCenter); its entries live in
+  // lib/notificationHistory, not here.
+  showNotifications: boolean
   updateStatus: { type: string; version?: string; percent?: number; bytesPerSecond?: number; message?: string } | null
 
   // The bottom nav's overflow sheet - its trigger button lives on Home now,
@@ -860,6 +865,9 @@ interface AppActions {
   completeApprovedLogin: (token: string, user: userApi.AccountUser) => Promise<void>
   logoutAccount: () => Promise<void>
   refreshPlaylists: () => Promise<void>
+  /** refreshPlaylists(), unless this session already loaded the signed-in
+   *  account's playlists. */
+  ensurePlaylists: () => Promise<void>
   prefetchPlaylistDetails: () => Promise<void>
   prefetchApiData: () => Promise<void>
   setPendingPlaylistId: (id: number | null) => void
@@ -947,6 +955,7 @@ interface AppActions {
   removeDownload: (id: string) => void
   clearCompletedDownloads: () => void
   setShowDownloadManager: (show: boolean) => void
+  setShowNotifications: (show: boolean) => void
   setUpdateStatus: (status: { type: string; version?: string; percent?: number; bytesPerSecond?: number; message?: string } | null) => void
 
   setShowMoreNav: (show: boolean) => void
@@ -971,8 +980,11 @@ export type AppStore = QueueSlice & DesktopSlice & AppState & AppActions
 
 // --- Store --------------------------------------------------------------------
 
-// Dedup flag: prevents concurrent /playlists/ fetches
-let _playlistsInFlight = false
+// The /playlists/ fetch in flight, shared by concurrent refreshPlaylists callers
+let _playlistsInFlight: Promise<void> | null = null
+// Account whose playlists a refreshPlaylists() has loaded this session (see
+// ensurePlaylists).
+let _playlistsLoadedFor: number | null = null
 // Dedup flag: prevents the startup detail/cover prefetch from running twice
 // (e.g. loadAccount racing with a later refreshPlaylists on the same session)
 let _detailsPrefetchInFlight = false
@@ -2468,8 +2480,10 @@ export const useStore = create<AppStore>((set, get, store) => ({
   },
 
   // ── Account ───────────────────────────────────────────────────────────────
-  account: null,
-  playlists: [],
+  // Painted from the offline cache so a returning user doesn't boot into the
+  // signed-out view; loadAccount() swaps in the server's copy once it answers.
+  account: userApi.peekCachedAccount(),
+  playlists: userApi.peekCachedPlaylists(),
   showUserAuth: false,
   pendingPlaylistId: null,
   publicProfileId: null,
@@ -2522,6 +2536,9 @@ export const useStore = create<AppStore>((set, get, store) => ({
     if (_loadAccountInFlight) return _loadAccountInFlight
     _loadAccountInFlight = (async () => {
       if (!userApi.getToken()) return
+      // Nothing below feeds the playlist list, so it loads alongside the
+      // profile instead of waiting behind favorites and the settings merge.
+      const playlistsLoaded = get().refreshPlaylists()
       try {
         const account = await userApi.getMe()
         set({ account })
@@ -2561,7 +2578,7 @@ export const useStore = create<AppStore>((set, get, store) => ({
       // Deliver any reports queued while signed out � a logged-in flush can
       // attach the account's Discord username as the contact field.
       get()._flushReports()
-      await get().refreshPlaylists()
+      await playlistsLoaded
       // Fire-and-forget: warm playlist tracks + covers in the background so the
       // Playlists page is ready before the user ever navigates to it. Two
       // requests per playlist, so it waits for idle rather than piling onto the
@@ -2654,6 +2671,7 @@ export const useStore = create<AppStore>((set, get, store) => ({
     ls.set('donorPlaylists', [])
     clearDonorPlaybackCache()
     clearDonorImageCache()
+    clearDecryptedAttachments()
     clearDonorCoverCache()
     // Overrides stay on this device after signing out, the same way likes do -
     // they're re-merged upward on the next login.
@@ -2663,16 +2681,33 @@ export const useStore = create<AppStore>((set, get, store) => ({
     // to sign in on this machine would merge it in and push it to their own
     // profile. The server copy is authoritative from the next login anyway.
     get()._setListeningPlays([])
+    // Chat notifications quote the account's messages; the rest of the
+    // notification area (news, announcements, toasts) isn't anyone's.
+    clearNotifications(['chat'])
   },
-  refreshPlaylists: async () => {
-    if (!get().account) return
-    if (_playlistsInFlight) return
-    _playlistsInFlight = true
-    try {
-      const playlists = await userApi.getPlaylists()
-      set({ playlists })
-    } catch {}
-    finally { _playlistsInFlight = false }
+  // Keyed on the token rather than `account`, so loadAccount can start it
+  // before getMe answers.
+  refreshPlaylists: () => {
+    if (!userApi.getToken()) return Promise.resolve()
+    if (_playlistsInFlight) return _playlistsInFlight
+    _playlistsInFlight = (async () => {
+      try {
+        const accountId = get().account?.id ?? null
+        const playlists = await userApi.getPlaylists()
+        // Signed out while it was loading.
+        if (!userApi.getToken()) return
+        set({ playlists })
+        _playlistsLoadedFor = accountId
+      } catch {}
+    })().finally(() => { _playlistsInFlight = null })
+    return _playlistsInFlight
+  },
+  // The list carries every playlist's items (~1.5 MB for a big library), so
+  // callers that only need it loaded once (Home, on every visit) use this.
+  ensurePlaylists: async () => {
+    const id = get().account?.id
+    if (id == null || _playlistsLoadedFor === id) return
+    await get().refreshPlaylists()
   },
 
   // Warm the in-memory (and, via the API layer, localStorage) caches for every
@@ -3470,7 +3505,11 @@ export const useStore = create<AppStore>((set, get, store) => ({
   clearCompletedDownloads: () => set((s) => ({
     downloads: s.downloads.filter((d) => d.state === 'downloading'),
   })),
-  setShowDownloadManager: (show) => set({ showDownloadManager: show }),
+  // Both panels hang off the top-right corner, so only one is open at a time.
+  setShowDownloadManager: (show) => set(show ? { showDownloadManager: true, showNotifications: false } : { showDownloadManager: false }),
+
+  showNotifications: false,
+  setShowNotifications: (show) => set(show ? { showNotifications: true, showDownloadManager: false } : { showNotifications: false }),
   setUpdateStatus: (updateStatus) => set({ updateStatus }),
 
   showMoreNav: false,

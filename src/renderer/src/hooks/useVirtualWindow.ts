@@ -26,9 +26,11 @@ function useWindowRange(
   const published = useRef(range)
 
   useLayoutEffect(() => {
-    const scroll = elementOf(scrollSource)
-    const content = elementOf(contentSource)
+    let scroll = elementOf(scrollSource)
+    let content = elementOf(contentSource)
     let frame = 0
+    let setupFrame = 0
+    let observer: ResizeObserver | undefined
     let height = 0
     let offset = 0
     const update = (): void => {
@@ -48,15 +50,24 @@ function useWindowRange(
     const onScroll = (): void => {
       if (!frame) frame = requestAnimationFrame(() => { frame = 0; update() })
     }
-    measure()
-    if (!scroll) return
-    scroll.addEventListener('scroll', onScroll, { passive: true })
-    const observer = new ResizeObserver(measure)
-    observer.observe(scroll)
-    if (content) observer.observe(content)
+    const setup = (): void => {
+      scroll = elementOf(scrollSource)
+      content = elementOf(contentSource)
+      measure()
+      if (!scroll) return
+      scroll.addEventListener('scroll', onScroll, { passive: true })
+      observer = new ResizeObserver(measure)
+      observer.observe(scroll)
+      if (content) observer.observe(content)
+    }
+    // Child layout effects run before the parent host ref is attached. Cached
+    // lists can mount in that same commit; retry once after refs are attached.
+    if (scroll && content) setup()
+    else setupFrame = requestAnimationFrame(setup)
     return () => {
-      scroll.removeEventListener('scroll', onScroll)
-      observer.disconnect()
+      scroll?.removeEventListener('scroll', onScroll)
+      observer?.disconnect()
+      cancelAnimationFrame(setupFrame)
       cancelAnimationFrame(frame)
     }
   }, [scrollSource, contentSource, rangeAt, totalHeight])

@@ -29,6 +29,8 @@ export interface DesktopState {
   eq?: boolean
   /** The song's other versions that can be played (WRLD's version notch's list), labeled by version alone. */
   versions?: { songId: number; label: string | null; version: string | null }[]
+  /** The song playing, as an entry of that list (null: not in a group), listed above the others to star or ban. */
+  currentVersion?: { songId: number; label: string | null; version: string | null } | null
   versionPrefs?: { preferred: string[]; excluded: string[] }
   fm?: boolean
   /** Whether 999 FM is on the air (null: not known yet). */

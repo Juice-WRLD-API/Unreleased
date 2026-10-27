@@ -261,6 +261,11 @@
 
 #menu .version-row { display: flex; align-items: center; }
 #menu .version-row [data-version] { flex: 1; min-width: 0; }
+/* The song playing, at the top: not a button, since it's already this version. */
+#menu .version-now { flex: 1; min-width: 0; display: flex; align-items: baseline; gap: calc(6px * var(--s)); padding: calc(7px * var(--s)) calc(10px * var(--s));
+  font-size: calc(12.5px * var(--s)); color: #fff; white-space: nowrap; }
+#menu .version-now span { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+#menu .version-now em { flex: 0 0 auto; font-style: normal; font-size: calc(10.5px * var(--s)); font-weight: 600; color: rgba(255, 255, 255, 0.5); }
 #menu .version-pref { flex: 0 0 auto; width: calc(28px * var(--s)); padding: calc(6px * var(--s)); display: flex; justify-content: center; color: rgba(255, 255, 255, 0.5); }
 #menu .version-pref svg { width: calc(14px * var(--s)); height: calc(14px * var(--s)); }
 #menu [data-pref="prefer"][aria-pressed="true"] { color: #facc15; }

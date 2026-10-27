@@ -6,6 +6,7 @@ import { ClampedMenu } from '../ClampedMenu'
 import { useStore } from '../../store/useStore'
 import { errorText, useDismiss } from './ui'
 import { searchGifs, trendingGifs, type GifResult } from '../../lib/gifApi'
+import { LazyImg } from '../LazyImg'
 
 export default function GifPicker({ x, y, onPick, onClose }: {
   x: number
@@ -106,10 +107,9 @@ export default function GifPicker({ x, y, onPick, onClose }: {
                     title={gif.title}
                     className="block w-full rounded-lg overflow-hidden bg-surface-raised hover:brightness-110 transition"
                   >
-                    <img
+                    <LazyImg
                       src={gif.previewUrl}
                       alt={gif.title}
-                      loading="lazy"
                       className="block w-full h-auto"
                       style={{ aspectRatio: gif.width && gif.height ? `${gif.width} / ${gif.height}` : undefined }}
                     />

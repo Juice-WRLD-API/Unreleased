@@ -1,9 +1,9 @@
 // Presentational pieces shared by the CDN nodes admin tab and the donor's own
 // "My CDN nodes" panel - the parts that read the same in both places.
-import { useMemo } from 'react'
-import { AlertCircle, ArrowDown, Check, Loader2, Minus, Rss } from 'lucide-react'
-import type { CdnAdminNode, CdnAdminStats } from '../lib/cdnAdminApi'
-import { wasAutoDisabled, VIOLATION_LIMIT, DEFAULT_TRUST_SCORE } from '../lib/cdnAdminApi'
+import { useCallback, useEffect, useMemo, useState } from 'react'
+import { AlertCircle, ArrowDown, Ban, Check, ChevronDown, ChevronRight, Loader2, Minus, Rss, Shield, ShieldAlert, ShieldCheck, ShieldOff, Trash2, UserPlus, Wrench, Undo2 } from 'lucide-react'
+import type { CdnAdminNode, CdnAdminStats, CdnNodeEvent, CdnNodeEventType } from '../lib/cdnAdminApi'
+import { wasAutoDisabled, VIOLATION_LIMIT, DEFAULT_TRUST_SCORE, fetchNodeEvents } from '../lib/cdnAdminApi'
 import { nodeSyncState, type CdnOwnedNode } from '../lib/cdnAccountApi'
 import { cdnNodeBucket, CDN_BUCKET_STYLE, formatMbps } from '../hooks/useCdnNodesAdmin'
 import { formatBytes } from '../lib/format'
@@ -282,6 +282,184 @@ export function CdnNodeFacts({ node, columns }: { node: CdnAdminNode; columns: s
         {node.public_base_url && <Fact label="Base URL" value={node.public_base_url} copy={node.public_base_url} />}
         <Fact label="Node ID" value={node.node_id} copy={node.node_id} />
       </div>
+    </div>
+  )
+}
+
+
+const EVENT_META: Record<CdnNodeEventType, { label: string; Icon: typeof Shield; tone: 'green' | 'red' | 'neutral' }> = {
+  registered:       { label: 'Registered',      Icon: UserPlus,    tone: 'neutral' },
+  approved:         { label: 'Approved',         Icon: ShieldCheck, tone: 'green' },
+  revoked:          { label: 'Revoked',          Icon: ShieldOff,   tone: 'red' },
+  enabled:          { label: 'Enabled',          Icon: Check,       tone: 'green' },
+  disabled:         { label: 'Disabled',         Icon: Ban,         tone: 'red' },
+  trust_reset:      { label: 'Trust Reset',      Icon: Shield,      tone: 'green' },
+  violation:        { label: 'Hash Violation',   Icon: ShieldAlert, tone: 'red' },
+  auto_disabled:    { label: 'Auto-Disabled',    Icon: ShieldOff,   tone: 'red' },
+  deleted:          { label: 'Deleted',          Icon: Trash2,      tone: 'red' },
+  restored:         { label: 'Restored',         Icon: Undo2,       tone: 'green' },
+  settings_changed: { label: 'Settings Changed', Icon: Wrench,      tone: 'neutral' },
+}
+
+const TONE_CLASSES = {
+  green:   { dot: 'bg-emerald-400', icon: 'text-emerald-400', line: 'bg-emerald-500/20' },
+  red:     { dot: 'bg-red-400',     icon: 'text-red-400',     line: 'bg-red-500/20' },
+  neutral: { dot: 'bg-zinc-500',    icon: 'text-zinc-400',    line: 'bg-zinc-500/20' },
+} as const
+
+function EventDetailRow({ label, before, after }: { label: string; before: unknown; after: unknown }): JSX.Element {
+  const fmt = (v: unknown): string => (v == null ? '—' : String(v))
+  return (
+    <div className="flex items-baseline gap-2 text-[11px]">
+      <span className="text-text-muted font-medium w-28 shrink-0 truncate">{label}</span>
+      <span className="text-red-400 line-through">{fmt(before)}</span>
+      <span className="text-text-muted">→</span>
+      <span className="text-emerald-400">{fmt(after)}</span>
+    </div>
+  )
+}
+
+function EventDetailBlock({ detail, eventType }: { detail: Record<string, unknown>; eventType: CdnNodeEventType }): JSX.Element | null {
+  if (!detail || Object.keys(detail).length === 0) return null
+  const diffKeys = Object.keys(detail).filter((k) => {
+    const v = detail[k]
+    return v != null && typeof v === 'object' && 'before' in (v as Record<string, unknown>) && 'after' in (v as Record<string, unknown>)
+  })
+  const plainKeys = Object.keys(detail).filter((k) => !diffKeys.includes(k))
+  return (
+    <div className="mt-1.5 space-y-0.5">
+      {diffKeys.map((k) => {
+        const d = detail[k] as { before: unknown; after: unknown }
+        return <EventDetailRow key={k} label={k} before={d.before} after={d.after} />
+      })}
+      {plainKeys.length > 0 && (
+        <div className="flex flex-wrap gap-x-3 gap-y-0.5 text-[11px] text-text-muted">
+          {plainKeys.map((k) => (
+            <span key={k}><span className="font-medium">{k}:</span> {String(detail[k])}</span>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
+function EventRow({ event }: { event: CdnNodeEvent }): JSX.Element {
+  const [open, setOpen] = useState(false)
+  const meta = EVENT_META[event.event_type] ?? EVENT_META.settings_changed
+  const tone = TONE_CLASSES[meta.tone]
+  const hasDetail = event.detail && Object.keys(event.detail).length > 0
+  const Chevron = open ? ChevronDown : ChevronRight
+
+  return (
+    <div className="relative flex gap-3 pb-4 last:pb-0">
+      <div className="flex flex-col items-center shrink-0 pt-0.5">
+        <div className={`w-6 h-6 rounded-full flex items-center justify-center ${tone.line}`}>
+          <meta.Icon size={12} className={tone.icon} />
+        </div>
+        <div className={`flex-1 w-px mt-1 ${tone.line}`} />
+      </div>
+      <div className="flex-1 min-w-0 -mt-0.5">
+        <div className="flex items-center gap-2">
+          <span className="text-xs font-semibold text-text-primary">{meta.label}</span>
+          {hasDetail && (
+            <button onClick={() => setOpen(!open)} className="text-text-muted hover:text-text-primary transition-colors">
+              <Chevron size={12} />
+            </button>
+          )}
+        </div>
+        <div className="flex flex-wrap gap-x-2 text-[10px] text-text-muted mt-0.5">
+          <span>{relativeTime(event.created_at)}</span>
+          {event.actor_username && <span>by {event.actor_username}</span>}
+          {event.actor_ip && <span>{event.actor_ip}</span>}
+        </div>
+        {open && hasDetail && <EventDetailBlock detail={event.detail} eventType={event.event_type} />}
+      </div>
+    </div>
+  )
+}
+
+const ALL_EVENT_TYPES: CdnNodeEventType[] = [
+  'registered', 'approved', 'revoked', 'enabled', 'disabled',
+  'trust_reset', 'violation', 'auto_disabled', 'deleted', 'restored', 'settings_changed',
+]
+
+export function CdnNodeEventHistory({ nodeId }: { nodeId: string }): JSX.Element {
+  const [events, setEvents] = useState<CdnNodeEvent[]>([])
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
+  const [page, setPage] = useState(1)
+  const [hasNext, setHasNext] = useState(false)
+  const [total, setTotal] = useState(0)
+  const [activeFilters, setActiveFilters] = useState<CdnNodeEventType[]>([])
+
+  const load = useCallback((p: number, filters: CdnNodeEventType[], append: boolean) => {
+    setLoading(true)
+    setError(null)
+    fetchNodeEvents(nodeId, p, filters.length ? filters : undefined)
+      .then((res) => {
+        setEvents((prev) => append ? [...prev, ...res.events] : res.events)
+        setHasNext(res.has_next)
+        setTotal(res.count)
+        setPage(p)
+      })
+      .catch(() => setError('Failed to load events'))
+      .finally(() => setLoading(false))
+  }, [nodeId])
+
+  useEffect(() => { load(1, activeFilters, false) }, [load, nodeId])
+
+  const toggleFilter = useCallback((t: CdnNodeEventType) => {
+    setActiveFilters((prev) => {
+      const next = prev.includes(t) ? prev.filter((x) => x !== t) : [...prev, t]
+      load(1, next, false)
+      return next
+    })
+  }, [load])
+
+  return (
+    <div className="space-y-3">
+      <div className="flex items-baseline justify-between">
+        <h3 className="text-[10px] font-bold uppercase tracking-widest text-text-muted">Event History</h3>
+        {total > 0 && <span className="text-[10px] text-text-muted tabular-nums">{total} event{total === 1 ? '' : 's'}</span>}
+      </div>
+
+      <div className="flex flex-wrap gap-1">
+        {ALL_EVENT_TYPES.map((t) => {
+          const meta = EVENT_META[t]
+          const active = activeFilters.includes(t)
+          return (
+            <button key={t} onClick={() => toggleFilter(t)}
+              className={`px-2 py-0.5 rounded-full text-[10px] font-medium transition-colors ${
+                active ? 'bg-accent/15 text-accent' : 'text-text-muted hover:text-text-primary hover:bg-surface-overlay'
+              }`}>
+              {meta.label}
+            </button>
+          )
+        })}
+      </div>
+
+      {error && (
+        <p className="flex items-center gap-1.5 text-xs text-red-400"><AlertCircle size={12} /> {error}</p>
+      )}
+
+      {!loading && events.length === 0 && (
+        <p className="text-xs text-text-muted py-4 text-center">No events recorded</p>
+      )}
+
+      <div className="pl-1">
+        {events.map((e) => <EventRow key={e.id} event={e} />)}
+      </div>
+
+      {hasNext && (
+        <button onClick={() => load(page + 1, activeFilters, true)} disabled={loading}
+          className="w-full text-center text-xs text-accent hover:text-accent/80 py-2 disabled:opacity-40">
+          {loading ? <Loader2 size={14} className="inline animate-spin" /> : 'Load more'}
+        </button>
+      )}
+
+      {loading && events.length === 0 && (
+        <div className="flex justify-center py-4"><Loader2 size={14} className="animate-spin text-text-muted" /></div>
+      )}
     </div>
   )
 }

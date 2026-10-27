@@ -1,5 +1,5 @@
-import { getSongById, getSongsByIds, type JWApiSong } from '../juicewrldApi'
-import { isPlayableSong } from '../songVersions'
+import { getSongById, type JWApiSong } from '../juicewrldApi'
+import { loadVersionGroupEntries } from '../songVersions'
 import { memberVersionPrefs, prefLabel, versionPrefToggles, type VersionPrefMember } from '../versionPrefs'
 import {
   getAllVersionGroups, getOwnVersionMeta, getVersionGroup, getVersionMetaForSongs, joinVersionGroup, linkSongVersion, searchVersionTitles,
@@ -64,18 +64,9 @@ async function prefTarget(arg: string): Promise<JWApiSong> {
  *  nothing to play (no path, and not a session with a playable edit) are left
  *  out, since starring one would break playback. Empty = not in a group. */
 async function prefRows(song: JWApiSong): Promise<PrefRow[]> {
-  const [own, group] = await Promise.all([getOwnVersionMeta(song.id), getVersionGroup(song.id)])
-  if (!own) return []
-  const metas = [own, ...group]
-  const byId = new Map((await getSongsByIds(metas.map((m) => m.songId))).map((s) => [s.id, s]))
-  byId.set(song.id, song)
-  const rows = await Promise.all(metas.map(async (m): Promise<PrefRow | null> => {
-    const s = byId.get(m.songId)
-    if (!s) return null
-    if (!(await isPlayableSong(s))) return null
-    return { song: s, version: prefLabel(m), title: m.versionTitle }
-  }))
-  return rows.filter((r): r is PrefRow => !!r)
+  const { self, siblings } = await loadVersionGroupEntries(song.id)
+  if (!self) return []
+  return [self, ...siblings].filter((e) => e.playable).map((e) => ({ song: e.song, version: prefLabel(e.meta), title: e.meta.versionTitle }))
 }
 
 const memberOf = (r: PrefRow): VersionPrefMember => ({ songId: r.song.id, version: r.version })
@@ -188,7 +179,7 @@ export const VERSION_COMMANDS: TermCommand[] = [
     name: 'versionprefs', aliases: ['vprefs', 'vpref'], group: 'Library',
     usage: 'versionprefs [list] [<song>] · prefer|unprefer|exclude|unexclude [<song> --] <label|N> · clear [<song>]',
     description: 'Your preferred (★) and excluded (⊘) versions of a song - the star and ban in Change version. <song> is a title, a number from find or id:123; left out, the song playing. <label> is a version label (v2, TV Mix, Session) or its number in the list. Several can be preferred; preferring un-excludes, excluding un-prefers; clear drops every star',
-    covers: ['versionsApi.getOwnVersionMeta', 'versionsApi.getVersionGroup', 'juicewrldApi.getSongsByIds', 'sessionEditsApi.hasPlayableSessionEdit'],
+    covers: ['songVersions.loadVersionGroupEntries', 'versionsApi.getOwnVersionMeta', 'versionsApi.getVersionGroup', 'juicewrldApi.getSongsByIds', 'sessionEditsApi.hasPlayableSessionEdit'],
     complete: (before, partial) => (before.length === 0 ? PREF_SUBS.filter((s) => s.startsWith(partial.toLowerCase())) : before.includes('--') ? [] : completeSongs(before.slice(PREF_SUBS.includes(before[0]) ? 1 : 0), partial)),
     run: async (args, ctx) => {
       const json = /(^|\s)--json(?=\s|$)/.test(args)

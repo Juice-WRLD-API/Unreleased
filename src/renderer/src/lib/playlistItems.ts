@@ -63,18 +63,19 @@ function itemToTrack(item: PlaylistItemEntry, library: Map<string, LibraryTrack>
 }
 
 /** One Track per entry, in the same order (index i is items[i]). */
-export function playlistItemsToTracks(items: PlaylistItemEntry[]): Track[] {
-  const library = items.some(it => itemSource(it) === 'local')
+export function playlistItemsToTracks(items: PlaylistItemEntry[] | null | undefined): Track[] {
+  const list = items ?? []
+  const library = list.some(it => itemSource(it) === 'local')
     ? new Map(useStore.getState().libraryTracks.map(t => [t.id, t]))
     : null
-  return items.map(it => itemToTrack(it, library))
+  return list.map(it => itemToTrack(it, library))
 }
 
 /** Catalogue song ids in the playlist, for membership checks and offline
  *  downloads (which only cover songs). */
-export function playlistSongIds(items: PlaylistItemEntry[]): number[] {
+export function playlistSongIds(items: PlaylistItemEntry[] | null | undefined): number[] {
   const ids: number[] = []
-  for (const it of items) if (it.song) ids.push(it.song.id)
+  for (const it of items ?? []) if (it.song) ids.push(it.song.id)
   return ids
 }
 
