@@ -544,7 +544,7 @@ export const createQueueSlice: StateCreator<any, [], [], QueueSlice> = (set, get
       queueManualNextIds: nextIdx > queueIndex && queueManualNextIds.length > 0
         ? removeOneId(queueManualNextIds, track.id)
         : queueManualNextIds,
-      queueManualTailIds: queueManualTailIds.length > 0 && nextIdx >= tailStart
+      queueManualTailIds: queueManualTailIds.length > 0 && nextIdx !== queueIndex && nextIdx >= tailStart
         ? removeOneId(queueManualTailIds, track.id)
         : queueManualTailIds,
     })
@@ -790,7 +790,8 @@ export const createQueueSlice: StateCreator<any, [], [], QueueSlice> = (set, get
       // Placement is occurrence-sensitive. The same song may have one copy
       // pinned next and another explicitly appended to the tail; removing the
       // tail copy must not consume the Play Next marker (or vice versa).
-      let removedNext = !!removed && index > s.queueIndex && index <= s.queueIndex + nextCount
+      let removedNext = !!removed && index > s.queueIndex && index <= s.queueIndex + nextCount &&
+        s.queueManualNextIds.includes(removed.id)
       let removedTail = !!removed && !s.queueMaterializing && tailCount > 0 && index >= s.queue.length - tailCount
       if (removedTail) removedNext = false
       let nextOriginal = s.queueOriginal
@@ -924,12 +925,17 @@ export const createQueueSlice: StateCreator<any, [], [], QueueSlice> = (set, get
           lyrics: filter.lyrics || undefined,
           category: filter.category || undefined,
           era: filter.era || undefined,
+          omit: 'lyrics,synced_lyrics,groupbuy_info',
         })
 
     Promise.resolve()
       .then(async () => {
+        // The pool request doesn't depend on the preference lookups, so run
+        // them side by side instead of making the fetch wait behind them.
+        const pool = loadPool()
+        pool.catch(() => {})
         if (!await syncLivePreference()) return null
-        const songs = await loadPool()
+        const songs = await pool
         if (!await syncLivePreference()) return null
         return songs
       })
@@ -973,8 +979,9 @@ export const createQueueSlice: StateCreator<any, [], [], QueueSlice> = (set, get
           queueRemovedCatalogIds: [],
         })
         if (waiting) get().nextTrack()
-      })
-      .catch(() => {
+      }, () => {
+        // onRejected of the same .then: only pool/preference failures land
+        // here, never an error thrown while committing a successful pool.
         if (session !== _queueLoadSession) return
         const state = get()
         if (state.queueSource !== 'tracker') return

@@ -91,6 +91,13 @@ const LYRICS_CACHE_TTL_MS = 2 * 60 * 1000
 const lyricsCache = new Map<number, { lyrics: string | null; syncedLyrics: string | null; ts: number }>()
 export function invalidateLyricsCache(songId: number): void { lyricsCache.delete(songId) }
 
+// `audio.src` reads back the browser-normalized URL, so a raw string with
+// spaces or non-ASCII characters never compares equal to what was assigned.
+function sameMediaSrc(current: string, wanted: string): boolean {
+  if (current === wanted) return true
+  try { return new URL(wanted, window.location.href).href === current } catch { return false }
+}
+
 export default function Player(): JSX.Element {
   const {
     currentTrack,
@@ -341,7 +348,7 @@ export default function Player(): JSX.Element {
     const url = resolvePlaybackUrl(nextTrackData)
     const na = getNext()
     if (!na) return
-    if (na.src === url) {
+    if (sameMediaSrc(na.src, url)) {
       if (
         na.readyState === HTMLMediaElement.HAVE_NOTHING &&
         na.networkState !== HTMLMediaElement.NETWORK_LOADING &&
@@ -1132,7 +1139,7 @@ export default function Player(): JSX.Element {
           // Keep the outgoing song at full volume and retry on the next native
           // timeupdate; if readiness never arrives, normal ended handling owns
           // the handoff and recovery path.
-          if (na.src !== url) { na.src = url; na.load(); return }
+          if (!sameMediaSrc(na.src, url)) { na.src = url; na.load(); return }
           if (na.ended) {
             try { na.currentTime = 0 } catch { /* wait for a seekable frame */ }
             return

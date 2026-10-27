@@ -1822,7 +1822,7 @@ const WrldQueuePanel = memo(function WrldQueuePanel({ onClose, variant }: {
               // absolute queue position history.length - 1 - i.
               const reversedIndexed = [...history].reverse().map((track, i) => ({ track, i }))
               const filtered = query ? reversedIndexed.filter(({ track }) => matchesQuery(track)) : reversedIndexed
-              const shown = filtered.slice(0, WRLD_MAX_HISTORY_SHOWN)
+              const shown = query ? filtered : filtered.slice(0, WRLD_MAX_HISTORY_SHOWN)
               return (
                 <div className="opacity-60">
                   {shown.map(({ track, i }) => (

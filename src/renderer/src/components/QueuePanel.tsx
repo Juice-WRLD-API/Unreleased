@@ -172,7 +172,7 @@ export default function QueuePanel(): JSX.Element {
                 // absolute queue position history.length - 1 - i.
                 const reversedIndexed = [...history].reverse().map((track, i) => ({ track, i }))
                 const filtered = query ? reversedIndexed.filter(({ track }) => matchesQuery(track)) : reversedIndexed
-                const shown = filtered.slice(0, MAX_HISTORY_SHOWN)
+                const shown = query ? filtered : filtered.slice(0, MAX_HISTORY_SHOWN)
                 return (
                   <div className="opacity-50 space-y-0.5">
                     {shown.map(({ track, i }) => (

@@ -2593,12 +2593,15 @@ export default function ApiTrackerView(): JSX.Element {
         : selectedEngineer
           ? (engineersByName.find(([engineer]) => engineer === selectedEngineer)?.[1] ?? [])
           : calendarSongs
-    } else if (compactView) {
-      sourceSongs = filteredCompactGroups.flatMap((group) => group.members.map((member) => member.item))
-    } else if (!fetchAllMode && hasMore) {
-      lazyFilter = {
-        category: categoryParam, era: eraParam, search: debouncedSearch,
-        page: lastLoadedPageRef.current + 1, hasMore: true, total: count,
+    } else {
+      if (compactView) {
+        sourceSongs = filteredCompactGroups.flatMap((group) => group.members.map((member) => member.item))
+      }
+      if (!fetchAllMode && hasMore) {
+        lazyFilter = {
+          category: categoryParam, era: eraParam, search: debouncedSearch,
+          page: lastLoadedPageRef.current + 1, hasMore: true, total: count,
+        }
       }
     }
 
