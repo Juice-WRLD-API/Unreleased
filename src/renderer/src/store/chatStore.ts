@@ -938,9 +938,13 @@ export const useChatStore = create<ChatState>((set, get) => {
       || get().lastMessage[key]?.key_version === conv.current_key_version
   }
 
+  // Skips rooms already primed: at launch the prime pool reaches DMs the key
+  // check finished priming moments earlier. A reconnect clears primedRooms
+  // first, so it still re-primes everything.
   const primeRoom = (key: string): Promise<void> => {
     const pending = primesInFlight.get(key)
     if (pending) return pending
+    if (primedRooms.has(key)) return Promise.resolve()
     const p = fetchPrime(key).finally(() => primesInFlight.delete(key))
     primesInFlight.set(key, p)
     return p

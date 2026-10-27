@@ -292,11 +292,13 @@ export function RecentPlayRow({ play, cover, onPlay, onContextMenu, isMobile }: 
   onContextMenu: (id: number, cover: StatsSong | undefined, e: React.MouseEvent) => void
   isMobile: boolean
 }): JSX.Element {
+  // A radio play of a file with no catalog song has nothing to play or open.
+  const id = play.song_id
   return (
     <div
-      onClick={() => onPlay(play.song_id)}
-      onContextMenu={(e) => onContextMenu(play.song_id, cover, e)}
-      className="group w-full flex items-center gap-3 px-2 py-2 rounded-lg hover:bg-surface-raised active:bg-surface-raised transition-colors text-left cursor-pointer"
+      onClick={id != null ? () => onPlay(id) : undefined}
+      onContextMenu={id != null ? (e) => onContextMenu(id, cover, e) : undefined}
+      className={`group w-full flex items-center gap-3 px-2 py-2 rounded-lg transition-colors text-left ${id != null ? 'hover:bg-surface-raised active:bg-surface-raised cursor-pointer' : ''}`}
     >
       <RowThumb
         cover={cover}
@@ -317,9 +319,9 @@ export function RecentPlayRow({ play, cover, onPlay, onContextMenu, isMobile }: 
       >
         {relativeTime(play.played_at)}
       </span>
-      {isMobile && (
+      {isMobile && id != null && (
         <button
-          onClick={(e) => { e.stopPropagation(); onContextMenu(play.song_id, cover, e) }}
+          onClick={(e) => { e.stopPropagation(); onContextMenu(id, cover, e) }}
           className="w-9 h-9 -mr-1.5 shrink-0 flex items-center justify-center text-text-muted active:text-accent"
           aria-label="More options"
         ><MoreVertical size={16} /></button>

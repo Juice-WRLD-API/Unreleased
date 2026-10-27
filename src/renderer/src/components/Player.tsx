@@ -437,6 +437,9 @@ export default function Player(): JSX.Element {
   const pendingPlays = useRef(new WeakMap<HTMLAudioElement, Promise<unknown>>()).current
 
   const playSlot = (audio: HTMLAudioElement, onRejected: (err: unknown) => void = console.error): void => {
+    // The first one builds the effects graph on desktop; it must exist before
+    // play() so the element never starts out unrouted.
+    resumeEffectsContext()
     const p = audio.play().catch(onRejected)
     pendingPlays.set(audio, p)
     p.finally(() => { if (pendingPlays.get(audio) === p) pendingPlays.delete(audio) })
@@ -542,7 +545,8 @@ export default function Player(): JSX.Element {
   // (see setEffectsChainWanted): routing a media element through Web Audio is
   // what makes background playback fragile there, and the overwhelming
   // majority of listeners never touch the EQ - no reason to make them pay for
-  // it. Desktop attaches on mount as it always has.
+  // it. Desktop registers them here and routes them on the first play (see
+  // resumeEffectsContext).
   const effectsInUse = eqEnabled || eqBalance !== 0 || eqMono || eqBoost !== 1 || reverbEnabled || skipSilence || fxInUse(audioFx, eqEnabled)
   useEffect(() => {
     if (effectsInUse) setEffectsChainWanted(true)

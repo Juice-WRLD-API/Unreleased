@@ -18,6 +18,8 @@ const AGC_TARGET = 0.7;
 const AGC_MAX_GAIN = 6;
 /** Below this the input is treated as silence/noise, and gain is frozen. */
 const AGC_GATE = 0.05;
+/** How long the analysers keep being read after playback stops, so a pause fade (400 ms) still draws. */
+const STOPPED_TAIL_MS = 1000;
 
 /**
  * Linear up to 0.8, then compresses smoothly toward 1. A hard clamp flattens
@@ -93,6 +95,7 @@ export class AudioEngine {
   private t = 0;
   private fluxAvg = 0;
   private cooldown = 0;
+  private playedAt = -Infinity;
 
   // Auto-gain state
   private ref = 0.3; // slow-moving estimate of how loud the input runs
@@ -263,7 +266,16 @@ export class AudioEngine {
     const f = this.frame;
     const raw = this.raw;
 
-    if (this.analyser) {
+    // Stopped: the analysers would only report silence, and reading them on
+    // every frame (two FFTs and three waveform copies) was most of WRLD's CPU
+    // while paused. They're left alone and the frame decays as silence would.
+    if (playing) this.playedAt = performance.now();
+    const listening = this.analyser !== null && performance.now() - this.playedAt < STOPPED_TAIL_MS;
+
+    if (this.analyser && !listening) {
+      raw.fill(0);
+      f.wave.fill(0);
+    } else if (this.analyser) {
       this.analyser.getByteFrequencyData(this.freq as any);
       // Log-spaced bins: linear FFT hands almost every bin to the low end.
       const bins = this.freq.length;
@@ -301,8 +313,8 @@ export class AudioEngine {
       }
     }
 
-    this.analyzeScope();
-    this.analyzeNotes(dt);
+    this.analyzeScope(listening);
+    this.analyzeNotes(dt, listening);
 
     if (this.analyser) this.applyAutoGain(dt);
     // Real audio gets the bass emphasis; the synthetic idle signal only needs
@@ -349,12 +361,12 @@ export class AudioEngine {
    * the right channel becomes a slightly delayed copy of the left, which draws
    * the signal's phase portrait instead.
    */
-  private analyzeScope() {
+  private analyzeScope(listening: boolean) {
     const f = this.frame;
     const n = SCOPE_POINTS;
     let src: Float32Array;
     let alt: Float32Array | null = null;
-    if (this.anL && this.anR) {
+    if (this.anL && this.anR && listening) {
       this.anL.getFloatTimeDomainData(this.bufL as any);
       this.anR.getFloatTimeDomainData(this.bufR as any);
       src = this.bufL;
@@ -378,11 +390,11 @@ export class AudioEngine {
   }
 
   /** Semitone loudness from the long-window analyser, plus a chroma summary. */
-  private analyzeNotes(dt: number) {
+  private analyzeNotes(dt: number, listening: boolean) {
     const f = this.frame;
     const notes = f.notes;
     const target = this.noteTarget;
-    if (this.anNotes && this.ctx) {
+    if (this.anNotes && this.ctx && listening) {
       this.anNotes.getByteFrequencyData(this.noteFreq as any);
       const hzPerBin = this.ctx.sampleRate / this.anNotes.fftSize;
       const last = this.noteFreq.length - 1;
