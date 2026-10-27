@@ -41,7 +41,10 @@ test('recognition rejects malformed or misleading matches', () => {
 test('microphone permission is restricted to the app main frame and audio', () => {
   const request = { url: 'file:///C:/app/dist/index.html', mainUrl: 'file:///C:/app/dist/index.html', appUrl: 'file:///C:/app/dist/index.html', isDev: false, isMainWindow: true, isMainFrame: true, mediaTypes: ['audio'] }
   assert.equal(canRequestMicrophone(request), true)
-  for (const patch of [{ url: 'file:///C:/other/index.html' }, { mainUrl: 'https://example.com' }, { isMainFrame: false }, { isMainWindow: false }, { mediaTypes: ['video'] }, { mediaTypes: ['audio', 'video'] }, { mediaTypes: [] }, { url: 'https://example.com' }]) {
+  // The router's pushState rewrites the frame URL; the loaded document is what counts.
+  assert.equal(canRequestMicrophone({ ...request, url: 'file:///C:/tracker' }), true)
+  assert.equal(canCaptureSystemAudio({ ...request, url: 'file:///C:/tracker', audioRequested: true, platform: 'win32' }), true)
+  for (const patch of [{ mainUrl: 'file:///C:/other/index.html' }, { mainUrl: '' }, { url: 'file://evil-host/C:/tracker' }, { mainUrl: 'https://example.com' }, { isMainFrame: false }, { isMainWindow: false }, { mediaTypes: ['video'] }, { mediaTypes: ['audio', 'video'] }, { mediaTypes: [] }, { url: 'https://example.com' }]) {
     assert.equal(canRequestMicrophone({ ...request, ...patch }), false)
   }
   assert.equal(canRequestMicrophone({ ...request, isDev: true, url: 'http://localhost:3018/tracker', mainUrl: 'http://localhost:3018/' }), true)
