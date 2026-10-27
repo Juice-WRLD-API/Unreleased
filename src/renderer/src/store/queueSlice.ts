@@ -248,6 +248,9 @@ function insertRandom<T>(base: T[], items: T[]): T[] {
 }
 
 const RADIO_HISTORY_LIMIT = 30
+// How long one radio pick may take (request plus preferred-version lookup)
+// before _prefetchRadioTrack gives up on it and asks again.
+const RADIO_PREFETCH_TIMEOUT_MS = 15000
 const PLAY_HISTORY_LIMIT = 100
 
 // Set while a currentTrack change is the same song under a new identity (a
@@ -833,11 +836,25 @@ export const createQueueSlice: StateCreator<any, [], [], QueueSlice> = (set, get
     const session = _radioSession
     const live = (): boolean => get().radioMode && session === _radioSession
 
+    // A request that never settles (one sent just as the connection dropped
+    // can hang for minutes) left radioNext empty, so radio stopped at the end
+    // of the song waiting on it. Past the timeout, abandon this attempt - the
+    // session bump turns anything it still delivers into a no-op - and start
+    // a fresh one.
+    const ctrl = new AbortController()
+    const timeout = setTimeout(() => {
+      if (!live()) return
+      _radioSession++
+      ctrl.abort()
+      get()._prefetchRadioTrack()
+    }, RADIO_PREFETCH_TIMEOUT_MS)
+
     const handleTrack = async (picked: Track): Promise<void> => {
       // Resolved before it's queued, so a preferred version starts as itself
       // instead of the picked one playing for a moment and then switching.
       const track = (await preferredVersionOf(picked, get().preferOgVersion).catch(() => null)) ?? picked
       if (!live()) return
+      clearTimeout(timeout)
       const wasWaiting = get()._radioWaiting
       set({ radioNext: track, _radioWaiting: false })
       if (wasWaiting) {
@@ -850,7 +867,9 @@ export const createQueueSlice: StateCreator<any, [], [], QueueSlice> = (set, get
     }
 
     const handleError = (): void => {
-      if (live()) setTimeout(() => { if (live()) get()._prefetchRadioTrack() }, 3000)
+      if (!live()) return
+      clearTimeout(timeout)
+      setTimeout(() => { if (live()) get()._prefetchRadioTrack() }, 3000)
     }
 
     if (radioFilter && (radioFilter.category || radioFilter.era || radioFilter.search)) {
@@ -863,7 +882,7 @@ export const createQueueSlice: StateCreator<any, [], [], QueueSlice> = (set, get
         era: radioFilter.era || undefined,
         page: randomPage,
         page_size: pageSize,
-      })
+      }, ctrl.signal)
         .then((data) => {
           if (!live()) return
           const playable = data.results.filter((s: JWApiSong) => !!s.path)
@@ -872,7 +891,7 @@ export const createQueueSlice: StateCreator<any, [], [], QueueSlice> = (set, get
         })
         .catch(handleError)
     } else {
-      apiFetch<RadioResponse>('/radio/random/')
+      apiFetch<RadioResponse>('/radio/random/', {}, ctrl.signal)
         .then((data) => handleTrack(songToTrack(data.song)))
         .catch(handleError)
     }

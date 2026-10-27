@@ -133,8 +133,6 @@ export function useEditorPageState(initialSongId: number | null = null) {
   const [pickingImage, setPickingImage] = useState(false)
   // Synced lyrics as a timestamp+text table (default) or the raw LRC text.
   const [syncedTable,  setSyncedTable]  = useState(() => localStorage.getItem('editor:syncedFormat') !== 'raw')
-  // Manual sync tool (stamp lines against the playing song) - session-only, unlike the Lines/Raw choice.
-  const [syncTool,     setSyncTool]     = useState(false)
   const [editingPropId, setEditingPropId] = useState<number | null>(null)
   // True while editing a 'create' proposal (new song) - has no backing song object yet
   const [isNewSongDraft, setIsNewSongDraft] = useState(false)
@@ -638,7 +636,7 @@ export function useEditorPageState(initialSongId: number | null = null) {
     sessionTitles, setSessionTitles, sessionTracking, setSessionTracking,
 
     lyricsTab, setLyricsTab, lyricsLoading, lyricsError, handleLyricsPaste,
-    syncedTable, setSyncedTable, syncTool, setSyncTool,
+    syncedTable, setSyncedTable,
 
     submitState, submitError, submit,
     deleteState, setDeleteState, deleteError, submitDeletion,

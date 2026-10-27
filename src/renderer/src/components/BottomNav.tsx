@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react'
+import { useLayoutEffect, useRef } from 'react'
 import { Settings } from 'lucide-react'
 import { useStorePick } from '../store/useStore'
 import { ViewType } from '../types'
@@ -33,11 +33,12 @@ export default function BottomNav(): JSX.Element {
   const showSettings = activeView === 'settings'
   const { tabs } = useMobileNavSplit()
   const mobileRoomOpen = useChatUiStore((s) => s.mobileRoomOpen)
-  // Same full-immersion treatment as WRLD below: once a chat room is open,
-  // its own overlay covers the space this bar would have used, and the
-  // back gesture/header already gets you out - a nav bar peeking behind it
-  // is just visual noise.
-  const hidden = activeView === 'wrld' || (activeView === 'chat' && mobileRoomOpen)
+  // WRLD and an open chat room are both full-screen overlays drawn over this
+  // bar (see App.tsx and ChatView.mobile). It stays laid out underneath them
+  // rather than being hidden: dragging either one away then reveals the page
+  // with its nav bar already in place, instead of the bar popping back in
+  // (and the page reflowing around it) only once the overlay has unmounted.
+  const covered = activeView === 'wrld' || (activeView === 'chat' && mobileRoomOpen)
 
   const navigateTo = (view: ViewType): void => {
     // Re-tapping the already-active Playlists tab dispatches a back event
@@ -67,31 +68,31 @@ export default function BottomNav(): JSX.Element {
   // can carve out exactly this much space instead of covering the nav bar -
   // measured rather than hardcoded since it varies with the safe-area inset.
   // Zero on desktop, where this is display:none and the rule is a no-op.
+  // Also zero while an overlay covers the bar: the chat room sizes itself
+  // off this to reach the bottom edge, and toasts and the like sit over the
+  // overlay then, where there's no nav bar to clear. A layout effect so the
+  // value is in place before the overlay's first paint.
   const navRef = useRef<HTMLElement>(null)
-  useEffect(() => {
+  useLayoutEffect(() => {
     const el = navRef.current
     if (!el) return
     const publish = (): void => {
-      document.documentElement.style.setProperty('--bottom-nav-height', `${el.offsetHeight}px`)
+      document.documentElement.style.setProperty('--bottom-nav-height', `${covered ? 0 : el.offsetHeight}px`)
     }
     publish()
     const ro = new ResizeObserver(publish)
     ro.observe(el)
     return () => { ro.disconnect(); document.documentElement.style.setProperty('--bottom-nav-height', '0px') }
-  }, [])
+  }, [covered])
 
   return (
     <nav
       ref={navRef}
-      // Hidden on WRLD (mobile) and while a chat room is open - both want
-      // full-screen immersion, and their own layouts already reclaim the
-      // freed space (see --bottom-nav-height, published below and read
-      // there).
       // bg-surface, not bg-sidebar: on the dark skin --sidebar is pure black,
       // noticeably blacker than the app's own --surface - stacked with the
       // safe-area-inset-bottom padding below the icons, that read as a stark,
       // "dead" slab distinct from the rest of the app instead of part of it.
-      className={`md:hidden ${hidden ? 'hidden' : 'flex'} items-stretch bg-surface shrink-0`}
+      className="md:hidden flex items-stretch bg-surface shrink-0"
       style={{ borderTop: '1px solid var(--border)', paddingBottom: 'env(safe-area-inset-bottom, 0px)' }}
     >
       {tabs.map((tab) => {

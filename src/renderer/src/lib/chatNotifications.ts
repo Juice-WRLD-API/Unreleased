@@ -4,6 +4,7 @@
 // polled, since chat already pushes messages in real time.
 
 import { notificationsSupported, focusAppWindow, playNotificationSound } from './notifications'
+import { recordNotification, type NotificationKind, type NotificationTarget } from './notificationHistory'
 
 export { notificationsSupported, notificationPermission, ensureNotifyPermission } from './notifications'
 
@@ -34,8 +35,29 @@ export interface ChatNotificationPayload {
   autoDismissMs?: number
   /** Tints the banner (admin broadcasts); plain toast when omitted. */
   level?: 'info' | 'success' | 'warning' | 'error'
-  /** OS notification tag; defaults to `chat-<id>`. */
+  /** OS notification tag; defaults to `chat-<id>`. Also the entry's id in
+   *  the notification area, so one event is never logged twice. */
   tag?: string
+  /** Which source raised it, for the notification area. Defaults to chat. */
+  kind?: NotificationKind
+  /** Where the notification area's entry goes when clicked, since onOpen
+   *  doesn't survive a reload. None: the entry just shows its full text. */
+  target?: NotificationTarget
+}
+
+function record(payload: ChatNotificationPayload): void {
+  const kind = payload.kind ?? 'chat'
+  recordNotification({
+    // Banner-only ids (broadcasts without a server id) are a per-session
+    // counter, so they'd collide with last session's entries.
+    id: payload.tag ?? (payload.id > 0 ? `${kind}-${payload.id}` : undefined),
+    kind,
+    title: payload.title,
+    body: payload.body,
+    icon: payload.icon,
+    level: payload.level,
+    target: payload.target,
+  })
 }
 
 // In-app banner (Discord-style toast) subscribers - kept separate from the OS
@@ -52,6 +74,7 @@ export function onChatNotificationBanner(listener: BannerListener): () => void {
 /** Shows the in-app banner only (no sound, no OS notification) - for other
  *  notification sources such as news that reuse the same toast. */
 export function showNotificationBanner(payload: ChatNotificationPayload): void {
+  record(payload)
   for (const listener of bannerListeners) listener(payload)
 }
 
@@ -61,6 +84,7 @@ export function showNotificationBanner(payload: ChatNotificationPayload): void {
 export function fireChatNotification(payload: ChatNotificationPayload): void {
   if (!chatNotificationsEnabled()) return
   playNotificationSound()
+  record(payload)
   for (const listener of bannerListeners) listener(payload)
 
   if (!notificationsSupported() || Notification.permission !== 'granted') return

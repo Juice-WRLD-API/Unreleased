@@ -3,7 +3,7 @@ import { Check, ImageIcon, FolderSearch, Loader2 } from 'lucide-react'
 import { useStore } from '../store/useStore'
 import {
   JWApiSong, resolvePrefCoverUrl, apiFetch, buildStreamUrl, smallCoverUrl,
-  parseBrowseEntries, cleanTitleForSearch, filterSearchResults, searchFiles, JWApiBrowseResponse,
+  parseBrowseEntries, coverSearchQueries, filterSearchResults, searchFiles, JWApiBrowseResponse,
 } from '../lib/juicewrldApi'
 import { getMediaType } from '../lib/fileTypes'
 import FilePickerModal from './FilePickerModal'
@@ -49,15 +49,14 @@ export default function CoverEditor({
 
   // Same title(+alt names) search FilePickerModal seeds itself with, but run
   // inline so likely covers show up here without opening the full browser.
-  // null = not fetched yet, so switching songs re-triggers it.
+  // Runs again whenever the set of names changes (versions load after the
+  // first render); null = nothing fetched for this song yet.
   const [searchedCovers, setSearchedCovers] = useState<{ path: string; url: string }[] | null>(null)
   const [searchedLoading, setSearchedLoading] = useState(false)
   useEffect(() => { setSearchedCovers(null) }, [songId])
+  const queriesKey = coverSearchQueries(apiTitle, [...versions.map((v) => v.song.name), ...altTitles]).join('\u0000')
   useEffect(() => {
-    if (searchedCovers != null) return
-    const queries = [apiTitle, ...versions.map((v) => v.song.name), ...altTitles]
-      .map(cleanTitleForSearch)
-      .filter((q, i, arr) => q && arr.indexOf(q) === i)
+    const queries = queriesKey ? queriesKey.split('\u0000') : []
     if (queries.length === 0) { setSearchedCovers([]); return }
     let cancelled = false
     setSearchedLoading(true)
@@ -83,7 +82,7 @@ export default function CoverEditor({
     }).finally(() => { if (!cancelled) setSearchedLoading(false) })
     return () => { cancelled = true }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [searchedCovers, apiTitle, versions, altTitles.join('\u0000')])
+  }, [queriesKey, songId])
 
   const coverDraftPreview = resolvePrefCoverUrl(coverDraft.trim())
 

@@ -13,8 +13,10 @@ import { serializeSyncedLyrics, type SyncLine, type SyncMode } from '../lib/sync
 const CHIP = 'inline-flex items-center gap-1.5 h-7 px-2.5 rounded-full border border-[var(--border)] text-[11px] font-semibold text-text-secondary hover:text-text-primary hover:bg-surface-overlay transition-colors disabled:opacity-50'
 const SMALL_BTN = 'inline-flex items-center gap-1.5 h-8 px-3 rounded-lg text-xs font-semibold text-text-secondary bg-surface-overlay hover:bg-surface-raised hover:text-text-primary transition-colors disabled:opacity-50'
 
-export default function LyricsSyncTab({ lines, onLines, mode, onMode, clock, audioField, audioHint, song, jobs, onJob, onFile, onPaste, busy }: {
+export default function LyricsSyncTab({ lines, original, onLines, mode, onMode, clock, audioField, audioHint, song, jobs, onJob, onFile, onPaste, busy }: {
   lines: SyncLine[]
+  /** The song's synced lyrics as saved, when the song editor opened Sync. */
+  original: SyncLine[] | null
   onLines: (lrc: string) => void
   mode: SyncMode
   onMode: (mode: SyncMode) => void
@@ -88,6 +90,7 @@ export default function LyricsSyncTab({ lines, onLines, mode, onMode, clock, aud
           clock={clock}
           mode={mode}
           onModeChange={onMode}
+          original={original}
           // Grows with the dialog: the bigger it is, the more lines show.
           fill
           className="flex-1 min-h-[460px]"

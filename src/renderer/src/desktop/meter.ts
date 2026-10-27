@@ -115,7 +115,7 @@ async function attach(): Promise<void> {
   window.clearTimeout(retry)
   if (hearing || starting || !listeners.size) return
   const tap = getAnalysisTap()
-  // The graph is built when the player first attaches its elements: look again shortly.
+  // The graph is built on the first play: look again shortly.
   if (!tap) { retry = window.setTimeout(attach, 1500); return }
   starting = true
   try {

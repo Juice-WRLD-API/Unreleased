@@ -44,6 +44,7 @@ import { Sheet, SheetItem, SheetDivider } from './mobile/Sheet'
 import MediaLightbox from './MediaLightbox'
 import SongInfoModal from './SongInfoModal'
 import { clickable } from '../lib/a11y'
+import { LazyImg } from './LazyImg'
 
 // ─── Files ────────────────────────────────────────────────────────────────────
 // Phone-first file browser over the API's /files/* endpoints. The data layer
@@ -113,7 +114,7 @@ function Thumb({ entry, size, rounded = 'rounded-xl' }: {
   }
   if (!errored && (mt === 'audio' || mt === 'image')) {
     return (
-      <img
+      <LazyImg
         // Audio takes the API's rendered cover; images are served whole by
         // /files/download/, so a folder of art would be hundreds of KB per row
         // at full size - thumbnails take the degraded copy, the lightbox still
@@ -122,8 +123,6 @@ function Thumb({ entry, size, rounded = 'rounded-xl' }: {
         alt=""
         className={`${rounded} object-cover bg-surface-overlay`}
         style={{ width: size, height: size }}
-        loading="lazy"
-        decoding="async"
         onError={() => setErrored(true)}
       />
     )

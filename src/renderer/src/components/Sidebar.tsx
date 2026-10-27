@@ -1,5 +1,5 @@
 ﻿import React, { useState, useEffect } from 'react'
-import { Settings, LogIn, ChevronLeft, ChevronRight, ChevronDown, Download, Upload, Info, Check, EyeOff } from 'lucide-react'
+import { Settings, LogIn, ChevronLeft, ChevronRight, ChevronDown, Download, Upload, Info, Check, EyeOff, Bell } from 'lucide-react'
 import logo from '../assets/logo.png'
 import { useStore, useStorePick } from '../store/useStore'
 import { ViewType } from '../types'
@@ -14,6 +14,7 @@ import NavPillGrip from './NavPillGrip'
 import { accountDisplayName, initial } from '../lib/format'
 import { useSlidingIndicator } from '../hooks/useSlidingIndicator'
 import { MotionDisclosure } from './MotionDisclosure'
+import { useUnreadNotificationCount } from '../hooks/useNotificationHistory'
 
 // Right-click only - fetched on first open rather than with the app shell.
 const PlaylistContextMenu = lazyOverlay(() => import('./PlaylistContextMenu'))
@@ -23,6 +24,8 @@ const LS_PLAYLISTS_EXPANDED = 'sidebar:playlistsExpanded'
 
 export default function Sidebar(): JSX.Element {
   const { activeView, setActiveView, openProfile, openOwnPublicProfile, openSettings, setShowDiagnostics, developerMode, account, setShowUserAuth, playlists, setPendingPlaylistId, sidebarPosition, navStyle, navOrder, setNavOrder, navVisibility, setNavItemVisible, navControlOrder, navControlVisibility, setNavControlVisible, uploads, showUploadManager, setShowUploadManager } = useStorePick('activeView', 'setActiveView', 'openProfile', 'openOwnPublicProfile', 'openSettings', 'setShowDiagnostics', 'developerMode', 'account', 'setShowUserAuth', 'playlists', 'setPendingPlaylistId', 'sidebarPosition', 'navStyle', 'navOrder', 'setNavOrder', 'navVisibility', 'setNavItemVisible', 'navControlOrder', 'navControlVisibility', 'setNavControlVisible', 'uploads', 'showUploadManager', 'setShowUploadManager')
+  const { showNotifications, setShowNotifications } = useStorePick('showNotifications', 'setShowNotifications')
+  const unreadNotifications = useUnreadNotificationCount()
 
   const [collapsed, setCollapsed] = useState<boolean>(
     () => localStorage.getItem(LS_COLLAPSED) === 'true'
@@ -191,6 +194,20 @@ export default function Sidebar(): JSX.Element {
             <span aria-hidden={collapsed} className={labelCls}>Transfers</span>
           </button>
         )
+      case 'notifications':
+        return (
+          <button key="notifications" data-notifications-toggle onClick={() => setShowNotifications(!showNotifications)} onContextMenu={openControlMenu('notifications', 'Notifications')} title={collapsed ? 'Notifications' : undefined} aria-label={unreadNotifications > 0 ? `Notifications, ${unreadNotifications} new` : undefined} className={rowCls}>
+            <span className={`${iconWrap} relative`}>
+              <Bell size={18} />
+              {unreadNotifications > 0 && (
+                <span className="absolute -top-1 -right-1 min-w-[14px] h-[14px] rounded-full bg-accent text-white text-[9px] font-bold flex items-center justify-center px-0.5 leading-none">
+                  {unreadNotifications > 99 ? '99+' : unreadNotifications}
+                </span>
+              )}
+            </span>
+            <span aria-hidden={collapsed} className={labelCls}>Notifications</span>
+          </button>
+        )
       case 'diagnostics':
         return (
           <button key="diagnostics" onClick={() => setShowDiagnostics(true)} onContextMenu={openControlMenu('diagnostics', 'Diagnostics')} title={collapsed ? 'Diagnostics' : undefined} className={rowCls}>
@@ -236,6 +253,17 @@ export default function Sidebar(): JSX.Element {
             {activeUploadCount > 0 && (
               <span className="absolute top-0.5 right-0.5 min-w-[13px] h-[13px] rounded-full bg-accent text-white text-[8px] font-bold flex items-center justify-center px-0.5 leading-none">
                 {activeUploadCount}
+              </span>
+            )}
+          </button>
+        )
+      case 'notifications':
+        return (
+          <button key="notifications" data-notifications-toggle onClick={() => setShowNotifications(!showNotifications)} onContextMenu={openControlMenu('notifications', 'Notifications')} title="Notifications" aria-label={unreadNotifications > 0 ? `Notifications, ${unreadNotifications} new` : 'Notifications'} className={`${barIconBtn} relative`}>
+            <Bell size={18} />
+            {unreadNotifications > 0 && (
+              <span className="absolute top-0.5 right-0.5 min-w-[13px] h-[13px] rounded-full bg-accent text-white text-[8px] font-bold flex items-center justify-center px-0.5 leading-none">
+                {unreadNotifications > 99 ? '99+' : unreadNotifications}
               </span>
             )}
           </button>
@@ -357,10 +385,12 @@ export default function Sidebar(): JSX.Element {
     <aside
       className={`app-sidebar hidden md:flex flex-col h-full bg-sidebar shrink-0 ${sidebarPosition === 'right' ? 'border-l' : 'border-r'} border-[var(--border)] transition-[width] duration-200 ${collapsed ? 'w-16' : 'w-60'}`}
     >
-      {/* Logo - collapses to zero height when the sidebar is collapsed */}
+      {/* Logo - collapses to zero height when the sidebar is collapsed. The
+          open cap is in rem like its contents (11.75rem), so a larger app
+          text size doesn't clip the wordmark. */}
       <div
         className="flex flex-col items-center gap-1 shrink-0 px-5 overflow-hidden transition-[max-height,opacity] duration-200 ease-in-out"
-        style={{ maxHeight: collapsed ? '0px' : '200px', opacity: collapsed ? 0 : 1 }}
+        style={{ maxHeight: collapsed ? '0px' : '13rem', opacity: collapsed ? 0 : 1 }}
       >
         <div className="pt-5 pb-4 flex flex-col items-center gap-1">
           <img src={logo} alt="unreleased" className="object-contain h-32 w-auto" />

@@ -15,12 +15,12 @@ function isCookieNoticeAcked(): boolean {
   }
 }
 
-const ADDRESSES = [
+export const ADDRESSES = [
   { label: 'ETH', value: '0x82744830C7Df595e92f2F8c4EbBA87cE9DC94b4d' },
   { label: 'BTC', value: 'bc1qk9mtqeyfuhdtksmlcpsylt69xp9d6xvt5528h0' }
 ] as const
 
-function AddressRow({ label, value }: { label: string; value: string }): JSX.Element {
+export function AddressRow({ label, value }: { label: string; value: string }): JSX.Element {
   const [copied, setCopied] = useState(false)
   return (
     <div className="flex items-center gap-2 min-w-0 bg-surface-overlay rounded-lg px-2.5 py-1.5">

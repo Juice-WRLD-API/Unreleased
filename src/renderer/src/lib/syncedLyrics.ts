@@ -1,7 +1,7 @@
 // The Synced lyrics tool's model of an LRC: lines with an optional start, and
 // in word mode the words of each line with optional starts of their own. The
-// song editor's Sync and the Synced lyrics dialog's Sync tab edit through it,
-// and a Whisper result's preview plays along with it.
+// Synced lyrics dialog's Sync tab (which the song editor's Sync opens) edits
+// through it, and a Whisper result's preview plays along with it.
 //
 // Reading keeps each line as it was, so a line nothing touched is written back
 // exactly as read; a stamped or moved one is rewritten as `[m:ss.xx] text`, or
@@ -53,11 +53,16 @@ export function lrcStamp(sec: number): string {
   return `${Math.floor(c / 6000)}:${((c % 6000) / 100).toFixed(2).padStart(5, '0')}`
 }
 
-/** "1:23.40", "1:23", "83.4" -> seconds; null when it isn't a time. */
+/** A typed time: "1:23.40", "1:23", "0:01:26" (h:mm:ss), "83.4" -> seconds;
+ *  null when it isn't a time. Two colons are hours, not LRC's old m:ss:cc. */
 export function parseStamp(raw: string): number | null {
   const v = raw.trim()
-  const m = /^(\d+):(\d{1,2})(?:[.:](\d{1,3}))?$/.exec(v)
-  if (m) return Number(m[2]) < 60 ? Number(m[1]) * 60 + Number(m[2]) + (m[3] ? Number(`0.${m[3]}`) : 0) : null
+  const m = /^(?:(\d+):)?(\d+):(\d{1,2})(?:\.(\d{1,3}))?$/.exec(v)
+  if (m) {
+    const [, h, min, sec, frac] = m
+    if (Number(sec) >= 60 || (h !== undefined && Number(min) >= 60)) return null
+    return (Number(h ?? 0) * 60 + Number(min)) * 60 + Number(sec) + (frac ? Number(`0.${frac}`) : 0)
+  }
   return /^\d+(?:\.\d+)?$/.test(v) ? Number(v) : null
 }
 

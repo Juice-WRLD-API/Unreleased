@@ -56,6 +56,9 @@ function ServerStrip(): JSX.Element {
 // interactions elsewhere in the room (message list scrolling, etc).
 const EDGE_WIDTH = 24
 const CLOSE_THRESHOLD = 80
+// Released past the threshold: how long the room takes to finish sliding off
+// the right edge before it closes.
+const ROOM_SLIDE_OUT_MS = 260
 
 export default function ChatViewMobile(): JSX.Element {
   const active = useChatStore((s) => s.active)
@@ -83,13 +86,20 @@ export default function ChatViewMobile(): JSX.Element {
   // room overlay's transform (not state) so dragging doesn't re-render the
   // message list on every touch frame - same approach as useDragToDismiss's
   // elRef path, just horizontal instead of vertical.
+  //
+  // Written to `translate`, not `transform`: .chat-sheet's entrance animation
+  // (fill-mode both) keeps holding `transform: none` after it finishes, and an
+  // animated value outranks inline style - so a transform written here never
+  // showed, and the room sat still under the finger and then just vanished on
+  // release. `translate` is its own property and composes with the animation.
   const roomOverlayRef = useRef<HTMLDivElement>(null)
   const dragStartX = useRef<number | null>(null)
   const dragX = useRef(0)
   const armed = useRef(false)
+  const slidingOut = useRef(false)
 
   const onRoomTouchStart = (e: React.TouchEvent): void => {
-    if (e.touches.length !== 1) return
+    if (e.touches.length !== 1 || slidingOut.current) return
     armed.current = e.touches[0].clientX <= EDGE_WIDTH
     dragStartX.current = armed.current ? e.touches[0].clientX : null
   }
@@ -98,20 +108,33 @@ export default function ChatViewMobile(): JSX.Element {
     const dx = Math.max(0, e.touches[0].clientX - dragStartX.current)
     dragX.current = dx
     const el = roomOverlayRef.current
-    if (el) el.style.transform = dx ? `translateX(${dx}px)` : ''
+    if (el) el.style.translate = dx ? `${dx}px 0` : ''
   }
   const onRoomTouchEnd = (): void => {
     if (!armed.current) return
     const el = roomOverlayRef.current
-    if (el) {
-      el.style.transition = 'transform 0.2s ease-out'
-      el.style.transform = ''
-      setTimeout(() => { if (el) el.style.transition = '' }, 200)
-    }
-    if (dragX.current > CLOSE_THRESHOLD) closeRoom()
+    const close = dragX.current > CLOSE_THRESHOLD
     dragX.current = 0
     dragStartX.current = null
     armed.current = false
+    if (close && el && !window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+      // Carry on off the right edge from where the finger let go, then close -
+      // closing right away unmounted the room the instant the finger lifted.
+      // Width is read before the transition goes on, so the slide starts from
+      // the last drag offset rather than snapping.
+      slidingOut.current = true
+      const width = el.offsetWidth
+      el.style.transition = `translate ${ROOM_SLIDE_OUT_MS}ms cubic-bezier(0.33,0,0.15,1)`
+      el.style.translate = `${width}px 0`
+      window.setTimeout(() => { slidingOut.current = false; closeRoom() }, ROOM_SLIDE_OUT_MS)
+      return
+    }
+    if (el) {
+      el.style.transition = 'translate 0.2s ease-out'
+      el.style.translate = ''
+      setTimeout(() => { if (el) el.style.transition = '' }, 200)
+    }
+    if (close) closeRoom()
   }
 
   return (

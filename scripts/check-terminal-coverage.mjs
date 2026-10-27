@@ -59,6 +59,7 @@ const NOT_APPLICABLE = {
   'juicewrldApi.matchLocalSongCover': 'client-side cover matching',
   'appVersion.useCommitStatus': 'React hook over the /changelog data',
   'clientZip.*': 'client-side zipping behind get',
+  'exactSeekAudio.*': 're-reads a stream URL the Synced lyrics tool already plays, to decode it for exact seeking (get downloads the same file)',
   'compactGroups.*': 'tracker compact-view loaders over /songs and /versions (versions all, find)',
   'newsNotifications.checkForNewPosts': 'background poll; the request is fetchNews (news)',
   'newsNotifications.mergeSubscriptionsFromProfile': 'applies the profile’s subscriptions locally (me, news subscribe)',

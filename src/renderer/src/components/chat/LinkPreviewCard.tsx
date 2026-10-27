@@ -1,5 +1,6 @@
 import { memo, useEffect, useState } from 'react'
 import { firstPreviewUrl, loadLinkPreview, type LinkPreview } from '../../lib/linkPreview'
+import { LazyImg } from '../LazyImg'
 
 function PreviewCard({ url }: { url: string }): JSX.Element | null {
   const [preview, setPreview] = useState<LinkPreview | null>(null)
@@ -30,10 +31,9 @@ function PreviewCard({ url }: { url: string }): JSX.Element | null {
         {preview.description && <span className="line-clamp-2 break-words text-xs text-text-secondary">{preview.description}</span>}
       </span>
       {preview.image && !imageFailed && (
-        <img
+        <LazyImg
           src={preview.image}
           alt=""
-          loading="lazy"
           draggable={false}
           referrerPolicy="no-referrer"
           onError={() => setImageFailed(true)}
