@@ -137,7 +137,10 @@ export default function RecognitionModal(): JSX.Element {
     const onHidden = () => {
       if (!document.hidden) return
       stopPreview()
-      if (phase === 'requesting' || phase === 'listening') cancel()
+      if (phase === 'requesting' || phase === 'listening') {
+        cancel()
+        setError('Listening stopped because Unreleased was hidden. Keep it open on screen until it finishes.')
+      }
     }
     document.addEventListener('visibilitychange', onHidden)
     return () => document.removeEventListener('visibilitychange', onHidden)
@@ -355,7 +358,7 @@ export default function RecognitionModal(): JSX.Element {
   const quiet = listening && seconds > 3 && level < 0.01
 
   return (
-    <ModalOverlay onClose={close} standalone zIndexClassName="z-[200]" panelClassName="w-full max-w-lg max-h-[90dvh] overflow-y-auto bg-surface border border-border rounded-2xl shadow-2xl">
+    <ModalOverlay onClose={close} standalone zIndexClassName="z-[200]" panelClassName="w-full max-w-lg max-h-[90dvh] overflow-y-auto bg-surface border border-[var(--border)] rounded-2xl shadow-2xl">
       {() => (
         <div ref={panel} role="dialog" aria-modal="true" aria-labelledby="recognition-title" aria-describedby="recognition-description" className="relative"
           onDragOver={onDragOver} onDragLeave={(event) => { if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setDragOver(false) }} onDrop={onDrop}
@@ -366,7 +369,7 @@ export default function RecognitionModal(): JSX.Element {
             if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last?.focus() }
             else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first?.focus() }
           }}>
-          <div className="flex items-center justify-between px-5 py-4 border-b border-border">
+          <div className="flex items-center justify-between px-5 py-4 border-b border-[var(--border)]">
             <span className="flex items-center gap-2 text-sm font-medium text-text-primary"><AudioLines size={17} className="text-accent" /> Identify song</span>
             <button ref={closeButton} onClick={close} aria-label="Close song recognition" className="p-2 rounded-lg text-text-muted hover:text-text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"><X size={18} /></button>
           </div>
@@ -410,7 +413,7 @@ export default function RecognitionModal(): JSX.Element {
 
             {source === 'file' && (phase === 'ready' || phase === 'decoding') && (
               <button onClick={() => fileInput.current?.click()} disabled={phase === 'decoding'}
-                className={`mt-5 w-full rounded-2xl border-2 border-dashed px-6 py-9 flex flex-col items-center gap-3 text-center transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent ${dragOver ? 'border-accent bg-accent/10' : 'border-border hover:border-accent/60 hover:bg-surface-overlay'}`}>
+                className={`mt-5 w-full rounded-2xl border-2 border-dashed px-6 py-9 flex flex-col items-center gap-3 text-center transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent ${dragOver ? 'border-accent bg-accent/10' : 'border-[var(--border)] hover:border-accent/60 hover:bg-surface-overlay'}`}>
                 <span className="w-14 h-14 rounded-full bg-accent/10 text-accent flex items-center justify-center">
                   {phase === 'decoding' ? <Loader2 size={26} className="motion-safe:animate-spin" /> : <FileUp size={26} />}
                 </span>
@@ -420,7 +423,7 @@ export default function RecognitionModal(): JSX.Element {
             )}
 
             {phase === 'trimming' && decoded && (
-              <div className="mt-5 rounded-2xl border border-border p-4 animate-recog-in">
+              <div className="mt-5 rounded-2xl border border-[var(--border)] p-4 animate-recog-in">
                 <div className="flex items-center justify-between gap-3 text-xs">
                   <span className="min-w-0 truncate font-medium text-text-primary" title={decoded.name}>{decoded.name}</span>
                   <span className="shrink-0 text-text-muted tabular-nums">{formatTime(decoded.duration)}</span>
@@ -489,7 +492,7 @@ export default function RecognitionModal(): JSX.Element {
             {phase === 'result' && result?.status === 'ambiguous' && (
               <ul className="mt-6 space-y-2 animate-recog-in">
                 {result.matches.map(match => (
-                  <li key={match.recording_id} className="flex items-center gap-3 rounded-xl border border-border p-2.5">
+                  <li key={match.recording_id} className="flex items-center gap-3 rounded-xl border border-[var(--border)] p-2.5">
                     <Artwork url={match.image_url} className="w-12 h-12 rounded-lg" />
                     <div className="min-w-0 flex-1">
                       <p className="text-sm font-medium text-text-primary truncate" title={match.title}>{match.title}</p>

@@ -148,6 +148,7 @@ export function recordRecognitionClip(signal: AbortSignal, onProgress: (seconds:
       } catch (error) { fail(error) }
     }).catch((error: unknown) => {
       const name = error instanceof DOMException ? error.name : ''
+      console.error('[recognition] capture failed', source, error)
       fail(new Error(name === 'NotAllowedError' || name === 'SecurityError' || (source === 'system' && name === 'AbortError') ? text.denied
         : name === 'NotFoundError' ? text.notFound
         : name === 'NotReadableError' ? text.busy

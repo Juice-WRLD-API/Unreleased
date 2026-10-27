@@ -88,6 +88,9 @@ let appSettings = {
   // name. Written by rememberSize(); wiped when rememberWindowSizes is turned
   // off so re-enabling starts from the built-in defaults again.
   windowSizes: {},
+  // Set once the user allows microphone access for song recognition, so the
+  // confirmation dialog isn't repeated on every Listen. Cancel is never stored.
+  recognitionMicGranted: false,
 }
 let settingsLoadError = null
 try {
@@ -3807,33 +3810,57 @@ app.whenReady().then(() => {
     isMainFrame, audioRequested: true, platform: process.platform,
   })
   session.defaultSession.setPermissionCheckHandler((webContents, permission, _origin, details) => {
+    // Same gate as the request handler below; the user prompt still decides.
+    // getDisplayMedia also checks 'media'/video for its throwaway screen track; the request
+    // handler still refuses real camera requests, so this only unblocks device-audio capture.
+    // Not logged: every enumerateDevices() call runs these checks. Electron's typings
+    // leave 'display-capture' out of check permissions, hence the widened type.
+    if (/** @type {string} */ (permission) === 'display-capture' || (permission === 'media' && details.mediaType === 'video')) {
+      return systemAudioAllowed(webContents, details.requestingUrl || '', details.isMainFrame)
+    }
     return permission === 'media' && details.mediaType === 'audio'
       && microphoneAllowed(webContents, details.requestingUrl || '', details.isMainFrame, ['audio'])
   })
   session.defaultSession.setPermissionRequestHandler((webContents, permission, callback, details) => {
     // The display-media handler below asks the user and picks the streams.
     if (permission === 'display-capture') {
+      const ok = systemAudioAllowed(webContents, details.requestingUrl, details.isMainFrame)
+      if (!ok) runLog('recognition', 'display-capture permission denied', JSON.stringify({ url: details.requestingUrl, isMainFrame: details.isMainFrame, mainUrl: webContents?.getURL() }))
+      callback(ok)
+      return
+    }
+    // getDisplayMedia arrives as 'media' with no device types (no camera or mic);
+    // the display-media handler below then asks the user and picks the streams.
+    if (permission === 'media' && 'mediaTypes' in details && (details.mediaTypes || []).length === 0) {
       callback(systemAudioAllowed(webContents, details.requestingUrl, details.isMainFrame))
       return
     }
     if (permission === 'media' && 'mediaTypes' in details
       && microphoneAllowed(webContents, details.requestingUrl, details.isMainFrame, details.mediaTypes)) {
+      if (appSettings.recognitionMicGranted) { callback(true); return }
       const requestingWindow = mainWindow
       void dialog.showMessageBox(requestingWindow, {
         type: 'question', title: 'Allow microphone access?',
         message: 'Allow Unreleased to use your microphone?',
         detail: 'Song recognition records a short clip when you choose Listen. You can cancel recording at any time.',
         buttons: ['Cancel', 'Allow microphone'], defaultId: 0, cancelId: 0,
-      }).then(({ response }) => callback(response === 1 && !webContents.isDestroyed()
-        && microphoneAllowed(webContents, details.requestingUrl, details.isMainFrame, details.mediaTypes)))
-        .catch(() => callback(false))
+      }).then(({ response }) => {
+        const granted = response === 1 && !webContents.isDestroyed()
+          && microphoneAllowed(webContents, details.requestingUrl, details.isMainFrame, details.mediaTypes)
+        if (granted) { appSettings.recognitionMicGranted = true; saveSettings() }
+        callback(granted)
+      }).catch(() => callback(false))
       return
     }
+    runLog('permissions', 'request denied', JSON.stringify({
+      permission, mediaTypes: 'mediaTypes' in details ? details.mediaTypes : undefined, url: details.requestingUrl, isMainFrame: details.isMainFrame,
+    }))
     callback(false)
   })
   // Grants system audio plus a throwaway screen track (getDisplayMedia cannot
   // be audio-only); the renderer stops the video as soon as it arrives.
   session.defaultSession.setDisplayMediaRequestHandler((request, callback) => {
+    runLog('recognition', 'display media requested', JSON.stringify({ audio: request.audioRequested, video: request.videoRequested, gesture: request.userGesture }))
     const deny = () => { try { callback({}) } catch {} }
     const allowed = () => {
       const webContents = mainWindow?.webContents
@@ -3846,7 +3873,14 @@ app.whenReady().then(() => {
         isMainWindow: isMainFrame, isMainFrame, audioRequested: request.audioRequested, platform: process.platform,
       })
     }
-    if (!allowed()) { deny(); return }
+    if (!allowed()) {
+      const frame = request.frame
+      runLog('recognition', 'device audio denied before prompt', JSON.stringify({
+        hasFrame: !!frame, frameUrl: frame?.url, mainUrl: mainWindow?.webContents?.getURL(),
+        audioRequested: request.audioRequested, platform: process.platform, isDev,
+      }))
+      deny(); return
+    }
     void dialog.showMessageBox(mainWindow, {
       type: 'question', title: 'Record device audio?',
       message: 'Let Unreleased listen to what your computer is playing?',

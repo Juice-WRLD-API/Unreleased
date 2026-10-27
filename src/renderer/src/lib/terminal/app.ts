@@ -24,7 +24,7 @@ const VIEWS: Record<string, ViewType> = {
 }
 const SETTINGS_TABS: SettingsTab[] = ['appearance', 'preferences', 'playback', 'desktop', 'shortcuts', 'library', 'app', 'developer', 'feedback', 'about']
 const ADMIN_TABS: AdminTab[] = ['proposals', 'comp-proposals', 'comp-replace', 'applications', 'reports', 'feedback', 'users', 'stats', 'channels', 'eras', 'cdn-nodes', 'beta', 'lyrics', 'logs']
-const OPEN_TARGETS = [...Object.keys(VIEWS), 'settings', 'profile', 'admin', 'queue', 'eq', 'diagnostics', 'user', 'song']
+const OPEN_TARGETS = [...Object.keys(VIEWS), 'settings', 'profile', 'admin', 'queue', 'eq', 'diagnostics', 'identify', 'user', 'song']
 // The Admin page is for administrators and chat is for staff, so neither is offered otherwise.
 const offered = (target: string): boolean => {
   const a = termAccess()
@@ -34,7 +34,7 @@ const offered = (target: string): boolean => {
 export const APP_COMMANDS: TermCommand[] = [
   {
     name: 'open', aliases: ['go', 'goto'], group: 'Navigation',
-    get usage() { return `open <page> · open settings [tab] · ${offered('admin') ? 'open admin [tab] · ' : ''}open user <id> · open song <title> · open queue|eq|diagnostics` },
+    get usage() { return `open <page> · open settings [tab] · ${offered('admin') ? 'open admin [tab] · ' : ''}open user <id> · open song <title> · open queue|eq|diagnostics|identify` },
     description: 'Go to any page, as if you had clicked it. The terminal keeps its place for when you return (Ctrl+` or the Terminal button)',
     complete: (before, partial) => {
       const p = partial.toLowerCase()
@@ -48,7 +48,7 @@ export const APP_COMMANDS: TermCommand[] = [
       const [target = '', ...restWords] = args.trim().split(/\s+/)
       const rest = restWords.join(' ')
       const key = target.toLowerCase()
-      if (!key) fail(`usage: open <${Object.keys(VIEWS).filter(offered).join('|')}|settings|${offered('admin') ? 'admin|' : ''}profile|queue|eq|diagnostics>`)
+      if (!key) fail(`usage: open <${Object.keys(VIEWS).filter(offered).join('|')}|settings|${offered('admin') ? 'admin|' : ''}profile|queue|eq|diagnostics|identify>`)
       if (!offered(key)) fail(`no page "${target}" (try: open home)`)
       const s = st()
       if (key === 'settings') {
@@ -66,6 +66,7 @@ export const APP_COMMANDS: TermCommand[] = [
       if (key === 'queue') { s.setShowQueue(true); ctx.print('queue panel opened', 'ok'); return }
       if (key === 'eq') { s.setShowEqPanel(true); ctx.print('equalizer opened', 'ok'); return }
       if (key === 'diagnostics' || key === 'diag') { s.setShowDiagnostics(true); ctx.print('diagnostics opened', 'ok'); return }
+      if (key === 'identify') { s.setShowRecognition(true); ctx.print('identify song opened', 'ok'); return }
       if (key === 'user') {
         if (!/^\d+$/.test(rest)) fail('usage: open user <numeric id>')
         s.openPublicProfile(Number(rest))
