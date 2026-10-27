@@ -258,7 +258,7 @@ export default function Player(): JSX.Element {
     setPlayerCollapsed,
     queue,
     queueIndex,
-    crossfadeEnabled,
+    crossfadeEnabled: requestedCrossfade,
     crossfadeDuration,
     sleepTimerEnd,
     setSleepTimer,
@@ -272,6 +272,9 @@ export default function Player(): JSX.Element {
     activeView,
     playNext, account, setPendingEditorSongId } = useStorePick('currentTrack', 'currentTrackFull', 'isPlaying', 'volume', 'shuffle', 'repeat', 'setIsPlaying', 'setVolume', 'setProgress', 'setCurrentTime', 'setCurrentTrackFull', 'toggleShuffle', 'toggleRepeat', 'nextTrack', 'prevTrack', 'setShowNowPlaying', 'showNowPlaying', 'showQueue', 'setShowQueue', 'playerCollapsed', 'setPlayerCollapsed', 'queue', 'queueIndex', 'crossfadeEnabled', 'crossfadeDuration', 'sleepTimerEnd', 'setSleepTimer', 'audioOutput', 'setAudioOutput', 'playbackSpeed', 'setPlaybackSpeed', 'likedTrackIds', 'toggleLike', 'setActiveView', 'activeView', 'playNext', 'account', 'setPendingEditorSongId')
   const canEditSong = useCanEdit()
+  // iOS ignores element volume and suspends RAF while locked, so its two-slot
+  // fade cannot provide a reliable background transition.
+  const crossfadeEnabled = requestedCrossfade && !IS_IOS
 
   const [showContextMenu, setShowContextMenu] = useState(false)
   // Cursor position for a right-click-spawned menu. null → menu was opened via
@@ -308,13 +311,14 @@ export default function Player(): JSX.Element {
   // partway through a playlist until some setting was toggled.
   const handleLoadedMetadata = (e: React.SyntheticEvent<HTMLAudioElement>): void => {
     const audio = e.currentTarget
+    loopPositions.delete(audio)
     applyRate(audio)
     if (audio === getActive() && resumeTrackId.current) {
       const state = useStore.getState()
       if (state.currentTrack?.id === resumeTrackId.current) {
         const duration = Number.isFinite(audio.duration) ? audio.duration : state.currentTrack.duration
         const time = duration > 0 ? Math.min(state.currentTime, Math.max(0, duration - 0.1)) : state.currentTime
-        try { audio.currentTime = time } catch { return }
+        try { seekSlot(audio, time) } catch { return }
         recoveryResumeAt.current = time
         setCurrentTime(time)
         if (duration > 0) setProgress(time / duration)
@@ -374,6 +378,17 @@ export default function Player(): JSX.Element {
   const slotA = useRef<HTMLAudioElement>(null)
   const slotB = useRef<HTMLAudioElement>(null)
   const activeSlot = useRef<'A' | 'B'>('A')
+  const loopPositions = useRef(new WeakMap<HTMLAudioElement, { src: string; time: number }>()).current
+  const observeNativeLoop = (audio: HTMLAudioElement): boolean => {
+    const previous = loopPositions.get(audio)
+    loopPositions.set(audio, { src: audio.src, time: audio.currentTime })
+    return !!(audio.loop && previous?.src === audio.src && audio.currentTime < previous.time)
+  }
+  // Explicit seeks must not look like the browser wrapping a native loop.
+  const seekSlot = (audio: HTMLAudioElement, time: number): void => {
+    loopPositions.delete(audio)
+    audio.currentTime = time
+  }
 
   const [prevMute, setPrevMute] = useState(0.8)
 
@@ -551,7 +566,7 @@ export default function Player(): JSX.Element {
   // opened again. So on mobile the next song loads into the spare slot during
   // the last stretch of this one, and playback hands over to it the moment
   // this one ends, from data that's already there.
-  const handoffActive = (): boolean => IS_MOBILE && !useStore.getState().crossfadeEnabled
+  const handoffActive = (): boolean => IS_MOBILE && !IS_IOS && !useStore.getState().crossfadeEnabled
 
   // The song nextTrack() will move to, when that's knowable ahead of time.
   const upcomingTrack = (): Track | null => {
@@ -593,9 +608,7 @@ export default function Player(): JSX.Element {
     playSlot(spare, (err) => {
       const name = (err as DOMException | null)?.name
       if (name !== 'NotAllowedError') { if (name !== 'AbortError') console.error(err); return }
-      // iOS refusing an element no tap has unlocked (see the unlock effect
-      // below). Start the song in the slot that just finished instead, the
-      // way it would have gone without a handoff.
+      // An element-specific autoplay refusal: fall back to the active slot.
       if (getActive() !== spare || useStore.getState().currentTrack?.id !== next.id) return
       console.warn('Handoff to the preloaded slot was refused - loading the next song the usual way')
       activeSlot.current = activeSlot.current === 'A' ? 'B' : 'A'
@@ -607,34 +620,6 @@ export default function Player(): JSX.Element {
       if (useStore.getState().isPlaying) playSlot(finished)
     })
   }
-
-  // iOS lets an <audio> element play without a tap only once a tap has
-  // played it - per element, not per page. Taps only ever play the active
-  // slot, so a handoff to the spare would be refused. Unlock the spare on the
-  // user's taps instead: play() and straight back to pause() while it's
-  // empty, which makes no sound. Only while nothing is playing, so it can't
-  // disturb a song - the first tap of a session (the one that starts the
-  // music, if nothing before it) is enough, and it lasts the session.
-  useEffect(() => {
-    if (!IS_IOS) return
-    const unlocked = new WeakSet<HTMLAudioElement>()
-    const unlock = (): void => {
-      const spare = getNext()
-      if (!spare || unlocked.has(spare) || spare.getAttribute('src') || getActive()?.paused === false) return
-      // An emptied slot (src="") carries an error that makes play() refuse
-      // before the tap counts; reloading with no source clears it.
-      if (spare.error) { spare.removeAttribute('src'); spare.load() }
-      const p = spare.play()
-      spare.pause()
-      p.then(() => unlocked.add(spare), (err: DOMException) => { if (err?.name !== 'NotAllowedError') unlocked.add(spare) })
-    }
-    document.addEventListener('touchend', unlock, true)
-    document.addEventListener('click', unlock, true)
-    return () => {
-      document.removeEventListener('touchend', unlock, true)
-      document.removeEventListener('click', unlock, true)
-    }
-  }, [])
 
   // Route both slots through the shared Web Audio effects chain (EQ, balance,
   // mono, silence detection). Elements keep their own volume/rate handling.
@@ -677,7 +662,7 @@ export default function Player(): JSX.Element {
       // can throw while its source is in an error/reload state.
       recoveryResumeAt.current = target
       audio.volume = volumeRef.current
-      try { audio.currentTime = target } catch { /* recovery will apply it once seekable */ }
+      try { seekSlot(audio, target) } catch { /* recovery will apply it once seekable */ }
       setCurrentTime(target)
       if (audio.duration) setProgress(target / audio.duration)
     }
@@ -1022,7 +1007,7 @@ export default function Player(): JSX.Element {
         // enough to know the length; seeking then silently no-ops, and the
         // stall detector picks that up as another round.
         if (latestResumeAt > 0 && isFinite(a.duration) && latestResumeAt < a.duration) {
-          try { a.currentTime = latestResumeAt } catch { /* not seekable yet */ }
+          try { seekSlot(a, latestResumeAt) } catch { /* not seekable yet */ }
         }
         applyRate(a)
         a.volume = volumeRef.current
@@ -1367,7 +1352,7 @@ export default function Player(): JSX.Element {
           const cap = dur > 0 ? dur - endGuard : audio.currentTime + JUMP_S
           const nextPosition = Math.min(audio.currentTime + JUMP_S, cap)
           recoveryResumeAt.current = nextPosition
-          try { audio.currentTime = nextPosition } catch { reset(); return }
+          try { seekSlot(audio, nextPosition) } catch { reset(); return }
         }
       } else {
         if (silenceJumpStart.current != null) {
@@ -1379,7 +1364,7 @@ export default function Player(): JSX.Element {
           if (back > silenceJumpStart.current) {
             recoveryResumeAt.current = back
             try {
-              audio.currentTime = back
+              seekSlot(audio, back)
               const rate = Math.max(0.25, s.playbackSpeed)
               skipCooldownUntil.current = performance.now() + (JUMP_S / rate) * 1000 + 500
             } catch { reset(); return }
@@ -1511,6 +1496,7 @@ export default function Player(): JSX.Element {
     // before loadedmetadata. That is transport noise, not a user seek or real
     // playback progress, so keep both the UI and recovery intent unchanged.
     if (recoveryLoading.current?.audio === audio || resumeTrackId.current === useStore.getState().currentTrack?.id) return
+    const looped = IS_IOS && observeNativeLoop(audio)
 
     // Liveness signal for the stall detector. Compared for *any* change, not
     // just forward motion, so a seek backwards doesn't look like a frozen
@@ -1553,9 +1539,20 @@ export default function Player(): JSX.Element {
     const abLooping = abLoopStart != null && abLoopEnd != null
     if (abLooping && audio.currentTime >= abLoopEnd!) {
       recoveryResumeAt.current = abLoopStart!
-      audio.currentTime = abLoopStart!
+      seekSlot(audio, abLoopStart!)
       setCurrentTime(abLoopStart!)
       if (dur > 0) setProgress(abLoopStart! / dur)
+      return
+    }
+
+    // Native looping keeps iOS's media session alive at EOF, even if JS is
+    // briefly suspended. Advance on the wrap using the same unlocked element;
+    // never wait for React's next render to start the next source.
+    // A delayed timeupdate can replay a little of the outgoing intro before
+    // the switch. This is a background-continuity workaround, not gapless audio.
+    if (looped && !abLooping) {
+      if (useStore.getState().repeat === 'one') return // already restarted natively
+      onAudioEnded(audio)
       return
     }
 
@@ -1724,12 +1721,13 @@ export default function Player(): JSX.Element {
     if (repeat === 'one') {
       const a = getActive()
       recoveryResumeAt.current = 0
-      if (a) { try { a.currentTime = 0 } catch {}; a.volume = volumeRef.current; playSlot(a) }
+      if (a) { try { seekSlot(a, 0) } catch {}; a.volume = volumeRef.current; playSlot(a) }
       return
     }
     const prevId = currentTrack?.id
     const next = nextTrack()
     if (!next) {
+      if (IS_IOS) audio.pause()
       setIsPlaying(false)
       return
     }
@@ -1737,10 +1735,21 @@ export default function Player(): JSX.Element {
       // Same track (single song in queue with repeat-all, or only one option)
       const a = getActive()
       recoveryResumeAt.current = 0
-      if (a) { try { a.currentTime = 0 } catch {}; a.volume = volumeRef.current; playSlot(a) }
+      if (a) { try { seekSlot(a, 0) } catch {}; a.volume = volumeRef.current; playSlot(a) }
       return
     }
-    handOffToSpare(next)
+    if (IS_IOS) {
+      loopPositions.delete(audio)
+      const url = resolvePlaybackUrl(next)
+      if (!url) { audio.pause(); return } // donor download is handled by the load effect
+      audio.src = url
+      recoveryResumeAt.current = 0
+      audio.volume = volumeRef.current
+      applyRate(audio)
+      playSlot(audio)
+    } else {
+      handOffToSpare(next)
+    }
   }
 
   const restartCurrentTrack = (shouldPlay = isPlaying): void => {
@@ -1748,7 +1757,7 @@ export default function Player(): JSX.Element {
     cancelCF()
     recoveryResumeAt.current = 0
     if (audio) {
-      try { audio.currentTime = 0 } catch { /* recovery will restart at zero */ }
+      try { seekSlot(audio, 0) } catch { /* recovery will restart at zero */ }
       audio.volume = volumeRef.current
       if (shouldPlay) playSlot(audio)
     }
@@ -1953,7 +1962,7 @@ export default function Player(): JSX.Element {
       cancelCF()
       const time = seekDrag * dur
       recoveryResumeAt.current = time
-      try { audio.currentTime = time } catch { /* recovery will apply it once seekable */ }
+      try { seekSlot(audio, time) } catch { /* recovery will apply it once seekable */ }
       audio.volume = volumeRef.current
       applyRate(audio)
       setCurrentTime(time)
@@ -2058,6 +2067,7 @@ export default function Player(): JSX.Element {
           the local-media:// protocol both send Access-Control-Allow-Origin. */}
       <audio
         ref={slotA}
+        loop={IS_IOS}
         preload="none"
         crossOrigin="anonymous"
         onLoadedMetadata={handleLoadedMetadata}
@@ -2070,6 +2080,7 @@ export default function Player(): JSX.Element {
       />
       <audio
         ref={slotB}
+        loop={IS_IOS}
         preload="none"
         crossOrigin="anonymous"
         onLoadedMetadata={handleLoadedMetadata}

@@ -61,7 +61,7 @@ function handoff({ spareSrc = 'next-url', readyState = 1, error = null } = {}) {
     resolvePlaybackUrl: () => 'next-url', handoffActive: () => true, applyRate() {},
     playSlot: (a, onRejected) => { calls.push(`play:${a.name}`); rejected = onRejected },
   }
-  const fn = run(block('  const handOffToSpare =', '  // iOS lets an <audio> element'), 'handOffToSpare', env)
+  const fn = run(block('  const handOffToSpare =', '  // Route both slots'), 'handOffToSpare', env)
   fn({ id: 'next' })
   return { env, slots, calls, reject: name => rejected({ name }) }
 }
@@ -85,4 +85,57 @@ test('a refused handoff loads the song into the slot that just finished', () => 
   assert.deepEqual(h.calls, ['play:B', 'B:clear', 'B:load', 'play:A'])
   const paused = handoff(); paused.reject('AbortError')
   assert.equal(paused.env.activeSlot.current, 'B'); assert.deepEqual(paused.calls, ['play:B'])
+})
+
+test('native loop detection advances once per wrap, ignores source changes and explicit seeks', () => {
+  const env = { loopPositions: new WeakMap() }
+  const code = block('  const observeNativeLoop =', '  const [prevMute,')
+  const { observe, seek } = run(code, '({ observe: observeNativeLoop, seek: seekSlot })', env)
+  const audio = { src: 'a', currentTime: 179, loop: true }
+  assert.equal(observe(audio), false)
+  audio.currentTime = 0.2
+  assert.equal(observe(audio), true)
+  assert.equal(observe(audio), false)
+  audio.currentTime = 179; observe(audio)
+  seek(audio, 0)
+  assert.equal(observe(audio), false)
+  audio.currentTime = 179; observe(audio)
+  audio.src = 'b'; audio.currentTime = 0
+  assert.equal(observe(audio), false)
+  audio.currentTime = 179; observe(audio)
+  audio.loop = false; audio.currentTime = 0
+  assert.equal(observe(audio), false)
+})
+
+test('iOS starts the next source synchronously on the same element without a render or spare', () => {
+  const calls = []
+  const audio = { src: 'old', pause: () => calls.push('pause') }
+  const state = { repeat: 'none', queue: [], queueIndex: 0, currentTrack: { id: 'old' }, isPlaying: true }
+  const env = {
+    IS_IOS: true, useStore: { getState: () => state }, getActive: () => audio,
+    cfActive: ref(false), loopPositions: new WeakMap(), recoveryResumeAt: ref(179), volumeRef: ref(0.5),
+    nextTrack: () => { state.currentTrack = { id: 'next' }; return state.currentTrack },
+    resolvePlaybackUrl: () => 'next-url', applyRate() {}, playSlot: a => calls.push(['play', a.src]),
+    setIsPlaying: v => { state.isPlaying = v }, seekSlot: (a, t) => { a.currentTime = t },
+    handOffToSpare: () => assert.fail('iOS must reuse the unlocked element'),
+  }
+  const ended = run(block('  const onAudioEnded =', '  const restartCurrentTrack ='), 'onAudioEnded', env)
+  ended(audio)
+  assert.equal(audio.src, 'next-url')
+  assert.deepEqual(calls, [['play', 'next-url']])
+  assert.equal(env.recoveryResumeAt.current, 0)
+  calls.length = 0
+  env.nextTrack = () => null
+  ended(audio)
+  assert.deepEqual(calls, ['pause'])
+  assert.equal(state.isPlaying, false)
+  calls.length = 0
+  state.repeat = 'one'; state.isPlaying = true
+  ended(audio)
+  assert.equal(audio.currentTime, 0)
+  assert.deepEqual(calls, [['play', 'next-url']])
+  calls.length = 0
+  state.isPlaying = false
+  ended(audio)
+  assert.deepEqual(calls, [])
 })
