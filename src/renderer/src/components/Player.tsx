@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, useCallback, Suspense } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState, useCallback, Suspense } from 'react'
 import { createPortal } from 'react-dom'
 import {
   Play,
@@ -176,6 +176,13 @@ export function invalidateLyricsCache(songId: number): void { lyricsCache.delete
 // mount→cleanup→mount), where both invocations' closures still see the same
 // pre-update `currentTrackFull` state.
 let lyricsFetchInFlight: number | null = null
+
+// `audio.src` reads back the browser-normalized URL, so a raw string with
+// spaces or non-ASCII characters never compares equal to what was assigned.
+function sameMediaSrc(current: string, wanted: string): boolean {
+  if (current === wanted) return true
+  try { return new URL(wanted, window.location.href).href === current } catch { return false }
+}
 
 // Playback position (progress / currentTime) changes ~4x/sec. Reading it in the
 // Player body re-rendered the entire (huge) component on every tick, so the
@@ -402,11 +409,17 @@ export default function Player(): JSX.Element {
 
   // Crossfade state (all refs - no re-renders needed)
   const cfActive     = useRef(false)
+  const cfSourceIdx  = useRef(-1)
+  const cfSourceUrl  = useRef<string | null>(null)
   const cfTargetIdx  = useRef(-1)
+  const cfTargetUrl  = useRef<string | null>(null)
   const cfIsRadio    = useRef(false)
+  const cfAttempt    = useRef(0)
   const cfOutRaf     = useRef<number | null>(null)
   const cfInRaf      = useRef<number | null>(null)
-  const skipNextLoad = useRef(false)
+  // URL-scoped handoff marker. A boolean can go stale when a crossfade target
+  // has the same track id and therefore does not trigger the load effect.
+  const skipNextLoadUrl = useRef<string | null>(null)
 
   // Pause-fade ramp ("smooth fade when pausing" setting)
   const pauseFadeRaf = useRef<number | null>(null)
@@ -484,19 +497,50 @@ export default function Player(): JSX.Element {
   }
 
   const cancelCF = (): void => {
+    cfAttempt.current++
     if (cfOutRaf.current != null) { cancelAnimationFrame(cfOutRaf.current); cfOutRaf.current = null }
     if (cfInRaf.current  != null) { cancelAnimationFrame(cfInRaf.current);  cfInRaf.current  = null }
     if (cfActive.current) {
       const na = getNext()
-      if (na) { na.pause(); na.src = ''; na.volume = 0 }
+      if (na) {
+        na.pause()
+        na.removeAttribute('src')
+        na.load()
+        na.volume = 0
+      }
       cfActive.current = false
+      cfSourceIdx.current = -1
+      cfSourceUrl.current = null
       cfTargetIdx.current = -1
+      cfTargetUrl.current = null
       cfIsRadio.current = false
     }
     // Restore current audio to proper volume
     const a = getActive()
     if (a) a.volume = volumeRef.current
   }
+
+  // A crossfade preloads audio for a particular source/target pair. Queue
+  // appends and lazy insertion behind that pair are harmless, but a jump or
+  // reorder that changes either position must cancel synchronously so the
+  // audible track and displayed metadata cannot diverge.
+  useLayoutEffect(() => {
+    if (!cfActive.current || cfIsRadio.current) return
+    const source = queue[cfSourceIdx.current]
+    const target = queue[cfTargetIdx.current]
+    const sequentialNext = queueIndex + 1
+    const expectedTargetIdx = repeat === 'one'
+      ? queueIndex
+      : sequentialNext < queue.length
+        ? sequentialNext
+        : repeat === 'all' ? 0 : -1
+    const pairChanged =
+      queueIndex !== cfSourceIdx.current ||
+      cfTargetIdx.current !== expectedTargetIdx ||
+      !source || resolvePlaybackUrl(source) !== cfSourceUrl.current ||
+      !target || resolvePlaybackUrl(target) !== cfTargetUrl.current
+    if (pairChanged) cancelCF()
+  }, [queue, queueIndex, repeat])
 
   // Compute what the next queue index would be (mirrors store's nextTrack logic,
   // without advancing). Shuffle included: the store pre-shuffles the upcoming
@@ -549,13 +593,35 @@ export default function Player(): JSX.Element {
     }
     const url = resolvePlaybackUrl(nextTrackData)
     const na = getNext()
-    if (!na || na.src === url) return
+    if (!na) return
+    if (sameMediaSrc(na.src, url)) {
+      if (
+        na.readyState === HTMLMediaElement.HAVE_NOTHING &&
+        na.networkState !== HTMLMediaElement.NETWORK_LOADING &&
+        !na.error
+      ) na.load()
+      return
+    }
     na.src = url
     na.load()
     // Preloaded slots inherit the current rate too - the loadedmetadata
     // handler re-asserts it once this load settles.
     applyRate(na)
-  }, [queueIndex, queue.length, isPlaying, repeat, crossfadeEnabled, radioMode, currentTrackReady])
+  }, [queue, queueIndex, isPlaying, repeat, crossfadeEnabled, radioMode, currentTrackReady])
+
+  // Crossfade is the only reason to keep a speculative second media request.
+  // Turning it off aborts that one inactive target while leaving pauses alone,
+  // so resuming playback does not download the same next song again.
+  useEffect(() => {
+    if (crossfadeEnabled) return
+    cancelCF()
+    const na = getNext()
+    if (!na) return
+    na.pause()
+    na.removeAttribute('src')
+    na.load()
+    na.volume = 0
+  }, [crossfadeEnabled])
 
   // ── Mobile handoff ─────────────────────────────────────────────────────────
   // Without crossfade, the next song normally starts by loading it into the
@@ -594,7 +660,7 @@ export default function Player(): JSX.Element {
 
   // Moves playback onto the spare slot if it already holds `next`. Called
   // between nextTrack() and the render it causes, so the load effect finds
-  // skipNextLoad set and leaves the slots alone.
+  // skipNextLoadUrl set and leaves the slots alone.
   const handOffToSpare = (next: Track): void => {
     const spare = getNext()
     const finished = getActive()
@@ -602,7 +668,7 @@ export default function Player(): JSX.Element {
     if (!spare || !finished || !url || !handoffActive() || spare.getAttribute('src') !== url
       || spare.error || spare.readyState < HTMLMediaElement.HAVE_METADATA) return
     activeSlot.current = activeSlot.current === 'A' ? 'B' : 'A'
-    skipNextLoad.current = true
+    skipNextLoadUrl.current = url
     spare.volume = volumeRef.current
     applyRate(spare)
     playSlot(spare, (err) => {
@@ -733,13 +799,14 @@ export default function Player(): JSX.Element {
     const audio = getActive()
     if (resumeTrackId.current !== currentTrack?.id) resumeTrackId.current = null
     if (!audio || !currentTrack) return
+    const fileUrl = resolvePlaybackUrl(currentTrack)
     fillSessionArtist(currentTrack.id, currentTrack.streamUrl)
 
-    if (skipNextLoad.current) {
+    if (skipNextLoadUrl.current === fileUrl) {
       // Crossfade or the mobile handoff just swapped - audio already playing
       // on active slot, and it was the preload target this same track just
       // finished loading as.
-      skipNextLoad.current = false
+      skipNextLoadUrl.current = null
       audio.volume = volumeRef.current
       // This slot was loaded by the crossfade preload, which never ran the
       // rate setup below - apply it now or the faded-in track plays at 1x.
@@ -747,6 +814,9 @@ export default function Player(): JSX.Element {
       setCurrentTrackReady(true)
       return
     }
+    // A same-id crossfade can leave the marker unconsumed. It must never skip
+    // a later, genuinely different source change.
+    skipNextLoadUrl.current = null
 
     if (isDonorStreamUrl(currentTrack.streamUrl) && !cachedDonorUrl(currentTrack.streamUrl)) {
       const trackId = currentTrack.id
@@ -779,7 +849,6 @@ export default function Player(): JSX.Element {
       return
     }
 
-    const fileUrl = resolvePlaybackUrl(currentTrack)
     // Reassigning `.src` restarts the fetch even when the URL is unchanged -
     // guard against a redundant re-run of this effect (e.g. React StrictMode's
     // deliberate double-invoke in dev) firing a second network request for
@@ -1127,12 +1196,15 @@ export default function Player(): JSX.Element {
   const handleAudioError = (audio: HTMLAudioElement, slot: string): void => {
     // The inactive slot gets its src blanked by cancelCF(), which fires an
     // error of its own, and a preload dying is harmless either way.
-    if (audio !== getActive()) return
     const err = audio.error
     if (!err || err.code === MediaError.MEDIA_ERR_ABORTED) return
     // A failed recovery load may never produce loadedmetadata, so its
     // timeupdate quarantine must be released by the terminal error instead.
     if (recoveryLoading.current?.audio === audio) recoveryLoading.current = null
+    if (audio !== getActive()) {
+      if (cfActive.current && audio === getNext()) cancelCF()
+      return
+    }
     console.error(`Audio error (${slot}): code ${err.code}`, err.message)
     if (!useStore.getState().isPlaying) return
     // Unsupported before a single frame played = the file itself is the
@@ -1591,6 +1663,18 @@ export default function Player(): JSX.Element {
         // skipping the crossfade falls back to a normal advance at track end.
         const nextReady = !isDonorStreamUrl(nextTrackData?.streamUrl) || !!cachedDonorUrl(nextTrackData.streamUrl)
         if (na && nextTrackData && nextReady) {
+          const url = resolvePlaybackUrl(nextTrackData)
+          // Never manufacture silence while a remote target is still cold.
+          // Keep the outgoing song at full volume and retry on the next native
+          // timeupdate; if readiness never arrives, normal ended handling owns
+          // the handoff and recovery path.
+          if (!sameMediaSrc(na.src, url)) { na.src = url; na.load(); return }
+          if (na.ended) {
+            try { na.currentTime = 0 } catch { /* wait for a seekable frame */ }
+            return
+          }
+          if (na.error || na.readyState < HTMLMediaElement.HAVE_FUTURE_DATA) return
+
           // Entering a healthy crossfade supersedes any delayed reload of the
           // outgoing slot. Invalidate both its timer and metadata callback.
           recoveryGeneration.current++
@@ -1598,14 +1682,17 @@ export default function Player(): JSX.Element {
           clearRecoveryTimer()
           cfActive.current = true
           cfIsRadio.current = isRadio
+          cfSourceIdx.current = useStore.getState().queueIndex
+          cfSourceUrl.current = currentTrack ? resolvePlaybackUrl(currentTrack) : null
           cfTargetIdx.current = nextIdx
-
-          const url = resolvePlaybackUrl(nextTrackData)
-          // Only reassign src if not already preloaded
-          if (na.src !== url) na.src = url
+          cfTargetUrl.current = url
+          const attempt = ++cfAttempt.current
           na.volume = 0
           applyRate(na)
-          na.play().catch(console.error)
+          na.play().catch((error) => {
+            console.error(error)
+            if (cfAttempt.current === attempt && cfActive.current && getNext() === na) cancelCF()
+          })
 
           // Fade OUT active audio
           const startVol  = audio.volume
@@ -1662,8 +1749,12 @@ export default function Player(): JSX.Element {
       cfActive.current = false
 
       const targetIdx = cfTargetIdx.current
+      const targetUrl = cfTargetUrl.current
       const wasRadio  = cfIsRadio.current
+      cfSourceIdx.current = -1
+      cfSourceUrl.current = null
       cfTargetIdx.current = -1
+      cfTargetUrl.current = null
       cfIsRadio.current   = false
 
       // Ensure incoming track is at full volume
@@ -1674,8 +1765,8 @@ export default function Player(): JSX.Element {
       activeSlot.current = activeSlot.current === 'A' ? 'B' : 'A'
       recoveryResumeAt.current = na?.currentTime ?? 0
 
-      // Tell the load useEffect to skip (audio already playing)
-      skipNextLoad.current = true
+      // Tell the load effect exactly which already-playing URL it may skip.
+      skipNextLoadUrl.current = targetUrl
 
       // Preserve a pause that raced in right at the crossfade boundary -
       // don't let the queue-advance forcibly resume playback. Since the
@@ -2068,7 +2159,7 @@ export default function Player(): JSX.Element {
       <audio
         ref={slotA}
         loop={IS_IOS}
-        preload="none"
+        preload={crossfadeEnabled ? 'auto' : 'none'}
         crossOrigin="anonymous"
         onLoadedMetadata={handleLoadedMetadata}
         onTimeUpdate={handleTimeUpdate}
@@ -2081,7 +2172,7 @@ export default function Player(): JSX.Element {
       <audio
         ref={slotB}
         loop={IS_IOS}
-        preload="none"
+        preload={crossfadeEnabled ? 'auto' : 'none'}
         crossOrigin="anonymous"
         onLoadedMetadata={handleLoadedMetadata}
         onTimeUpdate={handleTimeUpdate}

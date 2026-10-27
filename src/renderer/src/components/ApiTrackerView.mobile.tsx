@@ -661,7 +661,7 @@ function VersionTitlePromptModal({ saving, onSave, onSkip }: {
 // ─── Main view ────────────────────────────────────────────────────────────────
 export default function ApiTrackerView(): JSX.Element {
   const {
-    playTrack, startRadio, addToQueue, account, shuffle,
+    playTrack, playNext, addToQueue, account,
     apiTrackerCategory, setApiTrackerCategory,
     apiTrackerEra, setApiTrackerEra,
     apiTrackerTab, setApiTrackerTab,
@@ -670,8 +670,8 @@ export default function ApiTrackerView(): JSX.Element {
     playlists, refreshPlaylists, setShowUserAuth, likedTrackIds, toggleLike,
     openBulkEditor, currentTrack, isPlaying, fullEraNames, activeChannel, channels, setActiveChannel,
   } = useStore(useShallow(s => ({
-    playTrack: s.playTrack, startRadio: s.startRadio, addToQueue: s.addToQueue,
-    account: s.account, shuffle: s.shuffle,
+    playTrack: s.playTrack, playNext: s.playNext, addToQueue: s.addToQueue,
+    account: s.account,
     apiTrackerCategory: s.apiTrackerCategory, setApiTrackerCategory: s.setApiTrackerCategory,
     apiTrackerEra: s.apiTrackerEra, setApiTrackerEra: s.setApiTrackerEra,
     apiTrackerTab: s.apiTrackerTab, setApiTrackerTab: s.setApiTrackerTab,
@@ -898,7 +898,7 @@ export default function ApiTrackerView(): JSX.Element {
   }, [lyricsQuery])
 
   const {
-    results: lyricsResults, count: lyricsCount, hasMore: lyricsHasMore, loading: lyricsLoading, error: lyricsError, loadMore,
+    results: lyricsResults, all: lyricsAll, count: lyricsCount, hasMore: lyricsHasMore, loading: lyricsLoading, error: lyricsError, loadMore,
   } = useLyricSearch(debouncedLyricsQuery)
   const loadMoreLyrics = (): void => { if (!lyricsLoading) loadMore() }
 
@@ -1199,17 +1199,29 @@ export default function ApiTrackerView(): JSX.Element {
 
   const handlePlay = useCallback((song: JWApiSong) => {
     const track = songToTrack(song)
-    // If shuffle is already on, start radio mode from this track instead of
-    // loading the list into the queue.
-    if (shuffle) {
-      startRadio(track, null)
-      return
+    // Each surface queues what it lists, whole, so shuffle draws from all of
+    // it and a lower row never drags unrelated rows into the history.
+    let sourceSongs: JWApiSong[] = sortedSongs
+    if (trackerTab === 'lyrics') {
+      sourceSongs = lyricsAll
+    } else if (trackerTab === 'calendar' || trackerTab === 'producers') {
+      sourceSongs = detail
+        ? detailSongs
+        : trackerTab === 'calendar' && selectedDateKey
+          ? (calendarByDate.get(selectedDateKey) ?? [])
+          : [song]
+    } else if (compactView) {
+      sourceSongs = filteredCompactGroups.flatMap((group) => group.members.map((member) => member.item))
     }
-    // The whole result set is loaded, so the queue gets all of it up front.
-    const playable = sortedSongs.filter((s) => !!s.path)
+    const playable = [...new Map(
+      sourceSongs.filter((candidate) => !!candidate.path).map((candidate) => [candidate.id, candidate]),
+    ).values()]
     const context = playable.map(songToTrack)
     playTrack(track, context.length > 0 ? context : [track], null, 'tracker')
-  }, [playTrack, startRadio, shuffle, sortedSongs])
+  }, [
+    playTrack, trackerTab, sortedSongs, lyricsAll, detail, detailSongs, selectedDateKey, calendarByDate,
+    compactView, filteredCompactGroups,
+  ])
 
   const handleInfo = useCallback((song: JWApiSong) => { setSelectedSong(song) }, [])
   const handleQueue = useCallback((track: Track) => { addToQueue(track) }, [addToQueue])
@@ -2118,6 +2130,7 @@ export default function ApiTrackerView(): JSX.Element {
           song={contextMenu.song}
           onClose={() => setContextMenu(null)}
           onInfo={() => handleInfo(contextMenu.song)}
+          onPlayNext={() => playNext(songToTrack(contextMenu.song))}
           onAddToQueue={() => handleQueue(songToTrack(contextMenu.song))}
           onShowInFiles={() => handleShowInFiles(contextMenu.song)}
           canEdit={canEdit}

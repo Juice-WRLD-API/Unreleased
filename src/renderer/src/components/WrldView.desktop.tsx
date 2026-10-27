@@ -1648,13 +1648,14 @@ const FmLikeButton = memo(function FmLikeButton({ light }: { light: boolean }): 
 // (like LyricsPanel/FmProgressBar) so it reads the store directly instead of
 // drilling props from WrldView.
 const SongMenu = memo(function SongMenu({ light, onShareLyrics }: { light: boolean; onShareLyrics?: () => void }): JSX.Element {
-  const { currentTrack, radioFmActive, radioFmNowPlaying, radioFmMatchedSong, likedTrackIds, toggleLike } = useStore(useShallow(s => ({
+  const { currentTrack, radioFmActive, radioFmNowPlaying, radioFmMatchedSong, likedTrackIds, toggleLike, playNext } = useStore(useShallow(s => ({
     currentTrack: s.currentTrack,
     radioFmActive: s.radioFmActive,
     radioFmNowPlaying: s.radioFmNowPlaying,
     radioFmMatchedSong: s.radioFmMatchedSong,
     likedTrackIds: s.likedTrackIds,
     toggleLike: s.toggleLike,
+    playNext: s.playNext,
   })))
   const canEdit = useCanEdit()
 
@@ -1740,6 +1741,7 @@ const SongMenu = memo(function SongMenu({ light, onShareLyrics }: { light: boole
           onClose={() => setOpen(false)}
           canEdit={canEdit}
           onInfo={() => currentSongId != null && openInfo(currentSongId)}
+          onPlayNext={() => playNext(currentTrack)}
           liked={likedTrackIds.includes(currentTrack.id)}
           onToggleLike={() => toggleLike(currentTrack.id)}
           onShareLyrics={onShareLyrics}

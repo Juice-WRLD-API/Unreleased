@@ -56,7 +56,7 @@ function handoff({ spareSrc = 'next-url', readyState = 1, error = null } = {}) {
   }
   const env = {
     console: { warn() {}, error() {} }, HTMLMediaElement: { HAVE_METADATA: 1 },
-    useStore: { getState: () => state }, activeSlot: ref('A'), skipNextLoad: ref(false), volumeRef: ref(0.5),
+    useStore: { getState: () => state }, activeSlot: ref('A'), skipNextLoadUrl: ref(null), volumeRef: ref(0.5),
     getActive: () => slots[env.activeSlot.current], getNext: () => slots[env.activeSlot.current === 'A' ? 'B' : 'A'],
     resolvePlaybackUrl: () => 'next-url', handoffActive: () => true, applyRate() {},
     playSlot: (a, onRejected) => { calls.push(`play:${a.name}`); rejected = onRejected },
@@ -68,14 +68,14 @@ function handoff({ spareSrc = 'next-url', readyState = 1, error = null } = {}) {
 
 test('the song end hands playback to the spare slot when it already holds the next song', () => {
   const h = handoff()
-  assert.equal(h.env.activeSlot.current, 'B'); assert.equal(h.env.skipNextLoad.current, true)
+  assert.equal(h.env.activeSlot.current, 'B'); assert.equal(h.env.skipNextLoadUrl.current, 'next-url')
   assert.equal(h.slots.B.volume, 0.5); assert.deepEqual(h.calls, ['play:B'])
 })
 
 test('no handoff to a spare holding another song, nothing loaded yet, or a failed load', () => {
   for (const opts of [{ spareSrc: 'other-url' }, { spareSrc: null }, { readyState: 0 }, { error: { code: 2 } }]) {
     const h = handoff(opts)
-    assert.equal(h.env.activeSlot.current, 'A'); assert.equal(h.env.skipNextLoad.current, false); assert.deepEqual(h.calls, [])
+    assert.equal(h.env.activeSlot.current, 'A'); assert.equal(h.env.skipNextLoadUrl.current, null); assert.deepEqual(h.calls, [])
   }
 })
 
