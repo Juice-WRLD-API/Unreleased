@@ -104,7 +104,7 @@ export function followDeskViz(api: DesktopApi, coverOf: (s: AppStore) => string 
       const now = performance.now()
       const dt = Math.min(0.05, (now - last) / 1000)
       last = now
-      // The graph is built when the player first attaches its elements: until then, the gentle signal of no audio.
+      // The graph is built on the first play: until then, the gentle signal of no audio.
       if (!engine.active) {
         const tap = getAnalysisTap()
         if (tap) engine.enableNode(tap.ctx, tap.node)

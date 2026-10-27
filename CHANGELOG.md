@@ -6,6 +6,37 @@ All notable changes to this project are documented here.
 
 ---
 
+## [2.5.42] — 2026-10-26
+
+Changes since 2.5.0:
+
+- **New** **Passkeys** can be managed from your account and used to sign in or complete two-factor sign-in. The desktop app opens the passkey prompt in a separate window on Windows; the website uses the browser prompt
+- **New** **Mixed-source playlists** can hold songs, comp files, donor files and local files. Synced playlists can include donor files too
+- **New** Contributors can propose replacing an existing comp file from the Files tab
+- **New** **Sync** in Home → Tools keeps the released and unreleased catalogue with audio available offline, with controls to start, pause and manage it. The terminal's `offline` command can control it too
+- **New** **On this day** on Home finds songs connected to today's date; the terminal has an `onthisday` command
+- **New** **Sync lyrics** lets anyone time lyrics by line or word against a song or comp file. Open it from Home → Tools or a track's menu; the editor can use it while editing a song. Word timing is saved in enhanced LRC format
+- **New** Settings can remember the queue, current song and position on this device, restoring them paused when the app reopens
+- **New** The admin console has a Logs tab with comp-channel filtering, and the terminal has log commands. The CDN nodes tab shows each node's event and audit history; the terminal can list those events
+- **New** Files has a go-to-folder box (`Ctrl+L`). Folder search is faster, and hovering over folders starts loading them ahead of time
+- **New** Settings → About shows donation addresses
+- **Improve** Desktop and WRLD widgets have a song menu, a lyrics toggle and an equalizer shortcut. The clock and queue can follow 999 FM, and the desktop player has a more-options menu. Right-clicking a WRLD queue card opens that song's menu; clicking the playing card opens its lyrics
+- **Improve** Lyric styles gained Classic and Fisheye options, custom fonts from installed fonts or files, click-to-seek lines and sizing and color controls that follow the app. The WRLD visualizer, Edge light and lyrics controls were refined; shader and widget rendering is smoother
+- **Improve** Color changes cross-fade, menus use a glass style, tab content and disclosures animate, and the desktop notice and mobile dismiss gestures have more polished motion
+- **Improve** The Library tab has a new layout, artist details show the full song list, and playlist quick views and large Tracker lists scroll more smoothly
+- **Improve** Sign-in completes without waiting for account sync, and cached account and playlist data appears sooner on launch
+- **Improve** A DM can reset its encryption key. The notification area loads images as needed and caches chat attachments
+- **Improve** Song and comp file proposals are sent when submitted instead of being staged. The admin profile preview loads its totals and sections independently
+- **Improve** Updates are checked before the main app opens; Windows installs run behind an updating window. The 2FA status is under Settings → Account
+- **Improve** The debug recorder has an anonymous mode and removes known secrets from saved entries. Discord presence links to the player and the song's track page
+- **Fix** Playback recovers when a stream stalls, disconnects or pauses unexpectedly, including after a seek
+- **Fix** Editing and resubmitting a proposal from My proposals works with the server's paged summaries; the app fetches the full proposal before showing its diff or opening the editor
+- **Fix** Encrypted chat room keys are sent to every active device, so a newer device no longer waits indefinitely for a key
+- **Fix** Large ZIP downloads are split into parts before they exceed the in-memory ZIP limit
+- **Fix** Personal covers have a working fallback in Edge light when the image thumbnail endpoint cannot load them
+
+---
+
 ## [2.5.0] — 2026-10-20
 
 - **New** **Notifications**: a notification area that keeps the chat messages, news posts, announcements, device alerts and app notices that popped up, grouped by day, with a badge for new ones. Click one to go to its chat room or post. Opens from the Notifications button in the side menu (it can be moved or hidden like the others) or the terminal's `notifications` command. Kept on this device for 30 days; signing out clears the chat ones
@@ -21,6 +52,142 @@ All notable changes to this project are documented here.
 - **New** An Edge light can play round the edges on top of any classic or shader WRLD visualizer: Edge on top in the visualizer settings, or `set viz-edge` in the terminal
 - **Change** The lyrics pipe for the standalone iJWA app is gone: Desktop replaces it
 - **Change** WRLD's Cover Flow layout is gone: its queue cards, clock and controls are the Desktop player and clock now, on the desktop or in WRLD's Widgets layout. A saved Cover Flow opens as Aurora
+
+---
+
+## [2.2.0 — 2.5.41]
+
+Patch releases between 2.2.0 and 2.5.41, grouped by area (individual version entries below retain release dates).
+
+### Playback, queues and song versions
+
+- **Improve** Changing versions now replaces the playing song without clearing the queue, including during radio playback and in WRLD
+- **Improve** Explicitly selected versions play as selected; automatically queued songs respect preferred and excluded versions
+- **New** Multiple versions can be preferred, with playback choosing randomly between them
+- **New** Compact playlists show one row per song, expandable to its versions with prefer/exclude controls
+- **New** Recording sessions with playable session edits appear as Session versions and support version preferences
+- **Improve** Community edits include instrumentals; playing an edit preserves the queue
+- **Improve** Instrumentals and sessions display the song title with the filename on the artist line
+- **New** Queue history persists when switching queues, starting radio or playing from Tracker. Available in WRLD and through queue history
+- **Improve** Previous works in radio/shuffle mode
+- **Improve** Shuffle behavior is unified across entry points, and disabling shuffle restores the original order
+- **New** An ended queue can offer to start random radio
+- **Improve** WRLD's Next button follows the same playback behavior as the main player
+- **Improve** Temporary server errors and rate limits receive a retry before a source is treated as unplayable
+- **Fix** Cover and lyrics flashes when replaying the same track
+
+### Equalizer and visualizers
+
+- **New** Expanded audio effects with preamp, stereo width, saturation, compression, cut filters, echo and 8D auto-pan controls
+- **New** Named custom EQ presets, preset deletion and reset-all controls
+- **New** Preference synchronization for the new effects and saved presets
+- **New** 17 visualizers: Rain, Fireworks, Sonar, Embers, Warp, Lasers, Synthwave, Outrun, Neon City, Terrain, Grid Tunnel, Retro Planet, Sunset Beach, Vaporwave, 8-Bit, Night Drive and Black Hole
+- **New** A visualizer picker grouped into Classic and Shaders
+- **Improve** Audio-reactive shader movement
+- **Improve** WRLD panel transitions, cover positioning and lyrics centering
+- **Fix** Toolbar overlap with window controls and top navigation
+- **Improve** Floating navigation hides during WRLD fullscreen
+- **Improve** Lyrics toggles apply immediately, and disabled lyrics stay hidden during song changes
+
+### Search, Tracker and Files
+
+- **New** Customizable Tracker list columns and detail fields, with drag-to-reorder
+- **New** Extended song-field search across playlists, queues, tier lists and 999 FM, with syntax help
+- **Improve** Tracker searches and title sorting account for personal song renames
+- **Improve** Tracker defaults to newest-first Date Leaked sorting; leak/release dates display without times
+- **New** Expanded Files search with any-order words, quoted phrases, exclusions, typo fallback and extension, type, folder and size filters
+- **New** Search scoped to the current folder and its descendants
+- **New** Session-file linking is available to all users
+- **Improve** The session-file picker can switch comps and remembers the selected file's comp
+- **Improve** Session playback, downloads and "Show in Files" resolve the linked file across comps
+- **Fix** Session-edit and cover matching for titles containing `<3` or `</3`
+
+### Playlists, covers and downloads
+
+- **New** Immediate playlist quick-view opening and animated expansion, collapse and switching between cards
+- **Improve** Add-to-playlist and public/private changes update immediately, with rollback and error messages when requests fail
+- **Improve** Clearer errors for playlist creation, deletion, renaming, descriptions and sharing
+- **Fix** Custom playlist covers disappearing after reload
+- **Improve** Personal covers propagate to other versions that have no personal cover
+- **Improve** Cover searches include alternate song names
+- **Fix** Personalized covers stored as plain image paths
+- **Improve** WRLD album displays use personalized and album covers
+- **New** Downloaded songs save covers locally for offline playback; existing downloads receive cover backfills
+- **Improve** Personal name/cover changes refresh offline metadata, and removing a download removes its saved cover
+- **New** MP3 download tagging, expanded to song name, artist, album, cover and plain/synced lyrics
+- **Improve** Tagging integrated into download paths including playlist ZIP handling
+- **New** CDN-routed ZIP downloads
+- **Improve** Cover loading tries alternate resized copies and caps fallbacks at 1024px, avoiding oversized originals
+- **Improve** OS media artwork and chat song cards use resized covers
+
+### Chat, profiles and news
+
+- **New** Chat message search across DMs and servers, with encrypted DMs searched locally. Search supports sender, mentions, content type, room, date, status, exclusions and phrase filters
+- **New** Ctrl+F search and terminal chat-history grep
+- **New** Chat attachments show upload progress and support cancellation in Transfers
+- **New** Channel role-whitelist helpers
+- **Improve** Group chats display stacked member avatars
+- **Improve** Cached profiles appear immediately while refreshing
+- **Fix** Profile lookup failures and chat header overlap with window controls
+- **Fix** Chat starts app-wide, fixing terminal commands stuck on "starting"
+- **Fix** News Copy link and added it to article pages
+- **New** Formatting help with live examples to the news composer
+- **Fix** Notification sockets wait for confirmed account authentication before requesting a ticket
+
+### Editing, proposals and administration
+
+- **Improve** Dropped files are staged before submission; staged changes can be edited
+- **Improve** Folder uploads preserve nesting, merge matching comp-root folders and skip existing paths
+- **Improve** Transfers remains accessible when proposals are staged, with staged changes included in its badge
+- **New** New-leak flags and badges to comp proposals
+- **New** Staff can approve or deny proposals directly from profile cards
+- **New** Approval/denial of your own comp proposals where permitted
+- **New** Parallel acceptance of a user's edits across songs
+- **New** Refresh buttons to profile proposal and comp-file lists
+- **Fix** Large proposal diffs are capped for rendering while retaining full-value copying
+- **New** Admin Feedback tools, including hiding duplicate crash reports
+- **New** CDN node binary uploads with progress
+- **New** CDN world maps, country chips, locations and copyable owner information
+- **Improve** Propagation maps, flags and skipped-state reporting
+- **New** Channel/folder selection for owned CDN nodes
+
+### Settings, navigation and interface
+
+- **New** API-key management in Settings and the terminal
+- **New** Draggable pill navigation that docks to any window edge
+- **Fix** Restored Library navigation and the pill's app-menu button
+- **Change** Pill navigation keeps auto-hide disabled
+- **Fix** Window dragging with top pill or auto-hide navigation
+- **Improve** Unified context menus with consistent flyouts, keyboard navigation and dismissal
+- **Fix** Submenu crashes that could blank the app
+- **Improve** Flyouts wait for pointer movement before opening
+- **New** Themed selects, checkboxes, color pickers and date pickers
+- **Improve** Hover scrolling for truncated text, view transitions and sliding selection indicators
+- **Improve** Home uses the full available width; track pages show larger artwork
+- **Fix** Native clipboard handling fixes copy actions throughout Electron
+- **Improve** Hid the modal-lock control when pop-ups are undocked
+- **Improve** Moved API-server settings into Developer
+- **Improve** Moved credits out of About to the Thank you page
+- **New** Debug-log recording for console/network activity, available in Settings → About and through `debuglog`
+
+### Updates, performance and maintenance
+
+- **Fix** Windows update relaunch failures and repeated-update loops by letting the installer launch the new executable after installation
+- **Improve** Update installation shows progress
+- **Improve** Ready updates ask before restarting, including updates downloaded after startup
+- **Improve** Pending beta updates install on quit; beta auto-download respects its setting
+- **New** Beta administration, startup/periodic beta checks and a beta publishing flow
+- **Improve** Beta codes survive reinstalling; leaving beta returns to stable updates
+- **Improve** Preloaded view code while idle to reduce navigation delays
+- **Improve** Reduced song-response payloads and duplicate requests
+- **Improve** Lazy-load recovery waits for network availability
+- **Fix** Crashes caused by browser translation modifying the DOM
+- **Improve** Moved 1,905 emoji assets out of the module-import graph
+- **Fix** All-time listening totals being capped by the 2,000-entry history log
+- **New** Terminal version-preference controls and clickable usernames in terminal output
+- **New** Development-mode seeding of installed-app preferences/login storage
+- **Improve** Updated dependency overrides, documentation and thumbnail checks
+- **New** A tracker-sheet/API comparison script
 
 ---
 

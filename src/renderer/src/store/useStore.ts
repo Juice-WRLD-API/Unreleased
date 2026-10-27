@@ -863,6 +863,9 @@ interface AppActions {
   completeApprovedLogin: (token: string, user: userApi.AccountUser) => Promise<void>
   logoutAccount: () => Promise<void>
   refreshPlaylists: () => Promise<void>
+  /** refreshPlaylists(), unless this session already loaded the signed-in
+   *  account's playlists. */
+  ensurePlaylists: () => Promise<void>
   prefetchPlaylistDetails: () => Promise<void>
   prefetchApiData: () => Promise<void>
   setPendingPlaylistId: (id: number | null) => void
@@ -975,8 +978,11 @@ export type AppStore = QueueSlice & DesktopSlice & AppState & AppActions
 
 // --- Store --------------------------------------------------------------------
 
-// Dedup flag: prevents concurrent /playlists/ fetches
-let _playlistsInFlight = false
+// The /playlists/ fetch in flight, shared by concurrent refreshPlaylists callers
+let _playlistsInFlight: Promise<void> | null = null
+// Account whose playlists a refreshPlaylists() has loaded this session (see
+// ensurePlaylists).
+let _playlistsLoadedFor: number | null = null
 // Dedup flag: prevents the startup detail/cover prefetch from running twice
 // (e.g. loadAccount racing with a later refreshPlaylists on the same session)
 let _detailsPrefetchInFlight = false
@@ -2526,6 +2532,9 @@ export const useStore = create<AppStore>((set, get, store) => ({
     if (_loadAccountInFlight) return _loadAccountInFlight
     _loadAccountInFlight = (async () => {
       if (!userApi.getToken()) return
+      // Nothing below feeds the playlist list, so it loads alongside the
+      // profile instead of waiting behind favorites and the settings merge.
+      const playlistsLoaded = get().refreshPlaylists()
       try {
         const account = await userApi.getMe()
         set({ account })
@@ -2565,7 +2574,7 @@ export const useStore = create<AppStore>((set, get, store) => ({
       // Deliver any reports queued while signed out � a logged-in flush can
       // attach the account's Discord username as the contact field.
       get()._flushReports()
-      await get().refreshPlaylists()
+      await playlistsLoaded
       // Fire-and-forget: warm playlist tracks + covers in the background so the
       // Playlists page is ready before the user ever navigates to it. Two
       // requests per playlist, so it waits for idle rather than piling onto the
@@ -2672,15 +2681,29 @@ export const useStore = create<AppStore>((set, get, store) => ({
     // notification area (news, announcements, toasts) isn't anyone's.
     clearNotifications(['chat'])
   },
-  refreshPlaylists: async () => {
-    if (!get().account) return
-    if (_playlistsInFlight) return
-    _playlistsInFlight = true
-    try {
-      const playlists = await userApi.getPlaylists()
-      set({ playlists })
-    } catch {}
-    finally { _playlistsInFlight = false }
+  // Keyed on the token rather than `account`, so loadAccount can start it
+  // before getMe answers.
+  refreshPlaylists: () => {
+    if (!userApi.getToken()) return Promise.resolve()
+    if (_playlistsInFlight) return _playlistsInFlight
+    _playlistsInFlight = (async () => {
+      try {
+        const accountId = get().account?.id ?? null
+        const playlists = await userApi.getPlaylists()
+        // Signed out while it was loading.
+        if (!userApi.getToken()) return
+        set({ playlists })
+        _playlistsLoadedFor = accountId
+      } catch {}
+    })().finally(() => { _playlistsInFlight = null })
+    return _playlistsInFlight
+  },
+  // The list carries every playlist's items (~1.5 MB for a big library), so
+  // callers that only need it loaded once (Home, on every visit) use this.
+  ensurePlaylists: async () => {
+    const id = get().account?.id
+    if (id == null || _playlistsLoadedFor === id) return
+    await get().refreshPlaylists()
   },
 
   // Warm the in-memory (and, via the API layer, localStorage) caches for every

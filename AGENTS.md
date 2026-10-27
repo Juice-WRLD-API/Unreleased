@@ -1,6 +1,6 @@
 # Agent guide: Juice WRLD API and Unreleased
 
-**Version 1.32** · updated 2026-10-26. Bump the version and date whenever you
+**Version 1.36** · updated 2026-10-27. Bump the version and date whenever you
 change this file (minor for fixes and additions, major for rewrites).
 
 **Keep this file current.** If you find something in the docs or this file that
@@ -296,9 +296,11 @@ concurrent downloads of one track and aborts them on pause
 **Synced lyrics** (Tools menu, Home → Tools, a song's or comp file's menu) is
 one tool for timing lyrics by the line or the word. Model:
 `lib/syncedLyrics.ts` (untouched lines are written back byte for byte); UI:
-`components/SyncedLyricsTool.tsx`, edited in two places only: the song
-editor's Sync (on the app's player) and the dialog's Sync tab (on its own
-`<audio>`, for anyone; it opens big). A Whisper job's result shows it
+`components/SyncedLyricsTool.tsx`, edited in one place only: the dialog's
+Sync tab (`LyricsGenModal`, on its own `<audio>`, for anyone; it opens big).
+The song editor's Sync opens that dialog on the song and the editor's lyrics
+(`LyricsGenTarget.sync`), and "Use in the song editor" hands the result back;
+don't embed the tool in the editor again. A Whisper job's result shows it
 `readOnly` as a play-along preview, and Edit in Sync opens the result in the
 Sync tab; don't add timing controls back to the preview. Whisper stays
 donor-only, under Generate. Word timing
@@ -389,6 +391,39 @@ Node 22.
 
 Newest first. One entry each: date, what went wrong, what to do instead. Delete
 entries that stop being true.
+
+- 2026-10-27: Playlists showed up seconds after launch. Every song in playlist
+  and favorites responses carried full `lyrics`/`synced_lyrics` (7.1M of a
+  1,235-track library's characters; 0.8M without), so the `include_items`
+  list went over `apiCache`'s 2M-character cap, was never cached, and launch
+  waited behind getMe and favorites for it. `userApi` now sends
+  `omit=lyrics,synced_lyrics` (backend support in `library/views.py`) and strips
+  them again before caching; `loadAccount` starts the playlist fetch alongside
+  getMe. Keep lyrics out of list payloads you cache, and check an entry's size
+  against `MAX_ENTRY_CHARS`: `cacheSet` drops anything bigger without saying so.
+
+- 2026-10-27: `/plays/stats/` `recent_plays` rows have `song_id: null` and
+  `public_id: null` for radio plays of files with no catalog song, and
+  Statistics asked for `/songs/null/`. Both are typed nullable now; skip null
+  ids before resolving songs.
+
+- 2026-10-27: To profile the renderer, serve a `vite build --sourcemap` copy on
+  port 3018 and launch `electron . --user-data-dir=<scratch> --remote-debugging-port=9223`
+  (see the 2026-10-21 entry for the profile copy). The dev window navigates
+  before CDP setup lands even with `waitForDebuggerOnStart`, so expect to
+  reload it once, and synthetic wheel input stalls while the window is hidden
+  behind others. The API slows sharply under parallel load (one request
+  ~0.1 s, 20 at once a median of 2 s), so count startup requests before
+  blaming the renderer.
+
+- 2026-10-26: Synced lyrics stamps were off after any jump on a VBR MP3: Chromium
+  seeks those by estimate and reports the time it was asked for (11 of 12 jumps
+  landed 0.1 to 1.7 s off on a test file; CBR and playing from 0 are exact). The
+  dialog's `useAudioClock` now plays VBR MP3s as a decoded WAV
+  (`lib/exactSeekAudio.ts`), and the song editor's Sync opens that dialog
+  rather than stamping on the app's player. To measure seek accuracy, correlate against seeded
+  noise from ffmpeg, never music: repeated bars give false matches whole bars off.
+  The typed-time box also read `0:01:26` as m:ss:cc (1.26 s); it is h:mm:ss now.
 
 - 2026-10-26: Playlist PATCH responses (rename, public toggle, reorder,
   description) omit `items`, but `updatePlaylist`/`renamePlaylist`/`reorderPlaylistItems`

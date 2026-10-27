@@ -1,7 +1,7 @@
 // The Synced lyrics tool's model of an LRC: lines with an optional start, and
 // in word mode the words of each line with optional starts of their own. The
-// song editor's Sync and the Synced lyrics dialog's Sync tab edit through it,
-// and a Whisper result's preview plays along with it.
+// Synced lyrics dialog's Sync tab (which the song editor's Sync opens) edits
+// through it, and a Whisper result's preview plays along with it.
 //
 // Reading keeps each line as it was, so a line nothing touched is written back
 // exactly as read; a stamped or moved one is rewritten as `[m:ss.xx] text`, or

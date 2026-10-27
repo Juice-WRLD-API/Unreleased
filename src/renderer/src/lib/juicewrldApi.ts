@@ -113,8 +113,9 @@ export interface JWApiTopEra {
 
 export interface JWApiRecentPlay {
   id: number
-  song_id: number
-  public_id: number
+  // Null for a radio play of a file with no catalog song.
+  song_id: number | null
+  public_id: number | null
   title: string
   era_name: string | null
   category: JWApiSong['category']

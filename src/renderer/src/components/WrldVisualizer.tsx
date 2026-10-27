@@ -124,7 +124,8 @@ interface Props {
 export default function WrldVisualizer({
   rootRef, fullscreen, artUrl, title, artist, trackKey, albumKey, hasLyrics, txtPri, txtSec, fm, onEnter, onExit, onPopOutMini,
 }: Props): JSX.Element {
-  const isPlaying = useStore((s) => s.isPlaying)
+  // 999 FM plays with isPlaying off; the visualizer stops listening when this is false.
+  const isPlaying = useStore((s) => s.isPlaying || s.radioFmActive)
   const lyricsOverride = useStore((s) => s.lyricsOverride)
   // The screen light's look, while WRLD's Edge light is on.
   const vizEdgeOverlay = useWrldEdgeLook()
@@ -207,8 +208,8 @@ export default function WrldVisualizer({
     const viz = vizRef.current
     if (!viz) return
     viz.setPlaying(isPlaying)
-    // The graph is built when the player first attaches its elements; pick it
-    // up here in case this mounted before that happened.
+    // The graph is built on the first play (on mobile, once an effect is on);
+    // pick it up here in case this mounted before that happened.
     if (!viz.audioActive) {
       const tap = getAnalysisTap()
       if (tap) viz.enableAudioNode(tap.ctx, tap.node)

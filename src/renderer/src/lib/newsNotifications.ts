@@ -37,10 +37,14 @@ export function getSubscriptions(): string[] {
   }
 }
 
-function writeSubscriptions(ids: string[]): void {
+function storeSubscriptions(ids: string[]): void {
   try {
     localStorage.setItem(SUBS_KEY, JSON.stringify([...new Set(ids)]))
   } catch {}
+}
+
+function writeSubscriptions(ids: string[]): void {
+  storeSubscriptions(ids)
   // Best-effort profile sync - never blocks the local write.
   void pushSubscriptions()
 }
@@ -58,9 +62,15 @@ export function setSubscribed(channelId: string, subscribed: boolean): string[] 
 
 // Union the profile's copy into the local set on login, so a subscription made
 // on another device shows up here. Local-only ids are kept (pushed back up).
+// This runs on every account refresh, so it only writes what changed: pushing
+// a set the profile already holds was two no-op PATCHes per launch.
 export function mergeSubscriptionsFromProfile(remote: string[] | undefined): void {
   if (!remote || remote.length === 0) return
-  writeSubscriptions([...getSubscriptions(), ...remote])
+  const local = getSubscriptions()
+  const merged = [...new Set([...local, ...remote])]
+  if (merged.length !== new Set(local).size) storeSubscriptions(merged)
+  const onProfile = new Set(remote)
+  if (merged.some((id) => !onProfile.has(id))) void pushSubscriptions()
 }
 
 // Replaces the profile's `news_subscriptions` with this device's set. Gated:

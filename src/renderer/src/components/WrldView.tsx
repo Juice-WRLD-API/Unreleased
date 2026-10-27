@@ -358,12 +358,20 @@ export default function WrldView(): JSX.Element {
   // a single notch menu next to the cover art, each with the same prefer
   // (star) / exclude (ban) toggles as the Change-version menu - and the same
   // list and cache (useSongVersions). This notch just labels each by its
-  // version alone, since the song itself is already on screen.
+  // version alone, since the song itself is already on screen. The menu
+  // lists the song playing first (marked, not playable from there) so its own
+  // version can be starred or banned too.
   const versionSongId = !radioFmActive && currentTrack ? userApi.trackIdToSongId(currentTrack.id) : null
-  const { versions: songVersionOptions, members: songVersionMembers } = useSongVersions(versionSongId)
+  const { versions: songVersionOptions, current: songVersionCurrent, members: songVersionMembers } = useSongVersions(versionSongId)
   const songVersions = useMemo(
-    () => (songVersionOptions ?? []).map(v => ({ songId: v.song.id, label: v.version ?? v.versionTitle, version: v.version })),
+    () => (songVersionOptions ?? []).map(v => ({ songId: v.song.id, label: v.version ?? v.versionTitle, version: v.version, current: false })),
     [songVersionOptions]
+  )
+  const songVersionRows = useMemo(
+    () => (songVersionCurrent
+      ? [{ songId: songVersionCurrent.song.id, label: songVersionCurrent.version ?? songVersionCurrent.versionTitle, version: songVersionCurrent.version, current: true }, ...songVersions]
+      : songVersions),
+    [songVersionCurrent, songVersions]
   )
   const [songVersionMenuOpen, setSongVersionMenuOpen] = useState(false)
   // Portaled + measured rather than anchored inline: the menu is anchored to
@@ -396,7 +404,7 @@ export default function WrldView(): JSX.Element {
     place()
     window.addEventListener('resize', place)
     return () => window.removeEventListener('resize', place)
-  }, [songVersionMenuOpen, songVersions])
+  }, [songVersionMenuOpen, songVersionRows])
 
   const handlePlayVersion = usePlayVersion()
   const songVersionPrefs = useVersionPrefToggles(songVersionMembers)
@@ -1359,17 +1367,24 @@ export default function WrldView(): JSX.Element {
                   }`}
                   style={{ top: songVersionMenuPos.top, right: songVersionMenuPos.right, scrollbarWidth: 'thin' }}
                 >
-                  {songVersions.map((v, i) => {
+                  {songVersionRows.map((v, i) => {
                     const preferred = songVersionPrefs.isPreferred(v.version)
                     const excluded = songVersionPrefs.isExcluded(v.version)
                     return (
-                      <div key={v.songId} className="flex items-center pr-1 hover:bg-white/[0.08] transition-colors">
-                        <button
-                          onClick={() => { setSongVersionMenuOpen(false); handlePlayVersion(v.songId) }}
-                          className={`flex-1 min-w-0 pl-3 pr-2 py-1.5 text-left text-[10px] font-medium text-white/70 hover:text-white/95 transition-colors whitespace-nowrap ${excluded ? 'opacity-50' : ''}`}
-                        >
-                          {v.label ?? `Version ${i + 1}`}
-                        </button>
+                      <div key={v.songId} className={`flex items-center pr-1 ${v.current ? '' : 'hover:bg-white/[0.08] transition-colors'}`}>
+                        {v.current ? (
+                          <div className={`flex-1 min-w-0 flex items-center gap-1.5 pl-3 pr-2 py-1.5 text-[10px] font-medium text-white/95 whitespace-nowrap ${excluded ? 'opacity-50' : ''}`}>
+                            {v.label ?? `Version ${i + 1}`}
+                            <span className="text-[9px] font-semibold text-accent">Playing</span>
+                          </div>
+                        ) : (
+                          <button
+                            onClick={() => { setSongVersionMenuOpen(false); handlePlayVersion(v.songId) }}
+                            className={`flex-1 min-w-0 pl-3 pr-2 py-1.5 text-left text-[10px] font-medium text-white/70 hover:text-white/95 transition-colors whitespace-nowrap ${excluded ? 'opacity-50' : ''}`}
+                          >
+                            {v.label ?? `Version ${i + 1}`}
+                          </button>
+                        )}
                         {v.version && (
                           <>
                             <button

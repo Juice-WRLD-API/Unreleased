@@ -432,10 +432,12 @@ export default function Sidebar(): JSX.Element {
         />
       )}
       {/* Logo — collapses to zero height (redundant with the WRLD tab icon) */}
-      {/* Logo - collapses to zero height when the sidebar is collapsed */}
+      {/* Logo - collapses to zero height when the sidebar is collapsed. The
+          open cap is in rem like its contents (11.75rem), so a larger app
+          text size doesn't clip the wordmark. */}
       <div
         className="flex flex-col items-center gap-1 shrink-0 px-5 overflow-hidden transition-[max-height,opacity] duration-200 ease-in-out"
-        style={{ maxHeight: collapsed ? '0px' : '200px', opacity: collapsed ? 0 : 1 }}
+        style={{ maxHeight: collapsed ? '0px' : '13rem', opacity: collapsed ? 0 : 1 }}
       >
         <div className="pt-5 pb-4 flex flex-col items-center gap-1">
           <img src={logo} alt="unreleased" className="object-contain h-32 w-auto" />

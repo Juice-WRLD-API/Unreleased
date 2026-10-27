@@ -3,7 +3,7 @@ import { useCallback, useEffect, useState } from 'react'
 import { ShieldCheck, Loader2 } from 'lucide-react'
 import { useStore } from '../store/useStore'
 import * as userApi from '../lib/userApi'
-import { subscribeNotifications } from '../lib/notificationSocket'
+import { CATCH_UP_GRACE_MS, notificationsConnected, subscribeNotifications } from '../lib/notificationSocket'
 import type { PendingLoginApproval } from '../lib/userApi'
 
 
@@ -20,16 +20,21 @@ export default function LoginApprovalPrompt(): JSX.Element | null {
       if (document.hidden) return
       userApi.listLoginApprovals().then((list) => { if (!cancelled) setPending(list) }).catch(() => undefined)
     }
-    tick()
     // The notifications socket pushes a frame the moment a request is created.
     // No timer: we catch up by refetching on every (re)connect and when the
     // tab becomes visible again, which covers anything missed while offline.
+    // The first connect is the initial fetch too; fetch here only when the
+    // socket is already up or doesn't come up in time.
+    let caughtUp = false
+    const catchUp = (): void => { caughtUp = true; tick() }
     const unsubscribe = subscribeNotifications(
       (frame) => { if (/login[_-]?approval/i.test(frame.type)) tick() },
-      tick,
+      catchUp,
     )
+    if (notificationsConnected()) catchUp()
+    const fallback = window.setTimeout(() => { if (!caughtUp) tick() }, CATCH_UP_GRACE_MS)
     document.addEventListener('visibilitychange', tick)
-    return () => { cancelled = true; unsubscribe(); document.removeEventListener('visibilitychange', tick) }
+    return () => { cancelled = true; unsubscribe(); window.clearTimeout(fallback); document.removeEventListener('visibilitychange', tick) }
   }, [signedIn])
 
   const decide = useCallback(async (id: string, decision: 'approve' | 'deny') => {

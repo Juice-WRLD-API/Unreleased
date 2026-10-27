@@ -144,3 +144,15 @@ export function subscribeNotifications(onFrame: Listener, onOpen?: () => void): 
     if (listeners.size === 0 && openListeners.size === 0) close()
   }
 }
+
+/** Whether the shared socket is connected right now. `onOpen` only fires on
+ *  the next (re)connect, so a subscriber whose catch-up runs from it checks
+ *  this to catch up at once when it joins an already-open socket. */
+export function notificationsConnected(): boolean {
+  return !!ws && ws.readyState === WebSocket.OPEN
+}
+
+/** How long a subscriber waits for the first connect to run its catch-up
+ *  before fetching anyway. Fetching at mount as well as on that connect sent
+ *  every catch-up request twice at launch. */
+export const CATCH_UP_GRACE_MS = 5000

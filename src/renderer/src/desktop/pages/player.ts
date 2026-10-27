@@ -584,20 +584,28 @@ function closeMenu(): void { $('#menu').classList.add('hidden'); menuKind = null
 // ---- the song's other versions: WRLD's version notch, as a menu over the versions button ----
 
 const versionsOpen = (): boolean => menuOpen('versions')
+/** The menu's rows: the song playing first, so its own version can be starred or banned too, then the others. */
+const versionRows = (): { songId: number; label: string | null; version: string | null; current: boolean }[] => [
+  ...(live.state.currentVersion ? [{ ...live.state.currentVersion, current: true }] : []),
+  ...(live.state.versions ?? []).map(v => ({ ...v, current: false })),
+]
 function openVersions(): void {
-  const versions = live.state.versions ?? []
-  if (!versions.length) return
+  if (!live.state.versions?.length) return
   menuFor = null
-  showMenu('versions', `<div class="menu-title">Other versions</div>${versions.map((v, i) =>
-    `<div class="version-row"><button data-version="${v.songId}">${escapeText(v.label ?? `Version ${i + 1}`)}</button>${v.version ? `
+  showMenu('versions', `<div class="menu-title">Versions</div>${versionRows().map((v, i) => {
+    const label = escapeText(v.label ?? `Version ${i + 1}`)
+    // The song playing has nothing to switch to.
+    const name = v.current ? `<span class="version-now"><span>${label}</span><em>Playing</em></span>` : `<button data-version="${v.songId}">${label}</button>`
+    return `<div class="version-row">${name}${v.version ? `
       <button class="version-pref" data-pref="prefer" data-song="${v.songId}">${icons.star}</button>
-      <button class="version-pref" data-pref="exclude" data-song="${v.songId}">${icons.ban}</button>` : ''}</div>`).join('')}`, $<HTMLElement>('[data-tool="versions"]'))
+      <button class="version-pref" data-pref="exclude" data-song="${v.songId}">${icons.ban}</button>` : ''}</div>`
+  }).join('')}`, $<HTMLElement>('[data-tool="versions"]'))
   paintVersionPrefs()
 }
 
 function paintVersionPrefs(): void {
   for (const button of document.querySelectorAll<HTMLButtonElement>('#menu [data-pref]')) {
-    const version = live.state.versions?.find(v => v.songId === Number(button.dataset.song))?.version
+    const version = versionRows().find(v => v.songId === Number(button.dataset.song))?.version
     const prefer = button.dataset.pref === 'prefer'
     const active = !!version && !!live.state.versionPrefs?.[prefer ? 'preferred' : 'excluded'].includes(version.trim().toLowerCase())
     button.setAttribute('aria-pressed', String(active))
@@ -928,7 +936,7 @@ live.on((what, patch) => {
   if (what === 'settings') applyMetrics()
   if (what === 'state' && patch && 'track' in patch) { browseKey = null }
   // A new song's versions: the list open was the last song's.
-  if (what === 'state' && patch && 'versions' in patch && versionsOpen()) closeMenu()
+  if (what === 'state' && patch && ('versions' in patch || 'currentVersion' in patch) && versionsOpen()) closeMenu()
   if (what === 'state' && patch && 'versionPrefs' in patch && versionsOpen()) paintVersionPrefs()
   // And the ⋯ menu open was about the song before.
   if (what === 'state' && patch && 'track' in patch && songMenuOpen()) closeMenu()

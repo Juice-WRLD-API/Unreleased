@@ -19,7 +19,7 @@ import { playlistItemsToTracks } from './playlistItems'
 import { listEras } from './eras'
 import { libraryTrackToTrack } from './fileTypes'
 import { fxInUse } from './audioEffects'
-import { loadVersionEntries } from './songVersions'
+import { loadVersionGroupEntries, type SongVersionEntry } from './songVersions'
 import { memberVersionPrefs, prefLabel, versionPrefToggles } from './versionPrefs'
 import { showAppToast } from './appToast'
 import { copyText } from './clipboard'
@@ -159,12 +159,17 @@ function songMenu(s: AppStore): { title: string; info: boolean; link: boolean; d
   }
 }
 
-const loadedVersions = new Map<number, { songId: number; label: string | null; version: string | null }[]>()
+type VersionItem = { songId: number; label: string | null; version: string | null }
+type VersionList = { current: VersionItem | null; others: VersionItem[] }
 
-/** The song's other versions that can be played, as WRLD's version notch lists them (hooks/useSongVersions). */
-async function versionsOf(songId: number): Promise<{ songId: number; label: string | null; version: string | null }[]> {
-  const entries = await loadVersionEntries(songId).catch(() => [])
-  const versions = entries.filter((e) => e.playable).map(({ song, meta }) => ({ songId: song.id, label: prefLabel(meta) ?? meta.versionTitle, version: prefLabel(meta) }))
+const loadedVersions = new Map<number, VersionList>()
+
+/** The song's other versions that can be played, and the song itself (`current`, null when it isn't in a group), as
+ *  WRLD's version notch lists them (hooks/useSongVersions). */
+async function versionsOf(songId: number): Promise<VersionList> {
+  const { self, siblings } = await loadVersionGroupEntries(songId).catch(() => ({ self: null, siblings: [] }))
+  const item = ({ song, meta }: SongVersionEntry): VersionItem => ({ songId: song.id, label: prefLabel(meta) ?? meta.versionTitle, version: prefLabel(meta) })
+  const versions = { current: self?.playable ? item(self) : null, others: siblings.filter((e) => e.playable).map(item) }
   loadedVersions.set(songId, versions)
   return versions
 }
@@ -381,12 +386,12 @@ export async function runDesktopCommand(cmd: string, arg: unknown): Promise<void
     case 'exclude-version': {
       const anchor = s.currentTrack && !s.radioFmActive ? userApi.trackIdToSongId(s.currentTrack.id) : null
       if (anchor == null || !Number.isInteger(arg)) break
-      const versions = loadedVersions.get(anchor) ?? await versionsOf(anchor)
+      const { current: own, others } = loadedVersions.get(anchor) ?? await versionsOf(anchor)
       const current = useStore.getState()
       if (current.currentTrack?.id !== s.currentTrack?.id || current.radioFmActive) break
-      const member = versions.find(v => v.songId === arg)
+      const member = [own, ...others].find(v => v?.songId === arg)
       if (!member?.version) break
-      const members = [{ songId: anchor, version: null }, ...versions]
+      const members = [{ songId: anchor, version: own?.version ?? null }, ...others]
       const toggles = versionPrefToggles(members, current.songPrefs, {
         setDefault: current.setSongDefaultVersion, setExcluded: current.setSongExcludedVersions,
       })
@@ -533,9 +538,10 @@ export function watchDesktopState(send: (patch: Record<string, unknown>) => void
 
   let colorsFor: string | null | undefined
   let versionsFor: number | null | undefined
-  let versions: Awaited<ReturnType<typeof versionsOf>> = []
+  let versions: VersionItem[] = []
+  let currentVersion: VersionItem | null = null
   const sendVersionPrefs = (): void => {
-    const members = versionsFor == null ? [] : [{ songId: versionsFor, version: null }, ...versions]
+    const members = versionsFor == null ? [] : [{ songId: versionsFor, version: currentVersion?.version ?? null }, ...versions]
     const { preferred, excluded } = memberVersionPrefs(members, useStore.getState().songPrefs)
     push({ versionPrefs: { preferred: [...preferred], excluded: [...excluded] } })
   }
@@ -568,9 +574,14 @@ export function watchDesktopState(send: (patch: Record<string, unknown>) => void
     if (songId !== versionsFor) {
       versionsFor = songId
       versions = []
-      push({ versions })
+      currentVersion = null
+      push({ versions, currentVersion })
       if (songId != null) void versionsOf(songId).then((loaded) => {
-        if (versionsFor === songId) { versions = loaded; push({ versions }); sendVersionPrefs() }
+        if (versionsFor !== songId) return
+        versions = loaded.others
+        currentVersion = loaded.current
+        push({ versions, currentVersion })
+        sendVersionPrefs()
       })
     }
     sendVersionPrefs()

@@ -4,7 +4,7 @@ import { NEWS_ENABLED, type NewsItem } from '../lib/newsApi'
 import {
   acceptPushedPost, checkForNewPosts, fireNewsNotification, mergeSubscriptionsFromProfile,
 } from '../lib/newsNotifications'
-import { subscribeNotifications } from '../lib/notificationSocket'
+import { CATCH_UP_GRACE_MS, notificationsConnected, subscribeNotifications } from '../lib/notificationSocket'
 
 // How often to poll for new posts in subscribed channels. The feed is small and
 // this only runs in the main window, so a few minutes is plenty; a focus-driven
@@ -57,8 +57,10 @@ export default function NewsNotifier(): JSX.Element | null {
     }
 
     // Live path: the server pushes new posts. Every (re)connect also runs the
-    // catch-up fetch, covering anything posted while the socket was down.
-    let socketOpen = false
+    // catch-up fetch, covering anything posted while the socket was down. The
+    // first connect is the launch check too; fetch here only when the socket
+    // is already up or doesn't come up in time.
+    let socketOpen = notificationsConnected()
     const unsubscribe = subscribeNotifications(
       (frame) => {
         if (frame.type !== 'news' || frame.action !== 'created') return
@@ -71,7 +73,8 @@ export default function NewsNotifier(): JSX.Element | null {
       },
     )
 
-    run()
+    if (socketOpen) run()
+    const fallback = window.setTimeout(() => { if (!socketOpen) run() }, CATCH_UP_GRACE_MS)
     let lastFocusRun = Date.now()
     const onFocus = (): void => {
       const now = Date.now()
@@ -85,6 +88,7 @@ export default function NewsNotifier(): JSX.Element | null {
     const interval = setInterval(() => { if (!socketOpen) run() }, POLL_MS)
     return () => {
       unsubscribe()
+      window.clearTimeout(fallback)
       window.removeEventListener('focus', onFocus)
       clearInterval(interval)
     }
