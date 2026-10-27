@@ -5,7 +5,7 @@ import logo from '../assets/logo.png'
 // Placeholder donor list - replace with the real names. Order here is
 // display order (most recent or most generous first, whatever you prefer).
 const DONORS: string[] = [
-  'Jane Doe',
+  'bye bye @hostile_cat04',
   'John Smith',
   'Anonymous',
 ]
@@ -20,7 +20,8 @@ const OTHERS: string[] = [
   'Xig (fuck this nigga)',
   'emzie',
   'flow',
-  'Pure'
+  'Pure',
+  "fuckass nigga @yourealtwin"
 ]
 
 export default function ThankYouView(): JSX.Element {

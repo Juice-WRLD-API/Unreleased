@@ -8,7 +8,8 @@ import type { ListeningPlayEvent } from './listeningPlays'
 import type { ServerPlaylistFolder } from './playlistFolders'
 import { apiRequest, authedRequest, authHeaders, cacheDelete, defaultParseError } from './apiClient'
 import { IS_NATIVE_APP, shareOrigin } from './platform'
-import { cacheGet, cacheSet } from './apiCache'
+import type { ApiRequestOptions } from './apiClient'
+import { cacheGet, cacheHas, cacheSet } from './apiCache'
 import type { Skin } from './skins'
 import type { GifResult } from './gifApi'
 import type { TierlistSummary } from './tierlistApi'
@@ -16,6 +17,8 @@ import type { AudioFx, EqPreset } from './audioEffects'
 
 const ACCOUNT_BASE = routeUrl('/accounts')
 const LIBRARY_BASE = routeUrl('/library')
+const ME_URL = `${ACCOUNT_BASE}/account/me/`
+const PLAYLISTS_URL = `${LIBRARY_BASE}/playlists/?omit_cover_image=true&include_items=true`
 const TOKEN_KEY = 'unreleased:authToken'
 
 export interface AccountUser {
@@ -337,14 +340,49 @@ export function clearToken(): void {
   try {
     localStorage.removeItem(TOKEN_KEY)
   } catch {}
+  // The cached profile and playlists belong to that token: drop them so the
+  // next boot can't paint them for a different account (see peekCachedAccount).
+  cacheDelete(ME_URL)
+  cacheDelete(PLAYLISTS_URL)
 }
 
 // `cacheKey` opts a GET call into the offline fallback cache - pass it only
 // for idempotent reads whose staleness is acceptable (playlists, favorites,
 // profile). Mutations don't pass one, so they always hit the network and
 // fail loudly if offline rather than silently no-op against stale data.
-function request<T>(url: string, options: RequestInit = {}, auth = true, cacheKey?: string): Promise<T> {
+function request<T>(url: string, options: ApiRequestOptions<T> = {}, auth = true, cacheKey?: string): Promise<T> {
   return authedRequest<T>(url, { ...options, cacheKey }, auth ? getToken() : null)
+}
+
+// Playlist entries and favorites only need what ApiSongLite declares, but the
+// server's song objects also carry full lyrics: about nine tenths of the
+// payload (7.1M characters for one 1,235-track library, 0.8M without), which
+// kept the playlist list out of the offline cache entirely. Nothing reads them
+// from these rows; playback fetches lyrics per song. omit= asks the server to
+// leave them out. It goes on the request URL only, never the cache key, so a
+// copy cached with lyrics is replaced in place instead of left behind.
+function withoutLyricsParam(url: string): string {
+  return `${url}${url.includes('?') ? '&' : '?'}omit=lyrics,synced_lyrics`
+}
+
+// The same fields dropped on this side, for servers that ignore omit=.
+function songWithoutLyrics<S extends object>(song: S): S {
+  if (!('lyrics' in song) && !('synced_lyrics' in song)) return song
+  const copy: Record<string, unknown> = { ...song }
+  delete copy.lyrics
+  delete copy.synced_lyrics
+  return copy as S
+}
+
+function itemsWithoutLyrics(items: PlaylistItemEntry[]): PlaylistItemEntry[] {
+  return items.map((it) => {
+    const song = it.song && songWithoutLyrics(it.song)
+    return song === it.song ? it : { ...it, song }
+  })
+}
+
+function detailWithoutLyrics<D extends { items?: PlaylistItemEntry[] }>(detail: D): D {
+  return Array.isArray(detail.items) ? { ...detail, items: itemsWithoutLyrics(detail.items) } : detail
 }
 
 // Applies per-song overrides for the same reason songToTrack does - a track
@@ -531,8 +569,22 @@ export async function logout(): Promise<void> {
 }
 
 export async function getMe(): Promise<AccountUser> {
-  const url = `${ACCOUNT_BASE}/account/me/`
-  return request(url, { method: 'GET' }, true, url)
+  return request(ME_URL, { method: 'GET' }, true, ME_URL)
+}
+
+// The last profile and playlists getMe()/getPlaylists() saw, read from the
+// offline cache so a cold boot can show the signed-in state at once.
+// loadAccount() then confirms the token and replaces them (or signs out on a
+// 401). Nothing without a token.
+export function peekCachedAccount(): AccountUser | null {
+  if (!getToken()) return null
+  return cacheGet<AccountUser>(ME_URL) ?? null
+}
+
+export function peekCachedPlaylists(): PlaylistSummary[] {
+  if (!getToken()) return []
+  const rows = cacheGet<PlaylistRow[]>(PLAYLISTS_URL)
+  return Array.isArray(rows) ? seedPlaylistRows(rows) : []
 }
 
 export async function updateDisplayName(displayName: string): Promise<AccountUser> {
@@ -638,7 +690,10 @@ export async function getNowPlaying(userId: number): Promise<NowPlayingResponse>
 
 export async function getFavorites(): Promise<FavoriteEntry[]> {
   const url = `${LIBRARY_BASE}/favorites/`
-  return request(url, { method: 'GET' }, true, url)
+  return request<FavoriteEntry[]>(withoutLyricsParam(url), {
+    method: 'GET',
+    transform: (rows) => rows.map((f) => (f.song ? { ...f, song: songWithoutLyrics(f.song) } : f)),
+  }, true, url)
 }
 
 /** The last favorites response getFavorites cached, for an instant first paint. */
@@ -663,9 +718,40 @@ export async function removeFavorite(songId: number): Promise<void> {
 // so opening a playlist or the startup prefetch needs no further requests.
 // Servers without include_items just return plain summaries (no items), in
 // which case nothing is seeded and callers fall back to per-playlist fetches.
+// Without lyrics the whole response fits the offline cache, items included, so
+// the next launch paints the playlists and their tracks from it at once (see
+// peekCachedPlaylists).
 export async function getPlaylists(): Promise<PlaylistSummary[]> {
-  const url = `${LIBRARY_BASE}/playlists/?omit_cover_image=true&include_items=true`
-  const rows = await request<Array<PlaylistSummary & { items?: PlaylistItemEntry[] }>>(url, { method: 'GET' }, true, url)
+  const rows = await request<PlaylistRow[]>(withoutLyricsParam(PLAYLISTS_URL), {
+    method: 'GET',
+    transform: (r) => r.map(detailWithoutLyrics),
+  }, true, PLAYLISTS_URL)
+  slimCachedDetailsOnce(rows)
+  return seedPlaylistRows(rows)
+}
+
+type PlaylistRow = PlaylistSummary & { items?: PlaylistItemEntry[] }
+
+// Per-playlist copies cached before lyrics were dropped run up to 2M
+// characters each and crowd the rest of the offline cache out of
+// localStorage. getPlaylist only rewrites one when it's opened, so the first
+// list load after the change rewrites every one that exists from its own
+// lyric-free rows, once per device.
+const DETAILS_SLIMMED_KEY = 'unreleased:playlistDetailsSlimmed'
+
+function slimCachedDetailsOnce(rows: PlaylistRow[]): void {
+  try {
+    if (localStorage.getItem(DETAILS_SLIMMED_KEY)) return
+    if (!rows.some((row) => Array.isArray(row.items))) return
+    for (const row of rows) {
+      const key = playlistDetailUrl(row.id)
+      if (Array.isArray(row.items) && cacheHas(key)) cacheSet(key, row)
+    }
+    localStorage.setItem(DETAILS_SLIMMED_KEY, '1')
+  } catch {}
+}
+
+function seedPlaylistRows(rows: PlaylistRow[]): PlaylistSummary[] {
   return rows.map((row) => {
     const { items, ...summary } = row
     if (Array.isArray(items)) {
@@ -813,14 +899,28 @@ const playlistDetailUrl = (id: number): string => `${LIBRARY_BASE}/playlists/${i
 
 const playlistDetailInFlight = new Map<number, Promise<PlaylistDetail>>()
 
+/** Playlist PATCH responses often omit `items`; keep the cached track list. */
+function storePlaylistDetail(id: number, patch: PlaylistDetail): PlaylistDetail {
+  const prev = playlistDetailCache.get(id)
+  const detail: PlaylistDetail = {
+    ...(prev ?? patch),
+    ...patch,
+    id,
+    items: Array.isArray(patch.items) ? itemsWithoutLyrics(patch.items) : (prev?.items ?? []),
+  }
+  playlistDetailCache.set(id, detail)
+  cacheSet(playlistDetailUrl(id), detail)
+  return detail
+}
+
 // Single request - tracks + cover in one response. Concurrent callers for the
 // same id share the in-flight request.
 export function getPlaylist(id: number): Promise<PlaylistDetail> {
   const pending = playlistDetailInFlight.get(id)
   if (pending) return pending
   const url = playlistDetailUrl(id)
-  const p = request<PlaylistDetail>(url, {}, true, url)
-    .then((result) => { playlistDetailCache.set(id, result); return result })
+  const p = request<PlaylistDetail>(withoutLyricsParam(url), { transform: detailWithoutLyrics }, true, url)
+    .then((result) => storePlaylistDetail(id, result))
     .finally(() => playlistDetailInFlight.delete(id))
   playlistDetailInFlight.set(id, p)
   return p
@@ -831,9 +931,7 @@ export async function renamePlaylist(id: number, name: string): Promise<Playlist
     method: 'PATCH',
     body: JSON.stringify({ name }),
   })
-  playlistDetailCache.set(id, result)
-  cacheSet(playlistDetailUrl(id), result)
-  return result
+  return storePlaylistDetail(id, result)
 }
 
 export async function updatePlaylist(id: number, data: { name?: string; description?: string; is_public?: boolean }): Promise<PlaylistDetail> {
@@ -841,24 +939,21 @@ export async function updatePlaylist(id: number, data: { name?: string; descript
     method: 'PATCH',
     body: JSON.stringify(data),
   })
-  playlistDetailCache.set(id, result)
-  cacheSet(playlistDetailUrl(id), result)
-  return result
+  return storePlaylistDetail(id, result)
 }
 
 /** Fetch a public playlist without authentication. */
 export async function getPublicPlaylist(id: number): Promise<PlaylistDetail> {
   const url = `${LIBRARY_BASE}/playlists/public/${id}/`
-  const result = await request<PlaylistDetail>(url, {}, false, url)
-  playlistDetailCache.set(id, result)
-  return result
+  const result = await request<PlaylistDetail>(withoutLyricsParam(url), { transform: detailWithoutLyrics }, false, url)
+  return storePlaylistDetail(id, result)
 }
 
 /** Fetch cover of a public playlist without authentication. */
 export async function getPublicPlaylistCover(id: number): Promise<PlaylistCoverEntry> {
   const cached = playlistCoverCache.get(id)
   if (cached) return cached
-  const d = await request<PlaylistDetail>(`${LIBRARY_BASE}/playlists/public/${id}/`)
+  const d = await request<PlaylistDetail>(withoutLyricsParam(`${LIBRARY_BASE}/playlists/public/${id}/`))
   const trackImages = playlistTrackImages(d.items ?? [])
   const entry: PlaylistCoverEntry = { cover_image_url: d.cover_image_url, cover_image: d.cover_image, trackImages }
   playlistCoverCache.set(id, entry)
@@ -918,10 +1013,9 @@ export async function addToPlaylist(id: number, songId: number): Promise<Playlis
     method: 'POST',
     body: JSON.stringify({ song_id: songId }),
   })
-  playlistDetailCache.set(id, result)
-  cacheSet(playlistDetailUrl(id), result)
+  const stored = storePlaylistDetail(id, result)
   if (IS_NATIVE_APP) void import('../store/useStore').then(({ useStore }) => useStore.getState().autoDownloadIfOffline(id, [songId])).catch(console.error)
-  return result
+  return stored
 }
 
 /** Add any kind of entry (song, comp file, donor file, local file). Resolves
@@ -933,9 +1027,7 @@ export async function addPlaylistEntry(id: number, entry: PlaylistEntryInput): P
     body: JSON.stringify(entry),
   })
   if (!('items' in result)) return playlistDetailCache.get(id) ?? getPlaylist(id)
-  playlistDetailCache.set(id, result)
-  cacheSet(playlistDetailUrl(id), result)
-  return result
+  return storePlaylistDetail(id, result)
 }
 
 /** Remove one entry by its own id - the only way to remove a non-song entry. */
@@ -943,9 +1035,8 @@ export async function removePlaylistEntry(id: number, itemId: number): Promise<v
   await request(`${LIBRARY_BASE}/playlists/${id}/entries/${itemId}/`, { method: 'DELETE' })
   const cached = playlistDetailCache.get(id)
   if (cached) {
-    const updated = { ...cached, items: cached.items.filter(it => it.id !== itemId) }
-    playlistDetailCache.set(id, updated)
-    cacheSet(playlistDetailUrl(id), updated)
+    const updated = { ...cached, items: (cached.items ?? []).filter(it => it.id !== itemId) }
+    storePlaylistDetail(id, updated)
   }
 }
 
@@ -956,18 +1047,15 @@ export async function reorderPlaylistItems(id: number, itemIds: number[]): Promi
     method: 'PATCH',
     body: JSON.stringify({ item_order: itemIds }),
   })
-  playlistDetailCache.set(id, result)
-  cacheSet(playlistDetailUrl(id), result)
-  return result
+  return storePlaylistDetail(id, result)
 }
 
 export async function removeFromPlaylist(id: number, songId: number): Promise<void> {
   await request(`${LIBRARY_BASE}/playlists/${id}/items/${songId}/`, { method: 'DELETE' })
   const cached = playlistDetailCache.get(id)
   if (cached) {
-    const updated = { ...cached, items: cached.items.filter(it => it.song?.id !== songId) }
-    playlistDetailCache.set(id, updated)
-    cacheSet(playlistDetailUrl(id), updated)
+    const updated = { ...cached, items: (cached.items ?? []).filter(it => it.song?.id !== songId) }
+    storePlaylistDetail(id, updated)
   }
 }
 
@@ -1170,20 +1258,40 @@ const MY_PROPOSALS_PAGE = 200
 // the tab a signed-in editor lands on, and it shouldn't go blank just because
 // the request raced a flaky connection. The server pages this list (50 by
 // default, 200 at most) and returns summaries without proposed_data, so walk
-// every page and fetch one with getProposal before reading its data.
-export async function getMyProposals(channel?: string): Promise<SongEditProposal[]> {
-  const all: SongEditProposal[] = []
-  for (;;) {
+// every page and fetch one with getProposal before reading its data. The
+// first page gives the total, so the rest go out together; `onFirstPage` lets
+// a list show those rows while the others are still loading.
+export async function getMyProposals(
+  channel?: string,
+  onFirstPage?: (page: SongEditProposal[]) => void,
+): Promise<SongEditProposal[]> {
+  const fetchPage = async (offset: number): Promise<{ page: SongEditProposal[]; count: number } | SongEditProposal[]> => {
     // The cache key leaves out limit so withdrawProposal's cacheDelete still matches.
-    const key = myProposalsUrl(channel, all.length)
+    const key = myProposalsUrl(channel, offset)
     const url = new URL(key)
     url.searchParams.set('limit', String(MY_PROPOSALS_PAGE))
     const data = await request<SongEditProposal[] | { count?: number; results?: SongEditProposal[] }>(url.toString(), { method: 'GET' }, true, key)
     if (Array.isArray(data)) return data
-    const page = Array.isArray(data?.results) ? data.results : []
-    all.push(...page)
-    if (page.length === 0 || all.length >= (data?.count ?? 0)) return all
+    return { page: Array.isArray(data?.results) ? data.results : [], count: data?.count ?? 0 }
   }
+
+  const first = await fetchPage(0)
+  if (Array.isArray(first)) return first
+  if (first.page.length === 0 || first.page.length >= first.count) return first.page
+  onFirstPage?.(first.page)
+
+  // Step by what the server actually handed back, in case it clamps lower.
+  const step = first.page.length
+  const offsets: number[] = []
+  for (let o = step; o < first.count; o += step) offsets.push(o)
+  const rest = await Promise.all(offsets.map(async (o) => {
+    const r = await fetchPage(o)
+    return Array.isArray(r) ? r : r.page
+  }))
+  // A proposal made mid-walk shifts every page down by one, so the same row
+  // can turn up at the end of one page and the start of the next.
+  const seen = new Set<number>()
+  return [first.page, ...rest].flat().filter((p) => !seen.has(p.id) && !!seen.add(p.id))
 }
 
 /** One of your proposals in full, with proposed_data and original_snapshot. */
@@ -1342,6 +1450,13 @@ export async function adminReviewApplication(id: number, payload: {
     method: 'POST',
     body: JSON.stringify(payload),
   })
+}
+
+export async function adminUserCounts(): Promise<{ total: number; editors: number; managers: number; applicants: number }> {
+  const data = await request<{ total: number; editors: number; managers: number; applicants: number }>(`${ACCOUNT_BASE}/admin/users/?counts=1`, { method: 'GET' })
+  // Older servers ignore counts and return the full list. Don't treat that as totals.
+  if (Array.isArray(data)) throw new Error('User counts require an updated server')
+  return data
 }
 
 export async function adminListUsers(roleFilter?: string): Promise<AdminUser[]> {

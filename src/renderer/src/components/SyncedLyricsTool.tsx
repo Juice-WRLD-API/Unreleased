@@ -1,14 +1,11 @@
 import { memo, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import {
-  AlignLeft, ChevronLeft, ChevronRight, ChevronsDown, Clock, Crosshair, Ear, Eraser, Keyboard, Pause, Play, Plus, RotateCcw, Sparkles, WholeWord, X,
+  AlignLeft, ChevronLeft, ChevronRight, ChevronsDown, Clock, Crosshair, Ear, Eraser, Keyboard, Pause, Play, Plus, RotateCcw, WholeWord, X,
 } from 'lucide-react'
-import { useStore, useStorePick, IS_FLOAT_WINDOW } from '../store/useStore'
-import { seekAudio, getAudioCurrentTime, getAudioDuration } from './Player'
-import { songToTrack, type JWApiSong } from '../lib/juicewrldApi'
-import { trackIdToSongId } from '../lib/userApi'
 import { formatDuration } from '../lib/format'
 import { showAppToast } from '../lib/appToast'
 import { ls } from '../lib/persist'
+import { exactSeekAudio } from '../lib/exactSeekAudio'
 import {
   clearTarget, firstTarget, hasWordTiming, insertLine, isMoved, lineAt, lineStart, linesFromPlain, lrcStamp, nudgeTarget, outOfOrder, parseStamp,
   parseSyncedLyrics, removeLine, resetTarget, serializeSyncedLyrics, setLineText, shiftAll, stampTarget, stepTarget, syncProgress, targetKey,
@@ -18,11 +15,11 @@ import {
 // The Synced lyrics tool: time lyrics to a song by hand, a line or a word at a
 // time. Play the song and tap Space as each line (or word) is sung; the next
 // one comes up on its own. Then pick anything that came in early or late and
-// nudge it, set it to the playhead, or hear it again. The song editor's Sync
-// runs it against the app's player; the Synced lyrics dialog runs it against
-// audio of its own, for a hand sync or to fine-tune a Whisper one.
+// nudge it, set it to the playhead, or hear it again. It lives in the Synced
+// lyrics dialog, on audio of its own, for a hand sync or to fine-tune a
+// Whisper one; the song editor's Sync opens the dialog on the song.
 
-/** What the tool stamps against: the app's player, or an <audio> of its own. */
+/** What the tool stamps against: an <audio> of its own (see useAudioClock). */
 export interface SyncClock {
   /** There is audio to stamp against. */
   ready: boolean
@@ -40,8 +37,6 @@ const STEP_KEY = 'lyricsTimingStep'
 /** Nudge sizes; Shift makes a nudge five times bigger. */
 const STEPS = [0.01, 0.05, 0.25]
 const RATES = [0.5, 0.75, 1]
-/** How much of the song plays before a picked line or word. */
-const PREROLL = 1.5
 
 /** The tool's mode: words once the lyrics have word times, else the last one used. */
 export function useSyncMode(words: boolean): [SyncMode, (mode: SyncMode) => void] {
@@ -56,8 +51,30 @@ export function useAudioClock(src: string | null): { clock: SyncClock; element: 
   const ref = useRef<HTMLAudioElement>(null)
   const [playing, setPlaying] = useState(false)
   const [rate, setRate] = useState(1)
+  // A file that can't be sought exactly is swapped for a WAV of itself once
+  // that's decoded (see exactSeekAudio), carrying on where it got to.
+  const [exact, setExact] = useState<{ from: string; url: string } | null>(null)
+  const resume = useRef<{ at: number; play: boolean } | null>(null)
+  useEffect(() => {
+    if (!src) return
+    const ac = new AbortController()
+    let url: string | null = null
+    exactSeekAudio(src, ac.signal).then((wav) => {
+      if (!wav || ac.signal.aborted) return
+      url = URL.createObjectURL(wav)
+      const a = ref.current
+      resume.current = a ? { at: a.currentTime, play: !a.paused } : null
+      setExact({ from: src, url })
+    }, () => {})
+    return () => {
+      ac.abort()
+      setExact(null)
+      if (url) URL.revokeObjectURL(url)
+    }
+  }, [src])
+  const played = src && exact?.from === src ? exact.url : src
   useEffect(() => { setPlaying(false) }, [src])
-  useEffect(() => { if (ref.current) ref.current.playbackRate = rate }, [rate, src])
+  useEffect(() => { if (ref.current) ref.current.playbackRate = rate }, [rate, played])
   const clock: SyncClock = {
     ready: !!src,
     playing,
@@ -72,55 +89,27 @@ export function useAudioClock(src: string | null): { clock: SyncClock; element: 
     rate,
     setRate,
   }
-  const element = src
+  const element = played
     ? (
       <audio
         ref={ref}
-        src={src}
+        src={played}
         preload="auto"
         onPlay={() => setPlaying(true)}
         onPause={() => setPlaying(false)}
-        onLoadedMetadata={(e) => { e.currentTarget.playbackRate = rate }}
+        onLoadedMetadata={(e) => {
+          const a = e.currentTarget
+          a.playbackRate = rate
+          const r = resume.current
+          if (!r) return
+          resume.current = null
+          a.currentTime = r.at
+          if (r.play) a.play().catch(() => {})
+        }}
       />
     )
     : null
   return { clock, element }
-}
-
-/** A clock on the app's player, ready while `song` is the one playing. A
- *  slower speed picked here goes back when the tool closes, unless it was
- *  changed somewhere else since. */
-export function usePlayerClock(song: JWApiSong | null): { clock: SyncClock; playSong: () => string | null } {
-  const { currentTrack, isPlaying, setIsPlaying, playTrack, playbackSpeed, setPlaybackSpeed } =
-    useStorePick('currentTrack', 'isPlaying', 'setIsPlaying', 'playTrack', 'playbackSpeed', 'setPlaybackSpeed')
-  const isThisSong = !!song && !!currentTrack && trackIdToSongId(currentTrack.id) === song.id
-  const restore = useRef<{ from: number; set: number } | null>(null)
-  useEffect(() => () => {
-    const r = restore.current
-    const s = useStore.getState()
-    if (r && s.playbackSpeed === r.set) s.setPlaybackSpeed(r.from)
-  }, [])
-  const clock: SyncClock = {
-    ready: isThisSong,
-    playing: isThisSong && isPlaying,
-    now: getAudioCurrentTime,
-    duration: getAudioDuration,
-    seek: (t) => seekAudio(Math.max(0, t)),
-    setPlaying: setIsPlaying,
-    rate: playbackSpeed,
-    setRate: (r) => {
-      restore.current = { from: restore.current?.from ?? playbackSpeed, set: r }
-      setPlaybackSpeed(r)
-    },
-  }
-  const playSong = (): string | null => {
-    if (!song) return null
-    const track = songToTrack(song)
-    if (!track.path) return 'This song has no file to play'
-    playTrack(track, [track])
-    return null
-  }
-  return { clock, playSong }
 }
 
 const isTyping = (el: EventTarget | null): boolean => {
@@ -138,7 +127,7 @@ const KEYS: Array<[string, string]> = [
   ['↑ ↓', 'Pick the previous or next line (in word mode, word)'],
   ['← →', 'Move the picked one earlier or later (Shift for 5×)'],
   ['Enter', 'Start the picked one at the playhead, staying on it'],
-  ['R', 'Hear the picked one again'],
+  ['R', 'Replay the last stamp, or the line or word you picked'],
   ['J  L', 'Back or forward 2 seconds'],
   ['Delete', 'Take the picked one\'s time away'],
   ['Esc', 'Pick nothing (Space then goes to the first untimed one)'],
@@ -211,7 +200,14 @@ export default function SyncedLyricsTool({
   className?: string
 }): JSX.Element {
   const editText = !readOnly
-  const [rawSel, setSel] = useState<SyncTarget | null>(null)
+  const [rawSel, setRawSel] = useState<SyncTarget | null>(null)
+  const [lastStamped, setLastStamped] = useState<SyncTarget | null>(null)
+  const [stampFinished, setStampFinished] = useState(false)
+  const setSel = (next: Parameters<typeof setRawSel>[0]): void => {
+    setRawSel(next)
+    setLastStamped(null)
+    setStampFinished(false)
+  }
   const [lit, setLit] = useState({ line: -1, word: -1 })
   const [follow, setFollow] = useState(true)
   const [step, setStep] = useState(() => {
@@ -243,7 +239,9 @@ export default function SyncedLyricsTool({
     return rawSel.word < wordsOf(l).length ? rawSel : null
   }, [rawSel, lines, mode])
   // What Space stamps: the pick, else the first line or word without a time.
-  const cursor = readOnly ? null : sel ?? firstTarget(lines, mode)
+  const cursor = readOnly || stampFinished ? null : sel ?? firstTarget(lines, mode)
+  const replayTarget = lastStamped ?? sel
+  const replayStart = replayTarget ? targetStart(lines, replayTarget) : null
   const order = useMemo(() => outOfOrder(lines), [lines])
   const marks = useMemo(() => lines.map((_, i) => rowMarks(lines, i, order, original, mode)), [lines, order, original, mode])
   const progress = syncProgress(lines, mode)
@@ -294,7 +292,7 @@ export default function SyncedLyricsTool({
   const hear = (t: SyncTarget): void => {
     const s = targetStart(lines, t)
     if (!clock.ready || s === null) return
-    clock.seek(Math.max(0, s - PREROLL))
+    clock.seek(s)
     clock.setPlaying(true)
   }
   const pick = (t: SyncTarget, listen = true): void => {
@@ -313,7 +311,13 @@ export default function SyncedLyricsTool({
     if (!clock.ready || !t) return
     onChange(stampTarget(lines, t, clock.now()))
     flashOn(t)
-    if (advance) setSel(stepTarget(lines, t, 1, mode))
+    setLastStamped(t)
+    if (advance) {
+      const next = stepTarget(lines, t, 1, mode)
+      const finished = targetKey(next) === targetKey(t)
+      setRawSel(finished ? null : next)
+      setStampFinished(finished)
+    }
   }
 
   // A nudge pushes whatever it runs into along with it; it only stops at the
@@ -383,8 +387,9 @@ export default function SyncedLyricsTool({
     switch (e.key) {
       case ' ':
         claim()
+        if (e.repeat) break
         if (e.ctrlKey || readOnly) clock.setPlaying(!clock.playing)
-        else if (!e.repeat) stamp(true)
+        else stamp(true)
         break
       case 'ArrowUp':
       case 'ArrowDown': {
@@ -407,9 +412,9 @@ export default function SyncedLyricsTool({
         stamp(false)
         break
       case 'r': case 'R': case 'x': case 'X':
-        if (!sel) return
+        if (!replayTarget) return
         claim()
-        hear(sel)
+        hear(replayTarget)
         break
       case 'j': case 'J': case 'l': case 'L':
         claim()
@@ -421,7 +426,7 @@ export default function SyncedLyricsTool({
         clear()
         break
       case 'Escape':
-        if (!sel) return
+        if (!sel && !lastStamped && !stampFinished) return
         claim()
         setSel(null)
         break
@@ -666,7 +671,7 @@ export default function SyncedLyricsTool({
             <button onClick={() => stamp(false)} disabled={!clock.ready || !sel} title="Start it where the song is now (Enter)" className={SMALL_BTN}>
               <Crosshair size={13} /> To playhead
             </button>
-            <button onClick={() => { if (sel) hear(sel) }} disabled={!clock.ready || !sel || selStart === null} title={`Play from ${PREROLL}s before it (R)`} className={SMALL_BTN}>
+            <button onClick={() => { if (replayTarget) hear(replayTarget) }} disabled={!clock.ready || replayStart === null} title="Replay the last stamp or your pick (R)" className={SMALL_BTN}>
               <Ear size={13} /> Hear it
             </button>
           </div>
@@ -919,62 +924,5 @@ function EditField({ initial, placeholder, className, onCommit, onCancel }: {
       }}
       className={`rounded border border-accent/50 bg-surface-overlay px-1.5 py-0.5 text-text-primary focus:outline-none ${className}`}
     />
-  )
-}
-
-// The song editor's Sync: the tool on the editor's synced lyrics field,
-// stamping against the app's player while the edited song plays. Donors in
-// the main window can have Whisper time it first.
-export function SongSyncedLyricsTool({ value, onChange, plainLyrics, song, saved, onWhisper }: {
-  value: string
-  onChange: (lrc: string) => void
-  plainLyrics: string
-  song: JWApiSong | null
-  /** The song's synced lyrics as saved, for "moved" marks and Reset. */
-  saved: string
-  /** Opens lyrics generation on this song, its result coming back here. */
-  onWhisper?: (mode: SyncMode) => void
-}): JSX.Element {
-  const lines = useMemo(() => parseSyncedLyrics(value), [value])
-  const original = useMemo(() => (saved.trim() ? parseSyncedLyrics(saved) : null), [saved])
-  const [mode, setMode] = useSyncMode(hasWordTiming(lines))
-  const { clock, playSong } = usePlayerClock(song)
-  const [playError, setPlayError] = useState<string | null>(null)
-  const isDonor = useStore((s) => !!s.account?.is_donor)
-
-  return (
-    <div className="mt-1.5">
-      <SyncedLyricsTool
-        lines={lines}
-        onChange={(next) => onChange(serializeSyncedLyrics(next))}
-        clock={clock}
-        mode={mode}
-        onModeChange={setMode}
-        original={original}
-        plainLyrics={plainLyrics}
-        noAudio={(
-          <div className="flex-1 flex items-center gap-3 min-w-0">
-            <span className="flex-1 min-w-0 text-xs text-text-muted">
-              {song ? 'Play this song to sync it. Stamps use the player\'s clock.' : 'Open an existing song to sync lyrics against its audio.'}
-              {playError && <span className="block text-red-400 mt-0.5">{playError}</span>}
-            </span>
-            {song && (
-              <button onClick={() => setPlayError(playSong())} className={SMALL_BTN}>
-                <Play size={12} /> Play song
-              </button>
-            )}
-          </div>
-        )}
-        footer={onWhisper && isDonor && !IS_FLOAT_WINDOW && song && (
-          <button
-            onClick={() => onWhisper(mode)}
-            title="Donors: let Whisper time these lyrics, then fine-tune the result here"
-            className="inline-flex items-center gap-1 text-[11px] font-semibold text-accent/90 hover:text-accent transition-colors"
-          >
-            <Sparkles size={12} /> Auto-sync with Whisper
-          </button>
-        )}
-      />
-    </div>
   )
 }

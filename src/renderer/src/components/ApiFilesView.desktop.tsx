@@ -6,7 +6,7 @@ import {
   Download, ArrowUpDown, ArrowUp, ArrowDown, Link, Check, Info, ListPlus, Heart,
   X, Pencil, PackageOpen, CheckSquare2, Square, Search,
   Filter, MoreHorizontal, Clipboard, Plus, ListMusic, Replace, Trash2,
-  FileText, FolderInput, CornerLeftUp, RefreshCw, FolderPlus, Upload, Sparkles,
+  FileText, FolderInput, CornerLeftUp, RefreshCw, FolderPlus, Upload, Sparkles, FolderSearch,
 } from 'lucide-react'
 import { useStore, useStorePick } from '../store/useStore'
 import * as userApi from '../lib/userApi'
@@ -29,6 +29,7 @@ import {
 import { startCdnFileDownload } from '../hooks/useCdnFileDownload'
 import { CdnDownloadToast } from './CdnDownloadToast'
 import { useApiFilesBrowse } from '../hooks/useApiFilesBrowse'
+import { FolderJumpBox } from './FolderJumpBox'
 import { useApiFilesZip } from '../hooks/useApiFilesZip'
 import { useTrackerMatches } from '../hooks/useTrackerMatches'
 import { useAddFileToPlaylist } from '../hooks/useAddFileToPlaylist'
@@ -166,13 +167,40 @@ export default function ApiFilesView(): JSX.Element {
   // Data layer (browse/history/search/channel-switch) - shared with the
   // mobile build, see useApiFilesBrowse.
   const {
-    currentPath, entries, loading, error, history, setHistory, navigate, goBack, goHome, onChannelChange,
+    currentPath, entries, loading, error, history, setHistory, navigate, prefetchFolder, goBack, goHome, onChannelChange,
     search, setSearch, debouncedSearch, setDebouncedSearch, searchResults, searchTotal, searchFuzzy, prefetchSearchIndex,
     searchLoading, isSearching, searchInFolder, setSearchInFolder,
   } = useApiFilesBrowse({
     activeChannel, setActiveChannel, channels, loadChannels,
     apiFilesPath, setApiFilesPath, apiFilesLastPath, setApiFilesLastPath,
   })
+  const [jumpOpen, setJumpOpen] = useState(false)
+  // Resting the mouse on a folder for a moment fetches its listing ahead of
+  // the click (prefetchFolder skips it once the file index has it anyway).
+  const folderHoverTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const folderHoverProps = (entry: JWApiFileEntry): React.HTMLAttributes<HTMLDivElement> => entry.type !== 'directory' ? {} : {
+    onPointerEnter: (e) => {
+      if (e.pointerType !== 'mouse') return
+      if (folderHoverTimer.current) clearTimeout(folderHoverTimer.current)
+      folderHoverTimer.current = setTimeout(() => prefetchFolder(entry.path), 120)
+    },
+    onPointerLeave: () => { if (folderHoverTimer.current) clearTimeout(folderHoverTimer.current) },
+  }
+  useEffect(() => () => { if (folderHoverTimer.current) clearTimeout(folderHoverTimer.current) }, [])
+  // Ctrl+L opens the jump box, as it focuses the address bar in Explorer.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent): void => {
+      if (!(e.ctrlKey || e.metaKey) || e.key.toLowerCase() !== 'l' || e.altKey || e.shiftKey) return
+      const el = e.target as HTMLElement | null
+      if (el && (el.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName))) return
+      e.preventDefault()
+      setSearch(''); setDebouncedSearch('')
+      setJumpOpen(true)
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [setSearch, setDebouncedSearch])
+  useEffect(() => { if (isSearching) setJumpOpen(false) }, [isSearching])
 
   // Whether a right-clicked audio file actually has a matching song in the
   // Tracker - resolved lazily per path on menu-open (not for every row up
@@ -487,12 +515,17 @@ export default function ApiFilesView(): JSX.Element {
     },
     onDragLeave: () => setDropTarget(prev => (prev === entry.path ? null : prev)),
     onDrop: e => {
-      e.preventDefault(); e.stopPropagation()
       if (isExternalDrag(e)) {
+        // A file row isn't a target of its own - its dragover already fell
+        // through to the listing, so let the drop do the same and upload into
+        // the folder being browsed.
+        if (entry.type !== 'directory') return
+        e.preventDefault(); e.stopPropagation()
         setDropTarget(null); setFileDragOver(false)
-        if (entry.type === 'directory') collectDroppedFiles(e.dataTransfer).then(files => uploadLocalFiles(entry.path, files)).catch(() => {})
+        collectDroppedFiles(e.dataTransfer).then(files => uploadLocalFiles(entry.path, files)).catch(() => {})
         return
       }
+      e.preventDefault(); e.stopPropagation()
       if (!dropAllowed(entry)) { setDraggedItems([]); setDropTarget(null); return }
       if (entry.type === 'directory') proposeMovesInto(entry.path, draggedItems)
       // Onto a file: both sides move into a folder that doesn't exist yet, so
@@ -682,7 +715,16 @@ export default function ApiFilesView(): JSX.Element {
                 <button onClick={goHome} className="p-1.5 rounded-lg hover:bg-surface-overlay transition-colors" title="Root">
                   <Home size={15} className="text-text-muted" />
                 </button>
-                <div className="flex items-center gap-0.5 overflow-hidden ml-1 flex-1 min-w-0">
+                {jumpOpen ? (
+                  <FolderJumpBox channel={activeChannel} onJump={(p) => navigate(p)} onClose={() => setJumpOpen(false)} />
+                ) : (
+                <div
+                  className="flex items-center gap-0.5 overflow-hidden ml-1 flex-1 min-w-0 self-stretch cursor-text"
+                  // The empty space after the crumbs turns the bar into the
+                  // jump box, like clicking an address bar.
+                  onClick={(e) => { if (e.target === e.currentTarget) setJumpOpen(true) }}
+                  title="Click to go to a folder (Ctrl+L)"
+                >
                   <button
                     onClick={goHome}
                     className={`text-xs px-1.5 py-0.5 rounded transition-colors shrink-0 ${
@@ -702,6 +744,12 @@ export default function ApiFilesView(): JSX.Element {
                     </div>
                   ))}
                 </div>
+                )}
+                {!jumpOpen && (
+                  <button onClick={() => setJumpOpen(true)} className="p-1.5 rounded-lg hover:bg-surface-overlay transition-colors shrink-0" title="Go to folder (Ctrl+L)">
+                    <FolderSearch size={15} className="text-text-muted" />
+                  </button>
+                )}
               </div>
             )
           )}
@@ -787,6 +835,7 @@ export default function ApiFilesView(): JSX.Element {
                   <div key={entry.path}
                     {...dragSourceProps(entry)}
                     {...dropTargetProps(entry)}
+                    {...folderHoverProps(entry)}
                     className={`group flex items-center gap-3 px-3 py-2 rounded-lg transition-colors cursor-default ${
                       isDropTarget ? 'bg-accent/15 ring-2 ring-accent/50'
                         : isSelected ? 'bg-accent/10 hover:bg-accent/15'
@@ -918,6 +967,7 @@ export default function ApiFilesView(): JSX.Element {
                   <div key={entry.path}
                     {...dragSourceProps(entry)}
                     {...dropTargetProps(entry)}
+                    {...folderHoverProps(entry)}
                     className={`group flex flex-col rounded-xl overflow-hidden transition-colors cursor-default ${
                       isDropTarget ? 'bg-accent/15 ring-2 ring-accent/60'
                         : isSelected ? 'bg-accent/10 ring-2 ring-accent/40'

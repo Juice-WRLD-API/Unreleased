@@ -81,8 +81,10 @@ export interface LyricsGenTarget {
   /** The API song behind `track`, whose lyrics can seed a sync job. */
   songId?: number | null
   tab?: 'sync' | 'create' | 'jobs' | 'admin'
-  /** Opens Generate on this mode and text, as a follow-up would. */
-  prefill?: { mode: 'plain' | 'synced' | 'word_synced'; text: string }
+  /** Opens Sync on these lyrics (an LRC, or plain lines to time) in place of
+   *  the draft. `saved` is the song's synced lyrics as saved, for the tool's
+   *  "moved" marks and Reset. */
+  sync?: { text: string; saved?: string }
   /** Hands finished synced lyrics back to whoever opened the dialog (the song
    *  editor). `onApply` is false when it can't take them any more. */
   apply?: { label: string; onApply: (lrc: string) => boolean }

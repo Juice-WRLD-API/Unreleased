@@ -1,5 +1,6 @@
 import { CSSProperties, ReactEventHandler, SyntheticEvent, useEffect, useState } from 'react'
 import { fullCoverUrl, hasSmallCoverVariant, smallCoverUrl } from '../lib/juicewrldApi'
+import { imageLoadAttrs, markImageLoaded } from '../lib/loadedImages'
 
 interface Props {
   src: string | null | undefined
@@ -49,6 +50,7 @@ function Progressive({ src: rawSrc, alt = '', className = '', onError }: Props):
     let cancelled = false
     img.onload = () => {
       fullyLoadedSrcs.add(src)
+      markImageLoaded(src)
       if (!cancelled) setFullLoaded(true)
     }
     // A failed full load is not an error state: the placeholder is a perfectly
@@ -95,7 +97,8 @@ export function FallbackImg({ sources, alt = '', className, style, onError }: {
       alt={alt}
       className={className}
       style={style}
-      decoding="async"
+      decoding={imageLoadAttrs(showing, false).decoding}
+      onLoad={() => markImageLoaded(showing)}
       onError={(e: SyntheticEvent<HTMLImageElement>) => {
         if (remaining.length <= 1) onError?.(e)
         setFailed((f) => [...f, showing])

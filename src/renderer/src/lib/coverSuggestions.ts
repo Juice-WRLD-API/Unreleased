@@ -5,7 +5,7 @@
 // readable from juicewrldApi's songToTrack without a cycle; everything here
 // runs at play time, well away from that path, so it can import freely.
 import {
-  getSongById, buildStreamUrl, searchFiles, cleanTitleForSearch, titleVariants,
+  getSongById, buildStreamUrl, searchFiles, coverSearchQueries, filterSearchResults,
   JWApiSong,
 } from './juicewrldApi'
 import { getMediaType } from './fileTypes'
@@ -22,24 +22,19 @@ const _pending = new Map<number, Promise<string[]>>()
  *  its alt titles - the same suggestions SongPrefsSection's "Found in API
  *  files" grid offers, so what rotates is what the Personalize panel shows. */
 async function fetchCandidates(songId: number): Promise<string[]> {
-  let titles: string[]
+  let queries: string[]
   try {
     // getSongById caches, and the song is usually already cached from whatever
     // list it was played out of.
     const song = await getSongById(songId)
-    titles = (song.track_titles?.length ? song.track_titles : [song.name]).filter(Boolean)
+    queries = coverSearchQueries(song.name, (song.track_titles ?? []).filter(Boolean))
   } catch {
     return []
   }
-
-  const queries = titles
-    .flatMap(titleVariants)
-    .map(cleanTitleForSearch)
-    .filter((q, i, arr) => q && arr.indexOf(q) === i)
   if (queries.length === 0) return []
 
   const lists = await Promise.all(queries.map((q) =>
-    searchFiles(q).catch(() => [])
+    searchFiles(q).then((entries) => filterSearchResults(entries, q)).catch(() => [])
   ))
 
   const seenPaths = new Set<string>()

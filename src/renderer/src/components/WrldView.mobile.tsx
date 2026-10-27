@@ -1,8 +1,8 @@
-import { useEffect, useLayoutEffect, useRef, useState, memo, useCallback } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState, memo, useCallback, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 import {
   Music, Radio, Search, SkipForward, ThumbsUp, ThumbsDown, X, ChevronDown, Play, Pause,
-  SkipBack, SkipForward as SkipFwd, Shuffle, Repeat, Repeat1, Volume2, VolumeX,
+  SkipBack, SkipForward as SkipFwd, Shuffle, Repeat, Repeat1, Volume, Volume2, VolumeX,
   MoreHorizontal, Heart, ListMusic, Trash2, History, SlidersHorizontal,
   Mic2, Layers, Loader2, RefreshCw, Settings2, AlignLeft, AlignCenter, MicVocal,
 } from 'lucide-react'
@@ -24,6 +24,7 @@ import SongInfoModal from './SongInfoModal'
 import CoverEditor from './CoverEditor'
 import { AlbumArtThumbnail } from './AlbumArtThumbnail'
 import { FallbackImg, ProgressiveCover } from './ProgressiveCover'
+import { LikePop, SwapIcon, TrackSwap } from './PlayerMotion'
 import SongContextMenu from './SongContextMenu'
 import { getSkin } from '../lib/skins'
 import { IS_IOS } from '../lib/platform'
@@ -33,6 +34,7 @@ import { useLongPress } from './mobile/useLongPress'
 import { useBackToClose } from '../hooks/useBackToClose'
 import { useEscapeToClose } from '../hooks/useEscapeToClose'
 import { useDragToDismiss } from '../hooks/useDragToDismiss'
+import { useExitGhost } from '../hooks/useExitGhost'
 import { dimThemeColorMeta, syncThemeColorMeta } from '../lib/themeEffects'
 import {
   useWrldArt, useArtTextContrast, useWrldLyricsSource, useWrldNowPlaying,
@@ -41,6 +43,14 @@ import {
 
 // Pulls in html-to-image for the export - only worth downloading once opened.
 const ShareLyricsModal = lazyOverlay(() => import('./ShareLyricsModal'))
+
+// Swipe-down release / chevron: how long WRLD takes to finish sliding
+// off-screen before it collapses (see useDragToDismiss's slideOutMs).
+const WRLD_SLIDE_OUT_MS = 380
+// Opening: the rise up from the mini bar.
+const WRLD_SLIDE_IN_MS = 420
+// LyricsScreen's close - the reverse of its .animate-sheet-in entrance.
+const LYRICS_SLIDE_OUT_MS = 300
 
 /* ══════════════════════════════════════════════════════════════════════════════
    WRLD - the full-screen player, and since the mini bar now expands into it,
@@ -67,7 +77,7 @@ export default function WrldView(): JSX.Element {
     radioFmActive, setRadioFmActive, radioFmIsLive, radioFmNowPlaying,
     radioFmVote, radioFmUpNext, radioFmQueuePreview,
     radioFmMatchedSong,
-    playTrack,
+    playTrack, queueIndex,
     isPlaying, setIsPlaying,
     shuffle, repeat, toggleShuffle, toggleRepeat,
     showQueue, setShowQueue,
@@ -88,6 +98,7 @@ export default function WrldView(): JSX.Element {
     radioFmQueuePreview: s.radioFmQueuePreview,
     radioFmMatchedSong: s.radioFmMatchedSong,
     playTrack: s.playTrack,
+    queueIndex: s.queueIndex,
     isPlaying: s.isPlaying,
     setIsPlaying: s.setIsPlaying,
     shuffle: s.shuffle,
@@ -205,10 +216,17 @@ export default function WrldView(): JSX.Element {
   // white wash, which is invisible on a light surface - now it follows the
   // same polarity as the text.
   const trackBg  = textIsDark ? 'rgba(0,0,0,0.15)'  : 'rgba(255,255,255,0.2)'
+  // Fill for the small frosted surfaces (FM buttons, the vote card). Same
+  // polarity rule - a white wash vanishes on a light backdrop.
+  const glass    = textIsDark ? 'rgba(0,0,0,0.06)'  : 'rgba(255,255,255,0.1)'
 
   const { displayTitle, displayArtist, displayAlbum, fmDisabled, noTrack, toggleFm } = useWrldNowPlaying(
     radioFmActive, radioFmIsLive, radioFmNowPlaying, currentTrack,
   )
+  // Same keys as the Player bar's TrackSwap, so the title slides the way the
+  // queue moved (next from the right, previous from the left).
+  const swapKey = radioFmActive ? `fm:${radioFmNowPlaying?.title ?? ''}:${radioFmNowPlaying?.artist ?? ''}` : (currentTrack?.id ?? '')
+  const swapOrder = radioFmActive ? undefined : queueIndex
 
   // The chevron collapses the player back to wherever you came from - the same
   // gesture as any full-screen player. `previousView` can point back at this
@@ -245,13 +263,26 @@ export default function WrldView(): JSX.Element {
   // janky. `dragging` still comes through state (only flips at drag
   // start/end, so it's cheap) to drive the transition below.
   const dragWrapRef = useRef<HTMLDivElement>(null)
-  const { dragging, handlers: dragHandlers } = useDragToDismiss(collapse, {
+  const { dragging, dismissing, dismiss, handlers: dragHandlers } = useDragToDismiss(collapse, {
     elRef: dragWrapRef,
+    slideOutMs: WRLD_SLIDE_OUT_MS,
     applyStyle: (el, dy) => {
       el.style.transform = dy ? `translateY(${dy}px)` : ''
       el.style.borderRadius = dy ? `${Math.min(dy, 32)}px` : '0px'
     },
   })
+
+  // Rises up from the mini bar on open - it used to just appear, full-screen,
+  // in one frame. Composited onto the inline transform so a drag started
+  // mid-rise still tracks the finger.
+  useLayoutEffect(() => {
+    const el = dragWrapRef.current
+    if (!el || window.matchMedia('(prefers-reduced-motion: reduce)').matches) return
+    el.animate(
+      [{ transform: 'translateY(100%)' }, { transform: 'translateY(0)' }],
+      { duration: WRLD_SLIDE_IN_MS, easing: 'cubic-bezier(0.33,0,0.15,1)', composite: 'add' },
+    )
+  }, [])
 
   const voteActive = !!radioFmVote?.active && !voteDismissed
 
@@ -284,7 +315,11 @@ export default function WrldView(): JSX.Element {
       ref={dragWrapRef}
       className="relative flex-1 h-full w-full overflow-hidden flex flex-col isolate"
       style={{
-        transition: dragging ? 'none' : 'transform 0.25s ease-out, border-radius 0.25s ease-out',
+        // Released past the threshold (or the chevron tapped): carry on down
+        // off-screen on a gentle curve before collapse() unmounts this view.
+        transition: dragging ? 'none'
+          : dismissing ? `transform ${WRLD_SLIDE_OUT_MS}ms cubic-bezier(0.33,0,0.15,1), border-radius 0.2s ease-out`
+          : 'transform 0.25s ease-out, border-radius 0.25s ease-out',
       }}
     >
       <ArtBackdrop
@@ -307,17 +342,16 @@ export default function WrldView(): JSX.Element {
           style={{ paddingTop: ownsTopInset ? 'max(0.25rem, var(--top-inset))' : '0.25rem' }}
         >
           {/* Three equal flex-1 columns, not a fixed-width button flanking a
-              flex-1 middle - the right side can hold one or two 44px icon
-              buttons (FmLikeButton self-hides sometimes) while the left only
-              ever has one, so a fixed-width left button made the "centered"
-              middle actually sit off-center by half that imbalance. Equal
-              columns keep the pill centered regardless of how many icons the
-              other two hold. */}
+              flex-1 middle - SongMenu self-hides when there's nothing to act
+              on, and a fixed-width left button would then push the "centered"
+              pill off-center. Equal columns keep it centered regardless of
+              what the other two hold. The like heart lives by the title
+              below, where people look for it, not up here. */}
           <div className="flex-1 flex justify-start">
             <button
-              onClick={collapse}
+              onClick={dismiss}
               aria-label="Collapse player"
-              className="w-11 h-11 shrink-0 flex items-center justify-center rounded-full active:bg-white/10"
+              className="w-11 h-11 shrink-0 flex items-center justify-center rounded-full active:scale-90 transition-transform"
               style={{ color: txtPri }}
             ><ChevronDown size={22} /></button>
           </div>
@@ -326,8 +360,7 @@ export default function WrldView(): JSX.Element {
             <FmPill active={radioFmActive} live={radioFmIsLive} disabled={fmDisabled} onClick={toggleFm} light={textIsDark} />
           </div>
 
-          <div className="flex-1 flex justify-end items-center gap-1">
-            <FmLikeButton light={textIsDark} />
+          <div className="flex-1 flex justify-end items-center">
             <SongMenu light={textIsDark} />
           </div>
         </div>
@@ -342,10 +375,13 @@ export default function WrldView(): JSX.Element {
         <div className="flex-1 min-h-0 flex flex-col items-center px-8 py-2 gap-2">
           <div ref={coverRowRef} className="flex-1 min-h-0 w-full flex items-center justify-center">
             <div
-              className="rounded-3xl overflow-hidden shadow-[0_28px_70px_rgba(0,0,0,0.65)] transition-transform duration-500 ease-out touch-none"
+              className="rounded-3xl overflow-hidden shadow-[0_28px_70px_rgba(0,0,0,0.65)] touch-none"
               style={{
                 width: coverSize, height: coverSize,
                 transform: isPlaying || radioFmActive ? 'scale(1)' : 'scale(0.92)',
+                // Gentle-start, like the rest of WRLD's motion - Tailwind's
+                // ease-out front-loads the move and read as a snap.
+                transition: 'transform 0.6s cubic-bezier(0.33,0,0.15,1)',
                 // Without this, iOS Safari's own long-press-on-<img> callout
                 // (Save to Photos / Copy / etc) wins the gesture before our
                 // long-press timer ever fires - this property is inherited,
@@ -384,20 +420,26 @@ export default function WrldView(): JSX.Element {
 
         {/* ── Controls ───────────────────────────────────────────────────── */}
         <div
-          className="shrink-0 px-6 flex flex-col gap-2.5"
-          style={{ paddingBottom: 'max(0.5rem, env(safe-area-inset-bottom, 0px))' }}
+          className="shrink-0 px-6 pt-1 flex flex-col gap-3"
+          style={{ paddingBottom: 'max(0.75rem, env(safe-area-inset-bottom, 0px))' }}
         >
-          {/* Title block */}
-          <div className="min-w-0">
-            <p className="font-bold text-base leading-tight truncate" style={{ color: txtPri }}>
-              {displayTitle || (radioFmActive ? 'Tuning in…' : 'Not playing')}
-            </p>
-            <p className="text-xs mt-0.5 truncate" style={{ color: txtSec }}>
-              {[displayArtist, displayAlbum].filter(Boolean).join(' · ') || ' '}
-            </p>
+          {/* Title block - sized as the page's headline (it used to be 16px,
+              barely louder than the lyric line above it), with the like heart
+              beside it. Slides in on a song change the same way the mini
+              player's does. */}
+          <div className="flex items-center gap-3">
+            <TrackSwap swapKey={swapKey} order={swapOrder} className="flex-1 min-w-0">
+              <p className="font-bold text-[22px] leading-tight tracking-tight truncate" style={{ color: txtPri }}>
+                {displayTitle || (radioFmActive ? 'Tuning in…' : 'Not playing')}
+              </p>
+              <p className="text-[15px] mt-1 truncate" style={{ color: txtSec }}>
+                {[displayArtist, displayAlbum].filter(Boolean).join(' · ') || ' '}
+              </p>
+            </TrackSwap>
+            <FmLikeButton light={textIsDark} />
           </div>
 
-          {radioFmActive ? <FmProgressBar txtPri={txtPri} txtTer={txtTer} trackBg={trackBg} /> : <ProgressBar txtPri={txtPri} txtTer={txtTer} trackBg={trackBg} />}
+          {radioFmActive ? <FmProgressBar txtPri={txtPri} txtSec={txtSec} trackBg={trackBg} /> : <ProgressBar txtPri={txtPri} txtSec={txtSec} trackBg={trackBg} />}
 
           {/* Transport. 999 FM is a live stream - there is nothing local to
               play, pause or seek, so that mode gets the vote card (or its
@@ -410,70 +452,80 @@ export default function WrldView(): JSX.Element {
                 myVote={myVote}
                 onVote={(v) => { setMyVote(v); getActiveRadioClient()?.castVote(v) }}
                 onDismiss={() => setVoteDismissed(true)}
+                txtPri={txtPri} txtSec={txtSec} txtTer={txtTer} glass={glass}
               />
             ) : (
               <div className="flex items-center gap-2">
                 <button
                   onClick={() => { setVoteDismissed(false); getActiveRadioClient()?.proposeSkip() }}
-                  className="flex-1 h-11 rounded-full bg-white/10 text-white text-sm font-semibold flex items-center justify-center gap-2 active:bg-white/20"
+                  className="flex-1 h-11 rounded-full text-sm font-semibold flex items-center justify-center gap-2 active:scale-[0.97] transition-transform"
+                  style={{ background: glass, color: txtPri }}
                 ><SkipForward size={16} /> Vote to skip</button>
                 <button
                   onClick={() => setSheet('radio')}
-                  className="flex-1 h-11 rounded-full bg-white/10 text-white text-sm font-semibold flex items-center justify-center gap-2 active:bg-white/20"
+                  className="flex-1 h-11 rounded-full text-sm font-semibold flex items-center justify-center gap-2 active:scale-[0.97] transition-transform"
+                  style={{ background: glass, color: txtPri }}
                 ><Search size={16} /> Suggest</button>
               </div>
             )
           ) : (
-            <div className={`flex items-center justify-between transition-opacity ${noTrack ? 'opacity-35 pointer-events-none' : ''}`}>
-              <button
+            // -mx-2.5 pulls the outer toggles' icons (not their 40px hit
+            // boxes) onto the same edges as the title and progress bar.
+            <div className={`-mx-2.5 flex items-center justify-between transition-opacity ${noTrack ? 'opacity-35 pointer-events-none' : ''}`}>
+              <ModeToggle
+                on={shuffle}
                 onClick={toggleShuffle}
                 disabled={noTrack}
-                aria-label={shuffle ? 'Shuffle on' : 'Shuffle off'}
-                aria-pressed={shuffle}
-                className="w-10 h-10 flex items-center justify-center rounded-full active:bg-white/10"
-                style={{ color: shuffle ? txtPri : txtTer, opacity: shuffle ? 1 : 0.7 }}
-              ><Shuffle size={17} /></button>
+                label={shuffle ? 'Shuffle on' : 'Shuffle off'}
+                txtPri={txtPri} txtSec={txtSec}
+              ><Shuffle size={18} /></ModeToggle>
               <button
                 onClick={() => runPlayerCommand('previous')}
                 disabled={noTrack}
                 aria-label="Previous"
-                className="w-12 h-12 flex items-center justify-center rounded-full active:bg-white/10"
+                className="w-12 h-12 flex items-center justify-center rounded-full active:scale-90 transition-transform"
                 style={{ color: txtPri }}
-              ><SkipBack size={24} fill="currentColor" /></button>
+              ><SkipBack size={26} fill="currentColor" /></button>
               <button
                 onClick={() => setIsPlaying(!isPlaying)}
                 disabled={noTrack}
                 aria-label={isPlaying ? 'Pause' : 'Play'}
-                className="w-14 h-14 rounded-full flex items-center justify-center shadow-xl active:scale-95 transition-transform"
+                className="w-16 h-16 rounded-full flex items-center justify-center shadow-xl active:scale-95 transition-transform"
                 style={{ background: txtPri, color: textIsDark ? 'white' : 'black' }}
               >
-                {isPlaying
-                  ? <Pause size={24} fill="currentColor" />
-                  : <Play size={24} fill="currentColor" className="ml-1" />}
+                <SwapIcon swapKey={isPlaying}>
+                  {isPlaying
+                    ? <Pause size={28} fill="currentColor" />
+                    : <Play size={28} fill="currentColor" className="ml-0.5" />}
+                </SwapIcon>
               </button>
               <button
                 onClick={() => runPlayerCommand('next')}
                 disabled={noTrack}
                 aria-label="Next"
-                className="w-12 h-12 flex items-center justify-center rounded-full active:bg-white/10"
+                className="w-12 h-12 flex items-center justify-center rounded-full active:scale-90 transition-transform"
                 style={{ color: txtPri }}
-              ><SkipFwd size={24} fill="currentColor" /></button>
-              <button
+              ><SkipFwd size={26} fill="currentColor" /></button>
+              <ModeToggle
+                on={repeat !== 'none'}
                 onClick={toggleRepeat}
                 disabled={noTrack}
-                aria-label={repeat === 'none' ? 'No repeat' : repeat === 'all' ? 'Repeat all' : 'Repeat one'}
-                className="w-10 h-10 flex items-center justify-center rounded-full active:bg-white/10"
-                style={{ color: repeat !== 'none' ? txtPri : txtTer, opacity: repeat !== 'none' ? 1 : 0.7 }}
-              >{repeat === 'one' ? <Repeat1 size={17} /> : <Repeat size={17} />}</button>
+                label={repeat === 'none' ? 'No repeat' : repeat === 'all' ? 'Repeat all' : 'Repeat one'}
+                txtPri={txtPri} txtSec={txtSec}
+              >
+                <SwapIcon swapKey={repeat === 'one'}>{repeat === 'one' ? <Repeat1 size={18} /> : <Repeat size={18} />}</SwapIcon>
+              </ModeToggle>
             </div>
           )}
 
-          {!IS_IOS && <VolumeRow txtPri={txtPri} txtTer={txtTer} trackBg={trackBg} />}
+          {!IS_IOS && <VolumeRow txtPri={txtPri} txtSec={txtSec} trackBg={trackBg} />}
 
           {/* Everything that used to occupy a second column now hangs off
               these - each opens a sheet over the player rather than replacing
-              it, so what's playing never leaves the screen. */}
-          <div className="flex items-center justify-center gap-2">
+              it, so what's playing never leaves the screen. Icon-over-label
+              and sharing the row evenly: as text pills, four of them (Lyrics,
+              Queue, Versions, EQ) were wider than a 360px phone. */}
+          <div className="-mx-2 flex items-stretch">
             <ActionChip icon={Mic2} label="Lyrics" onClick={() => setLyricsOpen(true)} light={textIsDark} />
             {radioFmActive
               ? <ActionChip icon={Radio} label="Radio" onClick={() => setSheet('radio')} light={textIsDark} />
@@ -722,17 +774,20 @@ function FmPill({ active, live, disabled, onClick, light }: {
   onClick: () => void
   light: boolean
 }): JSX.Element {
+  // Off and on-but-not-live wash with the backdrop's polarity - white-on-white
+  // made the pill vanish over a bright cover.
+  const fg = light ? 'rgba(0,0,0,0.6)' : 'rgba(255,255,255,0.7)'
+  const bg = active ? (light ? 'rgba(0,0,0,0.1)' : 'rgba(255,255,255,0.15)')
+    : (light ? 'rgba(0,0,0,0.06)' : 'rgba(255,255,255,0.1)')
   return (
     <button
       onClick={onClick}
       disabled={disabled}
       aria-pressed={active}
-      className={`h-9 px-4 rounded-full flex items-center gap-2 text-[13px] font-semibold transition-colors disabled:opacity-40 ${
-        active && live ? 'bg-red-600/85 text-white'
-          : active ? 'bg-white/15 text-white/70'
-          : 'bg-white/10 active:bg-white/20'
+      className={`h-9 px-4 rounded-full flex items-center gap-2 text-[13px] font-semibold transition-[background-color,color,transform] active:scale-[0.96] disabled:opacity-40 ${
+        active && live ? 'bg-red-600/85 text-white' : ''
       }`}
-      style={!active ? { color: light ? 'rgba(0,0,0,0.6)' : 'rgba(255,255,255,0.7)' } : undefined}
+      style={active && live ? undefined : { background: bg, color: fg }}
     >
       <Radio size={15} className={active && live ? 'animate-pulse' : ''} />
       {active && live ? '999 FM · LIVE' : live === false ? '999 FM · OFF' : '999 FM'}
@@ -740,7 +795,10 @@ function FmPill({ active, live, disabled, onClick, light }: {
   )
 }
 
-/** One of the surfaces hanging off the bottom of the player. */
+/** One of the surfaces hanging off the bottom of the player: icon over a
+ *  small label, each taking an equal share of the row. `active` (EQ with
+ *  effects on) gets the same dot as shuffle/repeat - "dot = on" across the
+ *  whole page, instead of accent text that could disappear into the art. */
 function ActionChip({ icon: Icon, label, onClick, active, light }: {
   icon: typeof Radio
   label: string
@@ -748,45 +806,101 @@ function ActionChip({ icon: Icon, label, onClick, active, light }: {
   active?: boolean
   light: boolean
 }): JSX.Element {
+  const fg = light ? 'rgba(0,0,0,0.65)' : 'rgba(255,255,255,0.8)'
   return (
     <button
       onClick={onClick}
-      className="h-9 px-3 rounded-full flex items-center gap-1.5 text-xs font-medium bg-white/10 active:bg-white/20 transition-colors"
-      style={{ color: active ? 'var(--accent)' : (light ? 'rgba(0,0,0,0.65)' : 'rgba(255,255,255,0.8)') }}
+      className="relative flex-1 min-w-0 h-14 flex flex-col items-center justify-center gap-1 active:scale-95 transition-transform"
+      style={{ color: fg }}
     >
-      <Icon size={15} /> {label}
+      <Icon size={20} />
+      <span className="max-w-full px-1 text-[11px] font-semibold leading-none truncate">{label}</span>
+      <OnDot on={!!active} color={fg} />
     </button>
+  )
+}
+
+/** Shuffle / repeat: dimmed when off, full strength with a dot under it when
+ *  on. Off used to be the faintest text colour at 70% opacity on top - about
+ *  20% white, easy to miss entirely - and on vs off differed only by that. */
+function ModeToggle({ on, onClick, disabled, label, txtPri, txtSec, children }: {
+  on: boolean
+  onClick: () => void
+  disabled: boolean
+  label: string
+  txtPri: string
+  txtSec: string
+  children: ReactNode
+}): JSX.Element {
+  return (
+    <button
+      onClick={onClick}
+      disabled={disabled}
+      aria-label={label}
+      aria-pressed={on}
+      className="relative w-10 h-10 flex items-center justify-center rounded-full active:scale-90 transition-[transform,color] duration-200"
+      style={{ color: on ? txtPri : txtSec }}
+    >
+      {children}
+      <OnDot on={on} color={txtPri} />
+    </button>
+  )
+}
+
+/** The little "this is on" dot under a toggle. Always rendered so it can fade
+ *  and grow in rather than pop. */
+function OnDot({ on, color }: { on: boolean; color: string }): JSX.Element {
+  return (
+    <span
+      aria-hidden
+      className="absolute bottom-0.5 left-1/2 w-1 h-1 -ml-0.5 rounded-full pointer-events-none"
+      style={{
+        background: color,
+        opacity: on ? 1 : 0,
+        transform: on ? 'scale(1)' : 'scale(0.3)',
+        transition: 'opacity 0.3s cubic-bezier(0.4,0,0.2,1), transform 0.3s cubic-bezier(0.4,0,0.2,1)',
+      }}
+    />
   )
 }
 
 // ─── 999 FM vote ──────────────────────────────────────────────────────────────
 
-function VoteCard({ vote, secondsLeft, myVote, onVote, onDismiss }: {
+// Text and fill follow the backdrop's polarity like the rest of the page -
+// these were hardcoded white, which vanished over a bright cover.
+function VoteCard({ vote, secondsLeft, myVote, onVote, onDismiss, txtPri, txtSec, txtTer, glass }: {
   vote: NonNullable<ReturnType<typeof useStore.getState>['radioFmVote']>
   secondsLeft: number | null
   myVote: 'yes' | 'no' | null
   onVote: (v: 'yes' | 'no') => void
   onDismiss: () => void
+  txtPri: string
+  txtSec: string
+  txtTer: string
+  glass: string
 }): JSX.Element {
   return (
-    <div className="bg-white/10 rounded-2xl p-3.5 flex flex-col gap-2.5">
+    <div className="rounded-2xl p-3.5 flex flex-col gap-2.5" style={{ background: glass }}>
       <div className="flex items-center justify-between gap-2">
-        <p className="text-white/60 text-[11px] font-semibold uppercase tracking-wider">
+        <p className="text-[11px] font-semibold uppercase tracking-wider" style={{ color: txtSec }}>
           {vote.kind === 'skip' ? 'Vote to skip' : 'Vote to queue'}
         </p>
         <div className="flex items-center gap-1">
           {secondsLeft != null && (
-            <span className={`text-xs tabular-nums font-semibold ${secondsLeft <= 5 ? 'text-red-400' : 'text-white/40'}`}>
+            <span
+              className={`text-xs tabular-nums font-semibold ${secondsLeft <= 5 ? 'text-red-400' : ''}`}
+              style={secondsLeft <= 5 ? undefined : { color: txtTer }}
+            >
               {secondsLeft}s
             </span>
           )}
-          <button onClick={onDismiss} className="w-8 h-8 flex items-center justify-center text-white/40" aria-label="Dismiss vote">
+          <button onClick={onDismiss} className="w-8 h-8 flex items-center justify-center" style={{ color: txtTer }} aria-label="Dismiss vote">
             <X size={15} />
           </button>
         </div>
       </div>
-      {vote.track && <p className="text-white/90 text-sm font-medium truncate">{vote.track}</p>}
-      <p className="text-white/40 text-xs">
+      {vote.track && <p className="text-sm font-medium truncate" style={{ color: txtPri }}>{vote.track}</p>}
+      <p className="text-xs" style={{ color: txtTer }}>
         {vote.yes ?? 0} yes · {vote.no ?? 0} no
         {vote.votes_needed != null && <span> · need {vote.votes_needed}</span>}
       </p>
@@ -838,10 +952,15 @@ const FmLikeButton = memo(function FmLikeButton({ light }: { light: boolean }): 
       onClick={() => toggleLike(targetId)}
       aria-label={liked ? 'Remove from Liked Songs' : 'Add to Liked Songs'}
       aria-pressed={liked}
-      className="w-11 h-11 shrink-0 flex items-center justify-center rounded-full active:bg-white/10 transition-colors"
+      // -mr-2.5: next to the title, the heart (not its 44px hit box) lines up
+      // with the right end of the progress bar below.
+      className="w-11 h-11 -mr-2.5 shrink-0 flex items-center justify-center rounded-full transition-colors"
       style={{ color: liked ? 'var(--accent)' : (light ? 'rgba(0,0,0,0.55)' : 'rgba(255,255,255,0.7)') }}
     >
-      <Heart size={20} fill={liked ? 'currentColor' : 'none'} />
+      {/* Same pop + ring as the mini player's heart. */}
+      <LikePop liked={liked} trackKey={targetId}>
+        <Heart size={23} fill={liked ? 'currentColor' : 'none'} />
+      </LikePop>
     </button>
   )
 })
@@ -891,7 +1010,7 @@ const SongMenu = memo(function SongMenu({ light }: { light: boolean }): JSX.Elem
         onMouseDown={(e) => e.stopPropagation()}
         onClick={() => setOpen(v => !v)}
         aria-label="More options"
-        className="w-11 h-11 shrink-0 flex items-center justify-center rounded-full active:bg-white/10 transition-colors"
+        className="w-11 h-11 shrink-0 flex items-center justify-center rounded-full active:scale-90 transition-transform"
         style={{ color: light ? 'rgba(0,0,0,0.55)' : 'rgba(255,255,255,0.7)' }}
       >
         <MoreHorizontal size={20} />
@@ -1045,11 +1164,16 @@ function QueueSheet({ open, onClose }: { open: boolean; onClose: () => void }): 
     return () => syncThemeColorMeta()
   }, [open])
 
-  const { style: dragStyle, handlers: dragHandlers } = useDragToDismiss(requestClose, {
+  const { style: dragStyle, reset: resetDrag, handlers: dragHandlers } = useDragToDismiss(requestClose, {
     threshold: 90,
     rubberBand: true,
     transition: 'transform 220ms cubic-bezier(0.16,1,0.3,1)',
+    holdOnDismiss: true,
   })
+  // A swipe-close leaves the offset where the finger let go (see
+  // holdOnDismiss) and this sheet stays mounted, so clear it for next time.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useEffect(() => { if (open) resetDrag() }, [open])
 
   const showing = open || closing
 
@@ -1353,7 +1477,7 @@ function QueueRow({ track, active, playing, dragging, anyDragging, rowStyle, onD
  *  Not rendered on iOS at all (see call site) - Safari ignores
  *  HTMLMediaElement.volume entirely there (see Player.tsx), so this would be
  *  a control that looks interactive but does nothing. */
-const VolumeRow = memo(function VolumeRow({ txtPri, txtTer, trackBg }: { txtPri: string; txtTer: string; trackBg: string }): JSX.Element {
+const VolumeRow = memo(function VolumeRow({ txtPri, txtSec, trackBg }: { txtPri: string; txtSec: string; trackBg: string }): JSX.Element {
   const { volume, setVolume } = useStorePick('volume', 'setVolume')
   const barRef = useRef<HTMLDivElement>(null)
   // Remember the level before muting so unmuting restores it, instead of
@@ -1369,13 +1493,17 @@ const VolumeRow = memo(function VolumeRow({ txtPri, txtTer, trackBg }: { txtPri:
   }
 
   return (
+    // Quiet speaker on the left (also the mute toggle), loud one on the right,
+    // so the row reads as a range rather than a lone button and a line.
     <div className="flex items-center gap-3">
       <button
         onClick={() => setVolume(volume === 0 ? (prevVolumeRef.current || 0.8) : 0)}
         aria-label={volume === 0 ? 'Unmute' : 'Mute'}
-        className="w-9 h-9 -ml-1.5 shrink-0 flex items-center justify-center"
-        style={{ color: txtTer }}
-      >{volume === 0 ? <VolumeX size={17} /> : <Volume2 size={17} />}</button>
+        className="w-9 h-9 -ml-2 shrink-0 flex items-center justify-center active:scale-90 transition-transform"
+        style={{ color: txtSec }}
+      >
+        <SwapIcon swapKey={volume === 0}>{volume === 0 ? <VolumeX size={17} /> : <Volume size={17} />}</SwapIcon>
+      </button>
       <div
         ref={barRef}
         // touch-none, or the browser claims the drag as a scroll and the
@@ -1384,14 +1512,19 @@ const VolumeRow = memo(function VolumeRow({ txtPri, txtTer, trackBg }: { txtPri:
         onTouchStart={(e) => setFrom(e.touches[0].clientX)}
         onTouchMove={(e) => setFrom(e.touches[0].clientX)}
       >
+        {/* Filled in the secondary colour, not the faintest one - against
+            the trough that was a 30% line on a 20% one, barely a difference. */}
         <div className="w-full h-1.5 rounded-full" style={{ background: trackBg }}>
-          <div className="h-full rounded-full" style={{ width: `${volume * 100}%`, background: txtTer }} />
+          <div className="h-full rounded-full" style={{ width: `${volume * 100}%`, background: txtSec }} />
         </div>
         <div
           className="absolute w-3.5 h-3.5 rounded-full shadow pointer-events-none"
           style={{ left: `${volume * 100}%`, transform: 'translateX(-50%)', background: txtPri }}
         />
       </div>
+      <span aria-hidden className="w-9 h-9 -mr-2 shrink-0 flex items-center justify-center" style={{ color: txtSec }}>
+        <Volume2 size={17} />
+      </span>
     </div>
   )
 })
@@ -1399,7 +1532,7 @@ const VolumeRow = memo(function VolumeRow({ txtPri, txtTer, trackBg }: { txtPri:
 // Read-only bar for 999FM - it's a live stream, so no scrubbing, but
 // elapsed/duration are still known (from the radio WS) and ticked locally
 // between updates the same way the bottom Player bar does.
-const FmProgressBar = memo(function FmProgressBar({ txtPri, txtTer, trackBg }: { txtPri: string; txtTer: string; trackBg: string }): JSX.Element {
+const FmProgressBar = memo(function FmProgressBar({ txtPri, txtSec, trackBg }: { txtPri: string; txtSec: string; trackBg: string }): JSX.Element {
   const radioFmNowPlaying = useStore(s => s.radioFmNowPlaying)
   const [elapsedMs, setElapsedMs] = useState(0)
   const baseRef = useRef<{ elapsed: number; at: number }>({ elapsed: 0, at: 0 })
@@ -1424,14 +1557,14 @@ const FmProgressBar = memo(function FmProgressBar({ txtPri, txtTer, trackBg }: {
         <div className="h-full rounded-full" style={{ width: `${pct}%`, background: txtPri }} />
       </div>
       <div className="flex justify-between">
-        <span className="text-[11px] tabular-nums" style={{ color: txtTer }}>{formatDuration(elapsedMs / 1000)}</span>
-        <span className="text-[11px] tabular-nums" style={{ color: txtTer }}>{durationMs > 0 ? formatDuration(durationMs / 1000) : '-∞'}</span>
+        <span className="text-[11px] tabular-nums" style={{ color: txtSec }}>{formatDuration(elapsedMs / 1000)}</span>
+        <span className="text-[11px] tabular-nums" style={{ color: txtSec }}>{durationMs > 0 ? formatDuration(durationMs / 1000) : '-∞'}</span>
       </div>
     </div>
   )
 })
 
-const ProgressBar = memo(function ProgressBar({ txtPri, txtTer, trackBg }: { txtPri: string; txtTer: string; trackBg: string }): JSX.Element {
+const ProgressBar = memo(function ProgressBar({ txtPri, txtSec, trackBg }: { txtPri: string; txtSec: string; trackBg: string }): JSX.Element {
   const { progress, currentTime } = useStore(useShallow(s => ({ progress: s.progress, currentTime: s.currentTime })))
   const barRef = useRef<HTMLDivElement>(null)
   // Buffer the scrub position visually while dragging - only call seekAudio
@@ -1486,8 +1619,8 @@ const ProgressBar = memo(function ProgressBar({ txtPri, txtTer, trackBg }: { txt
         />
       </div>
       <div className="flex justify-between">
-        <span className="text-[11px] tabular-nums" style={{ color: txtTer }}>{formatDuration(displayTime)}</span>
-        <span className="text-[11px] tabular-nums" style={{ color: txtTer }}>{duration > 0 ? `-${formatDuration(remaining)}` : '-∞'}</span>
+        <span className="text-[11px] tabular-nums" style={{ color: txtSec }}>{formatDuration(displayTime)}</span>
+        <span className="text-[11px] tabular-nums" style={{ color: txtSec }}>{duration > 0 ? `-${formatDuration(remaining)}` : '-∞'}</span>
       </div>
     </div>
   )
@@ -1519,6 +1652,14 @@ function LyricsScreen({
   const [showLyricsSettings, setShowLyricsSettings] = useState(false)
   const [showShareLyrics, setShowShareLyrics] = useState(false)
 
+  // Opens with .animate-sheet-in but closes by unmounting, so it used to
+  // vanish in one frame - slide a copy back down instead.
+  const rootRef = useRef<HTMLDivElement>(null)
+  useExitGhost(rootRef, (ghost) => ghost.animate(
+    [{ transform: 'translateY(0)' }, { transform: 'translateY(100%)' }],
+    { duration: LYRICS_SLIDE_OUT_MS, easing: 'cubic-bezier(0.4,0,0.6,1)', fill: 'forwards' },
+  ))
+
   return createPortal(
     // isolate: ArtBackdrop's noise-texture layer uses mix-blend-overlay,
     // which blends with whatever's painted behind it in the same stacking
@@ -1527,7 +1668,7 @@ function LyricsScreen({
     // in place of it) and visibly ghosts that page's content through. Seen
     // as faint text from the Tracker list bleeding through the lyrics
     // screen's backdrop, reading as "the background is transparent".
-    <div className="fixed inset-0 z-[70] flex flex-col animate-sheet-in isolate">
+    <div ref={rootRef} className="fixed inset-0 z-[70] flex flex-col animate-sheet-in isolate">
       {/* Repaints the page's own backdrop instead of an opaque theme colour -
           the text colours below were picked against the artwork, not against
           --surface. */}
@@ -1540,7 +1681,7 @@ function LyricsScreen({
         <button
           onClick={onClose}
           aria-label="Close lyrics"
-          className="w-11 h-11 shrink-0 flex items-center justify-center rounded-full active:bg-white/10"
+          className="w-11 h-11 shrink-0 flex items-center justify-center rounded-full active:scale-90 transition-transform"
           style={{ color: txtPri }}
         ><ChevronDown size={22} /></button>
         <div className="flex-1 min-w-0 text-center">
@@ -1551,7 +1692,7 @@ function LyricsScreen({
           <button
             onClick={() => setShowShareLyrics(true)}
             aria-label="Share lyrics"
-            className="w-11 h-11 shrink-0 flex items-center justify-center rounded-full active:bg-white/10"
+            className="w-11 h-11 shrink-0 flex items-center justify-center rounded-full active:scale-90 transition-transform"
             style={{ color: txtTer }}
           ><MicVocal size={18} /></button>
         )}
@@ -1562,7 +1703,7 @@ function LyricsScreen({
         <button
           onClick={() => setShowLyricsSettings(true)}
           aria-label="Lyrics display settings"
-          className="w-11 h-11 shrink-0 flex items-center justify-center rounded-full active:bg-white/10"
+          className="w-11 h-11 shrink-0 flex items-center justify-center rounded-full active:scale-90 transition-transform"
           style={{ color: txtTer }}
         ><Settings2 size={19} /></button>
       </div>
@@ -1594,7 +1735,7 @@ function LyricsScreen({
           className="relative shrink-0 px-6 pt-1 flex items-center justify-center gap-8"
           style={{ paddingBottom: 'max(1rem, env(safe-area-inset-bottom, 0px))' }}
         >
-          <button onClick={() => runPlayerCommand('previous')} aria-label="Previous" className="w-12 h-12 flex items-center justify-center" style={{ color: txtPri }}>
+          <button onClick={() => runPlayerCommand('previous')} aria-label="Previous" className="w-12 h-12 flex items-center justify-center active:scale-90 transition-transform" style={{ color: txtPri }}>
             <SkipBack size={24} fill="currentColor" />
           </button>
           <button
@@ -1603,9 +1744,11 @@ function LyricsScreen({
             className="w-14 h-14 rounded-full flex items-center justify-center active:scale-95 transition-transform"
             style={{ background: txtPri, color: textIsDark ? 'white' : 'black' }}
           >
-            {isPlaying ? <Pause size={24} fill="currentColor" /> : <Play size={24} fill="currentColor" className="ml-0.5" />}
+            <SwapIcon swapKey={isPlaying}>
+              {isPlaying ? <Pause size={24} fill="currentColor" /> : <Play size={24} fill="currentColor" className="ml-0.5" />}
+            </SwapIcon>
           </button>
-          <button onClick={() => runPlayerCommand('next')} aria-label="Next" className="w-12 h-12 flex items-center justify-center" style={{ color: txtPri }}>
+          <button onClick={() => runPlayerCommand('next')} aria-label="Next" className="w-12 h-12 flex items-center justify-center active:scale-90 transition-transform" style={{ color: txtPri }}>
             <SkipFwd size={24} fill="currentColor" />
           </button>
         </div>
@@ -1880,7 +2023,9 @@ const MiniLyricLine = memo(function MiniLyricLine({
     >
       {/* Keying on the line index restarts the fade-in each time the active
           line changes, reading as a soft crossfade rather than a hard swap. */}
-      <p key={currentLineIdx} className="text-[15px] font-semibold text-center truncate animate-lyric-line-in" style={{ color: txtSec }}>
+      {/* 14px medium: a glance, not a headline - at 15px semibold it was as
+          loud as the song title it sits right above. */}
+      <p key={currentLineIdx} className="text-[14px] font-medium text-center truncate animate-lyric-line-in" style={{ color: txtSec }}>
         {text}
       </p>
     </button>

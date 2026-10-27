@@ -104,7 +104,7 @@ export default function StatisticsPanelMobile({ onOpenEra }: { onOpenEra: (eraNa
                 <div className="px-2">
                   {playStats.recent_plays.map((play) => (
                     <RecentPlayRow
-                      key={play.id} play={play} cover={songMap.get(play.song_id)}
+                      key={play.id} play={play} cover={play.song_id != null ? songMap.get(play.song_id) : undefined}
                       onPlay={playById} onContextMenu={openContextMenu} isMobile
                     />
                   ))}

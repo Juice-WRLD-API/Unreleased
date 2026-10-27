@@ -1,10 +1,11 @@
-import { ChevronRight, MoreHorizontal, Play, ListMusic, Gamepad2, Flame, Music2, Disc3, User, Newspaper, Radio, Album, Music, Search, MicVocal } from 'lucide-react'
+import { ChevronRight, MoreHorizontal, Play, ListMusic, Gamepad2, Flame, Music2, Disc3, User, Newspaper, Radio, Album, Music, Search, MicVocal, Bell } from 'lucide-react'
 import { useStore } from '../store/useStore'
 import * as userApi from '../lib/userApi'
 import { AlbumArtThumbnail } from './AlbumArtThumbnail'
 import { ProgressiveCover } from './ProgressiveCover'
 import { useMobileNavSplit } from '../hooks/useMobileNavTabs'
 import { useHomeData } from '../hooks/useHomeData'
+import { useUnreadNotificationCount } from '../hooks/useNotificationHistory'
 import { hasChatAccess } from '../lib/chatAccess'
 import OnThisDayTile from './OnThisDayTile'
 import { lazyOverlay } from '../lib/lazyView'
@@ -69,6 +70,9 @@ export default function HomeViewMobile(): JSX.Element {
   // rather than in the shared hook.
   const { moreTabs } = useMobileNavSplit()
   const setShowMoreNav = useStore((s) => s.setShowMoreNav)
+  const showNotifications = useStore((s) => s.showNotifications)
+  const setShowNotifications = useStore((s) => s.setShowNotifications)
+  const unreadNotifications = useUnreadNotificationCount()
   const setApiTrackerTab = useStore((s) => s.setApiTrackerTab)
   const setFocusApiTrackerSearch = useStore((s) => s.setFocusApiTrackerSearch)
   const openTrackerSearch = (): void => {
@@ -96,6 +100,20 @@ export default function HomeViewMobile(): JSX.Element {
           className="w-9 h-9 shrink-0 rounded-full flex items-center justify-center text-text-muted active:bg-[var(--surface-overlay)] transition-colors"
         >
           <Search size={19} />
+        </button>
+        {/* The notification area; on desktop it's a side-menu control. */}
+        <button
+          data-notifications-toggle
+          onClick={() => setShowNotifications(!showNotifications)}
+          aria-label={unreadNotifications > 0 ? `Notifications, ${unreadNotifications} new` : 'Notifications'}
+          className="relative w-9 h-9 shrink-0 rounded-full flex items-center justify-center text-text-muted active:bg-[var(--surface-overlay)] transition-colors"
+        >
+          <Bell size={19} />
+          {unreadNotifications > 0 && (
+            <span className="absolute top-0.5 right-0.5 min-w-[15px] h-[15px] rounded-full bg-accent text-white text-[9px] font-bold flex items-center justify-center px-0.5 leading-none">
+              {unreadNotifications > 99 ? '99+' : unreadNotifications}
+            </span>
+          )}
         </button>
         {account && userApi.showStaffProfile(account) && (
           <button

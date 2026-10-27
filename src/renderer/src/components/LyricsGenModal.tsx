@@ -37,8 +37,9 @@ import LyricsSyncTab from './LyricsSyncTab'
 import { useAudioClock, useSyncMode } from './SyncedLyricsTool'
 
 // "Synced lyrics": timing lyrics to a song, by hand or with Whisper. Sync is
-// the Synced lyrics tool (the same one as the song editor's Sync) on audio the
-// dialog holds, for anyone: tap along a line or a word at a time, then nudge.
+// the Synced lyrics tool on audio the dialog holds, for anyone: tap along a
+// line or a word at a time, then nudge. The song editor's Sync opens it here,
+// on the song and its lyrics.
 // Generate is the donor lyrics generation (Whisper on the server), the same
 // jobs the terminal's lyricsgen / lyricsjobs / lyricsmodel reach: a short form
 // - the audio (a file, or a song's own audio), what to make, the lyrics to
@@ -99,6 +100,12 @@ function jobAudio(job: Pick<LyricsGenJob, 'filename' | 'source'>): { server: Lyr
 const matches = (a: AudioChoice, e: Expected): boolean =>
   e.server ? !!a.server && sameServerAudio(a.server, e.server) : audioName(a) === e.name
 
+/** Lyrics for Sync: plain text becomes untimed lines; an LRC (line or word) is taken as it is. */
+function asSyncLrc(t: string): string {
+  const text = t.replace(/\r\n?/g, '\n').trim()
+  return looksLikeLrc(text) ? text : serializeSyncedLyrics(linesFromPlain(text))
+}
+
 export default function LyricsGenModal(): JSX.Element | null {
   const target = useStore((s) => s.lyricsGenModal)
   if (!target) return null
@@ -152,6 +159,8 @@ function LyricsGenDialog({ target }: { target: LyricsGenTarget }): JSX.Element {
   const [big, setBig] = useState<BigSizes>(() => ({ sync: true, other: false, ...ls.get<Partial<BigSizes>>(SIZE_KEY) }))
   useEffect(() => { if (syncLrc) ls.set(SYNC_DRAFT_KEY, syncLrc); else ls.remove(SYNC_DRAFT_KEY) }, [syncLrc])
   const syncLines = useMemo(() => parseSyncedLyrics(syncLrc), [syncLrc])
+  const syncSaved = target.sync?.saved ?? ''
+  const syncOriginal = useMemo(() => (syncSaved.trim() ? parseSyncedLyrics(syncSaved) : null), [syncSaved])
   const [syncMode, setSyncMode] = useSyncMode(hasWordTiming(syncLines))
   const fileUrl = useMemo(() => (audio?.file ? URL.createObjectURL(audio.file) : null), [audio?.file])
   useEffect(() => () => { if (fileUrl) URL.revokeObjectURL(fileUrl) }, [fileUrl])
@@ -210,22 +219,26 @@ function LyricsGenDialog({ target }: { target: LyricsGenTarget }): JSX.Element {
   }, [])
 
   // Opened (or re-opened) on a song: offer it, and load its audio straight
-  // away unless some audio is already here. The song editor's Auto-sync
-  // brings its lyrics and mode too, and always this song's audio.
+  // away unless some audio is already here. The song editor's Sync brings
+  // its lyrics too, in place of the draft (which the toast can bring back),
+  // and always this song's audio.
   const audioRef = useRef(audio)
   audioRef.current = audio
+  const syncLrcRef = useRef(syncLrc)
+  syncLrcRef.current = syncLrc
   useEffect(() => {
     if (target.tab) setTab(target.tab)
-    if (target.prefill) {
-      setMode(target.prefill.mode)
-      setModePicked(false)
-      setText(target.prefill.text.replace(/\r\n?/g, '\n').trim())
-      setKeptAdlibs(new Set())
-      setFormError(null)
+    if (target.sync) {
+      const before = syncLrcRef.current
+      const next = asSyncLrc(target.sync.text)
+      setSyncLrc(next)
+      if (before.trim() && before.trim() !== next) {
+        showAppToast('Opened on the song editor\'s lyrics, in place of the ones that were here', { tone: 'info', action: { label: 'Undo', onClick: () => setSyncLrc(before) } })
+      }
     }
     if (!target.track) return
     setSuggested(target.track)
-    if ((target.prefill || !audioRef.current) && canLoad(target.track)) {
+    if ((target.sync || !audioRef.current) && canLoad(target.track)) {
       setOpenJob(null)
       loadTrack(target.track)
     }
@@ -363,11 +376,7 @@ function LyricsGenDialog({ target }: { target: LyricsGenTarget }): JSX.Element {
   }
 
   // ── Lyrics for Sync ──
-  // Plain text becomes untimed lines; an LRC (line or word) is taken as it is.
-  const takeSyncText = (t: string): void => {
-    const text = t.replace(/\r\n?/g, '\n').trim()
-    setSyncLrc(looksLikeLrc(text) ? text : serializeSyncedLyrics(linesFromPlain(text)))
-  }
+  const takeSyncText = (t: string): void => setSyncLrc(asSyncLrc(t))
   const syncFromSong = async (): Promise<void> => {
     if (!lyricsTrack) return
     try {
@@ -678,6 +687,7 @@ function LyricsGenDialog({ target }: { target: LyricsGenTarget }): JSX.Element {
             ) : shownTab === 'sync' ? (
               <LyricsSyncTab
                 lines={syncLines}
+                original={syncOriginal}
                 onLines={setSyncLrc}
                 mode={syncMode}
                 onMode={setSyncMode}
