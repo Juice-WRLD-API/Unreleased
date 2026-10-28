@@ -3,8 +3,8 @@
 // addSongsInBackground is the background half of a multi-song "Add to
 // playlist": the caller
 // has already closed its menu / select mode as if the add succeeded; this
-// sends the requests, refreshes the playlist summaries, auto-downloads the
-// added songs if the playlist is kept offline, toasts if any failed,
+// sends one song_ids request, refreshes the playlist summaries, auto-downloads
+// the added songs if the playlist is kept offline, toasts if it failed,
 // and resolves to the song ids that didn't make it so the caller can roll
 // back whatever it marked locally.
 import * as userApi from './userApi'
@@ -15,18 +15,18 @@ import { isPrivateEntry, playlistItemToEntry, trackToPlaylistEntry } from './pla
 import type { Track } from '../types'
 
 export async function addSongsInBackground(playlistId: number, songIds: number[]): Promise<number[]> {
-  const results = await Promise.allSettled(songIds.map(id => userApi.addToPlaylist(playlistId, id)))
-  const failed = songIds.filter((_, i) => results[i].status === 'rejected')
-  void useStore.getState().refreshPlaylists()
-  const added = songIds.filter((_, i) => results[i].status === 'fulfilled')
-  if (added.length) void useStore.getState().autoDownloadIfOffline(playlistId, added)
-  if (failed.length) {
+  if (!songIds.length) return []
+  try {
+    await userApi.addSongsToPlaylist(playlistId, songIds)
+    void useStore.getState().refreshPlaylists()
+    void useStore.getState().autoDownloadIfOffline(playlistId, songIds)
+    return []
+  } catch {
+    void useStore.getState().refreshPlaylists()
     const name = useStore.getState().playlists.find(p => p.id === playlistId)?.name ?? 'playlist'
-    showAppToast(failed.length === songIds.length
-      ? `Couldn't add to "${name}"`
-      : `${failed.length} of ${songIds.length} songs couldn't be added to "${name}"`)
+    showAppToast(`Couldn't add to "${name}"`)
+    return songIds
   }
-  return failed
 }
 
 // The same for entries of any source (comp, donor and local files as well as

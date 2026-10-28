@@ -61,7 +61,7 @@ const NOT_APPLICABLE = {
   'newsNotifications.mergeSubscriptionsFromProfile': 'applies the profile’s subscriptions locally (me, news subscribe)',
   'apiFilesShared.findSongByFilename': 'Files-tab lookup over /songs (find)',
   'donorPlaylistEntries.*': 'one-off move of old donor playlists, and keeping a re-tagged file’s playlist slots; the calls are getPlaylist/createPlaylist/addPlaylistEntry/reorderPlaylistItems (playlist)',
-  'optimisticPlaylist.*':'optimistic UI wrappers over userApi.addToPlaylist/addPlaylistEntry/updatePlaylist (playlist add, playlist public)',
+  'optimisticPlaylist.*':'optimistic UI wrappers over userApi.addSongsToPlaylist/addToPlaylist/addPlaylistEntry/updatePlaylist (playlist add, playlist public)',
   'compFileChanges.proposeFileChanges': 'batch wrapper over createCompProposal (comp new)',
   'coverSuggestions.advanceRotatedCover': 'cover search over third-party catalogs, client-side rotation',
   'eras.loadEraFullNames': 'era name loader (era ls)',

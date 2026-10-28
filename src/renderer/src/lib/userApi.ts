@@ -961,24 +961,71 @@ export async function deletePlaylist(id: number): Promise<void> {
   cacheDelete(playlistDetailUrl(id))
 }
 
+type PlaylistItemsAddCreated = {
+  item?: PlaylistItemEntry
+  items?: PlaylistItemEntry[]
+  updated_at: string
+}
+type PlaylistItemsAddResponse = { detail: string } | PlaylistItemsAddCreated
+
+function playlistItemsAddCreated(result: PlaylistItemsAddResponse): result is PlaylistItemsAddCreated {
+  return typeof (result as PlaylistItemsAddCreated).updated_at === 'string'
+}
+
+function mergePlaylistAfterItemsAdd(id: number, added: PlaylistItemEntry[], updatedAt: string): PlaylistDetail | null {
+  const cached = playlistDetailCache.get(id)
+  if (!cached) return null
+  const seen = new Set(cached.items.map(it => it.id))
+  const items = [...cached.items]
+  for (const it of added) {
+    if (!seen.has(it.id)) {
+      seen.add(it.id)
+      items.push(it)
+    }
+  }
+  items.sort((a, b) => a.position - b.position || a.id - b.id)
+  return storePlaylistDetail(id, { ...cached, items, updated_at: updatedAt })
+}
+
+async function applyPlaylistItemsAddResponse(id: number, result: PlaylistItemsAddResponse): Promise<PlaylistDetail> {
+  if (!playlistItemsAddCreated(result)) {
+    return playlistDetailCache.get(id) ?? getPlaylist(id)
+  }
+  const added = result.item ? [result.item] : (result.items ?? [])
+  if (!added.length) {
+    const cached = playlistDetailCache.get(id)
+    if (cached) {
+      return storePlaylistDetail(id, { ...cached, updated_at: result.updated_at })
+    }
+    return getPlaylist(id)
+  }
+  return mergePlaylistAfterItemsAdd(id, added, result.updated_at) ?? getPlaylist(id)
+}
+
+export async function addSongsToPlaylist(id: number, songIds: number[]): Promise<PlaylistDetail> {
+  if (!songIds.length) return playlistDetailCache.get(id) ?? getPlaylist(id)
+  const unique = [...new Set(songIds)]
+  const result = await request<PlaylistItemsAddResponse>(`${LIBRARY_BASE}/playlists/${id}/items/`, {
+    method: 'POST',
+    body: JSON.stringify({ song_ids: unique }),
+  })
+  return applyPlaylistItemsAddResponse(id, result)
+}
+
 export async function addToPlaylist(id: number, songId: number): Promise<PlaylistDetail> {
-  const result = await request<PlaylistDetail>(`${LIBRARY_BASE}/playlists/${id}/items/`, {
+  const result = await request<PlaylistItemsAddResponse>(`${LIBRARY_BASE}/playlists/${id}/items/`, {
     method: 'POST',
     body: JSON.stringify({ song_id: songId }),
   })
-  return storePlaylistDetail(id, result)
+  return applyPlaylistItemsAddResponse(id, result)
 }
 
-/** Add any kind of entry (song, comp file, donor file, local file). Resolves
- *  to the updated detail, or to the cached one when the server says it was
- *  already there. */
 export async function addPlaylistEntry(id: number, entry: PlaylistEntryInput): Promise<PlaylistDetail> {
-  const result = await request<PlaylistDetail | { detail: string }>(`${LIBRARY_BASE}/playlists/${id}/items/`, {
+  const result = await request<PlaylistItemsAddResponse>(`${LIBRARY_BASE}/playlists/${id}/items/`, {
     method: 'POST',
     body: JSON.stringify(entry),
   })
-  if (!('items' in result)) return playlistDetailCache.get(id) ?? getPlaylist(id)
-  return storePlaylistDetail(id, result)
+  return applyPlaylistItemsAddResponse(id, result)
 }
 
 /** Remove one entry by its own id - the only way to remove a non-song entry. */

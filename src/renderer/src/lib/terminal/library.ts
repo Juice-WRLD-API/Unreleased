@@ -1,6 +1,6 @@
 import { useStore } from '../../store/useStore'
 import {
-  addPlaylistEntry, addToPlaylist, createPlaylist, deletePlaylist, getPlaylist, removeFromPlaylist, removePlaylistEntry, trackIdToSongId,
+  addPlaylistEntry, addSongsToPlaylist, addToPlaylist, createPlaylist, deletePlaylist, getPlaylist, removeFromPlaylist, removePlaylistEntry, trackIdToSongId,
   type PlaylistEntryInput, type PlaylistItemEntry, type PlaylistSummary,
 } from '../userApi'
 import { isPrivateEntry, itemSource, playlistItemsToTracks, playlistSongIds, trackToPlaylistEntry } from '../playlistItems'
@@ -200,12 +200,12 @@ export const LIBRARY_COMMANDS: TermCommand[] = [
     name: 'playlist', aliases: ['pl'], group: 'Library',
     usage: 'playlist <play|shuffle|show|open> <name|N>  ·  show <name|N> -- <filter>  ·  create <name>  ·  delete <name|N>  ·  add|remove <name|N> -- <song | file <path> | myfile <name> | local <name>>  ·  remove <name|N> -- at <N>  ·  rename|describe <name|N> -- <text>  ·  public|private <name|N>  ·  move <name|N> -- <from> <to>  ·  cover <name|N|id:N> [-- show|set|rm]  ·  view <id>',
     covers: [
-      'userApi.getPlaylists', 'userApi.createPlaylist', 'userApi.deletePlaylist', 'userApi.addToPlaylist', 'userApi.removeFromPlaylist', 'userApi.getPlaylist',
+      'userApi.getPlaylists', 'userApi.createPlaylist', 'userApi.deletePlaylist', 'userApi.addToPlaylist', 'userApi.addSongsToPlaylist', 'userApi.removeFromPlaylist', 'userApi.getPlaylist',
       'userApi.addPlaylistEntry', 'userApi.removePlaylistEntry', 'userApi.reorderPlaylistItems',
       'userApi.renamePlaylist', 'userApi.updatePlaylist', 'userApi.uploadPlaylistCover', 'userApi.removePlaylistCover',
       'userApi.getPlaylistCover', 'userApi.getPublicPlaylist', 'userApi.getPublicPlaylistCover',
     ],
-    description: 'Play, inspect and edit your playlists. <name> can be a few letters of the title, <N> or #N a number from playlists, <song> a title or a number from find. Playlists can also hold files: file <path> from the Files tab\'s current comp, myfile <name> from your uploads, local <name> from this device\'s library (the last two only in private playlists)',
+    description: 'Play, inspect and edit your playlists. <name> can be a few letters of the title, <N> or #N a number from playlists, <song> a title or a number from find. Several find numbers separated by commas (1,2,3) add those songs in one request. Playlists can also hold files: file <path> from the Files tab\'s current comp, myfile <name> from your uploads, local <name> from this device\'s library (the last two only in private playlists)',
     complete: completePlaylistNames,
     run: async (args, ctx) => {
       const [sub = '', ...restWords] = args.trim().split(/\s+/)
@@ -274,6 +274,17 @@ export const LIBRARY_COMMANDS: TermCommand[] = [
             await removePlaylistEntry(pl.id, row.item.id)
             await st().refreshPlaylists()
             ctx.print(`removed ${rowLabel(row)} from "${pl.name}"`, 'ok')
+            return
+          }
+          // Find numbers "1,2,3" are the catalogue songs from the last find,
+          // added with one song_ids request. A single number stays a normal add.
+          const bulkNums = isAdd ? target.split(',').map((s) => s.trim()).filter(Boolean) : []
+          if (bulkNums.length > 1 && bulkNums.every((s) => /^\d+$/.test(s))) {
+            const songs: JWApiSong[] = []
+            for (const n of bulkNums) songs.push(await songFromArg(n))
+            await addSongsToPlaylist(pl.id, songs.map((s) => s.id))
+            await st().refreshPlaylists()
+            ctx.print(`added ${songs.length} songs to "${pl.name}"`, 'ok')
             return
           }
           const { entry, label } = await entryFromArg(target)
