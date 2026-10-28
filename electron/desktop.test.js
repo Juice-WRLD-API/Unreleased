@@ -230,8 +230,30 @@ test('the widgets are measured as their pages lay themselves out', () => {
   const list = playlistMetrics({ size: 0.4, rows: 8 }, 1)
   const s = 0.8 + 0.5 * 0.4
   assert.equal(list.height, Math.ceil(66 * s + 8 * s + 8 * 50 * s + 48))
-  assert.equal(displayName({ label: '', id: 7 }), 'Display 7')
-  assert.equal(displayName({ label: 'DELL U2720Q', id: 7 }), 'DELL U2720Q')
+  const at = (label, x, y = 0, id = 1) => ({ label, id, bounds: { x, y, width: 1920, height: 1080 } })
+  const unnamed = at('', 0, 0, 7)
+  assert.equal(displayName(unnamed, [unnamed]), 'Display 7')
+  const dell = at('DELL U2720Q', 0), lg = at('LG ULTRAGEAR', 1920)
+  assert.equal(displayName(dell, [dell, lg]), 'DELL U2720Q')
+})
+
+test('two monitors of one model get names of their own', () => {
+  const { displayName } = require('./desktop/widgets')
+  const at = (label, x, y = 0, id = 1) => ({ label, id, bounds: { x, y, width: 1920, height: 1080 } })
+  const main = at('DELL U2720Q', 0), side = at('DELL U2720Q', -1920, 120)
+  const pair = [main, side]
+  assert.equal(displayName(main, pair), 'DELL U2720Q, right')
+  assert.equal(displayName(side, pair), 'DELL U2720Q, left')
+  // Hiding one keeps its name: names come from every display, not the shown ones.
+  assert.notEqual(displayName(main, pair), displayName(side, pair))
+  const top = at('DELL U2720Q', 200, -1080), bottom = at('DELL U2720Q', 0)
+  assert.equal(displayName(top, [bottom, top]), 'DELL U2720Q, top')
+  assert.equal(displayName(bottom, [bottom, top]), 'DELL U2720Q, bottom')
+  // The same id on both, and no label: still told apart.
+  const blank = [at('', 0, 0, 3), at('', 1920, 0, 3)]
+  assert.deepEqual(blank.map((d) => displayName(d, blank)), ['Display 3, left', 'Display 3, right'])
+  const row = [at('AOC', 3840), at('AOC', 0), at('AOC', 1920), at('LG', 5760)]
+  assert.deepEqual(row.map((d) => displayName(d, row)), ['AOC, 3rd from left', 'AOC, 1st from left', 'AOC, 2nd from left', 'LG'])
 })
 
 test('the widgets in the WRLD tab are measured as the desktop\'s windows are', () => {

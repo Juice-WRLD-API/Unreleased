@@ -29,8 +29,28 @@ function playlistMetrics(style, fit = 1) {
   return { s, edge: margin, width: Math.ceil(width + 2 * margin), height: Math.ceil(headerHeight + gap + listHeight + 2 * margin) }
 }
 
-/** A display's name as the settings keep it. */
-const displayName = (d) => d.label || `Display ${d.id}`
+const labelOf = (d) => d.label || `Display ${d.id}`
+const centerOf = (d) => ({ x: d.bounds.x + d.bounds.width / 2, y: d.bounds.y + d.bounds.height / 2 })
+const sameBounds = (a, b) => a.x === b.x && a.y === b.y && a.width === b.width && a.height === b.height
+const ordinal = (n) => `${n}${n === 1 ? 'st' : n === 2 ? 'nd' : n === 3 ? 'rd' : 'th'}`
+
+/** A display's name as the settings keep it: its label - and where it sits, when another display has the same label
+ *  (two monitors of one model): left or right, top or bottom, or its place counting from the left. Twins are told
+ *  apart by place, not id, which they can share too. `all` is every display there is, hidden ones included. */
+function displayName(d, all) {
+  const label = labelOf(d)
+  const twins = all.filter((o) => labelOf(o) === label)
+  if (twins.length < 2) return label
+  if (twins.length === 2) {
+    const [a, b] = twins.map(centerOf)
+    const first = sameBounds(twins[0].bounds, d.bounds)
+    if (Math.abs(a.x - b.x) >= Math.abs(a.y - b.y)) return `${label}, ${first === (a.x < b.x) ? 'left' : 'right'}`
+    return `${label}, ${first === (a.y < b.y) ? 'top' : 'bottom'}`
+  }
+  twins.sort((p, q) => centerOf(p).x - centerOf(q).x || centerOf(p).y - centerOf(q).y)
+  const at = twins.findIndex((o) => sameBounds(o.bounds, d.bounds))
+  return at < 0 ? label : `${label}, ${ordinal(at + 1)} from left`
+}
 
 const DEFAULT_PLACES = {
   player: () => [0.5, 0.64],
@@ -84,7 +104,8 @@ class Widget {
   display() {
     const shown = this.options.displays()
     const named = this.place()?.display
-    return shown.find((d) => displayName(d) === named) || shown.find((d) => d.id === screen.getPrimaryDisplay().id) || shown[0] || screen.getPrimaryDisplay()
+    const all = screen.getAllDisplays()
+    return shown.find((d) => displayName(d, all) === named) ||shown.find((d) => d.id === screen.getPrimaryDisplay().id) || shown[0] || screen.getPrimaryDisplay()
   }
 
   fit() { return fitAt(this.display().workArea) }
@@ -236,7 +257,7 @@ class Widget {
     const display = screen.getDisplayNearestPoint(center)
     const area = display.workArea
     const clamp = (v) => Math.min(Math.max(v, 0), 1)
-    const place = { x: clamp((center.x - area.x) / area.width), y: clamp((center.y - area.y) / area.height), display: displayName(display) }
+    const place = { x: clamp((center.x - area.x) / area.width), y: clamp((center.y - area.y) / area.height), display: displayName(display, screen.getAllDisplays()) }
     this.dropPlace = place
     this.options.onPlace(this.which, place)
   }

@@ -50,7 +50,8 @@ function createDesktop(options) {
 
   const shownDisplays = () => {
     const hidden = new Set(settings?.hiddenDisplays || [])
-    const shown = screen.getAllDisplays().filter((d) => !hidden.has(displayName(d)))
+    const all = screen.getAllDisplays()
+    const shown = all.filter((d) => !hidden.has(displayName(d, all)))
     return shown.length ? shown : [screen.getPrimaryDisplay()]
   }
 
@@ -293,7 +294,8 @@ function createDesktop(options) {
   const invokers = {
     'desktop:displays': () => {
       const primary = screen.getPrimaryDisplay().id
-      return screen.getAllDisplays().map((d) => ({ label: displayName(d), primary: d.id === primary }))
+      const all = screen.getAllDisplays()
+      return all.map((d) => ({ label: displayName(d, all), primary: d.id === primary }))
     },
     'desktop:page-hello': (event) => {
       const role = roles.get(event.sender)

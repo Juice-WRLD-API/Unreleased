@@ -1,6 +1,6 @@
 # Agent guide: Juice WRLD API and Unreleased
 
-**Version 1.36** · updated 2026-10-27. Bump the version and date whenever you
+**Version 1.37** · updated 2026-10-27. Bump the version and date whenever you
 change this file (minor for fixes and additions, major for rewrites).
 
 **Keep this file current.** If you find something in the docs or this file that
@@ -391,6 +391,13 @@ Node 22.
 
 Newest first. One entry each: date, what went wrong, what to do instead. Delete
 entries that stop being true.
+
+- 2026-10-27: Desktop settings kept displays by Electron's `display.label`, which
+  is the monitor model, so two monitors of one model shared a name: hiding one
+  hid both, and a widget left on the second came back on the first. Name
+  displays only through `displayName(d, all)` in `electron/desktop/widgets.js`,
+  passing every display (hidden ones too); it adds left/right or top/bottom for
+  twins. Don't key displays by `id` either: twins can share it.
 
 - 2026-10-27: Playlists showed up seconds after launch. Every song in playlist
   and favorites responses carried full `lyrics`/`synced_lyrics` (7.1M of a
