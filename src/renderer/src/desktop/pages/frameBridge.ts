@@ -55,6 +55,7 @@ export function frameBridge(): Bridge {
     size: (width: number, height: number) => post({ type: 'size', width: Number(width) || 0, height: Number(height) || 0 }),
     curtainOpened: () => {},
     menu: (x: number, y: number, part?: string) => post({ type: 'menu', x: Number(x) || 0, y: Number(y) || 0, ...(part === 'lyrics' ? { part } : {}) }),
+    songMenu: (x: number, y: number, place: number, id: string) => post({ type: 'song-menu', x: Number(x) || 0, y: Number(y) || 0, place: Number(place), id: String(id) }),
   }
   return bridge as unknown as Bridge
 }

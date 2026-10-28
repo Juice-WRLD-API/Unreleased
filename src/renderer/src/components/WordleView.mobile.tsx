@@ -1,6 +1,6 @@
 import { useEffect } from 'react'
 import {
-  ChevronLeft, Search, X, Check, Music2, BarChart3, Share2, RefreshCw,
+  Search, X, Check, Music2, BarChart3, Share2, RefreshCw,
   AlertCircle, Loader2, Volume2, SlidersHorizontal, RotateCcw, Type, Delete,
 } from 'lucide-react'
 import { useStorePick } from '../store/useStore'
@@ -15,6 +15,8 @@ import { GameSwitcher, GameBackdrop, Field, Segmented, numberInput } from './gam
 import { formatCountdown, lastUsedBucket } from '../lib/heardleViewShared'
 import { tileTone, Row, useWordleSettingsForm, statsSummary } from '../lib/wordleViewShared'
 import { useWordleGame, MODES, KEY_ROWS } from '../hooks/useWordleGame'
+import { BackButton, BarButton } from './mobile/NavBar'
+import { Segmented as IosSegmented } from './mobile/Segmented'
 
 // ─── Board ────────────────────────────────────────────────────────────────────
 
@@ -29,7 +31,7 @@ function Keyboard({ hints, onLetter, onEnter, onBackspace, disabled }: {
   onBackspace: () => void
   disabled: boolean
 }): JSX.Element {
-  const base = 'h-11 rounded-md border flex items-center justify-center text-xs font-bold transition-colors disabled:opacity-40'
+  const base = 'h-11 rounded-[7px] border flex items-center justify-center text-subhead font-semibold transition-colors disabled:opacity-40'
   return (
     <div className="space-y-1.5">
       {KEY_ROWS.map((row, i) => (
@@ -38,7 +40,7 @@ function Keyboard({ hints, onLetter, onEnter, onBackspace, disabled }: {
             <button
               onClick={onEnter}
               disabled={disabled}
-              className={`${base} flex-[1.6] border-accent/40 bg-accent/10 text-text-primary active:bg-accent/20 text-[10px] uppercase tracking-wider`}
+              className={`${base} flex-[1.6] border-transparent bg-accent text-white active:opacity-80 !text-footnote`}
             >
               Enter
             </button>
@@ -51,7 +53,7 @@ function Keyboard({ hints, onLetter, onEnter, onBackspace, disabled }: {
                 onClick={() => onLetter(letter)}
                 disabled={disabled}
                 className={`${base} flex-1 min-w-0 ${
-                  state ? tileTone(state) : 'border-[var(--border)] bg-[var(--surface-overlay)]/60 text-text-primary active:border-accent/40'
+                  state ? tileTone(state) : 'border-transparent bg-[var(--fill-strong)] text-text-primary active:bg-[var(--fill)]'
                 }`}
               >
                 {letter}
@@ -63,7 +65,7 @@ function Keyboard({ hints, onLetter, onEnter, onBackspace, disabled }: {
               onClick={onBackspace}
               disabled={disabled}
               title="Delete"
-              className={`${base} flex-[1.6] border-[var(--border)] bg-[var(--surface-overlay)]/60 text-text-primary active:border-accent/40`}
+              className={`${base} flex-[1.6] border-transparent bg-[var(--fill-strong)] text-text-primary active:bg-[var(--fill)]`}
             >
               <Delete size={15} />
             </button>
@@ -95,27 +97,27 @@ function SettingsPanel({ settings, onChange, eras, mode, onClose }: {
         <div className="px-5 pt-2 flex justify-end">
           <button
             onClick={() => onChange({ ...DEFAULT_SETTINGS })}
-            className="flex items-center gap-1.5 h-9 px-3 rounded-full text-xs font-semibold text-text-muted active:bg-surface-overlay transition-colors"
+            className="flex items-center gap-1.5 h-9 px-1 text-subhead text-accent active:opacity-60 transition-opacity"
           >
-            <RotateCcw size={12} /> Reset to defaults
+            <RotateCcw size={14} /> Reset to defaults
           </button>
         </div>
       }
     >
       <div className="px-5 pb-2">
-        <p className="text-xs text-text-muted mb-3">
-          These apply to <span className="text-text-secondary font-semibold">Unlimited</span> only. The Daily
+        <p className="text-footnote text-text-secondary mb-3">
+          These apply to <span className="text-text-primary font-semibold">Unlimited</span> only. The Daily
           title always runs the standard rules - everyone plays the same round, and a six-guess round and a
           ten-guess round aren't the same result.
         </p>
         {mode !== 'unlimited' && (
-          <p className="text-xs text-accent bg-accent/10 border border-accent/25 rounded-lg px-3 py-2 mb-4">
+          <p className="text-footnote text-accent bg-accent/10 rounded-xl px-3 py-2 mb-4">
             You're playing Daily right now - nothing here changes that round. Switch to Unlimited to
             play by these.
           </p>
         )}
 
-        <h3 className="text-[10px] font-bold uppercase tracking-widest text-text-muted mb-1">Difficulty</h3>
+        <h3 className="text-footnote font-semibold text-text-secondary mb-1">Difficulty</h3>
         <Field label="Guesses" hint={`${MIN_TRIES}–${MAX_TRIES} titles per round`}>
           <input
             type="number"
@@ -134,18 +136,18 @@ function SettingsPanel({ settings, onChange, eras, mode, onClose }: {
           />
         </Field>
 
-        <h3 className="text-[10px] font-bold uppercase tracking-widest text-text-muted mt-4 mb-1">Title pool</h3>
-        <div className="py-3 border-b border-[var(--border)]">
-          <div className="text-sm text-text-primary font-medium mb-2">Catalogues</div>
+        <h3 className="text-footnote font-semibold text-text-secondary mt-5 mb-1">Title pool</h3>
+        <div className="py-3 border-b border-[var(--separator)]">
+          <div className="text-body text-text-primary mb-2">Catalogues</div>
           <div className="flex flex-wrap gap-1.5">
             {(Object.keys(POOL_LABELS) as PoolId[]).map((c) => (
               <button
                 key={c}
                 onClick={() => toggleCategory(c)}
-                className={`h-8 px-3 rounded-full text-xs font-semibold border transition-colors ${
+                className={`h-8 px-3 rounded-full text-footnote font-semibold transition-colors ${
                   settings.categories.includes(c)
-                    ? 'border-accent/50 bg-accent/15 text-accent'
-                    : 'border-[var(--border)] text-text-muted'
+                    ? 'bg-accent/15 text-accent'
+                    : 'bg-[var(--fill)] text-text-secondary'
                 }`}
               >
                 {POOL_LABELS[c]}
@@ -155,12 +157,12 @@ function SettingsPanel({ settings, onChange, eras, mode, onClose }: {
         </div>
         <div className="py-3">
           <div className="flex items-center gap-2 mb-2">
-            <div className="text-sm text-text-primary font-medium">Eras</div>
-            <span className="text-xs text-text-muted">
+            <div className="text-body text-text-primary">Eras</div>
+            <span className="text-footnote text-text-muted">
               {settings.eras.length === 0 ? 'All' : `${settings.eras.length} selected`}
             </span>
             {settings.eras.length > 0 && (
-              <button onClick={() => set('eras', [])} className="ml-auto text-xs text-accent active:underline">
+              <button onClick={() => set('eras', [])} className="ml-auto text-subhead text-accent active:opacity-60">
                 Clear
               </button>
             )}
@@ -171,16 +173,16 @@ function SettingsPanel({ settings, onChange, eras, mode, onClose }: {
                 key={era}
                 onClick={() => toggleEra(era)}
                 title={eraFullName(era) ?? era}
-                className={`h-8 px-2.5 rounded-full text-xs font-semibold border transition-colors ${
+                className={`h-8 px-3 rounded-full text-footnote font-semibold transition-colors ${
                   settings.eras.includes(era)
-                    ? 'border-accent/50 bg-accent/15 text-accent'
-                    : 'border-[var(--border)] text-text-muted'
+                    ? 'bg-accent/15 text-accent'
+                    : 'bg-[var(--fill)] text-text-secondary'
                 }`}
               >
                 {era} <span className="opacity-60">{count}</span>
               </button>
             ))}
-            {eras.length === 0 && <span className="text-xs text-text-muted">Loading…</span>}
+            {eras.length === 0 && <span className="text-footnote text-text-muted">Loading…</span>}
           </div>
         </div>
       </div>
@@ -196,8 +198,8 @@ function StatsPanel({ onClose }: { onClose: () => void }): JSX.Element {
   return (
     <Sheet onClose={onClose} title="Statistics">
       <div className="px-5 pb-4">
-        <p className="text-xs text-text-muted mb-4">Daily rounds only - Unlimited isn't counted.</p>
-        <div className="grid grid-cols-4 gap-2 mb-5 text-center">
+        <p className="text-footnote text-text-secondary mb-4">Daily rounds only - Unlimited isn't counted.</p>
+        <div className="grid grid-cols-4 gap-2 mb-5 text-center rounded-[20px] bg-[var(--fill)] py-3">
           {[
             { label: 'Played', value: stats.played },
             { label: 'Win %', value: winRate },
@@ -205,21 +207,21 @@ function StatsPanel({ onClose }: { onClose: () => void }): JSX.Element {
             { label: 'Best', value: stats.maxStreak },
           ].map((s) => (
             <div key={s.label}>
-              <div className="text-text-primary text-xl font-bold">{s.value}</div>
-              <div className="text-[10px] uppercase tracking-wider text-text-muted">{s.label}</div>
+              <div className="text-title2 text-text-primary tabular-nums">{s.value}</div>
+              <div className="text-caption1 text-text-secondary">{s.label}</div>
             </div>
           ))}
         </div>
         <div className="space-y-1.5">
           {stats.distribution.slice(0, Math.max(DEFAULT_SETTINGS.tries, lastUsedBucket(stats))).map((n, i) => (
             <div key={i} className="flex items-center gap-2">
-              <span className="w-3 text-xs text-text-muted">{i + 1}</span>
-              <div className="flex-1 h-5 rounded bg-[var(--surface-overlay)] overflow-hidden">
+              <span className="w-3 text-footnote text-text-secondary tabular-nums">{i + 1}</span>
+              <div className="flex-1 h-6 rounded-md bg-[var(--fill)] overflow-hidden">
                 <div
-                  className="h-full bg-accent/70 flex items-center justify-end px-1.5"
+                  className="h-full rounded-md bg-accent flex items-center justify-end px-2"
                   style={{ width: `${Math.max(6, (n / max) * 100)}%` }}
                 >
-                  <span className="text-[10px] font-bold text-white">{n}</span>
+                  <span className="text-caption1 font-semibold text-white tabular-nums">{n}</span>
                 </div>
               </div>
             </div>
@@ -272,34 +274,20 @@ export default function WordleView(): JSX.Element {
         className="absolute left-2 z-20"
         style={{ top: ownsTopInset ? 'calc(var(--top-inset) + 0.5rem)' : '0.5rem' }}
       >
-        <button
-          // See HeardleView.mobile.tsx's back button - same reasoning: Home,
-          // not WRLD, is where mobile actually enters this game from now.
-          onClick={() => setActiveView(previousView ?? 'home')}
-          aria-label="Back"
-          className="w-11 h-11 flex items-center justify-center rounded-full text-text-primary active:bg-surface-overlay transition-colors"
-        >
-          <ChevronLeft size={20} />
-        </button>
+        {/* See HeardleView.mobile.tsx's back button - same reasoning: Home,
+            not WRLD, is where mobile actually enters this game from now. */}
+        <BackButton onClick={() => setActiveView(previousView ?? 'home')} />
       </div>
       <div
-        className="absolute right-2 z-20 flex items-center gap-1"
+        className="absolute right-2 z-20 flex items-center gap-2"
         style={{ top: ownsTopInset ? 'calc(var(--top-inset) + 0.5rem)' : '0.5rem' }}
       >
-        <button
-          onClick={() => setShowSettings(true)}
-          aria-label="Game settings"
-          className="w-11 h-11 flex items-center justify-center rounded-full text-text-muted active:bg-surface-overlay transition-colors"
-        >
-          <SlidersHorizontal size={17} />
-        </button>
-        <button
-          onClick={() => setShowStats(true)}
-          aria-label="Statistics"
-          className="w-11 h-11 flex items-center justify-center rounded-full text-text-muted active:bg-surface-overlay transition-colors"
-        >
-          <BarChart3 size={17} />
-        </button>
+        <BarButton label="Game settings" onClick={() => setShowSettings(true)}>
+          <SlidersHorizontal size={19} />
+        </BarButton>
+        <BarButton label="Statistics" onClick={() => setShowStats(true)}>
+          <BarChart3 size={19} />
+        </BarButton>
       </div>
 
       {/* z-10: the backdrop layers above are absolutely positioned, so content
@@ -315,34 +303,25 @@ export default function WordleView(): JSX.Element {
 
           {/* Hero */}
           <div className="text-center mb-5">
-            <h1 className="text-text-primary text-3xl font-black tracking-tight inline-flex items-start gap-1">
+            <h1 className="text-title1 text-text-primary inline-flex items-start gap-1">
               Juice WRLD Wordle
-              <span className="text-accent text-sm font-mono font-bold mt-1">999</span>
+              <span className="text-accent text-footnote font-bold mt-0.5">999</span>
             </h1>
-            <p className="mt-2 text-[11px] font-mono lowercase tracking-[0.18em] text-text-muted">
-              guess the song title, letter by letter
+            <p className="mt-1 text-subhead text-text-secondary">
+              Guess the song title, letter by letter
             </p>
           </div>
 
-          {/* Mode tabs - a scrollable pill row, same idiom as Heardle's. */}
-          <div className="flex items-center justify-center gap-2 mb-2 overflow-x-auto scrollbar-none">
-            {MODES.map((m) => (
-              <button
-                key={m.id}
-                onClick={() => setMode(m.id)}
-                title={m.hint}
-                className={`shrink-0 h-9 px-3.5 rounded-full text-xs font-bold uppercase tracking-[0.14em] transition-colors ${
-                  mode === m.id
-                    ? 'bg-accent text-white'
-                    : 'bg-[var(--surface-overlay)] text-text-muted active:text-text-secondary'
-                }`}
-              >
-                {m.label}
-              </button>
-            ))}
+          {/* Mode - the same segmented control as Heardle's. */}
+          <div className="mb-2">
+            <IosSegmented
+              value={mode}
+              options={MODES.map((m) => ({ value: m.id, label: m.label }))}
+              onChange={setMode}
+            />
           </div>
 
-          <p className="text-center text-[10px] font-mono tracking-wider text-text-muted mb-3">
+          <p className="text-center text-footnote text-text-muted mb-3">
             {isDaily && `#${puzzleNumber(day)} · `}
             {MODES.find((m) => m.id === mode)?.hint.toLowerCase()}
             {length > 0 && ` · ${length} letters · ${tries} guesses`}
@@ -357,30 +336,30 @@ export default function WordleView(): JSX.Element {
                 onClick={newRound}
                 disabled={entries.length === 0}
                 title="Skip this title and draw another"
-                className="inline-flex items-center gap-2 h-9 px-4 rounded-full bg-[var(--surface-overlay)] text-text-muted active:text-text-primary text-[10px] font-bold uppercase tracking-[0.18em] transition-colors disabled:opacity-40"
+                className="inline-flex items-center gap-1.5 h-9 px-4 rounded-full bg-[var(--fill)] text-accent text-subhead font-semibold active:bg-[var(--fill-strong)] transition-colors disabled:opacity-40"
               >
-                <RefreshCw size={12} /> Reroll
+                <RefreshCw size={14} /> Reroll
               </button>
             ) : (
-              <div className="h-[30px]" aria-hidden />
+              <div className="h-9" aria-hidden />
             )}
           </div>
 
           {poolLoading ? (
             <div className="flex flex-col items-center gap-3 py-24 text-text-muted">
               <Loader2 size={20} className="animate-spin" />
-              <p className="text-sm">
+              <p className="text-subhead">
                 Loading the {categories.map((c) => POOL_LABELS[c].toLowerCase()).join(' + ')} catalogue…
               </p>
             </div>
           ) : poolError ? (
             <div className="flex flex-col items-center gap-3 py-24 text-center">
               <AlertCircle size={22} className="text-red-400" />
-              <p className="text-sm text-text-secondary">Couldn't load the catalogue - {poolError}</p>
+              <p className="text-subhead text-text-secondary">Couldn't load the catalogue - {poolError}</p>
             </div>
           ) : !answer ? (
             <div className="flex flex-col items-center gap-3 py-24 text-center">
-              <p className="text-sm text-text-muted">
+              <p className="text-subhead text-text-secondary">
                 {rules.eras.length > 0
                   ? 'No titles match the eras you picked.'
                   : `No title in this pool has ${MIN_OPTIONS} others its length to play against.`}
@@ -388,7 +367,7 @@ export default function WordleView(): JSX.Element {
               {rules.eras.length > 0 && (
                 <button
                   onClick={() => setSettings((s) => ({ ...s, eras: [] }))}
-                  className="text-xs font-semibold text-accent active:underline"
+                  className="text-subhead font-semibold text-accent active:opacity-60"
                 >
                   Clear era filter
                 </button>
@@ -397,7 +376,7 @@ export default function WordleView(): JSX.Element {
           ) : (
             <>
               {/* Board */}
-              <div className="rounded-2xl border border-[var(--border)] bg-[var(--surface-raised)]/60 p-4 space-y-4">
+              <div className="rounded-[20px] bg-[var(--grouped)] p-4 space-y-4">
                 <div className="space-y-1">
                   {Array.from({ length: tries }, (_, i) => {
                     const row = rows[i]
@@ -420,7 +399,7 @@ export default function WordleView(): JSX.Element {
                 </div>
 
                 {notice && !finished && (
-                  <p className="text-center text-xs text-red-400">{notice}</p>
+                  <p className="text-center text-footnote text-red-500">{notice}</p>
                 )}
 
                 {!finished && (
@@ -437,36 +416,36 @@ export default function WordleView(): JSX.Element {
                         easier named than spelled. Picking one here submits it
                         exactly as typing it out would. */}
                     <div className="relative">
-                      <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-text-muted pointer-events-none" />
+                      <Search size={17} className="absolute left-3 top-1/2 -translate-y-1/2 text-text-muted pointer-events-none" />
                       <input
                         value={query}
                         onChange={(e) => { setQuery(e.target.value); setDropdownOpen(true) }}
                         onFocus={() => setDropdownOpen(true)}
                         onKeyDown={handleKeyDown}
                         placeholder={`or find a ${length}-letter title by name…`}
-                        className="w-full h-11 pl-9 pr-3 rounded-xl bg-[var(--surface-overlay)]/50 border border-[var(--border)] text-sm text-text-primary placeholder:text-text-muted focus:outline-none focus:border-accent/50"
+                        className="w-full h-11 pl-9 pr-3 rounded-full bg-[var(--fill)] border border-transparent text-body text-text-primary placeholder:text-text-muted focus:outline-none focus:border-accent/50"
                       />
                       {dropdownOpen && suggestions.length > 0 && (
-                        <div className="absolute bottom-full mb-1 left-0 right-0 max-h-64 overflow-y-auto rounded-xl border border-[var(--border)] bg-[var(--surface-raised)] shadow-xl z-20">
+                        <div className="absolute bottom-full mb-2 left-0 right-0 max-h-64 overflow-y-auto rounded-2xl glass-thick z-20">
                           {suggestions.map((s, i) => {
                             const alias = matchedAlias(s, query)
                             return (
                               <button
                                 key={s.id}
                                 onClick={() => submitGuess(s)}
-                                className={`w-full text-left px-3 py-2.5 flex items-center gap-2 transition-colors ${
-                                  i === highlighted ? 'bg-accent/15' : 'active:bg-surface-overlay'
+                                className={`w-full text-left px-4 py-2.5 flex items-center gap-2 transition-colors ${
+                                  i === highlighted ? 'bg-accent/15' : 'active:bg-[var(--fill)]'
                                 } ${alreadyGuessed(s) ? 'opacity-40' : ''}`}
                               >
                                 <span className="min-w-0">
-                                  <span className="block text-sm text-text-primary truncate">{s.name}</span>
+                                  <span className="block text-body text-text-primary truncate">{s.name}</span>
                                   {/* Why this row is here when the name doesn't
                                       match what was typed. */}
                                   {alias && (
-                                    <span className="block text-[10px] text-text-muted truncate">aka {alias}</span>
+                                    <span className="block text-caption1 text-text-muted truncate">aka {alias}</span>
                                   )}
                                 </span>
-                                {s.era && <span className="ml-auto shrink-0 text-[10px] text-text-muted uppercase tracking-wider">{s.era}</span>}
+                                {s.era && <span className="ml-auto shrink-0 text-footnote text-text-muted">{s.era}</span>}
                               </button>
                             )
                           })}
@@ -487,20 +466,20 @@ export default function WordleView(): JSX.Element {
                     return (
                       <div
                         key={i}
-                        className={`h-10 rounded-lg border flex items-center gap-2 px-3 ${
+                        className={`h-11 rounded-xl flex items-center gap-2.5 px-3.5 text-text-primary ${
                           correct
-                            ? 'border-accent/50 bg-accent/15 text-text-primary'
+                            ? 'bg-accent/15'
                             : sameEra
-                              ? 'border-amber-500/40 bg-amber-500/10 text-text-primary'
-                              : 'border-[var(--border)] bg-[var(--surface-raised)] text-text-primary'
+                              ? 'bg-amber-500/15'
+                              : 'bg-[var(--grouped)]'
                         }`}
                       >
                         {correct
-                          ? <Check size={14} className="shrink-0 text-accent" />
-                          : <X size={14} className="shrink-0 text-red-400" />}
-                        <span className="text-sm truncate">{guess.label}</span>
+                          ? <Check size={16} className="shrink-0 text-accent" />
+                          : <X size={16} className="shrink-0 text-red-500" />}
+                        <span className="text-body truncate">{guess.label}</span>
                         {!correct && sameEra && (
-                          <span className="ml-auto shrink-0 text-[10px] font-bold uppercase tracking-widest text-amber-400">
+                          <span className="ml-auto shrink-0 text-footnote font-semibold text-amber-500">
                             Same era
                           </span>
                         )}
@@ -511,23 +490,23 @@ export default function WordleView(): JSX.Element {
               )}
 
               {finished && (
-                <div className="mt-4 rounded-2xl border border-[var(--border)] bg-[var(--surface-raised)] p-4">
+                <div className="mt-4 rounded-[20px] bg-[var(--grouped)] p-4">
                   <div className="flex gap-4">
                     {/* Art stays hidden until the round is over - era covers are
                         shared, so showing one early would narrow the field. */}
-                    <div className="w-20 h-20 shrink-0 rounded-xl border border-[var(--border)] bg-[var(--surface-overlay)] overflow-hidden flex items-center justify-center">
+                    <div className="w-20 h-20 shrink-0 rounded-xl bg-[var(--fill)] overflow-hidden flex items-center justify-center">
                       {answer.song.imageUrl
                         ? <img src={smallCoverUrl(answer.song.imageUrl)} alt="" className="w-full h-full object-cover" />
                         : <Music2 size={28} className="text-text-muted" />}
                     </div>
                     <div className="min-w-0 flex-1">
-                      <p className={`text-[10px] font-bold uppercase tracking-[0.2em] mb-1 ${status === 'won' ? 'text-accent' : 'text-red-400'}`}>
+                      <p className={`text-footnote font-semibold mb-0.5 ${status === 'won' ? 'text-accent' : 'text-red-500'}`}>
                         {status === 'won'
                           ? `Got it in ${guesses.length} ${guesses.length === 1 ? 'guess' : 'guesses'}`
                           : 'Out of guesses'}
                       </p>
-                      <h2 className="text-text-primary text-lg font-bold leading-snug">{answer.song.name}</h2>
-                      <p className="text-sm text-text-secondary mt-0.5">
+                      <h2 className="text-title3 text-text-primary">{answer.song.name}</h2>
+                      <p className="text-subhead text-text-secondary mt-0.5">
                         {[answer.song.era, CATEGORY_LABELS[answer.song.category] ?? answer.song.category,
                           answer.song.length].filter(Boolean).join(' · ')}
                       </p>
@@ -536,7 +515,7 @@ export default function WordleView(): JSX.Element {
                           win on "Titanic" reading back as "Titanic (v2)" looks
                           like the game graded something else. */}
                       {/[([{]/.test(answer.song.name) && (
-                        <p className="text-xs text-text-muted mt-1.5">
+                        <p className="text-footnote text-text-muted mt-1.5">
                           Tiles spell <span className="font-mono">{answer.key}</span> - anything in brackets
                           is left off the board.
                         </p>
@@ -544,33 +523,33 @@ export default function WordleView(): JSX.Element {
                     </div>
                   </div>
                   {playError && (
-                    <p className="text-xs text-red-400 mt-3">Couldn't load that song. Check your connection.</p>
+                    <p className="text-footnote text-red-500 mt-3">Couldn't load that song. Check your connection.</p>
                   )}
                   <div className="flex flex-wrap items-center gap-2 mt-4">
                     <button
                       onClick={playFullSong}
-                      className="inline-flex items-center gap-1.5 h-10 px-3.5 rounded-lg text-sm font-semibold bg-accent text-white active:opacity-90 transition-opacity"
+                      className="inline-flex items-center gap-1.5 h-11 px-4 rounded-full text-subhead font-semibold bg-accent text-white active:opacity-80 transition-opacity"
                     >
-                      <Volume2 size={15} /> Play full song
+                      <Volume2 size={16} /> Play full song
                     </button>
                     {isDaily ? (
                       <button
                         onClick={share}
                         title="Share"
-                        className="inline-flex items-center gap-1.5 h-10 px-3.5 rounded-lg text-sm font-semibold bg-[var(--surface-overlay)] text-text-secondary active:text-text-primary transition-colors"
+                        className="inline-flex items-center gap-1.5 h-11 px-4 rounded-full text-subhead font-semibold bg-[var(--fill)] text-text-primary active:bg-[var(--fill-strong)] transition-colors"
                       >
-                        <Share2 size={15} /> {copied ? 'Copied!' : 'Share'}
+                        <Share2 size={16} /> {copied ? 'Copied!' : 'Share'}
                       </button>
                     ) : (
                       <button
                         onClick={newRound}
-                        className="inline-flex items-center gap-1.5 h-10 px-3.5 rounded-lg text-sm font-semibold bg-[var(--surface-overlay)] text-text-secondary active:text-text-primary transition-colors"
+                        className="inline-flex items-center gap-1.5 h-11 px-4 rounded-full text-subhead font-semibold bg-[var(--fill)] text-text-primary active:bg-[var(--fill-strong)] transition-colors"
                       >
-                        <RefreshCw size={15} /> Next title
+                        <RefreshCw size={16} /> Next title
                       </button>
                     )}
                     {isDaily && (
-                      <span className="ml-auto text-xs text-text-muted tabular-nums">
+                      <span className="ml-auto text-footnote text-text-muted tabular-nums">
                         Next title in {formatCountdown(countdown)}
                       </span>
                     )}
@@ -579,8 +558,8 @@ export default function WordleView(): JSX.Element {
               )}
 
               {!finished && (
-                <p className="text-center text-[10px] font-mono tracking-wider text-text-muted mt-4 flex items-center justify-center gap-1.5">
-                  <Type size={11} />
+                <p className="text-center text-footnote text-text-muted mt-4 flex items-center justify-center gap-1.5">
+                  <Type size={13} className="shrink-0" />
                   {tries - guesses.length} {tries - guesses.length === 1 ? 'guess' : 'guesses'} left ·
                   {' '}type it out or search by name ·
                   {' '}{optionCount} titles are {length} letters long

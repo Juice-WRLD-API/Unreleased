@@ -18,7 +18,7 @@ const CATEGORIES = [
 // text-text-muted` convention instead of the plain blank space that used to
 // separate these groups.
 function SectionLabel({ children }: { children: string }): JSX.Element {
-  return <p className="text-[10px] font-bold uppercase tracking-widest text-text-muted pt-2 pb-0.5">{children}</p>
+  return <p className="text-footnote font-semibold text-text-secondary pt-3 pb-1 px-1">{children}</p>
 }
 
 export default function AddSongModal({ onClose, onSubmitted, channel }: {
@@ -36,18 +36,18 @@ export default function AddSongModal({ onClose, onSubmitted, channel }: {
 
   return (
     <div ref={overlayRef} className="fixed inset-0 z-50 flex items-end justify-center" onClick={e => { if (e.target === overlayRef.current) onClose() }}>
-      <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={onClose} />
-      <div className="relative w-full max-w-2xl bg-[var(--surface)] rounded-t-2xl shadow-2xl border border-[var(--border)] border-b-0 animate-slide-up flex flex-col max-h-[88dvh]">
+      <div className="absolute inset-0 bg-black/40" onClick={onClose} />
+      <div className="relative w-full max-w-2xl glass-thick rounded-t-[28px] animate-slide-up flex flex-col max-h-[88dvh]">
         {/* Header */}
-        <div className="flex items-center gap-3 px-5 pt-5 pb-4 border-b border-[var(--border)] shrink-0">
-          <div className="w-9 h-9 rounded-2xl bg-accent/15 border border-accent/20 flex items-center justify-center shrink-0">
+        <div className="flex items-center gap-3 px-5 pt-5 pb-4 border-b border-[var(--separator)] shrink-0">
+          <div className="w-9 h-9 rounded-xl bg-accent/15 flex items-center justify-center shrink-0">
             <Plus size={16} className="text-accent" />
           </div>
           <div className="flex-1 min-w-0">
-            <p className="text-text-primary font-bold text-sm">Propose new song</p>
-            <p className="text-text-muted text-xs opacity-60 mt-0.5">Admins review and add it to the database</p>
+            <p className="text-headline text-text-primary">Propose new song</p>
+            <p className="text-footnote text-text-secondary mt-0.5">Admins review and add it to the database</p>
           </div>
-          <button onClick={onClose} title="Close" className="w-9 h-9 flex items-center justify-center rounded-lg text-text-muted active:text-text-primary active:bg-[var(--surface-overlay)] transition-colors shrink-0">
+          <button onClick={onClose} title="Close" className="w-[30px] h-[30px] flex items-center justify-center rounded-full bg-[var(--fill)] text-text-secondary active:bg-[var(--fill-strong)] transition-colors shrink-0">
             <X size={15} />
           </button>
         </div>
@@ -70,7 +70,7 @@ export default function AddSongModal({ onClose, onSubmitted, channel }: {
           <BasicRow label="Credited artists" value={f.artists} onChange={v => updateField('artists', v)} placeholder="Juice WRLD ft. …" suggest="credited_artists" />
 
           <button onClick={() => setShowMore(v => !v)}
-            className="flex items-center gap-1.5 self-start px-1 py-1.5 text-[11px] font-semibold text-text-muted opacity-60 active:opacity-100 transition-opacity select-none">
+            className="flex items-center gap-1.5 self-start px-1 py-1.5 text-footnote font-semibold text-accent active:opacity-60 transition-opacity select-none">
             {showMore ? <ChevronUp size={11} /> : <ChevronDown size={11} />}
             {showMore ? 'Fewer fields' : 'More fields'}
           </button>
@@ -109,7 +109,7 @@ export default function AddSongModal({ onClose, onSubmitted, channel }: {
 
               {/* Synced lyrics get the editor's line table, with the same raw
                   escape hatch for pasting a whole LRC at once. */}
-              <div className="rounded-md border border-[var(--border)] bg-[var(--surface-overlay)]/60 px-2.5 py-1.5">
+              <div className="rounded-xl border border-transparent bg-[var(--fill)] px-2.5 py-1.5">
                 <div className="flex items-center gap-1.5">
                   <span className="text-[10px] font-semibold tracking-wide text-text-muted leading-tight">Synced lyrics</span>
                   <span className="flex-1" />
@@ -141,27 +141,27 @@ export default function AddSongModal({ onClose, onSubmitted, channel }: {
         </div>
 
         {/* Footer */}
-        <div className="shrink-0 border-t border-[var(--border)] px-5 py-4 space-y-3">
+        <div className="shrink-0 border-t border-[var(--separator)] px-5 pt-3 space-y-3" style={{ paddingBottom: 'calc(env(safe-area-inset-bottom, 0px) + 0.75rem)' }}>
           <input value={edNotes} onChange={e => setEdNotes(e.target.value)} placeholder="Editor notes (optional)…"
-            className="w-full bg-[var(--surface-overlay)] border border-[var(--border)] rounded-xl px-3 py-2 text-xs text-text-primary placeholder:text-text-muted placeholder:opacity-30 focus:outline-none focus:border-accent/40 transition-colors" />
+            className="w-full bg-[var(--fill)] border border-transparent rounded-xl px-3.5 py-2.5 text-subhead text-text-primary placeholder:text-text-muted placeholder:opacity-30 focus:outline-none focus:border-accent/40 transition-colors" />
           {submitError && (
-            <div className="flex items-center gap-2 text-red-400 text-xs">
+            <div className="flex items-center gap-2 text-red-500 text-footnote">
               <AlertCircle size={12} className="shrink-0" /> {submitError}
             </div>
           )}
           <button onClick={handleSubmit} disabled={!f.name.trim() || submitState === 'submitting' || submitState === 'submitted'}
-            className={`w-full py-2.5 rounded-xl text-sm font-bold transition-all flex items-center justify-center gap-2 ${
+            className={`w-full h-12 rounded-full text-headline transition-[background-color,color,opacity] flex items-center justify-center gap-2 ${
               submitState === 'submitted' ? 'bg-emerald-500/20 text-emerald-400' :
               submitState === 'error'     ? 'bg-red-500/20 text-red-400' :
-              !f.name.trim()              ? 'bg-[var(--surface-overlay)] text-text-muted opacity-40 cursor-not-allowed' :
-              'bg-accent text-white hover:bg-accent/90 shadow-lg shadow-accent/20'
+              !f.name.trim()              ? 'bg-[var(--fill)] text-text-muted opacity-50 cursor-not-allowed' :
+              'bg-accent text-white active:opacity-80'
             }`}>
             {submitState === 'submitting' && <Loader2 size={14} className="animate-spin" />}
             {submitState === 'submitted'  && <Check size={14} />}
             {submitState === 'error'      && <AlertCircle size={14} />}
-            {submitState === 'idle'       && 'Stage proposal'}
-            {submitState === 'submitting' && 'Staging…'}
-            {submitState === 'submitted'  && 'Staged!'}
+            {submitState === 'idle'       && 'Submit proposal'}
+            {submitState === 'submitting' && 'Submitting…'}
+            {submitState === 'submitted'  && 'Submitted!'}
             {submitState === 'error'      && 'Try again'}
           </button>
         </div>

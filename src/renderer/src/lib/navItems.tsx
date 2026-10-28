@@ -1,4 +1,4 @@
-import { SearchCode, SquareTerminal, HardDrive, ListMusic, Heart, BookOpen, Newspaper, Gamepad2, BarChart3, Shield, House, User, Download, Upload, Info, Settings } from 'lucide-react'
+import { SearchCode, SquareTerminal, HardDrive, ListMusic, Heart, BookOpen, Newspaper, Gamepad2, BarChart3, Shield, House, User, Download, Upload, Info, Settings, Bell } from 'lucide-react'
 import type { ReactNode } from 'react'
 import logo from '../assets/logo.png'
 import type { ViewType } from '../types'
@@ -174,7 +174,7 @@ export function isNavItemVisible(item: NavItemDef, visibility: Record<string, bo
 // the Sidebar owns their behavior and renders each by id. `login` and the
 // collapse toggle are deliberately NOT here: they stay pinned so the user can
 // never hide the only ways to sign in or re-expand a collapsed menu.
-export type NavControlId = 'profile' | 'uploads' | 'diagnostics' | 'download' | 'settings'
+export type NavControlId = 'profile' | 'uploads' | 'notifications' | 'diagnostics' | 'download' | 'settings'
 
 export interface NavControlDef {
   id: NavControlId
@@ -186,6 +186,7 @@ export interface NavControlDef {
 export const NAV_CONTROLS: NavControlDef[] = [
   { id: 'profile', label: 'Profile', icon: <User size={18} /> },
   { id: 'uploads', label: 'Transfers', icon: <Upload size={18} /> },
+  { id: 'notifications', label: 'Notifications', icon: <Bell size={18} /> },
   { id: 'diagnostics', label: 'Diagnostics', icon: <Info size={18} /> },
   { id: 'download', label: 'Download app', icon: <Download size={18} /> },
   { id: 'settings', label: 'Settings', icon: <Settings size={18} /> },
@@ -205,7 +206,14 @@ export function orderedNavControls(order: string[]): NavControlDef[] {
     const c = byId.get(id as NavControlId)
     if (c && !seen.has(id)) { out.push(c); seen.add(id) }
   }
-  for (const c of NAV_CONTROLS) if (!seen.has(c.id)) out.push(c)
+  // A control the saved order predates goes in after its neighbour in the
+  // default order, not below Settings at the very end.
+  NAV_CONTROLS.forEach((c, i) => {
+    if (seen.has(c.id)) return
+    const before = NAV_CONTROLS.slice(0, i).reverse().find((p) => seen.has(p.id))
+    out.splice(before ? out.findIndex((o) => o.id === before.id) + 1 : 0, 0, c)
+    seen.add(c.id)
+  })
   return out
 }
 
@@ -215,13 +223,14 @@ export interface NavControlCtx { account: boolean; isElectron: boolean; develope
 // user's show/hide choice): profile needs an account, download is web only,
 // diagnostics needs developer mode, uploads needs something to show (an
 // active transfer, this session's history, or staged proposals) - otherwise it's a button that
-// opens an empty panel - settings is always available.
+// opens an empty panel - notifications and settings are always available.
 export function isNavControlAvailable(id: NavControlId, ctx: NavControlCtx): boolean {
   switch (id) {
     case 'profile': return ctx.account
     case 'download': return !ctx.isElectron
     case 'diagnostics': return ctx.developerMode
     case 'uploads': return ctx.hasUploads
+    case 'notifications': return true
     case 'settings': return true
   }
 }

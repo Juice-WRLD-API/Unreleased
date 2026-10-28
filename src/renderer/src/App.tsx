@@ -22,6 +22,16 @@ const FOCUS_REFRESH_MIN_INTERVAL_MS = 60 * 1000
 // Wordle play audio, so those are left to remount.
 const HOLD_UNDER_TERMINAL: ViewType[] = ['editor', 'contributor', 'albums-admin', 'playlists', 'settings', 'chat']
 
+// Mobile views that run their scrollers under the floating glass dock (tab bar
+// + mini player) and pad their own ends for it (.pb-dock). Every other view
+// gets that room reserved on `main` instead, so its layout ends above the dock
+// exactly as it did when the dock took up space in the column.
+const MOBILE_SCROLL_UNDER: ViewType[] = ['home', 'playlists', 'liked', 'api-tracker', 'api-files', 'settings', 'stats', 'docs']
+// Of those, the ones whose large title draws under the status bar: their own
+// nav bar pads itself by --top-inset (mobile/NavBar). Tracker and Files keep
+// the reserved strip - their search and tabs stay pinned at the top.
+const MOBILE_BLEED_TOP: ViewType[] = ['home', 'playlists', 'settings', 'stats', 'docs']
+
 function getViewFromPath(pathname: string): ViewType {
   if (pathname === '/home') return 'home'
   // Desktop and installed apps land on Home; a mobile browser tab still gets
@@ -109,16 +119,20 @@ import { useChatBootstrap } from './hooks/useChatBootstrap'
 import { UserCardHost } from './components/chat/UserCard'
 const UserAuthModal = lazyOverlay(() => import('./components/UserAuthModal'))
 const DebugLogViewer = lazyView(() => import('./components/DebugLogViewer'))
+const RecognitionModal = lazyView(() => import('./components/RecognitionModal'))
 const LoginApprovalPrompt = lazyView(() => import('./components/LoginApprovalPrompt'))
 // Donors and administrators only - fetched the first time it opens.
 const LyricsGenModal = lazyOverlay(() => import('./components/LyricsGenModal'))
+const CoverArtSubmitModal = lazyOverlay(() => import('./components/CoverArtSubmitModal'))
 const BulkEditModal = lazyOverlay(() => import('./components/BulkEditModal'))
 const UploadManager = lazyOverlay(() => import('./components/UploadManager'))
+const NotificationCenter = lazyOverlay(() => import('./components/NotificationCenter'))
 const GlobalSongInfoHost = lazyOverlay(async () => ({ default: (await import('./components/SongInfoModal')).GlobalSongInfoHost }))
 
 export default function App(): JSX.Element {
-  const { showNowPlaying, showQueue, showSettings, setShowSettings, showDiagnostics, setShowDiagnostics, showUploadManager, setShowUploadManager, activeView, previousView, sidebarPosition, navStyle, autoHideNav, loadAccount, completeDiscordLogin, showUserAuth, setShowUserAuth, prefetchApiData, refreshPlaylists, heroBleedTop, navOrder, navVisibility, activeChannel, bulkEdit, infoSongId } = useStorePick(
-    'showNowPlaying', 'showQueue', 'showSettings', 'setShowSettings', 'showDiagnostics', 'setShowDiagnostics', 'showUploadManager', 'setShowUploadManager', 'activeView', 'previousView', 'sidebarPosition', 'navStyle', 'autoHideNav', 'loadAccount', 'completeDiscordLogin', 'showUserAuth', 'setShowUserAuth', 'prefetchApiData', 'refreshPlaylists', 'heroBleedTop', 'navOrder', 'navVisibility', 'activeChannel', 'bulkEdit', 'infoSongId')
+  const showRecognition = useStore((s) => s.showRecognition)
+  const { showNowPlaying, showQueue, showSettings, setShowSettings, showDiagnostics, setShowDiagnostics, showUploadManager, setShowUploadManager, showNotifications, setShowNotifications, activeView, previousView, sidebarPosition, navStyle, autoHideNav, loadAccount, completeDiscordLogin, showUserAuth, setShowUserAuth, prefetchApiData, refreshPlaylists, heroBleedTop, navOrder, navVisibility, activeChannel, bulkEdit, infoSongId } = useStorePick(
+    'showNowPlaying', 'showQueue', 'showSettings', 'setShowSettings', 'showDiagnostics', 'setShowDiagnostics', 'showUploadManager', 'setShowUploadManager', 'showNotifications', 'setShowNotifications', 'activeView', 'previousView', 'sidebarPosition', 'navStyle', 'autoHideNav', 'loadAccount', 'completeDiscordLogin', 'showUserAuth', 'setShowUserAuth', 'prefetchApiData', 'refreshPlaylists', 'heroBleedTop', 'navOrder', 'navVisibility', 'activeChannel', 'bulkEdit', 'infoSongId')
   // What renders behind WRLD - WRLD is a full-screen overlay on top of
   // wherever you were (Spotify-style "now playing" sheet), not a real nav
   // destination, so dragging it down should reveal that page like a curtain
@@ -140,6 +154,7 @@ export default function App(): JSX.Element {
   const isMobile = useIsMobile()
   const debugLogOpen = useDebugLogViewer((s) => s.log !== null)
   const lyricsGenOpen = useStore((s) => s.lyricsGenModal !== null)
+  const coverArtOpen = useStore((s) => s.coverArtModal !== null)
   useThemeEffects()
   useChatBootstrap()
   // Seed auth token from env in local dev only - import.meta.env.DEV is false in production
@@ -307,10 +322,19 @@ export default function App(): JSX.Element {
           // needed there.
           // Mobile's nav bar is bottom-only (no per-platform top option any
           // more - see BottomNav), so on mobile this only ever depends on
-          // heroBleedTop. sidebarPosition still gates it on desktop, where
-          // Sidebar itself can sit at the top and already reserves the space.
-          style={(isMobile || sidebarPosition !== 'top' || autoHideNav || navStyle === 'pill') && !heroBleedTop
-            ? { paddingTop: 'var(--top-inset)' } : undefined}
+          // heroBleedTop and the large-title views (MOBILE_BLEED_TOP).
+          // sidebarPosition still gates it on desktop, where Sidebar itself
+          // can sit at the top and already reserves the space.
+          //
+          // The bottom: the mobile dock floats over `main` rather than
+          // sitting under it, so views that don't scroll beneath it get its
+          // height reserved here instead.
+          style={{
+            paddingTop: (isMobile || sidebarPosition !== 'top' || autoHideNav || navStyle === 'pill') && !heroBleedTop
+              && !(isMobile && MOBILE_BLEED_TOP.includes(bgView))
+              ? 'var(--top-inset)' : undefined,
+            paddingBottom: isMobile && !MOBILE_SCROLL_UNDER.includes(bgView) ? 'var(--dock-h)' : undefined,
+          }}
         >
           <div className="flex-1 overflow-hidden flex">
             <ErrorBoundary>
@@ -364,17 +388,30 @@ export default function App(): JSX.Element {
             {activeView === 'wrld' && (
               <ErrorBoundary>
                 <Suspense fallback={null}>
-                  <div className="absolute inset-0 z-30">
-                    {/* No compensation needed for main's padding here: an
-                        absolutely positioned element's offsets resolve
-                        against its containing block's padding edge, which
-                        sits BEFORE (outside) that padding - so `inset-0`
-                        already reaches the true top of `main` regardless of
-                        whatever padding-top `main` itself has. (An earlier
-                        version of this added a negative top offset to
-                        "compensate," which was wrong and clipped the top of
-                        WRLD - including its header row - behind `main`'s
-                        own overflow-hidden.) */}
+                  <div
+                    // Mobile: pinned over the whole shell, not just `main`,
+                    // so it covers the mini player and BottomNav too - both
+                    // stay mounted underneath instead of being hidden while
+                    // WRLD is open. Hiding them made `main` grow to full
+                    // height for WRLD, so the curtain-drag revealed the page
+                    // with no nav bar, and the bar (and the page reflowing to
+                    // make room for it) only came back once collapse() ran
+                    // after the slide-out. Sized off --app-height, same as
+                    // .app-shell itself.
+                    //
+                    // Desktop: no compensation needed for main's padding
+                    // here: an absolutely positioned element's offsets
+                    // resolve against its containing block's padding edge,
+                    // which sits BEFORE (outside) that padding - so `inset-0`
+                    // already reaches the true top of `main` regardless of
+                    // whatever padding-top `main` itself has. (An earlier
+                    // version of this added a negative top offset to
+                    // "compensate," which was wrong and clipped the top of
+                    // WRLD - including its header row - behind `main`'s own
+                    // overflow-hidden.)
+                    className={isMobile ? 'fixed inset-x-0 top-0 z-30' : 'absolute inset-0 z-30'}
+                    style={isMobile ? { height: 'var(--app-height)' } : undefined}
+                  >
                     <WrldView />
                   </div>
                 </Suspense>
@@ -424,6 +461,11 @@ export default function App(): JSX.Element {
           <UploadManager />
         </ErrorBoundary>
       )}
+      {showNotifications && (
+        <ErrorBoundary variant="overlay" onDismiss={() => setShowNotifications(false)}>
+          <NotificationCenter />
+        </ErrorBoundary>
+      )}
       {showUserAuth && (
         <ErrorBoundary variant="overlay" onDismiss={() => setShowUserAuth(false)}>
           <UserAuthModal onClose={() => setShowUserAuth(false)} />
@@ -437,6 +479,12 @@ export default function App(): JSX.Element {
           <LyricsGenModal />
         </ErrorBoundary>
       )}
+      {coverArtOpen && (
+        <ErrorBoundary variant="overlay" onDismiss={() => useStore.getState().closeCoverArtSubmit()}>
+          <CoverArtSubmitModal />
+        </ErrorBoundary>
+      )}
+      {showRecognition && <ErrorBoundary variant="overlay"><Suspense fallback={null}><RecognitionModal /></Suspense></ErrorBoundary>}
       <ErrorBoundary fallback={null}><InstallPrompt /></ErrorBoundary>
       <ErrorBoundary fallback={null}><CookieNotice /></ErrorBoundary>
       <ErrorBoundary fallback={null}><DonationNotice /></ErrorBoundary>

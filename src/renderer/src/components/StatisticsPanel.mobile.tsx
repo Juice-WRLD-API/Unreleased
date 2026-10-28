@@ -10,7 +10,7 @@ import SongContextMenu from './SongContextMenu'
 // Header and tab pills belong to ApiTrackerView.mobile - this is just the body.
 
 function SectionLabel({ children }: { children: React.ReactNode }): JSX.Element {
-  return <h2 className="text-text-primary text-[15px] font-bold px-4 mb-2.5">{children}</h2>
+  return <h2 className="text-title3 text-text-primary px-4 mb-2">{children}</h2>
 }
 
 export default function StatisticsPanelMobile({ onOpenEra }: { onOpenEra: (eraName: string) => void }): JSX.Element {
@@ -23,30 +23,28 @@ export default function StatisticsPanelMobile({ onOpenEra }: { onOpenEra: (eraNa
 
   return (
     <div className="flex-1 flex flex-col min-h-0 overflow-hidden">
-      <div className="flex-1 min-h-0 overflow-y-auto overscroll-contain pt-3 pb-6">
+      <div className="flex-1 min-h-0 overflow-y-auto overscroll-contain pt-3 pb-dock">
         {loading ? (
           <div className="px-4 space-y-3">
-            <div className="h-20 bg-surface-raised animate-pulse rounded-xl" />
-            <div className="h-28 bg-surface-raised animate-pulse rounded-xl" />
-            <div className="h-56 bg-surface-raised animate-pulse rounded-xl" />
+            <div className="h-20 bg-[var(--grouped)] animate-pulse rounded-[20px]" />
+            <div className="h-28 bg-[var(--grouped)] animate-pulse rounded-[20px]" />
+            <div className="h-56 bg-[var(--grouped)] animate-pulse rounded-[20px]" />
           </div>
         ) : (
           <>
             {/* Hero */}
-            <div className="flex items-center gap-3 px-4 mb-6">
-              <div className="w-11 h-11 shrink-0 rounded-2xl bg-gradient-to-br from-accent/40 to-accent/10 flex items-center justify-center">
-                <BarChart3 size={20} className="text-accent" />
-              </div>
+            <div className="mx-4 mb-6 rounded-[20px] bg-[var(--grouped)] flex items-center gap-3 px-4 py-3.5">
+              <BarChart3 size={22} className="text-accent shrink-0" />
               <div className="min-w-0 flex-1">
-                <p className="text-text-primary text-xl font-bold tabular-nums leading-tight truncate">{(stats?.total_songs ?? 0).toLocaleString()}</p>
-                <p className="text-text-muted text-xs truncate">songs in catalog</p>
+                <p className="text-title2 text-text-primary tabular-nums truncate">{(stats?.total_songs ?? 0).toLocaleString()}</p>
+                <p className="text-footnote text-text-secondary truncate">Songs in catalog</p>
               </div>
               {playStats && (
                 <>
-                  <div className="w-px h-9 bg-[var(--border)] shrink-0" />
+                  <div className="w-px h-9 bg-[var(--separator)] shrink-0" />
                   <div className="min-w-0 flex-1">
-                    <p className="text-text-primary text-xl font-bold tabular-nums leading-tight truncate">{playStats.total_plays.toLocaleString()}</p>
-                    <p className="text-text-muted text-xs truncate">total plays</p>
+                    <p className="text-title2 text-text-primary tabular-nums truncate">{playStats.total_plays.toLocaleString()}</p>
+                    <p className="text-footnote text-text-secondary truncate">Total plays</p>
                   </div>
                 </>
               )}
@@ -104,7 +102,7 @@ export default function StatisticsPanelMobile({ onOpenEra }: { onOpenEra: (eraNa
                 <div className="px-2">
                   {playStats.recent_plays.map((play) => (
                     <RecentPlayRow
-                      key={play.id} play={play} cover={songMap.get(play.song_id)}
+                      key={play.id} play={play} cover={play.song_id != null ? songMap.get(play.song_id) : undefined}
                       onPlay={playById} onContextMenu={openContextMenu} isMobile
                     />
                   ))}

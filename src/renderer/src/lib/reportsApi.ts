@@ -151,6 +151,7 @@ export async function submitSongReport(r: PendingSongReport, contact?: string | 
     issues ? `Issues: ${issues}` : null,
     `Song: ${r.songName}`,
     r.message || null,
+    r.lyrics ? `Pasted lyrics:\n${r.lyrics}` : null,
     ` - Unreleased v${r.appVersion}`,
   ].filter(Boolean).join('\n\n')
   await post(SONG_REPORTS_URL, { song_id: r.songId, message, ...(contact ? { contact } : {}) })

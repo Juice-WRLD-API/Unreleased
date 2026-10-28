@@ -1,11 +1,12 @@
 import { useState, useEffect, useRef, useCallback, memo, type ReactNode } from 'react'
 import {
-  Loader2, Check, AlertCircle, LogIn, Clock, X, ChevronDown, ArrowLeft,
+  Loader2, Check, AlertCircle, LogIn, Clock, X, ChevronDown,
   ChevronUp, Award, Music2, FileText, Pencil, Plus, Trash2, FolderOpen,
 } from 'lucide-react'
 import FilePickerModal from './FilePickerModal'
 import { useStore, useStorePick } from '../store/useStore'
-import { apiFetch, JWApiSong, JWApiEra, buildImageUrl, toSiteRelativeImageUrl, CATEGORY_LABELS } from '../lib/juicewrldApi'
+import { BackButton } from './mobile/NavBar'
+import { apiFetch, JWApiSong, JWApiEra, buildImageUrl, toSiteRelativeImageUrl, songToTrack, CATEGORY_LABELS } from '../lib/juicewrldApi'
 import * as userApi from '../lib/userApi'
 import { isPrimaryChannelSlug } from '../hooks/useChannelRoles'
 import { invalidateLyricsCache } from './Player'
@@ -24,7 +25,7 @@ import {
 import { useValueSuggestions, DatePickerButton, AppField } from './EditorPageParts'
 import { useEditorPageState } from '../hooks/useEditorPageState'
 import { clickable } from '../lib/a11y'
-import LyricsSyncTool from './LyricsSyncTool'
+import { lyricsToTime } from '../lib/lyricsGenApi'
 
 type SubmitState = 'idle' | 'submitting' | 'submitted' | 'error'
 type LyricsTab = 'lyrics' | 'synced'
@@ -43,12 +44,12 @@ export function Card({ title, icon, action, children, className = '', overflowVi
         <div className="flex items-center gap-1.5 px-1 pb-1.5">
           {icon && <span className="text-text-muted opacity-70 shrink-0">{icon}</span>}
           {title
-            ? <p className="text-[11px] font-semibold uppercase tracking-wider text-text-muted flex-1 min-w-0">{title}</p>
+            ? <p className="text-footnote font-semibold text-text-secondary flex-1 min-w-0">{title}</p>
             : <span className="flex-1" />}
           {action}
         </div>
       )}
-      <div className={`rounded-2xl bg-[var(--surface-overlay)] p-3.5 space-y-2.5 ${overflowVisible ? '' : 'overflow-hidden'}`}>
+      <div className={`rounded-[20px] bg-[var(--grouped)] p-3.5 space-y-2.5 ${overflowVisible ? '' : 'overflow-hidden'}`}>
         {children}
       </div>
     </section>
@@ -68,14 +69,14 @@ export function FieldGrid({ children, cols = 2 }: { children: ReactNode; cols?: 
 function SuggestDropdown({ matches, onPick }: { matches: string[]; onPick: (v: string) => void }): JSX.Element | null {
   if (matches.length === 0) return null
   return (
-    <div className="absolute z-20 top-full left-0 right-0 mt-1 max-h-48 overflow-y-auto rounded-lg border border-[var(--border)] bg-surface-raised shadow-2xl py-1">
+    <div className="absolute z-20 top-full left-0 right-0 mt-1 max-h-48 overflow-y-auto rounded-xl glass-thick py-1">
       {matches.map(m => (
         <button
           key={m}
           // mousedown (not click) fires before the input's blur, so the
           // suggestion is still in `matches` when this runs.
           onMouseDown={e => { e.preventDefault(); onPick(m) }}
-          className="w-full text-left px-2.5 py-2 text-xs text-text-secondary active:bg-surface-overlay active:text-text-primary transition-colors truncate"
+          className="w-full text-left px-2.5 py-2 text-xs text-text-secondary active:bg-[var(--fill)] active:text-text-primary transition-colors truncate"
         >
           {m}
         </button>
@@ -97,7 +98,7 @@ export function FieldRow({ label, value, original = '', onChange, placeholder, m
   const { matches, open, setOpen } = useValueSuggestions(suggest, value)
   return (
     <label className={`relative block rounded-xl border px-2.5 py-1.5 transition-colors ${span ? 'col-span-2' : ''} ${
-      changed ? 'border-accent/40 bg-accent/[0.06]' : 'border-[var(--border)] bg-surface-raised/50'
+      changed ? 'border-accent/40 bg-accent/[0.06]' : 'border-[var(--separator)] bg-surface-raised/50'
     }`}>
       <span className="block text-[10px] font-semibold tracking-wide text-text-muted select-none leading-tight">{label}</span>
       <div className="flex items-center gap-1">
@@ -138,7 +139,7 @@ export function TextareaRow({ label, value, original = '', onChange, rows = 3, p
   const { matches, open, setOpen } = useValueSuggestions(suggest, value)
   return (
     <label className={`relative block rounded-xl border px-2.5 py-1.5 transition-colors ${span ? 'col-span-2' : ''} ${
-      changed ? 'border-accent/40 bg-accent/[0.06]' : 'border-[var(--border)] bg-surface-raised/50'
+      changed ? 'border-accent/40 bg-accent/[0.06]' : 'border-[var(--separator)] bg-surface-raised/50'
     }`}>
       <span className="block text-[10px] font-semibold tracking-wide text-text-muted select-none leading-tight">{label}</span>
       <div className="relative">
@@ -152,7 +153,7 @@ export function TextareaRow({ label, value, original = '', onChange, rows = 3, p
         {dateInput && (
           <DatePickerButton
             onPick={picked => onChange(value.trim() ? `${value}\n${picked}` : picked)}
-            className="absolute right-0 top-0 p-1 rounded text-text-muted active:text-text-primary active:bg-surface-overlay transition-colors"
+            className="absolute right-0 top-0 p-1 rounded text-text-muted active:text-text-primary active:bg-[var(--fill)] transition-colors"
           />
         )}
       </div>
@@ -168,7 +169,7 @@ const basicControlClass =
 
 const basicShellClass = (changed: boolean): string =>
   `block rounded-md border px-2.5 py-1.5 transition-colors focus-within:border-accent/50 ${
-    changed ? 'border-accent/40 bg-accent/[0.06]' : 'border-[var(--border)] bg-surface-overlay/60'
+    changed ? 'border-accent/40 bg-accent/[0.06]' : 'border-[var(--separator)] bg-surface-overlay/60'
   }`
 
 const basicLabelClass =
@@ -256,7 +257,7 @@ export function BasicSelect({ label, value, original, onChange, options, placeho
       </div>
 
       {open && (
-        <div className="absolute left-0 right-0 top-full mt-1 max-h-60 overflow-y-auto rounded-lg border border-[var(--border)] bg-surface-raised shadow-2xl py-1">
+        <div className="absolute left-0 right-0 top-full mt-1 max-h-60 overflow-y-auto rounded-xl glass-thick py-1">
           {[{ value: '', label: placeholder || '—' }, ...options].map(o => {
             const active = o.value === value
             return (
@@ -264,7 +265,7 @@ export function BasicSelect({ label, value, original, onChange, options, placeho
                 key={o.value || '__none'}
                 onClick={e => { e.stopPropagation(); onChange(o.value); setOpen(false) }}
                 className={`w-full flex items-center gap-1.5 text-left px-2.5 py-2 text-xs transition-colors ${
-                  active ? 'text-accent font-semibold bg-accent/10' : 'text-text-secondary active:bg-surface-overlay'
+                  active ? 'text-accent font-semibold bg-accent/10' : 'text-text-secondary active:bg-[var(--fill)]'
                 }`}
               >
                 <span className="flex-1 min-w-0 truncate">{o.label}</span>
@@ -306,8 +307,8 @@ export function SyncedLyricsTable({ value, onChange }: {
               title="Timestamp for this line"
               className={`w-[72px] shrink-0 rounded border px-1.5 py-1.5 font-mono text-[11px] text-center focus:outline-none focus:border-accent/50 transition-colors ${
                 r.time.trim()
-                  ? 'border-[var(--border)] bg-surface-overlay text-text-primary'
-                  : 'border-dashed border-[var(--border)] bg-transparent text-text-muted'
+                  ? 'border-[var(--separator)] bg-surface-overlay text-text-primary'
+                  : 'border-dashed border-[var(--separator)] bg-transparent text-text-muted'
               } placeholder:text-text-muted placeholder:opacity-40`}
             />
             <input
@@ -362,7 +363,7 @@ export default function EditorPage({ initialSongId = null }: {
     instrumentals, setInstrumentals, instrumentalNames, setInstrumentalNames,
     sessionTitles, setSessionTitles, sessionTracking, setSessionTracking,
     lyricsTab, setLyricsTab, lyricsLoading, lyricsError, handleLyricsPaste,
-    syncedTable, setSyncedTable, syncTool, setSyncTool,
+    syncedTable, setSyncedTable,
     submitState, submitError, submit,
     deleteState, setDeleteState, deleteError, submitDeletion,
     showMore, setShowMore,
@@ -373,18 +374,42 @@ export default function EditorPage({ initialSongId = null }: {
     base, current, patch, changedCount, alreadySubmitted,
   } = useEditorPageState(initialSongId)
 
+  // Sync: the Synced lyrics dialog (Home → Tools) on this song, starting from
+  // these lyrics - the synced ones, or else the plain ones to time. Its
+  // result, by hand or from Whisper, comes back to this field, only while the
+  // editor is still on the song it was opened from.
+  const songRef = useRef(song)
+  songRef.current = song
+  const openSync = (): void => {
+    const id = song?.id ?? null
+    useStore.getState().openLyricsGen({
+      ...(song ? { track: songToTrack(song), songId: song.id } : {}),
+      tab: 'sync',
+      sync: { text: synced.trim() || lyricsToTime(lyrics, ''), saved: String(base.synced_lyrics || '') },
+      apply: {
+        label: 'Use in the song editor',
+        onApply: (lrc) => {
+          if ((songRef.current?.id ?? null) !== id) return false
+          setSynced(lrc)
+          setLyricsTab('synced')
+          return true
+        },
+      },
+    })
+  }
+
   /* ── Guards ──────────────────────────────────────────────────────────────── */
   if (!account) return (
     <div className="flex-1 flex flex-col items-center justify-center gap-5 px-6 text-center">
-      <div className="w-16 h-16 rounded-2xl bg-surface-overlay border border-[var(--border)] flex items-center justify-center">
+      <div className="w-16 h-16 rounded-2xl bg-[var(--fill)] flex items-center justify-center">
         <LogIn size={24} className="text-text-muted" />
       </div>
       <div className="space-y-1.5">
-        <p className="text-text-primary font-bold text-base">Log in to contribute</p>
-        <p className="text-text-muted text-sm max-w-[220px]">Editors propose corrections to song entries.</p>
+        <p className="text-title3 text-text-primary">Log in to contribute</p>
+        <p className="text-subhead text-text-secondary max-w-[240px]">Editors propose corrections to song entries.</p>
       </div>
       <button onClick={() => setShowUserAuth(true)}
-        className="flex items-center gap-2.5 px-5 py-3 rounded-xl bg-[#5865F2] active:bg-[#4752c4] text-white text-sm font-semibold transition-colors shadow-lg">
+        className="flex items-center gap-2.5 px-6 h-12 rounded-full bg-[#5865F2] active:bg-[#4752c4] text-white text-headline transition-colors">
         <svg viewBox="0 0 24 24" className="w-4 h-4 fill-current"><path d="M20.317 4.37a19.791 19.791 0 0 0-4.885-1.515.074.074 0 0 0-.079.037c-.21.375-.444.864-.608 1.25a18.27 18.27 0 0 0-5.487 0 12.64 12.64 0 0 0-.617-1.25.077.077 0 0 0-.079-.037A19.736 19.736 0 0 0 3.677 4.37a.07.07 0 0 0-.032.027C.533 9.046-.32 13.58.099 18.057c.002.022.015.043.03.06a19.9 19.9 0 0 0 5.993 3.03.078.078 0 0 0 .084-.028 13.978 13.978 0 0 0 1.226-1.994.076.076 0 0 0-.041-.106 13.107 13.107 0 0 1-1.872-.892.077.077 0 0 1-.008-.128 10.2 10.2 0 0 0 .372-.292.074.074 0 0 1 .077-.01c3.928 1.793 8.18 1.793 12.062 0a.074.074 0 0 1 .078.01c.12.098.246.198.373.292a.077.077 0 0 1-.006.127 12.299 12.299 0 0 1-1.873.892.077.077 0 0 0-.041.107c.36.698.772 1.362 1.225 1.993a.076.076 0 0 0 .084.028 19.839 19.839 0 0 0 6.002-3.03.077.077 0 0 0 .032-.054c.5-5.177-.838-9.674-3.549-13.66a.061.061 0 0 0-.031-.03z"/></svg>
         Continue with Discord
       </button>
@@ -404,22 +429,16 @@ export default function EditorPage({ initialSongId = null }: {
   return (
     <div className="flex-1 flex flex-col min-h-0">
 
-      {/* App bar - matches Settings' header shape */}
-      <div className="shrink-0 flex items-center gap-1 px-2 pt-2">
-        <button
-          onClick={() => setActiveView(backView)}
-          aria-label="Back"
-          className="w-11 h-11 shrink-0 flex items-center justify-center rounded-full text-text-primary active:bg-surface-overlay"
-        >
-          <ArrowLeft size={20} />
-        </button>
-        <div className="flex-1 min-w-0 px-0.5">
-          <h1 className="text-text-primary text-[20px] font-bold leading-tight truncate">Song editor</h1>
-          <p className="text-text-muted text-xs truncate">
+      {/* iOS nav bar: back, the centered title, a text action on the right */}
+      <div className="shrink-0 flex items-center gap-2 px-2 pt-1 pb-1">
+        <BackButton onClick={() => setActiveView(backView)} />
+        <div className="flex-1 min-w-0 text-center">
+          <h1 className="text-headline text-text-primary truncate">Song editor</h1>
+          <p className="text-caption1 text-text-secondary truncate">
             {isAdmin ? 'Admin' : 'Editor'} · {accountDisplayName(account)}
           </p>
         </div>
-        <button onClick={() => logoutAccount()} className="shrink-0 px-2.5 py-2 text-xs font-medium text-text-muted opacity-75 active:opacity-100 transition-opacity">
+        <button onClick={() => logoutAccount()} className="shrink-0 h-11 px-2 text-body text-accent active:opacity-60 transition-opacity">
           Sign out
         </button>
       </div>
@@ -433,7 +452,7 @@ export default function EditorPage({ initialSongId = null }: {
           </div>
         ) : !song && !isNewSongDraft && loadError ? (
           <div className="flex flex-col items-center justify-center gap-3 h-64 px-6 text-center">
-            <div className="w-12 h-12 rounded-2xl bg-surface-overlay border border-[var(--border)] flex items-center justify-center">
+            <div className="w-12 h-12 rounded-2xl bg-[var(--fill)] flex items-center justify-center">
               <AlertCircle size={18} className="text-red-400" />
             </div>
             <div className="space-y-1">
@@ -451,7 +470,7 @@ export default function EditorPage({ initialSongId = null }: {
           </div>
         ) : !song && !isNewSongDraft ? (
           <div className="flex flex-col items-center justify-center gap-3 h-64 px-6 text-center">
-            <div className="w-12 h-12 rounded-2xl bg-surface-overlay border border-[var(--border)] flex items-center justify-center">
+            <div className="w-12 h-12 rounded-2xl bg-[var(--fill)] flex items-center justify-center">
               <FileText size={18} className="text-text-muted opacity-65" />
             </div>
             <div className="space-y-1">
@@ -480,7 +499,7 @@ export default function EditorPage({ initialSongId = null }: {
                 {imageUrl
                   ? <img src={buildImageUrl(imageUrl)} alt=""
                       className="w-14 h-14 rounded-xl object-cover shrink-0 shadow-lg ring-1 ring-white/10" />
-                  : <div className="w-14 h-14 rounded-xl bg-surface-raised border border-[var(--border)] flex items-center justify-center shrink-0">
+                  : <div className="w-14 h-14 rounded-xl bg-surface-raised border border-[var(--separator)] flex items-center justify-center shrink-0">
                       <Music2 size={20} className="text-text-muted" />
                     </div>
                 }
@@ -496,7 +515,7 @@ export default function EditorPage({ initialSongId = null }: {
                   </div>
                 </div>
                 <button onClick={closeSong} title="Close" aria-label="Close"
-                  className="shrink-0 w-9 h-9 rounded-full flex items-center justify-center text-text-muted opacity-65 active:opacity-100 active:bg-surface-raised transition-colors">
+                  className="shrink-0 w-9 h-9 rounded-full flex items-center justify-center text-text-muted opacity-65 active:opacity-100 active:bg-[var(--fill)] transition-colors">
                   <X size={16} />
                 </button>
               </div>
@@ -519,7 +538,7 @@ export default function EditorPage({ initialSongId = null }: {
                     className={`px-3 py-1.5 rounded-full text-[12px] font-semibold transition-all ${
                       cat === c.value
                         ? CAT_PILL[c.value] || 'bg-accent text-white'
-                        : 'bg-surface-raised text-text-muted active:text-text-primary border border-[var(--border)]'
+                        : 'bg-surface-raised text-text-muted active:text-text-primary border border-[var(--separator)]'
                     }`}>
                     {c.label}
                   </button>
@@ -566,13 +585,13 @@ export default function EditorPage({ initialSongId = null }: {
                   </div>
                 </FieldGrid>
                 {titleSuggestions.length > 0 && versionTitle.trim() && (
-                  <div className="max-h-40 overflow-y-auto rounded-lg border border-[var(--border)] bg-surface-raised">
+                  <div className="max-h-40 overflow-y-auto rounded-lg border border-[var(--separator)] bg-surface-raised">
                     {titleSuggestions.map(s => (
                       <button
                         key={s.groupId}
                         onClick={() => handlePickTitleSuggestion(s)}
                         title="Joins this song into that existing version group"
-                        className="w-full text-left px-2.5 py-2 text-xs text-text-secondary active:bg-surface-overlay active:text-text-primary transition-colors truncate"
+                        className="w-full text-left px-2.5 py-2 text-xs text-text-secondary active:bg-[var(--fill)] active:text-text-primary transition-colors truncate"
                       >
                         {s.title}
                       </button>
@@ -585,7 +604,7 @@ export default function EditorPage({ initialSongId = null }: {
                   className={`w-full py-2 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-1.5 ${
                     versionSaveStatus === 'saved' ? 'bg-emerald-500/20 text-emerald-400' :
                     versionSaveStatus === 'error' ? 'bg-red-500/20 text-red-400' :
-                    'bg-surface-raised border border-[var(--border)] text-text-primary active:bg-surface'
+                    'bg-surface-raised border border-[var(--separator)] text-text-primary active:bg-surface'
                   }`}
                 >
                   {versionSaveStatus === 'saving' && <Loader2 size={12} className="animate-spin" />}
@@ -648,14 +667,14 @@ export default function EditorPage({ initialSongId = null }: {
                 <div className="flex items-center gap-0.5">
                   {lyricsTab === 'synced' && (
                     <button
-                      onClick={() => setSyncTool(v => !v)}
-                      title="Stamp each line's time while the song plays"
-                      className={`px-1.5 py-1 rounded-lg text-[10px] font-semibold transition-colors ${syncTool ? 'bg-accent/15 text-accent' : 'text-text-muted opacity-60 hover:opacity-100'}`}
+                      onClick={openSync}
+                      title="Open Synced lyrics on this song: time each line or word while it plays"
+                      className="px-1.5 py-1 rounded-lg text-[10px] font-semibold text-text-muted opacity-60 hover:opacity-100 transition-opacity"
                     >
                       Sync
                     </button>
                   )}
-                  {lyricsTab === 'synced' && !syncTool && (
+                  {lyricsTab === 'synced' && (
                     <button
                       onClick={() => { setSyncedTable(v => !v); localStorage.setItem('editor:syncedFormat', syncedTable ? 'raw' : 'table') }}
                       title={syncedTable ? 'Edit the raw LRC text' : 'Edit as timestamped lines'}
@@ -690,7 +709,7 @@ export default function EditorPage({ initialSongId = null }: {
                     disabled={lyricsLoading}
                     placeholder="Full lyrics… or paste a Genius URL"
                     className={`w-full bg-surface-raised/70 rounded-xl px-3 py-2.5 text-sm text-text-primary focus:outline-none resize-none placeholder:text-text-muted placeholder:opacity-25 border transition-colors leading-relaxed ${
-                      lyrics !== String(base.lyrics || '') ? 'border-accent/40' : 'border-[var(--border)] focus:border-accent/40'
+                      lyrics !== String(base.lyrics || '') ? 'border-accent/40' : 'border-[var(--separator)] focus:border-accent/40'
                     } ${lyricsLoading ? 'opacity-40' : ''}`}
                   />
                   {lyricsLoading && (
@@ -706,8 +725,6 @@ export default function EditorPage({ initialSongId = null }: {
                     </div>
                   )}
                 </div>
-              ) : syncTool ? (
-                <LyricsSyncTool value={synced} onChange={setSynced} plainLyrics={lyrics} song={song} />
               ) : syncedTable ? (
                 <SyncedLyricsTable value={synced} onChange={setSynced} />
               ) : (
@@ -715,7 +732,7 @@ export default function EditorPage({ initialSongId = null }: {
                   rows={12} value={synced} onChange={e => setSynced(e.target.value)}
                   placeholder={"[00:00.00] Line one\n[00:05.20] Line two\n…"}
                   className={`w-full bg-surface-raised/70 rounded-xl px-3 py-2.5 text-sm font-mono text-text-primary focus:outline-none resize-none placeholder:text-text-muted placeholder:opacity-25 border transition-colors ${
-                    synced ? 'border-accent/40' : 'border-[var(--border)] focus:border-accent/40'
+                    synced ? 'border-accent/40' : 'border-[var(--separator)] focus:border-accent/40'
                   }`}
                 />
               )}
@@ -729,49 +746,49 @@ export default function EditorPage({ initialSongId = null }: {
 
       {/* Sticky footer actions */}
       {showFooter && (
-        <div className="shrink-0 border-t border-[var(--border)] px-3.5 pt-2.5 pb-3 space-y-2">
+        <div className="shrink-0 border-t border-[var(--separator)] px-4 pt-2.5 pb-3 space-y-2">
           {submitError && (
-            <div className="flex items-center gap-2 text-red-400 text-xs">
+            <div className="flex items-center gap-2 text-red-500 text-footnote">
               <AlertCircle size={12} className="shrink-0" /> {submitError}
             </div>
           )}
           {deleteError && (
-            <div className="flex items-center gap-2 text-red-400 text-xs">
+            <div className="flex items-center gap-2 text-red-500 text-footnote">
               <AlertCircle size={12} className="shrink-0" /> {deleteError}
             </div>
           )}
           <div className="flex items-center justify-between px-0.5">
-            <span className="text-[11px] text-text-muted opacity-65">Changes</span>
-            <span className={`text-xs font-bold tabular-nums ${changedCount > 0 ? 'text-accent' : 'text-text-muted opacity-30'}`}>
+            <span className="text-footnote text-text-secondary">Changes</span>
+            <span className={`text-footnote font-semibold tabular-nums ${changedCount > 0 ? 'text-accent' : 'text-text-muted opacity-40'}`}>
               {changedCount} field{changedCount !== 1 ? 's' : ''}
             </span>
           </div>
           <button
             onClick={submit}
             disabled={submitState === 'submitting' || submitState === 'submitted' || changedCount === 0 || alreadySubmitted}
-            className={`w-full py-3 rounded-xl text-sm font-bold transition-all flex items-center justify-center gap-1.5 ${
-              submitState === 'submitted' ? 'bg-emerald-500/20 text-emerald-400' :
-              submitState === 'error'     ? 'bg-red-500/20 text-red-400' :
-              changedCount === 0 || alreadySubmitted ? 'bg-surface-overlay text-text-muted opacity-30' :
-              'bg-accent text-white active:bg-accent/90 shadow-lg shadow-accent/20'
+            className={`w-full h-12 rounded-full text-headline transition-[background-color,color,opacity] flex items-center justify-center gap-1.5 ${
+              submitState === 'submitted' ? 'bg-emerald-500/20 text-emerald-500' :
+              submitState === 'error'     ? 'bg-red-500/20 text-red-500' :
+              changedCount === 0 || alreadySubmitted ? 'bg-[var(--fill)] text-text-muted opacity-50' :
+              'bg-accent text-white active:opacity-80'
             }`}>
             {submitState === 'submitting' && <Loader2 size={14} className="animate-spin" />}
             {submitState === 'submitted'  && <Check size={14} />}
             {submitState === 'error'      && <AlertCircle size={14} />}
-            {submitState === 'idle' && alreadySubmitted && (editingPropId != null ? 'Updated' : 'Staged')}
-            {submitState === 'idle' && !alreadySubmitted && (editingPropId != null ? 'Update proposal' : 'Stage proposal')}
-            {submitState === 'submitting' && (editingPropId != null ? 'Updating…' : 'Staging…')}
-            {submitState === 'submitted'  && (editingPropId != null ? 'Updated!' : 'Staged!')}
+            {submitState === 'idle' && alreadySubmitted && (editingPropId != null ? 'Updated' : 'Submitted')}
+            {submitState === 'idle' && !alreadySubmitted && (editingPropId != null ? 'Update proposal' : 'Submit proposal')}
+            {submitState === 'submitting' && (editingPropId != null ? 'Updating…' : 'Submitting…')}
+            {submitState === 'submitted'  && (editingPropId != null ? 'Updated!' : 'Submitted!')}
             {submitState === 'error'      && 'Try again'}
           </button>
 
-          {/* Stage deletion - only for an existing song, not a new-song draft or an in-progress edit proposal */}
+          {/* Delete proposal - only for an existing song, not a new-song draft or an in-progress edit proposal */}
           {song && !isNewSongDraft && editingPropId == null && (
             <button
               onClick={submitDeletion}
               onBlur={() => { if (deleteState === 'confirm') setDeleteState('idle') }}
               disabled={deleteState === 'submitting' || deleteState === 'submitted'}
-              title="Stage this song entry for deletion. Review it in the Uploads panel before it's proposed - admins review before it's removed."
+              title="Propose deleting this song entry - admins review before it's removed."
               className={`w-full py-2.5 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-1.5 ${
                 deleteState === 'submitted' ? 'bg-emerald-500/20 text-emerald-400' :
                 deleteState === 'error'     ? 'bg-red-500/20 text-red-400' :
@@ -782,10 +799,10 @@ export default function EditorPage({ initialSongId = null }: {
               {deleteState === 'submitted'  && <Check size={12} />}
               {(deleteState === 'idle' || deleteState === 'confirm') && <Trash2 size={12} />}
               {deleteState === 'error'      && <AlertCircle size={12} />}
-              {deleteState === 'idle'       && 'Stage deletion'}
+              {deleteState === 'idle'       && 'Delete song'}
               {deleteState === 'confirm'    && 'Tap again to confirm'}
-              {deleteState === 'submitting' && 'Staging…'}
-              {deleteState === 'submitted'  && 'Staged!'}
+              {deleteState === 'submitting' && 'Submitting…'}
+              {deleteState === 'submitted'  && 'Submitted!'}
               {deleteState === 'error'      && 'Try again'}
             </button>
           )}
@@ -871,8 +888,8 @@ const ApplicationView = memo(function ApplicationView({ application, loading, on
   return (
     <div className="flex-1 flex flex-col min-h-0 overflow-y-auto">
       <div className="w-full px-4 py-6">
-        <div className="rounded-2xl border border-[var(--border)] bg-surface-raised/50 overflow-hidden">
-          <div className="px-5 pt-5 pb-4 border-b border-[var(--border)] flex items-center gap-3">
+        <div className="rounded-2xl border border-[var(--separator)] bg-surface-raised/50 overflow-hidden">
+          <div className="px-5 pt-5 pb-4 border-b border-[var(--separator)] flex items-center gap-3">
             <div className="w-11 h-11 rounded-xl bg-accent/10 border border-accent/20 flex items-center justify-center shrink-0">
               <Award size={19} className="text-accent" />
             </div>
@@ -890,7 +907,7 @@ const ApplicationView = memo(function ApplicationView({ application, loading, on
             <AppField label="Motivation"        value={motivation}  onChange={setMotivation}  rows={4} hint="min. 20 chars"
               placeholder="Why do you want to be an editor and what can you contribute?" />
             {error && (
-              <div className="flex items-center gap-2 px-3 py-2.5 rounded-xl bg-red-500/10 border border-red-500/20 text-red-400 text-xs">
+              <div className="flex items-center gap-2 px-3 py-2.5 rounded-xl bg-red-500/10 text-red-500 text-footnote">
                 <AlertCircle size={13} className="shrink-0" /> {error}
               </div>
             )}

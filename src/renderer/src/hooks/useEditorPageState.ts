@@ -1,7 +1,7 @@
 // Shared data/logic for the song editor page (EditorPage). Desktop and
 // mobile wrap this in their own JSX/layout - keep behavior here.
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { useStore, useStorePick } from '../store/useStore'
+import { useStorePick } from '../store/useStore'
 import { apiFetch, JWApiSong, JWApiEra } from '../lib/juicewrldApi'
 import * as userApi from '../lib/userApi'
 import { isPrimaryChannelSlug } from './useChannelRoles'
@@ -133,8 +133,6 @@ export function useEditorPageState(initialSongId: number | null = null) {
   const [pickingImage, setPickingImage] = useState(false)
   // Synced lyrics as a timestamp+text table (default) or the raw LRC text.
   const [syncedTable,  setSyncedTable]  = useState(() => localStorage.getItem('editor:syncedFormat') !== 'raw')
-  // Manual sync tool (stamp lines against the playing song) - session-only, unlike the Lines/Raw choice.
-  const [syncTool,     setSyncTool]     = useState(false)
   const [editingPropId, setEditingPropId] = useState<number | null>(null)
   // True while editing a 'create' proposal (new song) - has no backing song object yet
   const [isNewSongDraft, setIsNewSongDraft] = useState(false)
@@ -411,7 +409,8 @@ export function useEditorPageState(initialSongId: number | null = null) {
   useEffect(() => {
     if (!pendingEditProposal || !canEdit) return
     manualLoadRef.current = true
-    const { id, songId, proposedData: d, editorNotes } = pendingEditProposal
+    const { id, songId, editorNotes } = pendingEditProposal
+    const d = pendingEditProposal.proposedData ?? {}
     setPendingEditProposal(null)
     setEditingPropId(id)
 
@@ -519,22 +518,19 @@ export function useEditorPageState(initialSongId: number | null = null) {
     setSubmitError(null)
     try {
       if (editingPropId != null) {
-        // Already a live pending proposal on the server - editing it further
-        // updates that proposal directly rather than staging a second one.
         await userApi.updateProposal(editingPropId, { proposed_data: patch, editor_notes: edNotes })
         setEditingPropId(null)
         setIsNewSongDraft(false)
-        if (song && ('lyrics' in patch || 'synced_lyrics' in patch)) invalidateLyricsCache(song.id)
       } else if (song) {
-        useStore.getState().stageSongChanges([{
-          songId: song.id, changeType: 'update',
-          title: name || song.name, proposedData: patch, editorNotes: edNotes,
+        await userApi.createProposal({
+          song: song.id, change_type: 'update',
+          title: name || song.name, proposed_data: patch, editor_notes: edNotes,
           channel: activeChannel,
-        }])
+        })
       }
-      // Lyrics cache invalidation for an update happens once it's actually
-      // proposed (see compStagedSongChanges) - staging alone changes nothing
-      // server-side yet.
+      // Lyrics may have changed (and auto-approve admins make it live
+      // instantly) - drop the cached copy so the next play reflects the edit.
+      if (song && ('lyrics' in patch || 'synced_lyrics' in patch)) invalidateLyricsCache(song.id)
       lastSubmittedPatchRef.current = JSON.stringify(patch)
       setSubmitState('submitted')
       setTimeout(() => setSubmitState('idle'), 3000)
@@ -551,11 +547,11 @@ export function useEditorPageState(initialSongId: number | null = null) {
     setDeleteState('submitting')
     setDeleteError(null)
     try {
-      useStore.getState().stageSongChanges([{
-        songId: song.id, changeType: 'delete',
-        title: name || song.name, proposedData: {}, editorNotes: edNotes,
+      await userApi.createProposal({
+        song: song.id, change_type: 'delete',
+        title: name || song.name, proposed_data: {}, editor_notes: edNotes,
         channel: activeChannel,
-      }])
+      })
       setDeleteState('submitted')
       setTimeout(() => setDeleteState('idle'), 3000)
     } catch (e) {
@@ -640,7 +636,7 @@ export function useEditorPageState(initialSongId: number | null = null) {
     sessionTitles, setSessionTitles, sessionTracking, setSessionTracking,
 
     lyricsTab, setLyricsTab, lyricsLoading, lyricsError, handleLyricsPaste,
-    syncedTable, setSyncedTable, syncTool, setSyncTool,
+    syncedTable, setSyncedTable,
 
     submitState, submitError, submit,
     deleteState, setDeleteState, deleteError, submitDeletion,

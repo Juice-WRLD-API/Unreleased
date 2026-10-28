@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, ReactNode, ElementType } from 'react'
 import {
   Brush, Palette, Volume2, Zap, Clock, Info, Github, MessageCircle, Check,
-  PenLine, BookOpen, Copy, Eye, EyeOff, ChevronDown, ChevronRight, ArrowLeft, KeyRound, Globe, RefreshCw,
+  PenLine, BookOpen, Copy, Eye, EyeOff, ChevronDown, ChevronRight, KeyRound, Globe, RefreshCw,
   FolderOpen, FolderPlus, Minus, Loader2, Plus, AlignLeft, FileText, Trash2, Music2,
   Waves, RotateCcw, ExternalLink,
   ListOrdered, CloudUpload, Type, AlignCenter, Menu, Pencil, Upload,
@@ -9,8 +9,13 @@ import {
   Activity,
 } from 'lucide-react'
 import { DebugAnonymousToggle, DebugLogOpenButton, DebugRecordButton } from './DebugRecorder'
+import { BADGE_ROW_INSET, GroupedRow, GroupedSection, IconBadge } from './mobile/Grouped'
+import { BackButton, CompactBar, LARGE_TITLE_COLLAPSE, LargeTitle, useScrolledPast } from './mobile/NavBar'
+import { Segmented } from './mobile/Segmented'
+import { SearchField } from './mobile/SearchField'
 import { useStore, useStorePick } from '../store/useStore'
 import { SKINS, getSkin } from '../lib/skins'
+import { ADDRESSES as DONATION_ADDRESSES, AddressRow as DonationAddressRow } from './DonationNotice'
 import SkinEditorModal from './SkinEditorModal'
 import { allFonts } from '../lib/fonts'
 import { useCustomFonts } from '../hooks/useCustomFonts'
@@ -18,10 +23,11 @@ import { orderedNavItems, isNavItemVisible, DEFAULT_NAV_ORDER, DEFAULT_NAV_VISIB
 import { hasChatAccess, useChatStore } from '../store/chatStore'
 import ChatDevices from './chat/ChatDevices'
 import MyCdnNodes from './MyCdnNodes'
+import MyCoverArt from './MyCoverArt'
 import ApiKeys from './ApiKeys'
 import Passkeys from './Passkeys'
 import ChatKeyTransfer from './chat/ChatKeyTransfer'
-import { HOME_SECTIONS, DEFAULT_HOME_SECTION_VISIBILITY, isHomeSectionVisible, hasHomeTools } from '../lib/homeSections'
+import { HOME_SECTIONS, DEFAULT_HOME_SECTION_VISIBILITY, isHomeSectionVisible } from '../lib/homeSections'
 import { getToken, CONTRIBUTOR_ENABLED, showStaffProfile, staffProfileLabel } from '../lib/userApi'
 import { APP_VERSION, COMMIT_HASH, useCommitStatus } from '../lib/appVersion'
 import { DEFAULT_JWAPI_BASE, JWAPI_BASE, getServerOverride, setServerOverride, getRouteRules, setRouteRules, cleanRouteRules, KNOWN_ROUTE_PREFIXES, type RouteRule } from '../lib/apiServers'
@@ -171,7 +177,9 @@ const SETTINGS_SEARCH_INDEX: { tab: Tab; label: string; sub?: string; devOnly?: 
   { tab: 'about', label: 'Record debug log', sub: 'Record console messages and network requests to a file you can send us' },
   { tab: 'about', label: 'Open debug log', sub: 'View a saved debug log file - requests, errors and console messages' },
   { tab: 'about', label: 'About', sub: 'Version, GitHub, Discord, API links' },
+  { tab: 'account', label: 'My cover art', sub: 'Cover art you sent in for songs' },
   { tab: 'account', label: 'My CDN nodes', sub: 'Nodes linked to your account' },
+  { tab: 'account', label: 'Two-factor authentication', sub: 'Whether sign-ins ask for an authenticator code' },
   { tab: 'account', label: 'Passkeys', sub: 'Sign in with your face, fingerprint, PIN, a security key or your phone' },
   { tab: 'account', label: 'API keys', sub: 'Keys for scripts and integrations' },
   { tab: 'about', label: 'Auth Token', sub: 'View and copy your account token' },
@@ -187,14 +195,18 @@ const SETTINGS_SEARCH_INDEX: { tab: Tab; label: string; sub?: string; devOnly?: 
 ]
 
 // ── Row primitives ────────────────────────────────────────────────────────
-// Every section is built from these three, inside a SettingsCard: `Row` for a
-// label with its control on the right, `Block` for a label whose control is too
-// wide to sit beside it, and `Segmented` for a small closed set of choices.
-// The icon sits in a colored badge (iOS Settings-style) - a fixed color + white
-// icon reads correctly in both themes, unlike the plain `text-muted` icon this
-// replaced, which nearly disappeared in light mode.
+// Every section is built from these, inside a SettingsCard (an iOS inset
+// group - see mobile/Grouped): `Row` for a label with its control on the
+// right, `Block` for a label whose control is too wide to sit beside it, and
+// the shared `Segmented` for a small closed set of choices. The icon sits in
+// a colored badge (iOS Settings-style) - a fixed color + white icon reads
+// correctly in both themes. Rows bleed to the card's edges (-mx-4 px-4) so a
+// pressed row highlights edge to edge, and draw iOS's inset hairline between
+// them (.grouped-row).
 
-function Row({ icon: Icon, iconColor, label, sub, labelExtra, children }: {
+const BADGE_INSET = { ['--row-inset' as string]: BADGE_ROW_INSET }
+
+function Row({ icon, iconColor, label, sub, labelExtra, children }: {
   icon: ElementType
   iconColor: string
   label: string
@@ -207,17 +219,15 @@ function Row({ icon: Icon, iconColor, label, sub, labelExtra, children }: {
   children?: ReactNode
 }): JSX.Element {
   return (
-    // 52px minimum and the helper text wraps rather than truncating: on a phone
-    // the sub-label is usually the part that explains what the control does, so
-    // clipping it to one line loses exactly the useful half.
-    <div className="flex items-center justify-between gap-3 py-3 min-h-[52px] border-b border-[var(--border)] last:border-b-0">
+    // The helper text wraps rather than truncating: on a phone the sub-label
+    // is usually the part that explains what the control does, so clipping it
+    // to one line loses exactly the useful half.
+    <div className="grouped-row -mx-4 px-4 flex items-center justify-between gap-3 py-2.5 min-h-[44px]" style={BADGE_INSET}>
       <div className="flex items-center gap-3 min-w-0">
-        <div className="w-7 h-7 rounded-lg flex items-center justify-center shrink-0" style={{ backgroundColor: iconColor }}>
-          <Icon size={15} className="text-white" strokeWidth={2.25} />
-        </div>
+        <IconBadge icon={icon} color={iconColor} />
         <div className="min-w-0">
-          <p className="text-text-primary text-[15px] leading-snug">{label}</p>
-          {sub && <p className="text-text-muted text-xs leading-snug mt-0.5">{sub}</p>}
+          <p className="text-body text-text-primary">{label}</p>
+          {sub && <p className="text-footnote text-text-secondary mt-0.5">{sub}</p>}
         </div>
         {labelExtra}
       </div>
@@ -226,45 +236,38 @@ function Row({ icon: Icon, iconColor, label, sub, labelExtra, children }: {
   )
 }
 
-// A row that *is* the control: the whole 52px strip is tappable and a chevron
+// A row that *is* the control: the whole strip is tappable and a chevron
 // (or an external-link arrow) says so. About's pill buttons and full-width
 // bordered buttons became these, so navigation looks like navigation and only
 // switches and pickers look like controls.
-function ActionRow({ icon: Icon, iconColor, label, sub, onClick }: {
+function ActionRow({ icon, iconColor, label, sub, onClick }: {
   icon: ElementType
   iconColor: string
   label: string
   sub?: string
   onClick: () => void
 }): JSX.Element {
-  return (
-    <button onClick={onClick} className="w-full flex items-center gap-3 py-3 min-h-[52px] border-b border-[var(--border)] last:border-b-0 text-left active:opacity-70">
-      <div className="w-7 h-7 rounded-lg flex items-center justify-center shrink-0" style={{ backgroundColor: iconColor }}>
-        <Icon size={15} className="text-white" strokeWidth={2.25} />
-      </div>
-      <div className="min-w-0 flex-1">
-        <p className="text-text-primary text-[15px] leading-snug">{label}</p>
-        {sub && <p className="text-text-muted text-xs leading-snug mt-0.5">{sub}</p>}
-      </div>
-      <ChevronRight size={17} className="text-text-muted shrink-0" />
-    </button>
-  )
+  return <GroupedRow icon={icon} iconColor={iconColor} label={label} sub={sub} onClick={onClick} />
 }
 
 // Same, for a link that leaves the app.
-function LinkRow({ icon: Icon, iconColor, label, href }: {
+function LinkRow({ icon, iconColor, label, href }: {
   icon: ElementType
   iconColor: string
   label: string
   href: string
 }): JSX.Element {
   return (
-    <a href={href} target="_blank" rel="noopener noreferrer" className="w-full flex items-center gap-3 py-3 min-h-[52px] border-b border-[var(--border)] last:border-b-0 active:opacity-70">
-      <div className="w-7 h-7 rounded-lg flex items-center justify-center shrink-0" style={{ backgroundColor: iconColor }}>
-        <Icon size={15} className="text-white" strokeWidth={2.25} />
-      </div>
-      <span className="min-w-0 flex-1 text-text-primary text-[15px]">{label}</span>
-      <ExternalLink size={16} className="text-text-muted shrink-0" />
+    <a
+      href={href}
+      target="_blank"
+      rel="noopener noreferrer"
+      className="grouped-row -mx-4 px-4 flex items-center gap-3 py-2.5 min-h-[44px] transition-colors active:bg-[var(--fill)]"
+      style={BADGE_INSET}
+    >
+      <IconBadge icon={icon} color={iconColor} />
+      <span className="min-w-0 flex-1 text-body text-text-primary">{label}</span>
+      <ExternalLink size={17} className="text-text-muted shrink-0" />
     </a>
   )
 }
@@ -286,49 +289,16 @@ function Block({ icon: Icon, iconColor, label, sub, action, children }: {
   children: ReactNode
 }): JSX.Element {
   return (
-    <div className="py-3 border-b border-[var(--border)] last:border-b-0">
+    <div className="grouped-row -mx-4 px-4 py-3" style={BADGE_INSET}>
       <div className="flex items-center gap-3 mb-3">
-        <div className="w-7 h-7 rounded-lg flex items-center justify-center shrink-0" style={{ backgroundColor: iconColor }}>
-          <Icon size={15} className="text-white" strokeWidth={2.25} />
-        </div>
+        <IconBadge icon={Icon} color={iconColor} />
         <div className="min-w-0 flex-1">
-          <p className="text-text-primary text-[15px] leading-snug">{label}</p>
-          {sub && <p className="text-text-muted text-xs leading-snug mt-0.5">{sub}</p>}
+          <p className="text-body text-text-primary">{label}</p>
+          {sub && <p className="text-footnote text-text-secondary mt-0.5">{sub}</p>}
         </div>
         {action}
       </div>
       {children}
-    </div>
-  )
-}
-
-// A closed set of 2–4 choices (text size, lyric alignment, nav edge). These
-// were loose wrapping pills, which on a phone left a ragged trailing gap and
-// gave no sense of being one control; equal-width segments in a track read as
-// a single switch and land on the same baseline in every section that uses one.
-function Segmented<T extends string | number>({ value, options, onChange }: {
-  value: T
-  options: { value: T; label: string; icon?: ElementType }[]
-  onChange: (value: T) => void
-}): JSX.Element {
-  return (
-    <div className="flex items-center gap-1 p-1 rounded-xl bg-[var(--surface-highest)]">
-      {options.map(({ value: v, label, icon: Icon }) => {
-        const active = value === v
-        return (
-          <button
-            key={String(v)}
-            onClick={() => onChange(v)}
-            aria-pressed={active}
-            className={`flex-1 min-w-0 flex items-center justify-center gap-1.5 h-9 rounded-lg text-[13px] font-medium transition-colors ${
-              active ? 'bg-accent text-white' : 'text-text-secondary active:bg-[var(--surface-overlay)]'
-            }`}
-          >
-            {Icon && <Icon size={14} className="shrink-0" />}
-            <span className="truncate">{label}</span>
-          </button>
-        )
-      })}
     </div>
   )
 }
@@ -449,19 +419,7 @@ function RouteRulesEditor(): JSX.Element {
 }
 
 function SettingsCard({ title, children }: { title?: string; children: ReactNode }): JSX.Element {
-  return (
-    <div className="mb-4">
-      {title && (
-        <p className="px-3 pb-1.5 text-[11px] font-semibold uppercase tracking-wider text-text-muted">{title}</p>
-      )}
-      {/* Full-opacity surface-overlay, not a tinted one: in the dark palette
-          the two surfaces sit ~1 step apart, so any transparency blends the
-          card straight back into the page. */}
-      <div className="rounded-2xl bg-[var(--surface-overlay)] px-4 overflow-hidden">
-        {children}
-      </div>
-    </div>
-  )
+  return <GroupedSection header={title} className="mb-6">{children}</GroupedSection>
 }
 
 // Collapses a bulky inline picker (skin swatches, a 7-item font list) down to
@@ -475,31 +433,32 @@ function PickerRow({ preview, title, sub, onClick }: {
   onClick: () => void
 }): JSX.Element {
   return (
-    <button onClick={onClick} className="w-full flex items-center gap-3 py-2.5 -my-1 text-left active:opacity-70">
+    <button onClick={onClick} className="w-full flex items-center gap-3 py-2.5 -my-1 text-left active:opacity-60 transition-opacity">
       {preview}
       <div className="min-w-0 flex-1">
-        <p className="text-text-primary text-[15px] font-medium truncate">{title}</p>
-        {sub && <p className="text-text-muted text-xs truncate mt-0.5">{sub}</p>}
+        <p className="text-body text-text-primary truncate">{title}</p>
+        {sub && <p className="text-footnote text-text-secondary truncate">{sub}</p>}
       </div>
-      <ChevronRight size={17} className="text-text-muted shrink-0" />
+      <ChevronRight size={18} strokeWidth={2.5} className="text-text-muted opacity-60 shrink-0" />
     </button>
   )
 }
 
 function Toggle({ on, onClick }: { on: boolean; onClick: () => void }): JSX.Element {
   return (
-    // A thumb-sized switch, with the tap target extended past it by padding so
-    // the whole 44px is live without the switch itself looking oversized. The
-    // knob slides via flexbox justify-content (not absolute + translate) so it
-    // can never land outside the track regardless of rounding - it's always a
-    // flex child inset by the track's own padding. The off state sits on
-    // surface-highest: against a card that is already surface-overlay, an off
-    // switch in that same colour vanished.
-    <button onClick={onClick} aria-pressed={on} className="shrink-0 -m-2 p-2">
-      <span className={`flex items-center w-[46px] h-[26px] p-[3px] rounded-full transition-colors ${
-        on ? 'bg-accent justify-end' : 'bg-[var(--surface-highest)] justify-start'
+    // iOS's switch: 51×31 with a 27px white knob, its tap target extended past
+    // it by padding. The knob slides (transform only, by the track's width
+    // less its own and the 2px insets) rather than jumping between ends, and
+    // the off track is a fill mixed from the text color, so it shows on any
+    // card in any skin.
+    <button onClick={onClick} role="switch" aria-checked={on} className="shrink-0 -m-1.5 p-1.5">
+      <span className={`relative block w-[51px] h-[31px] rounded-full transition-colors duration-200 ${
+        on ? 'bg-accent' : 'bg-[var(--fill-strong)]'
       }`}>
-        <span className="w-5 h-5 rounded-full bg-white" />
+        <span
+          className="absolute top-[2px] left-[2px] w-[27px] h-[27px] rounded-full bg-white shadow-[0_3px_8px_rgb(0_0_0/0.15),0_3px_1px_rgb(0_0_0/0.06)] transition-transform duration-200 motion-reduce:transition-none"
+          style={{ transform: `translateX(${on ? 20 : 0}px)` }}
+        />
       </span>
     </button>
   )
@@ -638,6 +597,9 @@ export default function Settings(): JSX.Element {
 
   const [tab, setTab] = useState<Tab>((settingsTab as Tab) ?? 'appearance')
   const contentRef = useRef<HTMLDivElement>(null)
+  // The category list's scroller, for its collapsing large title.
+  const [rootScrollEl, setRootScrollEl] = useState<HTMLDivElement | null>(null)
+  const rootCollapsed = useScrolledPast(rootScrollEl, LARGE_TITLE_COLLAPSE)
 
   // Settings is a two-level page: a category list that drills into one section
   // at a time. `inSection` = a section is open.
@@ -833,7 +795,7 @@ export default function Settings(): JSX.Element {
     // nav bar stay put, the status-bar inset is already handled upstream, and
     // there's no z-index, no backdrop, and no close button to get out with:
     // you leave by tapping another tab.
-    <div className="flex-1 flex flex-col min-h-0 overflow-hidden">
+    <div className="relative flex-1 flex flex-col min-h-0 overflow-hidden">
       {/* Custom-skin editor (portals to <body>, so placement here is fine) */}
       {editingSkinId && (
         <SkinEditorModal
@@ -843,141 +805,113 @@ export default function Settings(): JSX.Element {
         />
       )}
 
-      {/* App bar - same shape as the other tabs', and no background of its own
-          so the shell's (optionally accent-gradient) backdrop runs unbroken. */}
-      <div className="shrink-0 flex items-center gap-1 px-2 pt-2 pb-2">
-        {inSection && (
-          <button
-            onClick={() => setInSection(false)}
-            aria-label="Back"
-            className="w-11 h-11 shrink-0 flex items-center justify-center rounded-full text-text-primary active:bg-surface-overlay"
-          >
-            <ArrowLeft size={20} />
-          </button>
-        )}
-        <div className={`flex-1 min-w-0 ${inSection ? 'px-0.5' : 'pl-2.5'}`}>
-          <h1 className="text-text-primary text-[20px] font-bold leading-tight truncate">
-            {inSection ? (activeTab?.label ?? 'Settings') : 'Settings'}
-          </h1>
-          {inSection && (
-            <p className="text-text-muted text-xs truncate">{activeTab?.sub ?? ''}</p>
-          )}
-        </div>
-      </div>
+      {/* iOS navigation: the root's large title collapses into a glass bar as
+          it scrolls under; a section opens with that bar already up, its back
+          button and name pinned while the content scrolls beneath. Settings
+          is in App's MOBILE_BLEED_TOP, so both pad themselves below the
+          status bar. */}
+      <CompactBar
+        title={inSection ? (activeTab?.label ?? 'Settings') : 'Settings'}
+        shown={inSection || rootCollapsed}
+        leading={inSection ? <BackButton label="Settings" onClick={() => setInSection(false)} /> : undefined}
+      />
 
         {/* Root - the category list. Tapping a row drills into that section
-            (the header grows a back arrow), so each pane gets the whole screen
+            (the bar grows a back button), so each pane gets the whole screen
             instead of sharing it with a pill scroller. */}
         {!inSection && (
-          <div className="flex-1 min-h-0 overflow-y-auto overscroll-contain px-4 pt-3 pb-6 space-y-4">
+          <div ref={setRootScrollEl} className="flex-1 min-h-0 overflow-y-auto overscroll-contain pb-dock">
+            <LargeTitle title="Settings" />
+            <div className="px-4 pt-1 space-y-6">
             {/* Search - a flat filter over every setting row (see
                 SETTINGS_SEARCH_INDEX), not just the active tab; picking a
                 result drills straight into its section. */}
-            <div className="relative">
-              <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-text-muted pointer-events-none" />
-              <input
-                type="text"
-                value={settingsQuery}
-                onChange={(e) => setSettingsQuery(e.target.value)}
-                placeholder="Search settings"
-                className="w-full bg-[var(--surface-overlay)] text-text-primary text-sm rounded-xl pl-9 pr-9 py-2.5 border border-[var(--border)] placeholder:text-text-muted focus:outline-none focus:border-[var(--accent)] transition-colors"
-              />
-              {settingsQuery && (
-                <button
-                  onClick={() => setSettingsQuery('')}
-                  title="Clear search"
-                  className="absolute right-3 top-1/2 -translate-y-1/2 text-text-muted active:text-text-primary transition-colors"
-                >
-                  <X size={14} />
-                </button>
-              )}
-            </div>
+            <SearchField
+              value={settingsQuery}
+              onChange={setSettingsQuery}
+              placeholder="Search"
+              enterKeyHint="search"
+            />
 
             {settingsQueryTrimmed ? (
-              <div>
-                <h3 className="text-text-primary text-lg font-bold mb-4">
-                  {searchResults.length > 0 ? `${searchResults.length} result${searchResults.length === 1 ? '' : 's'}` : 'No results'}
-                </h3>
-                {searchResults.length === 0 && (
-                  <p className="text-text-muted text-sm">Nothing matches “{settingsQuery.trim()}”.</p>
-                )}
-                <div className="flex flex-col">
-                  {searchResults.map((r, i) => (
-                    <button
-                      key={`${r.tab}-${r.label}-${i}`}
-                      onClick={() => jumpToResult(r.tab)}
-                      className="flex items-center justify-between gap-3 py-3 border-b border-[var(--border)] last:border-b-0 text-left active:bg-[var(--surface-overlay)] -mx-2 px-2 rounded-lg transition-colors"
-                    >
-                      <div className="min-w-0">
-                        <p className="text-text-primary text-sm truncate">{r.label}</p>
-                        {r.sub && <p className="text-text-muted text-[11px] truncate">{r.sub}</p>}
-                      </div>
-                      <span className="shrink-0 text-[11px] font-medium text-text-muted bg-[var(--surface-overlay)] border border-[var(--border)] rounded-full px-2 py-0.5">
-                        {tabs.find((t) => t.id === r.tab)?.label ?? r.tab}
-                      </span>
-                    </button>
-                  ))}
-                </div>
-              </div>
+              <GroupedSection
+                header={searchResults.length > 0 ? `${searchResults.length} result${searchResults.length === 1 ? '' : 's'}` : undefined}
+              >
+                {searchResults.length === 0 ? (
+                  <p className="py-3 text-body text-text-muted">Nothing matches “{settingsQuery.trim()}”.</p>
+                ) : searchResults.map((r, i) => (
+                  <GroupedRow
+                    key={`${r.tab}-${r.label}-${i}`}
+                    label={r.label}
+                    sub={r.sub}
+                    detail={<span className="text-footnote">{tabs.find((t) => t.id === r.tab)?.label ?? r.tab}</span>}
+                    onClick={() => jumpToResult(r.tab)}
+                  />
+                ))}
+              </GroupedSection>
             ) : (
               <>
             {/* Account gets a profile header rather than a list row - the
-                platform idiom (iOS's Apple ID card, Android's account chip),
-                and it makes signing in discoverable instead of buried as one
-                more identical row. It's pulled out of the list below. */}
-            <button
-              onClick={() => openSection('account')}
-              className="w-full flex items-center gap-3.5 p-3.5 rounded-2xl bg-[var(--surface-overlay)] text-left active:bg-[var(--surface-raised)] transition-colors"
-            >
-              {account?.avatar
-                ? <img src={account.avatar} alt="" className="w-12 h-12 rounded-full object-cover shrink-0" />
-                : (
-                  <div className={`w-12 h-12 rounded-full flex items-center justify-center shrink-0 ${account ? 'bg-accent/20 text-accent text-lg font-semibold' : 'bg-[var(--surface-raised)] text-text-muted'}`}>
-                    {account
-                      ? initial(accountDisplayName(account))
-                      : <User size={22} />}
-                  </div>
-                )}
-              <div className="min-w-0 flex-1">
-                <p className="text-text-primary text-base font-semibold truncate">
-                  {account ? accountDisplayName(account) : 'Not signed in'}
-                </p>
-                <p className="text-text-muted text-xs truncate">
-                  {account ? 'Account, token, sign out' : 'Sign in to sync likes and playlists'}
-                </p>
-              </div>
-              <ChevronRight size={18} className="text-text-muted shrink-0" />
-            </button>
+                platform idiom (iOS's Apple Account card, Android's account
+                chip), and it makes signing in discoverable instead of buried
+                as one more identical row. It's pulled out of the list below. */}
+            <GroupedSection>
+              <button
+                onClick={() => openSection('account')}
+                className="-mx-4 px-4 w-[calc(100%+2rem)] flex items-center gap-3.5 py-3 text-left active:bg-[var(--fill)] transition-colors"
+              >
+                {account?.avatar
+                  ? <img src={account.avatar} alt="" className="w-[60px] h-[60px] rounded-full object-cover shrink-0" />
+                  : (
+                    <div className={`w-[60px] h-[60px] rounded-full flex items-center justify-center shrink-0 ${account ? 'bg-accent/20 text-accent text-title2' : 'bg-[var(--fill)] text-text-muted'}`}>
+                      {account
+                        ? initial(accountDisplayName(account))
+                        : <User size={28} />}
+                    </div>
+                  )}
+                <div className="min-w-0 flex-1">
+                  <p className="text-title3 text-text-primary truncate">
+                    {account ? accountDisplayName(account) : 'Not Signed In'}
+                  </p>
+                  <p className="text-footnote text-text-secondary truncate">
+                    {account ? 'Account, token, sign out' : 'Sign in to sync likes and playlists'}
+                  </p>
+                </div>
+                <ChevronRight size={18} strokeWidth={2.5} className="text-text-muted opacity-60 shrink-0 -mr-1" />
+              </button>
+            </GroupedSection>
 
-            {/* The rest as one inset grouped card, so the section reads as a
-                single surface instead of rows floating on the page. */}
-            <div className="rounded-2xl overflow-hidden">
+            {/* The rest as one inset group, so the section reads as a single
+                surface instead of rows floating on the page. */}
+            <GroupedSection>
               {tabs.filter((t) => t.id !== 'account').map((t) => (
-                <button
+                <GroupedRow
                   key={t.id}
+                  icon={t.icon}
+                  iconColor={t.color}
+                  label={t.label}
+                  sub={t.sub}
                   onClick={() => openSection(t.id)}
-                  className="w-full flex items-center gap-3 px-3.5 py-3.5 border-b border-[var(--border)] last:border-b-0 text-left bg-[var(--surface-overlay)] active:bg-[var(--surface-raised)] transition-colors"
-                >
-                  <div className="w-8 h-8 rounded-lg flex items-center justify-center shrink-0" style={{ backgroundColor: t.color }}>
-                    <t.icon size={17} className="text-white" strokeWidth={2.25} />
-                  </div>
-                  <div className="min-w-0 flex-1">
-                    <p className="text-text-primary text-[15px] truncate">{t.label}</p>
-                    <p className="text-text-muted text-xs truncate">{t.sub}</p>
-                  </div>
-                  <ChevronRight size={18} className="text-text-muted shrink-0" />
-                </button>
+                />
               ))}
-            </div>
+            </GroupedSection>
               </>
             )}
+            </div>
 
           </div>
         )}
 
-        {/* The drilled-into section - one category owns the whole screen. */}
+        {/* The drilled-into section - one category owns the whole screen,
+            scrolling under the pinned bar. */}
         {inSection && (
-          <div key={tab} ref={contentRef} className="flex-1 min-h-0 overflow-y-auto overscroll-contain px-4 pt-3 pb-6">
+          <div
+            key={tab}
+            ref={contentRef}
+            className="flex-1 min-h-0 overflow-y-auto overscroll-contain px-4 pb-dock"
+            style={{ paddingTop: 'calc(var(--top-inset, 0px) + 3.5rem)' }}
+          >
+            {activeTab?.sub && <p className="px-4 pb-4 text-footnote text-text-secondary">{activeTab.sub}</p>}
 
             {/* ── Account ── */}
             {tab === 'account' && (
@@ -1106,8 +1040,32 @@ export default function Settings(): JSX.Element {
                         <ChatKeyTransfer userId={account.id} />
                       </SettingsCard>
                     )}
+                    <SettingsCard title="My cover art">
+                      <MyCoverArt />
+                    </SettingsCard>
                     <SettingsCard title="My CDN nodes">
                       <MyCdnNodes />
+                    </SettingsCard>
+                    {/* Setup is admin-only on the server (GET otp/setup/ answers
+                        "Administrator access required."), and Admin already
+                        parks an admin without 2FA on its setup panel. */}
+                    <SettingsCard title="Security">
+                      <Row
+                        icon={ShieldCheck}
+                        iconColor={account.otp_enabled ? '#059669' : '#6b7280'}
+                        label="Two-factor authentication"
+                        sub={account.otp_enabled
+                          ? 'Sign-ins ask for a code from your authenticator app'
+                          : account.is_administrator ? 'Required for admin tools' : 'Not turned on for this account'}
+                      >
+                        {account.otp_enabled ? (
+                          <span className="shrink-0 text-[11px] font-semibold text-emerald-500">On</span>
+                        ) : account.is_administrator ? (
+                          <button onClick={() => openMainView('admin')} className="shrink-0 text-[11px] font-semibold text-accent hover:underline">Set up</button>
+                        ) : (
+                          <span className="shrink-0 text-[11px] font-semibold text-text-muted">Off</span>
+                        )}
+                      </Row>
                     </SettingsCard>
                     <SettingsCard title="Passkeys">
                       <Passkeys />
@@ -1522,7 +1480,7 @@ export default function Settings(): JSX.Element {
                     ) : undefined}
                   >
                     <div className="rounded-xl bg-[var(--surface-highest)] overflow-hidden">
-                      {HOME_SECTIONS.filter((section) => (!section.staffOnly || hasChatAccess(account)) && (!section.donorOnly || hasHomeTools(account))).map((section) => {
+                      {HOME_SECTIONS.filter((section) => (!section.staffOnly || hasChatAccess(account))).map((section) => {
                         const shown = isHomeSectionVisible(section.id, homeSectionVisibility)
                         return (
                           <div
@@ -1838,6 +1796,16 @@ export default function Settings(): JSX.Element {
                   </Row>
                   <ActionRow icon={Heart} iconColor="#ec4899" label="Thank You" sub="Donors and contributors" onClick={() => openMainView('thanks')} />
                 </SettingsCard>
+
+                <div className="mt-3 px-3 py-2.5 rounded-xl bg-[var(--surface-raised)] border border-[var(--border)]">
+                  <p className="flex items-center gap-2 text-text-secondary text-xs mb-2">
+                    <Heart size={13} className="text-accent shrink-0" />
+                    Enjoying the app? Donations help keep it running.
+                  </p>
+                  <div className="flex flex-col gap-1.5">
+                    {DONATION_ADDRESSES.map(a => <DonationAddressRow key={a.label} label={a.label} value={a.value} />)}
+                  </div>
+                </div>
 
                 {/* Only shown to accounts that aren't already one - these are
                     the application pages, not a status display. */}

@@ -18,6 +18,7 @@ import ReportsTab from './ReportsTab'
 import FeedbackTab from './FeedbackTab'
 import CompProposalsTab from './CompProposalsTab'
 import CompReplaceTab from './CompReplaceTab'
+import CoverArtTab from './CoverArtTab'
 import ChannelsTab from './ChannelsTab'
 import EraTab from './EraTab'
 import CdnNodesTab from './CdnNodesTab'
@@ -25,6 +26,7 @@ import BetaTab from './BetaTab'
 import LogsTab from './LogsTab'
 import LyricsGenAdminTab from './LyricsGenAdminTab'
 import { useStaffRoles } from '../hooks/useStaffRoles'
+import { useCanManage } from '../hooks/useChannelRoles'
 import { useAdminQueue, type AdminTab } from '../hooks/useAdminQueue'
 import { useOtpGate } from '../hooks/useOtpGate'
 import { useVisitedTabs } from '../hooks/useVisitedTabs'
@@ -69,6 +71,8 @@ export default function AdminPage({ embedded = false, initialTab, onExit }: {
   // a channel they don't actually manage. See useChannelRoles for the same
   // pattern used elsewhere.
   const { isAdmin: isFullAdmin, canReviewStaff: canAccessStaff } = useStaffRoles(account, activeChannel, channels)
+  // Cover art isn't per channel: the server asks for a primary-channel manager.
+  const canReviewCoverArt = useCanManage()
   const otpEnabled = !!account?.otp_enabled
 
   const {
@@ -83,6 +87,7 @@ export default function AdminPage({ embedded = false, initialTab, onExit }: {
     feedbackFilter, setFeedbackFilter,
     feedback,
     refresh,
+    refreshCoverArtCount,
     nav,
   } = useAdminQueue({
     canLoad: canAccessStaff,
@@ -90,9 +95,8 @@ export default function AdminPage({ embedded = false, initialTab, onExit }: {
     gateNonProposalTabs: true,
     activeChannel,
     initialTab: effectiveInitialTab ?? 'proposals',
-    // No Security tab for managers: it renders a flat "2FA is enabled", which
-    // the OTP gate below guarantees for admins and can't guarantee for them.
-    managerNavIds: ['proposals', 'comp-proposals', 'comp-replace'],
+    managerNavIds: ['proposals', 'cover-art', 'comp-proposals', 'comp-replace'],
+    canReviewCoverArt,
   })
 
   // No more overview grid - every section already has its own deep link
@@ -165,7 +169,7 @@ export default function AdminPage({ embedded = false, initialTab, onExit }: {
         {/* A tab's data loads once per visit (see the sig comment in
             useAdminQueue) rather than refetching every time it's reselected -
             this is the explicit way back to fresh data instead. */}
-        {tab !== 'comp-proposals' && tab !== 'comp-replace' && tab !== 'channels' && tab !== 'eras' && tab !== 'cdn-nodes' && tab !== 'beta' && tab !== 'lyrics' && tab !== 'logs' && tab !== 'security' && (
+        {tab !== 'cover-art' && tab !== 'comp-proposals' && tab !== 'comp-replace' && tab !== 'channels' && tab !== 'eras' && tab !== 'cdn-nodes' && tab !== 'beta' && tab !== 'lyrics' && tab !== 'logs' && (
           <button onClick={() => refresh()} disabled={loading} title="Refresh"
             className="shrink-0 p-1.5 rounded-lg text-accent hover:bg-surface-overlay transition-colors disabled:opacity-40">
             <RefreshCw size={12} className={loading ? 'animate-spin' : ''} />
@@ -220,6 +224,11 @@ export default function AdminPage({ embedded = false, initialTab, onExit }: {
               })}
               channel={activeChannel}
             />
+          </div>
+        )}
+        {visited.has('cover-art') && canReviewCoverArt && (
+          <div className={tab === 'cover-art' ? 'h-full' : 'hidden'}>
+            <CoverArtTab onCountsChanged={refreshCoverArtCount} />
           </div>
         )}
         {visited.has('comp-proposals') && (
@@ -289,11 +298,6 @@ export default function AdminPage({ embedded = false, initialTab, onExit }: {
         {visited.has('logs') && (
           <div className={tab === 'logs' ? 'h-full' : 'hidden'}>
             <LogsTab active={tab === 'logs'} />
-          </div>
-        )}
-        {visited.has('security') && (
-          <div className={tab === 'security' ? 'h-full' : 'hidden'}>
-            <SecurityTab />
           </div>
         )}
       </div>
@@ -1225,24 +1229,6 @@ function StatsTab({ applications, proposals, users }: {
           </div>
         </div>
       )}
-    </div>
-  )
-}
-
-// ── Security ──────────────────────────────────────────────────────────────────
-
-function SecurityTab(): JSX.Element {
-  return (
-    <div className="p-6 max-w-md">
-      <div className="flex items-start gap-4 px-5 py-5 rounded-2xl bg-emerald-500/8 border border-emerald-500/20">
-        <div className="w-10 h-10 rounded-xl bg-emerald-500/15 flex items-center justify-center shrink-0">
-          <Check size={18} className="text-emerald-400" />
-        </div>
-        <div>
-          <p className="text-text-primary font-semibold">Two-factor authentication enabled</p>
-          <p className="text-text-muted text-sm mt-1">Your account is protected with 2FA.</p>
-        </div>
-      </div>
     </div>
   )
 }

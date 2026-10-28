@@ -136,10 +136,10 @@ export default function SharedPlaylistView(): JSX.Element {
     return (
       <div className="flex-1 flex flex-col items-center justify-center gap-3 text-text-muted">
         <Music2 size={40} className="opacity-20" />
-        <p className="text-sm">Shared playlist not found or expired.</p>
+        <p className="text-subhead md:text-sm md:tracking-normal">Shared playlist not found or expired.</p>
         <button
           onClick={() => setActiveView(backView)}
-          className="flex items-center gap-1.5 text-text-muted hover:text-text-primary text-sm transition-colors mt-1"
+          className="flex items-center gap-1.5 text-accent md:text-text-muted hover:text-text-primary text-body md:text-sm md:tracking-normal max-md:active:opacity-60 transition-colors mt-1"
         >
           <ChevronLeft size={15} /> Back to app
         </button>
@@ -152,7 +152,7 @@ export default function SharedPlaylistView(): JSX.Element {
       {/* Header */}
       <button
         onClick={() => setActiveView(backView)}
-        className="flex items-center gap-1.5 self-start text-text-muted hover:text-text-primary text-sm transition-colors mb-4"
+        className="flex items-center gap-1.5 self-start text-accent md:text-text-muted hover:text-text-primary text-body md:text-sm md:tracking-normal max-md:active:opacity-60 transition-colors mb-4"
       >
         <ChevronLeft size={15} /> Back to app
       </button>
@@ -161,9 +161,9 @@ export default function SharedPlaylistView(): JSX.Element {
           <Share2 size={28} className="text-accent" />
         </div>
         <div>
-          <p className="text-text-muted text-xs uppercase tracking-widest font-semibold mb-1">Shared playlist</p>
-          <h1 className="text-text-primary text-2xl font-bold">Shared Playlist</h1>
-          <p className="text-text-muted text-sm">{tracks.length} tracks</p>
+          <p className="text-footnote font-semibold text-accent md:text-text-muted md:text-xs md:uppercase md:tracking-widest mb-1">Shared playlist</p>
+          <h1 className="text-title1 md:text-2xl md:font-bold md:tracking-normal text-text-primary">Shared Playlist</h1>
+          <p className="text-subhead md:text-sm md:tracking-normal text-text-secondary md:text-text-muted">{tracks.length} tracks</p>
         </div>
       </div>
 
@@ -172,7 +172,7 @@ export default function SharedPlaylistView(): JSX.Element {
         <div className="flex gap-3 mb-6">
           <button
             onClick={() => playCollection(tracks)}
-            className="flex items-center gap-2 px-6 py-3 rounded-full bg-accent text-black text-sm font-bold hover:scale-105 active:scale-95 transition-transform shadow-lg"
+            className="flex items-center gap-2 px-6 h-12 md:h-auto md:py-3 rounded-full bg-accent text-black text-headline md:text-sm md:font-bold md:tracking-normal hover:scale-105 active:scale-95 transition-transform md:shadow-lg"
           >
             <Play size={17} fill="currentColor" /> Play all
           </button>
@@ -184,17 +184,17 @@ export default function SharedPlaylistView(): JSX.Element {
         {tracks.map((t, i) => (
           <div
             key={t.id}
-            className="group flex items-center gap-3 px-3 py-2.5 hover:bg-surface-overlay rounded-lg cursor-pointer transition-colors"
+            className="group m-hairline flex items-center gap-3 px-1 md:px-3 py-2 md:py-2.5 hover:bg-surface-overlay max-md:active:bg-[var(--fill)] rounded-none md:rounded-lg cursor-pointer transition-colors [--row-inset:6.25rem]"
             {...clickable(() => playTrack(t, tracks))}
           >
-            <span className="text-text-muted text-xs w-6 text-right tabular-nums shrink-0">{i + 1}</span>
-            <div className="relative w-9 h-9 rounded-lg overflow-hidden bg-surface-overlay shrink-0 flex items-center justify-center">
+            <span className="text-text-muted text-subhead md:text-xs md:tracking-normal w-6 text-right tabular-nums shrink-0">{i + 1}</span>
+            <div className="relative w-12 h-12 md:w-9 md:h-9 rounded-lg overflow-hidden bg-surface-overlay shrink-0 flex items-center justify-center">
               <AlbumArtThumbnail track={t} fill className="w-full h-full" />
               <div className="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 flex items-center justify-center transition-opacity">
                 <Play size={12} fill="white" className="text-white ml-0.5" />
               </div>
             </div>
-            <span className="text-text-primary text-sm flex-1 truncate" title={t.title}>{t.title}</span>
+            <span className="text-text-primary text-body md:text-sm md:tracking-normal flex-1 truncate" title={t.title}>{t.title}</span>
             <a
               href={buildStreamUrl(t.path)}
               download={`${t.title}.mp3`}

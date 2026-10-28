@@ -1,5 +1,6 @@
 import { useEffect, useState, useCallback, useRef } from 'react'
 import { useIsMobile } from '../hooks/useIsMobile'
+import { BackButton } from './mobile/NavBar'
 import {
   ChevronLeft, Newspaper, RefreshCw, AlertCircle, Plus, Settings2,
   Pencil, Trash2, Star, Paperclip, Download, Bell, BellOff, ArrowDownWideNarrow, ArrowUpWideNarrow,
@@ -24,6 +25,7 @@ import NewsContextMenu, { type NewsMenuState } from './NewsContextMenu'
 import { lazyOverlay } from '../lib/lazyView'
 import ChangesFeedPanel from './ChangesFeedPanel'
 import Markdown from './Markdown'
+import { LazyImg } from './LazyImg'
 
 // Staff-only (it pulls in the chat store) - fetched when opened.
 const ShareNewsModal = lazyOverlay(() => import('./chat/ShareNewsModal'))
@@ -112,10 +114,9 @@ function FeaturedCard({ item, onOpen, canManage, onEdit, onDelete, onContextMenu
       >
         {item.image_url ? (
           <div className="relative aspect-[16/7] w-full overflow-hidden bg-[var(--surface-overlay)]">
-            <img
+            <LazyImg
               src={ensureHttpsMediaUrl(item.image_url) ?? undefined}
               alt=""
-              loading="lazy"
               className="w-full h-full object-cover group-hover:scale-[1.03] transition-transform duration-300"
             />
             <div className="absolute inset-0 bg-gradient-to-t from-black/70 via-black/10 to-transparent" />
@@ -156,10 +157,9 @@ function NewsCard({ item, onOpen, canManage, onEdit, onDelete, onContextMenu }: 
       >
         {item.image_url && (
           <div className="w-full aspect-[16/9] shrink-0 overflow-hidden bg-[var(--surface-overlay)]">
-            <img
+            <LazyImg
               src={ensureHttpsMediaUrl(item.image_url) ?? undefined}
               alt=""
-              loading="lazy"
               className="w-full h-full object-cover group-hover:scale-[1.03] transition-transform duration-300"
             />
           </div>
@@ -267,7 +267,7 @@ function AttachmentList({ attachments }: { attachments: NewsAttachment[] }) {
         <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
           {images.map((a, i) => (
             <a key={i} href={ensureHttpsMediaUrl(a.url) ?? a.url} target="_blank" rel="noopener noreferrer" className="block rounded-xl overflow-hidden border border-[var(--border)] bg-[var(--surface-overlay)] hover:border-accent/40 transition-colors cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/50">
-              <img src={ensureHttpsMediaUrl(a.url) ?? undefined} alt={a.name} loading="lazy" className="w-full aspect-square object-cover" />
+              <LazyImg src={ensureHttpsMediaUrl(a.url) ?? undefined} alt={a.name} className="w-full aspect-square object-cover" />
             </a>
           ))}
         </div>
@@ -327,7 +327,7 @@ function ArticleDetail({ item, channelLabel, onBack, canManage, onEdit, onDelete
       <div className="flex items-center gap-2 mb-4">
         <button
           onClick={onBack}
-          className="inline-flex items-center gap-1 text-sm text-text-muted hover:text-text-primary transition-colors cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/50 rounded-lg"
+          className="inline-flex items-center gap-1 text-body md:text-sm md:tracking-normal text-accent md:text-text-muted hover:text-text-primary max-md:active:opacity-60 transition-colors cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/50 rounded-lg"
         >
           <ChevronLeft size={16} /> Back to news
         </button>
@@ -546,17 +546,21 @@ export default function NewsView(): JSX.Element {
   return (
     <div className="flex-1 flex flex-col h-full overflow-hidden bg-[var(--surface)]">
       {/* Header */}
-      <div className="flex-shrink-0 px-6 pt-6 pb-0 border-b border-[var(--border)]">
-        <div className="flex items-center gap-3 mb-4">
+      <div className="flex-shrink-0 px-4 md:px-6 pt-1 md:pt-6 pb-0 border-b border-[var(--separator)] md:border-[var(--border)]">
+        <div className="flex items-center gap-2 md:gap-3 mb-3 md:mb-4">
+          {/* Phones: the round glass back button every pushed mobile page uses. */}
+          <span className="md:hidden shrink-0">
+            <BackButton onClick={() => setActiveView(previousView && previousView !== 'news' ? previousView : 'wrld')} />
+          </span>
           <button
             onClick={() => setActiveView(previousView && previousView !== 'news' ? previousView : 'wrld')}
             title="Back"
             aria-label="Back"
-            className="p-1 -ml-1 rounded-lg text-text-muted hover:text-text-primary hover:bg-surface-overlay transition-colors shrink-0 cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/50"
+            className="hidden md:block p-1 -ml-1 rounded-lg text-text-muted hover:text-text-primary hover:bg-surface-overlay transition-colors shrink-0 cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/50"
           >
             <ChevronLeft size={18} />
           </button>
-          <h1 className="text-text-primary text-xl font-bold">News</h1>
+          <h1 className="text-title2 md:text-xl md:font-bold md:tracking-normal text-text-primary">News</h1>
           {mode === 'news' && (
           <div className="ml-auto flex items-center gap-1">
             {channel !== ALL_CHANNEL && (
@@ -601,7 +605,7 @@ export default function NewsView(): JSX.Element {
             {canPost && (
               <button
                 onClick={openNew}
-                className="ml-1 inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-semibold bg-accent text-white hover:opacity-90 transition-opacity cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/50"
+                className="ml-1 inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full md:rounded-lg text-sm font-semibold bg-accent text-white hover:opacity-90 max-md:active:opacity-80 transition-opacity cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/50"
               >
                 <Plus size={15} /> New post
               </button>
@@ -610,34 +614,36 @@ export default function NewsView(): JSX.Element {
           )}
         </div>
         {/* Primary tabs */}
-        <div className="flex gap-1 mb-1">
+        {/* Phones: an iOS segmented control; desktop keeps its tab buttons. */}
+        <div className="flex gap-1 mb-3 md:mb-1 p-0.5 md:p-0 rounded-full md:rounded-none bg-[var(--fill)] md:bg-transparent">
           {(['news', 'feed'] as const).map((m) => (
             <button
               key={m}
               onClick={() => setMode(m)}
               aria-pressed={mode === m}
-              className={`px-3 py-1.5 text-sm font-semibold rounded-lg border transition-colors cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/50 ${
+              className={`flex-1 md:flex-none h-8 md:h-auto px-3 md:py-1.5 text-footnote md:text-sm md:tracking-normal font-semibold rounded-full md:rounded-lg border-0 md:border transition-colors cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/50 ${
                 mode === m
-                  ? 'bg-[var(--surface-raised)] text-accent border-[var(--border)]'
-                  : 'border-transparent text-text-muted hover:text-text-primary'
+                  ? 'bg-[var(--control-thumb)] text-text-primary shadow-[0_3px_8px_rgb(0_0_0/0.12)] md:shadow-none md:bg-[var(--surface-raised)] md:text-accent md:border-[var(--border)]'
+                  : 'border-transparent text-text-secondary md:text-text-muted hover:text-text-primary'
               }`}
             >
               {m === 'news' ? 'News' : 'Feed'}
             </button>
           ))}
         </div>
-        {/* Channels */}
+        {/* Channels - phones get chips, the selected one inverted (as in the
+            Tracker); desktop keeps its underline tabs. */}
         {mode === 'news' && (
-        <div className="flex gap-1 overflow-x-auto scrollbar-none">
+        <div className="flex gap-2 md:gap-1 overflow-x-auto scrollbar-none pb-3 md:pb-0 -mx-4 px-4 md:mx-0 md:px-0">
           {tabs.map((ch) => (
             <button
               key={ch.id}
               onClick={() => setChannel(ch.id)}
               aria-pressed={channel === ch.id}
-              className={`flex-shrink-0 px-4 py-2 text-sm font-medium transition-colors border-b-2 -mb-px cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/50 ${
+              className={`flex-shrink-0 h-8 md:h-auto px-3.5 md:px-4 md:py-2 rounded-full md:rounded-none text-subhead md:text-sm md:tracking-normal font-medium transition-colors md:border-b-2 md:-mb-px cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/50 ${
                 channel === ch.id
-                  ? 'text-accent border-accent'
-                  : 'text-text-muted border-transparent hover:text-text-primary'
+                  ? 'bg-text-primary text-surface md:bg-transparent md:text-accent md:border-accent'
+                  : 'bg-[var(--fill)] text-text-primary md:bg-transparent md:text-text-muted md:border-transparent hover:text-text-primary'
               }`}
             >
               {ch.label}
@@ -648,7 +654,7 @@ export default function NewsView(): JSX.Element {
       </div>
 
       {/* Content */}
-      <div className="flex-1 overflow-y-auto p-6">
+      <div className="flex-1 overflow-y-auto p-4 md:p-6">
         {mode === 'feed' ? (
           <ChangesFeedPanel />
         ) : selected ? (

@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } fro
 import { AtSign, Hash, KeyRound, Loader2, Lock, MicOff, ShieldCheck, Upload } from 'lucide-react'
 import { conversationTitle, displayName, roomKey, useChatStore, useMyPostingRestriction, type RoomRef, type UiMessage } from '../../store/chatStore'
 import Composer, { type ComposerHandle } from './Composer'
+import { ConfirmDialog } from './MessageItem'
 import MessageList from './MessageList'
 import { useRoomPeople } from './people'
 import { TrustBanners } from './ChatTrust'
@@ -117,6 +118,84 @@ function ChannelIntro({ room, title }: { room: RoomRef; title: string }): JSX.El
   )
 }
 
+// This device has no key for the conversation's current version. The others
+// here (and, on v2, our other devices) are asked automatically; if nobody has
+// the key any more, a new one can be started for what's said from now on.
+function MissingKeyBanner({ conversationId, failed }: { conversationId: number; failed: boolean }): JSX.Element {
+  const identity = useChatStore((s) => s.identity)
+  const resolveKey = useChatStore((s) => s.resolveKey)
+  const askForKeys = useChatStore((s) => s.askForKeys)
+  const resetKey = useChatStore((s) => s.resetKey)
+  const [busy, setBusy] = useState<'ask' | 'reset' | null>(null)
+  const [asked, setAsked] = useState(false)
+  const [confirming, setConfirming] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const askedTimer = useRef<number | null>(null)
+
+  useEffect(() => () => { if (askedTimer.current !== null) window.clearTimeout(askedTimer.current) }, [])
+
+  const ask = async (): Promise<void> => {
+    setBusy('ask')
+    setError(null)
+    try {
+      if (failed) await resolveKey(conversationId)
+      else {
+        await askForKeys(conversationId)
+        setAsked(true)
+        if (askedTimer.current !== null) window.clearTimeout(askedTimer.current)
+        askedTimer.current = window.setTimeout(() => setAsked(false), 15_000)
+      }
+    } catch (err) {
+      setError((err as Error)?.message || 'Couldn’t ask for the key.')
+    } finally {
+      setBusy(null)
+    }
+  }
+
+  const reset = async (): Promise<void> => {
+    setConfirming(false)
+    setBusy('reset')
+    setError(null)
+    try {
+      await resetKey(conversationId)
+    } catch (err) {
+      setError((err as Error)?.message || 'Couldn’t reset the key.')
+    } finally {
+      setBusy(null)
+    }
+  }
+
+  const btn = 'shrink-0 inline-flex items-center gap-1 font-semibold text-amber-800 dark:text-amber-300 hover:underline disabled:opacity-60 disabled:no-underline'
+  return (
+    <div className="mx-4 md:mx-5 mt-3 flex items-center gap-3 rounded-xl border border-amber-500/30 bg-amber-500/10 px-3 py-2.5 text-xs text-amber-900 dark:text-amber-200">
+      <KeyRound size={16} className="shrink-0 text-amber-600 dark:text-amber-400" />
+      <span className="flex-1">
+        {failed
+          ? 'Couldn’t set up encryption for this conversation.'
+          : `This device doesn’t have the key for this conversation. ${identity === 'ready' ? 'The others here and your other devices were' : 'The others here were'} asked for it; it arrives once someone who has it is online. If it never comes, reset the key: new messages will work, older ones stay locked here.`}
+        {error && <span className="block text-red-600 dark:text-red-400">{error}</span>}
+      </span>
+      <button onClick={() => void ask()} disabled={busy !== null || asked} className={btn}>
+        {busy === 'ask' && <Loader2 size={11} className="animate-spin" />}
+        {failed ? 'Retry' : asked ? 'Asked' : 'Ask again'}
+      </button>
+      <button onClick={() => setConfirming(true)} disabled={busy !== null} className={btn}>
+        {busy === 'reset' && <Loader2 size={11} className="animate-spin" />}Reset key
+      </button>
+      {confirming && (
+        <ConfirmDialog
+          title="Reset this conversation’s key?"
+          body="Everyone here gets a new key, so new messages can be read on every device. Older messages stay unreadable on this device; anyone who still has the old key can still read them."
+          confirmLabel="Reset key"
+          danger={false}
+          onConfirm={() => void reset()}
+          onCancel={() => setConfirming(false)}
+        />
+      )}
+    </div>
+  )
+}
+
 export default function RoomPane({ room, header, enterSends = true }: {
   room: RoomRef
   header: ReactNode
@@ -125,7 +204,6 @@ export default function RoomPane({ room, header, enterSends = true }: {
   const info = useRoomInfo(room)
   const people = useRoomPeople(room)
   const keyState = useChatStore((s) => (room.kind === 'conversation' ? s.keyState[room.id] : undefined))
-  const resolveKey = useChatStore((s) => s.resolveKey)
   const meId = useChatStore((s) => s.meId)
   const identity = useChatStore((s) => s.identity)
   const participants = useChatStore((s) => (room.kind === 'conversation' ? s.conversations.find((c) => c.id === room.id)?.participants : undefined))
@@ -207,17 +285,7 @@ export default function RoomPane({ room, header, enterSends = true }: {
       )}
       {participants && <TrustBanners participants={participants.map((p) => p.user)} />}
       {room.kind === 'conversation' && (keyState === 'waiting' || keyState === 'error') && identity !== 'needs-link' && (
-        <div className="mx-4 md:mx-5 mt-3 flex items-center gap-3 rounded-xl border border-amber-500/30 bg-amber-500/10 px-3 py-2.5 text-xs text-amber-900 dark:text-amber-200">
-          <KeyRound size={16} className="shrink-0 text-amber-600 dark:text-amber-400" />
-          <span className="flex-1">
-            {keyState !== 'waiting'
-              ? 'Couldn’t set up encryption for this conversation.'
-              : identity === 'ready'
-                ? 'This device doesn’t have the key for this conversation yet. Your other devices were asked for it automatically; it arrives when one of them, or a participant, is online.'
-                : 'This device doesn’t have the key for this conversation. Keys go to one device per person, so either wait for a participant to come online, or export them from your keyed device in Settings › Chat devices and import them here.'}
-          </span>
-          <button onClick={() => void resolveKey(room.id)} className="shrink-0 font-semibold text-amber-800 dark:text-amber-300 hover:underline">Retry</button>
-        </div>
+        <MissingKeyBanner conversationId={room.id} failed={keyState === 'error'} />
       )}
       {room.kind === 'conversation' && keyState === 'resolving' && (
         <div className="absolute top-16 right-5 z-10 inline-flex items-center gap-1.5 rounded-full bg-surface border border-[var(--border)] px-2.5 py-1 text-[11px] text-text-muted shadow">

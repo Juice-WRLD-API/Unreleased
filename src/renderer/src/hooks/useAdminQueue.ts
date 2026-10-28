@@ -22,10 +22,11 @@ import { CONTRIBUTOR_ENABLED } from '../lib/userApi'
 import type { AdminUser, EditorApplication, ProposalStatus, SongEditProposal } from '../lib/userApi'
 import * as reportsApi from '../lib/reportsApi'
 import type { FeedbackRow, SongReportRow, SongReportStatus } from '../lib/reportsApi'
+import { adminCoverArtCounts } from '../lib/coverArtApi'
 import { useStrictModeSafeEffect } from './useStrictModeSafeEffect'
 import { errorMessage } from '../lib/format'
 
-export type AdminTab = 'proposals' | 'comp-proposals' | 'comp-replace' | 'applications' | 'reports' | 'feedback' | 'users' | 'stats' | 'security' | 'channels' | 'eras' | 'cdn-nodes' | 'beta' | 'lyrics' | 'logs'
+export type AdminTab = 'proposals' | 'cover-art' | 'comp-proposals' | 'comp-replace' | 'applications' | 'reports' | 'feedback' | 'users' | 'stats' | 'channels' | 'eras' | 'cdn-nodes' | 'beta' | 'lyrics' | 'logs'
 
 // Deep-link paths for the standalone (non-embedded) admin console - each
 // section its own top-level URL instead of one flat "/admin" for every tab.
@@ -35,6 +36,7 @@ export type AdminTab = 'proposals' | 'comp-proposals' | 'comp-replace' | 'applic
 // "/admin" like an unrecognized tab would).
 export const ADMIN_TAB_PATHS: Partial<Record<AdminTab, string>> = {
   proposals: '/admin',
+  'cover-art': '/cover-art',
   'comp-proposals': '/comp-files',
   'comp-replace': '/comp-replace',
   applications: '/applications',
@@ -47,7 +49,6 @@ export const ADMIN_TAB_PATHS: Partial<Record<AdminTab, string>> = {
   beta: '/beta',
   lyrics: '/lyrics-gen',
   logs: '/logs',
-  security: '/security',
 }
 
 // Reverse of the above, for turning a URL back into a tab on load/back-forward.
@@ -61,7 +62,7 @@ export type FeedbackFilter = 'human' | 'automated' | ''
 export interface AdminNavItem {
   id: AdminTab
   label: string
-  iconKey: 'proposals' | 'comp-proposals' | 'comp-replace' | 'applications' | 'reports' | 'feedback' | 'users' | 'stats' | 'channels' | 'eras' | 'cdn-nodes' | 'beta' | 'lyrics' | 'logs' | 'security'
+  iconKey: 'proposals' | 'cover-art' | 'comp-proposals' | 'comp-replace' | 'applications' | 'reports' | 'feedback' | 'users' | 'stats' | 'channels' | 'eras' | 'cdn-nodes' | 'beta' | 'lyrics' | 'logs'
   badge?: number
 }
 
@@ -81,12 +82,34 @@ export interface UseAdminQueueOptions {
    *  true). Omit on desktop, which has no equivalent re-forcing effect. */
   forceTab?: { when: boolean; tab: AdminTab }
   /** Tab ids visible to a non-full-admin (manager) in the nav, filtered out of
-   *  fullNav. Desktop: ['proposals', 'comp-proposals']. Mobile: ['comp-proposals']. */
+   *  fullNav. Desktop: ['proposals', 'cover-art', 'comp-proposals']. Mobile:
+   *  ['cover-art', 'comp-proposals']. Cover art only appears when
+   *  canReviewCoverArt adds it to fullNav. */
   managerNavIds: AdminTab[]
+  /** Cover art is reviewed by managers of the primary channel and admins,
+   *  whatever channel is active (songs aren't per channel). Hides the tab
+   *  and skips its count otherwise. */
+  canReviewCoverArt?: boolean
 }
 
 export function useAdminQueue(opts: UseAdminQueueOptions) {
-  const { canLoad, isFullAdmin, gateNonProposalTabs, activeChannel, initialTab, forceTab, managerNavIds } = opts
+  const { canLoad, isFullAdmin, gateNonProposalTabs, activeChannel, initialTab, forceTab, managerNavIds, canReviewCoverArt = false } = opts
+
+  // The Cover art tab loads its own rows; only the pending count for its badge
+  // lives here, asked for on its own (?counts=1) so the badge shows before
+  // the tab is ever opened. Not gated on canLoad: mobile managers never run
+  // this hook's load() (their other queues fetch themselves) but they do
+  // review cover art.
+  const [pendingCoverArt, setPendingCoverArt] = useState<number | null>(null)
+  const [coverArtCountKey, setCoverArtCountKey] = useState(0)
+  useEffect(() => {
+    if (!canReviewCoverArt) { setPendingCoverArt(null); return }
+    let stale = false
+    adminCoverArtCounts()
+      .then((c) => { if (!stale) setPendingCoverArt(c.pending) })
+      .catch(() => { if (!stale) setPendingCoverArt(null) })
+    return () => { stale = true }
+  }, [canReviewCoverArt, coverArtCountKey])
 
   const [tab, setTab] = useState<AdminTab>(initialTab)
   const [loading, setLoading] = useState(false)
@@ -179,20 +202,15 @@ export function useAdminQueue(opts: UseAdminQueueOptions) {
     // eslint-disable-next-line react-hooks/exhaustive-deps -- sig already encodes every input `load` reads for the active tab (see comment above); `load` itself would fire this on every render otherwise.
   }, [tab, sig, canLoad])
 
-  // Mobile-only re-forcing effect: account can still be loading when the page
-  // first mounts (deep link, page refresh) - managerOnly flips from false to
-  // true once it lands, and the tab set at mount time would otherwise strand
-  // a manager on a tab their nav bar no longer offers a button for.
-  useEffect(() => {
-    if (forceTab?.when && tab !== forceTab.tab) setTab(forceTab.tab)
-  }, [forceTab?.when, forceTab?.tab, tab])
-
   const pendingApps    = applications.filter(a => a.status === 'pending').length
   const pendingProps   = tab !== 'proposals' ? proposals.filter(p => p.status === 'pending').length : 0
   const pendingReports = tab !== 'reports' ? reports.filter(r => r.status === 'pending').length : 0
 
   const fullNav: AdminNavItem[] = [
     { id: 'proposals',    label: 'Song edits',   iconKey: 'proposals',   badge: pendingProps || undefined },
+    ...(canReviewCoverArt ? [
+      { id: 'cover-art' as const, label: 'Cover art', iconKey: 'cover-art' as const, badge: pendingCoverArt || undefined },
+    ] : []),
     ...(CONTRIBUTOR_ENABLED ? [
       { id: 'comp-proposals' as const, label: 'Comp files', iconKey: 'comp-proposals' as const },
       { id: 'comp-replace' as const, label: 'Replace comp', iconKey: 'comp-replace' as const },
@@ -208,9 +226,17 @@ export function useAdminQueue(opts: UseAdminQueueOptions) {
     { id: 'beta',         label: 'Beta',         iconKey: 'beta' },
     { id: 'lyrics',       label: 'Lyrics',       iconKey: 'lyrics' },
     { id: 'logs',         label: 'Logs',         iconKey: 'logs' },
-    { id: 'security',     label: 'Security',     iconKey: 'security' },
   ]
   const nav = isFullAdmin ? fullNav : fullNav.filter(n => managerNavIds.includes(n.id))
+  // Mobile re-forces a manager off a tab their nav doesn't offer once the
+  // account lands (they used to mount on Song edits). A tab the nav does
+  // offer, including Cover art opened from the profile tile, stays put.
+  const navIds = nav.map(n => n.id).join(',')
+  useEffect(() => {
+    if (!forceTab?.when || tab === forceTab.tab) return
+    if (navIds.split(',').includes(tab)) return
+    setTab(forceTab.tab)
+  }, [forceTab?.when, forceTab?.tab, tab, navIds])
 
   return {
     tab, setTab,
@@ -227,6 +253,8 @@ export function useAdminQueue(opts: UseAdminQueueOptions) {
     feedbackFilter, setFeedbackFilter,
     feedback,
     pendingApps, pendingProps, pendingReports,
+    pendingCoverArt,
+    refreshCoverArtCount: () => setCoverArtCountKey(k => k + 1),
     fullNav, nav,
   }
 }

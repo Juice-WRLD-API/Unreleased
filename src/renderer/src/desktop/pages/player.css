@@ -250,7 +250,7 @@
 /* The song's other versions, and the ⋯ menu with its playlists, over their buttons: a long list scrolls. */
 #menu.listing { max-height: var(--carousel-height); max-width: calc(260px * var(--s)); overflow-y: auto; scrollbar-width: thin; }
 #menu.listing button, #menu .menu-title { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-#menu .menu-title { padding: calc(5px * var(--s)) calc(10px * var(--s)) calc(3px * var(--s)); font-size: calc(11px * var(--s)); font-weight: 600; color: rgba(255, 255, 255, 0.5); }
+#menu .menu-title { max-width: calc(250px * var(--s)); padding: calc(5px * var(--s)) calc(10px * var(--s)) calc(3px * var(--s)); font-size: calc(11px * var(--s)); font-weight: 600; color: rgba(255, 255, 255, 0.5); }
 #menu button.menu-title { border-radius: calc(8px * var(--s)); }
 #menu button.menu-title:hover { color: rgba(255, 255, 255, 0.85); }
 #menu .menu-note { padding: calc(7px * var(--s)) calc(10px * var(--s)); font-size: calc(12px * var(--s)); color: rgba(255, 255, 255, 0.45); }

@@ -110,7 +110,7 @@ export default function EditorProfileView(): JSX.Element {
     avatarUploading, avatarError, handleAvatarFile,
     refreshKey, setRefreshKey, showAddSong, setShowAddSong, openAdmin,
     proposalsView, setProposalsView, expandedProposalId, setExpandedProposalId, compSearch, setCompSearch,
-    isContributor, isAdmin, isManager, canReviewReports, canReviewStaff,
+    isContributor, isAdmin, isManager, canReviewReports, canReviewStaff, canReviewCoverArt,
     loadingProposals, refreshing, filter, setFilter, search, setSearch, deletingId, resubmittingId,
     filteredProposals, handleDelete, handleResubmit, handleReview, reviewingId, canReviewProposals, tabCount, proposals,
     leaderboard, loadingLeaderboard, myEntry,
@@ -534,7 +534,7 @@ export default function EditorProfileView(): JSX.Element {
                         ever reach Song edits + Comp files (both open a
                         queue), so they never see a Stats group at all and
                         Queues just takes the full width on its own. Admins
-                        without 2FA only see the Security box (highlighted)
+                        without 2FA only see the 2FA box (highlighted)
                         so they can find and turn it on - every other
                         number/button here is an account-wide admin surface
                         and stays gated until then. */}
@@ -544,6 +544,7 @@ export default function EditorProfileView(): JSX.Element {
                         {!otpLocked && (
                           <>
                             <AdminStatBox label="Song edits" value={adminPreview?.pendingProposals} highlight={!!adminPreview?.pendingProposals} onClick={() => openAdmin('proposals')} />
+                            {canReviewCoverArt && <AdminStatBox label="Cover art" value={adminPreview?.pendingCoverArt} highlight={!!adminPreview?.pendingCoverArt} onClick={() => openAdmin('cover-art')} />}
                             <AdminStatBox label="Comp files" value={adminPreview?.pendingComp} highlight={!!adminPreview?.pendingComp} onClick={() => openAdmin('comp-proposals')} />
                             {CONTRIBUTOR_ENABLED && <AdminStatBox label="Replace comp" value="Open" onClick={() => openAdmin('comp-replace')} />}
                           </>
@@ -562,13 +563,11 @@ export default function EditorProfileView(): JSX.Element {
                             <AdminStatBox label="Broadcast" value="Send" onClick={() => setShowBroadcast(true)} />
                           </>
                         )}
-                        {isAdmin && (
-                          <AdminStatBox
-                            label="Security"
-                            value={adminPreview ? (adminPreview.otpEnabled ? 'ON' : 'OFF') : undefined}
-                            highlight={adminPreview?.otpEnabled === false}
-                            onClick={() => openAdmin('security')}
-                          />
+                        {/* The 2FA status lives in Settings → Account; this box
+                            only appears while it's off. Admin opens on its
+                            setup gate. */}
+                        {otpLocked && (
+                          <AdminStatBox label="2FA" value="OFF" highlight onClick={() => openAdmin('proposals')} />
                         )}
                       </div>
                       {otpLocked && (

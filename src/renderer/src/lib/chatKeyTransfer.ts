@@ -1,8 +1,8 @@
 import { allRoomKeys, putRoomKey } from './chatKeyStore'
 
-// Moving room keys between your own browsers by hand: only one device per
-// person is keyed automatically (see primaryDevices in chatE2E), so a second
-// browser gets its keys from an export made on the first one.
+// Moving room keys between your own browsers by hand: devices are only sent
+// each conversation's current key (see shareKeyWithUser in chatE2E), so a
+// second browser gets older history from an export made on the first one.
 //
 // The blob is `unrlsd-keys:v1:<base64>` over
 //   salt(16) || iv(12) || AES-GCM(PBKDF2-SHA256(passphrase, salt, ITERATIONS))

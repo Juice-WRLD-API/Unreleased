@@ -2,9 +2,9 @@ import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import {
   Folder, Music2, ChevronRight, ChevronDown, ArrowLeft, Play, Loader2,
   ImageIcon, Video, Download, ArrowUp, ArrowDown, Link, Check, Info, ListPlus,
-  Heart, X, Pencil, PackageOpen, Search, Filter, MoreVertical, Clipboard, Plus,
+  Heart, X, Pencil, PackageOpen, Search, Filter, MoreHorizontal, Clipboard, Plus,
   ListMusic, Replace, Trash2, LayoutGrid, LayoutList, FileQuestion, Home,
-  CheckCircle2, Circle, SlidersHorizontal, Radio,
+  CheckCircle2, Circle, SlidersHorizontal, Radio, Sparkles,
 } from 'lucide-react'
 import { useStore, useStorePick } from '../store/useStore'
 import * as userApi from '../lib/userApi'
@@ -43,6 +43,9 @@ import { Sheet, SheetItem, SheetDivider } from './mobile/Sheet'
 import MediaLightbox from './MediaLightbox'
 import SongInfoModal from './SongInfoModal'
 import { clickable } from '../lib/a11y'
+import { LazyImg } from './LazyImg'
+import { BackButton, BarButton, LargeTitle } from './mobile/NavBar'
+import { SearchField, SearchFieldButton } from './mobile/SearchField'
 
 // ─── Files ────────────────────────────────────────────────────────────────────
 // Phone-first file browser over the API's /files/* endpoints. The data layer
@@ -93,7 +96,7 @@ function metaLine(entry: JWApiFileEntry, showParent: boolean): string {
 
 // ─── Thumbnails ───────────────────────────────────────────────────────────────
 
-function Thumb({ entry, size, rounded = 'rounded-xl' }: {
+function Thumb({ entry, size, rounded = 'rounded-lg' }: {
   entry: JWApiFileEntry
   size: number
   rounded?: string
@@ -101,7 +104,7 @@ function Thumb({ entry, size, rounded = 'rounded-xl' }: {
   const activeChannel = useStore((s) => s.activeChannel)
   const [errored, setErrored] = useState(false)
   const mt = entry.type === 'directory' ? 'folder' : getMediaType(entry.name)
-  const box = `flex items-center justify-center bg-surface-overlay ${rounded}`
+  const box = `flex items-center justify-center bg-[var(--fill)] ${rounded}`
 
   if (mt === 'folder') {
     return (
@@ -112,7 +115,7 @@ function Thumb({ entry, size, rounded = 'rounded-xl' }: {
   }
   if (!errored && (mt === 'audio' || mt === 'image')) {
     return (
-      <img
+      <LazyImg
         // Audio takes the API's rendered cover; images are served whole by
         // /files/download/, so a folder of art would be hundreds of KB per row
         // at full size - thumbnails take the degraded copy, the lightbox still
@@ -121,8 +124,6 @@ function Thumb({ entry, size, rounded = 'rounded-xl' }: {
         alt=""
         className={`${rounded} object-cover bg-surface-overlay`}
         style={{ width: size, height: size }}
-        loading="lazy"
-        decoding="async"
         onError={() => setErrored(true)}
       />
     )
@@ -445,8 +446,8 @@ export default function ApiFilesView(): JSX.Element {
     return (
       <div
         key={entry.path}
-        className={`flex items-center gap-3 pl-4 pr-1 py-2 rounded-2xl transition-colors ${
-          isSelected ? 'bg-accent/15' : 'active:bg-surface-overlay'
+        className={`list-row relative flex items-center gap-3 pl-4 pr-1 py-2 transition-colors ${
+          isSelected ? 'bg-accent/15' : 'active:bg-[var(--fill)]'
         }`}
         {...clickable(() => openEntry(entry))}
         {...pressHandlers(entry)}
@@ -458,23 +459,23 @@ export default function ApiFilesView(): JSX.Element {
         <div className="relative shrink-0">
           <Thumb entry={entry} size={48} />
           {selectMode && (
-            <div className={`absolute inset-0 flex items-center justify-center rounded-xl transition-colors ${isSelected ? 'bg-accent/75' : 'bg-black/45'}`}>
+            <div className={`absolute inset-0 flex items-center justify-center rounded-lg transition-colors ${isSelected ? 'bg-accent/75' : 'bg-black/45'}`}>
               {isSelected
                 ? <Check size={22} className="text-white" strokeWidth={3} />
                 : <Circle size={20} className="text-white/85" />}
             </div>
           )}
           {playing === entry.path && (
-            <div className="absolute inset-0 flex items-center justify-center rounded-xl bg-black/55">
+            <div className="absolute inset-0 flex items-center justify-center rounded-lg bg-black/55">
               <Loader2 size={18} className="text-white animate-spin" />
             </div>
           )}
         </div>
         <div className="flex-1 min-w-0 py-0.5">
-          <p className={`text-[15px] leading-snug truncate ${isCurrent ? 'text-accent font-semibold' : 'text-text-primary'}`}>
+          <p className={`text-body truncate ${isCurrent ? 'text-accent font-semibold' : 'text-text-primary'}`}>
             {entry.name}
           </p>
-          <p className="text-text-muted text-xs truncate mt-0.5">{metaLine(entry, isSearching)}</p>
+          <p className="text-subhead text-text-secondary truncate">{metaLine(entry, isSearching)}</p>
         </div>
         {pendingFor(entry.path) && <PendingMarker proposal={pendingFor(entry.path)!} />}
         {isLiked && <Heart size={14} fill="currentColor" className="text-accent shrink-0" />}
@@ -483,11 +484,11 @@ export default function ApiFilesView(): JSX.Element {
           isDir ? <ChevronRight size={16} className="text-text-muted shrink-0 mr-3" /> : <span className="w-3 shrink-0" />
         ) : (
           <button
-            className="shrink-0 w-11 h-11 flex items-center justify-center text-text-muted active:text-accent"
+            className="shrink-0 w-11 h-11 flex items-center justify-center text-text-primary active:opacity-50"
             onClick={(e) => { e.stopPropagation(); openActions(entry) }}
             aria-label={isDir ? 'Folder options' : 'File options'}
           >
-            <MoreVertical size={18} />
+            <MoreHorizontal size={20} />
           </button>
         )}
       </div>
@@ -506,8 +507,8 @@ export default function ApiFilesView(): JSX.Element {
     return (
       <div
         key={entry.path}
-        className={`relative flex flex-col rounded-2xl overflow-hidden transition-colors ${
-          isSelected ? 'bg-accent/15 ring-2 ring-accent' : 'bg-surface-raised active:bg-surface-overlay'
+        className={`relative flex flex-col rounded-[14px] overflow-hidden transition-colors ${
+          isSelected ? 'bg-accent/15 ring-2 ring-accent' : 'bg-[var(--grouped)] active:bg-[var(--fill-strong)]'
         }`}
         {...clickable(() => openEntry(entry))}
         {...pressHandlers(entry)}
@@ -548,16 +549,16 @@ export default function ApiFilesView(): JSX.Element {
         </div>
         <div className="flex items-center gap-0.5 pl-2.5 pr-0.5 py-1.5">
           <div className="flex-1 min-w-0">
-            <p className={`text-[13px] font-medium truncate ${isCurrent ? 'text-accent' : 'text-text-primary'}`}>{entry.name}</p>
-            <p className="text-text-muted text-[11px] truncate mt-0.5">{metaLine(entry, isSearching)}</p>
+            <p className={`text-footnote font-medium truncate ${isCurrent ? 'text-accent' : 'text-text-primary'}`}>{entry.name}</p>
+            <p className="text-footnote text-text-secondary truncate">{metaLine(entry, isSearching)}</p>
           </div>
           {!selectMode && (
             <button
-              className="shrink-0 w-9 h-9 flex items-center justify-center text-text-muted active:text-accent"
+              className="shrink-0 w-9 h-9 flex items-center justify-center text-text-primary active:opacity-50"
               onClick={(e) => { e.stopPropagation(); openActions(entry) }}
               aria-label="Options"
             >
-              <MoreVertical size={16} />
+              <MoreHorizontal size={18} />
             </button>
           )}
         </div>
@@ -581,102 +582,86 @@ export default function ApiFilesView(): JSX.Element {
             instead, which only shortens the scroller. */}
         <div className="shrink-0">
             {/* No top padding: <main> has already absorbed the status-bar
-                inset, and the 44px control row carries its own breathing room
-                - anything extra here just reads as a dead strip under the
-                notch. */}
-            <div className="flex items-center gap-1 px-2">
-              <button
-                onClick={() => { if (isSearching || search) { setSearch(''); setDebouncedSearch('') } else goBack() }}
-                disabled={!currentPath && !isSearching && !search}
-                className="w-11 h-11 shrink-0 flex items-center justify-center rounded-full text-text-primary active:bg-surface-overlay disabled:opacity-25 disabled:pointer-events-none"
-                aria-label="Back"
-              ><ArrowLeft size={20} /></button>
-
-              <div className="flex-1 min-w-0 px-0.5">
-                <h1 className="text-text-primary text-[20px] font-bold leading-tight truncate">{title}</h1>
-                {currentPath && !isSearching ? (
-                  // The path doubles as the folder switcher: tapping it opens a
-                  // sheet listing every ancestor, which is how you jump up more
-                  // than one level without a breadcrumb row eating a whole line
-                  // of a phone screen.
-                  <button
-                    onClick={() => setSheet('path')}
-                    className="flex items-center gap-1 max-w-full text-text-muted active:text-text-primary"
-                  >
-                    <span className="text-xs truncate">{currentPath}</span>
-                    <ChevronDown size={13} className="shrink-0" />
-                  </button>
-                ) : (
-                  <p className="text-text-muted text-xs truncate">{subtitle}</p>
-                )}
-              </div>
-
-              {channels.length > 1 && (
+                inset. At the root the actions share the large title's line,
+                as Tracker's do; inside a folder they move up to a bar with the
+                back button, iOS Files-style, and the folder's name takes the
+                large title. The layout follows the folder, not the search
+                text, so typing never moves the field under the finger. */}
+            {(() => {
+              const titleSub = currentPath && !isSearching ? (
+                // The path doubles as the folder switcher: tapping it opens a
+                // sheet listing every ancestor, which is how you jump up more
+                // than one level without a breadcrumb row eating a whole line
+                // of a phone screen.
                 <button
-                  onClick={() => setSheet('channel')}
-                  className="w-11 h-11 shrink-0 flex items-center justify-center rounded-full text-text-muted active:bg-surface-overlay"
-                  aria-label={`Channel: ${channels.find((c) => c.slug === activeChannel)?.name ?? 'default'}`}
-                ><Radio size={19} /></button>
-              )}
-
-              {/* Sort lives here rather than as a chip in the row below: the
-                  four filter chips already fill a phone's width on their own.
-                  The current field/direction shows in the sheet it opens. */}
-              <button
-                onClick={() => setSheet('sort')}
-                className="w-11 h-11 shrink-0 flex items-center justify-center rounded-full text-text-muted active:bg-surface-overlay"
-                aria-label={`Sort by ${SORT_LABELS[sortBy].toLowerCase()}, ${sortDir === 'asc' ? 'ascending' : 'descending'}`}
-              ><SlidersHorizontal size={19} /></button>
-
-              <button
-                onClick={() => setViewMode(viewMode === 'list' ? 'grid' : 'list')}
-                className="w-11 h-11 shrink-0 flex items-center justify-center rounded-full text-text-muted active:bg-surface-overlay"
-                aria-label={viewMode === 'list' ? 'Switch to grid' : 'Switch to list'}
-              >{viewMode === 'list' ? <LayoutGrid size={19} /> : <LayoutList size={19} />}</button>
-            </div>
+                  onClick={() => setSheet('path')}
+                  className="flex items-center gap-1 max-w-full text-text-secondary active:text-text-primary"
+                >
+                  <span className="truncate">{currentPath}</span>
+                  <ChevronDown size={14} className="shrink-0" />
+                </button>
+              ) : subtitle
+              const actions = <>
+                {channels.length > 1 && (
+                  <BarButton
+                    label={`Channel: ${channels.find((c) => c.slug === activeChannel)?.name ?? 'default'}`}
+                    onClick={() => setSheet('channel')}
+                  ><Radio size={20} /></BarButton>
+                )}
+                {/* Sort lives up here rather than as a chip in the row below:
+                    the four filter chips already fill a phone's width on their
+                    own. The current field/direction shows in the sheet it
+                    opens. */}
+                <BarButton
+                  label={`Sort by ${SORT_LABELS[sortBy].toLowerCase()}, ${sortDir === 'asc' ? 'ascending' : 'descending'}`}
+                  onClick={() => setSheet('sort')}
+                ><SlidersHorizontal size={20} /></BarButton>
+                <BarButton
+                  label={viewMode === 'list' ? 'Switch to grid' : 'Switch to list'}
+                  onClick={() => setViewMode(viewMode === 'list' ? 'grid' : 'list')}
+                >{viewMode === 'list' ? <LayoutGrid size={20} /> : <LayoutList size={20} />}</BarButton>
+              </>
+              return currentPath ? (
+                <>
+                  <div className="flex items-center gap-2 px-3 pt-1">
+                    <BackButton
+                      onClick={() => { if (isSearching || search) { setSearch(''); setDebouncedSearch('') } else goBack() }}
+                    />
+                    <div className="flex-1" />
+                    {actions}
+                  </div>
+                  <LargeTitle inset="none" title={title} subtitle={titleSub} />
+                </>
+              ) : (
+                <LargeTitle inset="none" title={title} subtitle={titleSub} trailing={actions} />
+              )
+            })()}
 
             {/* Search - recursive across the whole tree, or (with the folder
                 toggle on) just the folder being browsed and its subfolders. */}
-            <div className="px-4 pt-2 pb-2">
-              <div className="relative flex items-center">
-                <Search size={16} className="absolute left-3.5 text-text-muted pointer-events-none" />
-                <input
-                  type="search"
-                  value={search}
-                  onChange={(e) => setSearch(e.target.value)}
-                  onFocus={prefetchSearchIndex}
-                  placeholder={searchInFolder && currentPath ? `Search in ${currentPath.slice(currentPath.lastIndexOf('/') + 1)}` : 'Search all files'}
-                  enterKeyHint="search"
-                  autoCorrect="off"
-                  autoCapitalize="off"
-                  spellCheck={false}
-                  className={`w-full h-11 bg-surface-overlay rounded-full pl-10 ${currentPath ? 'pr-28' : 'pr-20'} text-[15px] text-text-primary placeholder:text-text-muted focus:outline-none focus:ring-1 focus:ring-accent/50 [&::-webkit-search-cancel-button]:hidden`}
-                />
-                <div className="absolute right-1 flex items-center">
-                  {search && (
-                    <button
-                      onClick={() => { setSearch(''); setDebouncedSearch('') }}
-                      className="w-9 h-9 flex items-center justify-center rounded-full text-text-muted active:text-text-primary"
-                      aria-label="Clear search"
-                    ><X size={16} /></button>
-                  )}
+            <div className="px-4 pt-1 pb-2">
+              <SearchField
+                value={search}
+                onChange={(v) => { setSearch(v); if (!v) setDebouncedSearch('') }}
+                onFocus={prefetchSearchIndex}
+                placeholder={searchInFolder && currentPath ? `Search in ${currentPath.slice(currentPath.lastIndexOf('/') + 1)}` : 'Search all files'}
+                trailing={<>
                   {currentPath && (
-                    <button
+                    <SearchFieldButton
+                      label={searchInFolder ? 'Search all files' : 'Search this folder only'}
                       onClick={() => setSearchInFolder(!searchInFolder)}
-                      className={`w-9 h-9 flex items-center justify-center rounded-full transition-colors ${searchInFolder ? 'text-accent' : 'text-text-muted active:text-text-primary'}`}
-                      aria-label={searchInFolder ? 'Search all files' : 'Search this folder only'}
-                      aria-pressed={searchInFolder}
-                    ><Folder size={16} /></button>
+                      active={searchInFolder}
+                    ><Folder size={17} /></SearchFieldButton>
                   )}
                   <span className="w-9 h-9 flex items-center justify-center">
                     <SearchHelpButton
                       kind="files"
-                      size={16}
+                      size={17}
                       className={(open) => `flex transition-colors ${open ? 'text-accent' : 'text-text-muted active:text-text-primary'}`}
                     />
                   </span>
-                </div>
-              </div>
+                </>}
+              />
             </div>
 
             {/* Filter chips. Label-only, and the selected one grows a leading
@@ -685,15 +670,16 @@ export default function ApiFilesView(): JSX.Element {
                 always scrolled and always looked clipped. Sort moved up to
                 the app bar for the same reason. The row can still scroll, but
                 only as a fallback for a very narrow screen. */}
-            <div className="flex items-center gap-2 px-4 py-2.5 overflow-x-auto no-scrollbar">
+            <div className="flex items-center gap-2 px-4 pt-1 pb-2 overflow-x-auto no-scrollbar">
               {MEDIA_FILTERS.map(({ key, label }) => {
                 const active = typeFilter === key
                 return (
                   <button
                     key={key}
                     onClick={() => setTypeFilter(key)}
-                    className={`shrink-0 flex items-center gap-1 h-9 pr-3.5 rounded-full text-[13px] font-medium transition-colors ${
-                      active ? 'bg-accent text-white pl-2.5' : 'bg-surface-overlay text-text-secondary active:bg-surface-highest pl-3.5'
+                    aria-pressed={active}
+                    className={`shrink-0 flex items-center gap-1 h-8 pr-3.5 rounded-full text-subhead font-medium transition-colors ${
+                      active ? 'bg-text-primary text-surface pl-2.5' : 'bg-[var(--fill)] text-text-primary active:bg-[var(--fill-strong)] pl-3.5'
                     }`}
                   >
                     {active && <Check size={14} />}{label}
@@ -704,7 +690,12 @@ export default function ApiFilesView(): JSX.Element {
         </div>
 
         {/* Listing */}
-        <div ref={scrollRef} className="flex-1 overflow-y-auto overscroll-contain pb-6">
+        <div
+          ref={scrollRef}
+          className="flex-1 overflow-y-auto overscroll-contain pb-dock"
+          // Room to scroll past the floating selection bar in select mode.
+          style={selectMode ? { paddingBottom: 'calc(var(--dock-h, 0px) + 8rem)' } : undefined}
+        >
           {busy && filteredEntries.length === 0 ? (
             <div className="px-4 pt-1">
               {Array.from({ length: 9 }).map((_, i) => (
@@ -748,21 +739,21 @@ export default function ApiFilesView(): JSX.Element {
               )}
             </div>
           ) : viewMode === 'list' ? (
-            <div className="px-2">
+            <div>
               {filteredEntries.map((entry, i) => (
                 <div key={entry.path}>
                   {/* Folders sort first, so a single label where the run ends
                       is enough to separate the two groups. */}
                   {!isSearching && folderCount > 0 && (i === 0 || i === folderCount) && filteredEntries.length > folderCount && (
-                    <p className="px-3 pt-3 pb-1 text-[11px] font-semibold uppercase tracking-wider text-text-muted">
+                    <h2 className="px-4 pt-4 pb-1 text-title3 text-text-primary">
                       {i === 0 ? 'Folders' : 'Files'}
-                    </p>
+                    </h2>
                   )}
                   {renderRow(entry)}
                 </div>
               ))}
               {visibleGhosts.length > 0 && (
-                <p className="px-3 pt-3 pb-1 text-[11px] font-semibold uppercase tracking-wider text-text-muted">Pending review</p>
+                <h2 className="px-4 pt-4 pb-1 text-title3 text-text-primary">Pending Review</h2>
               )}
               {visibleGhosts.map((g) => <PendingGhostItem key={`ghost:${g.path}`} ghost={g} variant="row" mobile />)}
             </div>
@@ -774,22 +765,23 @@ export default function ApiFilesView(): JSX.Element {
           )}
         </div>
 
-        {/* Selection action bar - in flow, so it sits directly above the player
-            and nav instead of floating over the last row. */}
+        {/* Selection action bar - a glass panel floating just above the mini
+            player, like the dock under it; the listing pads its end for it in
+            select mode so the last rows can scroll clear. */}
         {selectMode && (
-          <div className="shrink-0 border-t border-[var(--border)] bg-surface">
+          <div className="fixed left-3 right-3 z-20 glass rounded-[28px] overflow-hidden" style={{ bottom: 'var(--dock-h, 0px)' }}>
           <div className="flex items-center gap-1 pl-1 pr-2 pt-1">
             <button
               onClick={exitSelectMode}
-              className="w-10 h-10 flex items-center justify-center rounded-full text-text-primary active:bg-surface-overlay"
+              className="w-10 h-10 flex items-center justify-center rounded-full text-text-primary active:bg-[var(--fill)]"
               aria-label="Cancel selection"
             ><X size={19} /></button>
-            <span className="flex-1 min-w-0 text-text-primary font-semibold text-[15px] truncate">
+            <span className="flex-1 min-w-0 text-text-primary text-headline truncate">
               {selectedPaths.size} selected
             </span>
             <button
               onClick={() => setSelectedPaths(new Set(filteredEntries.map((e) => e.path)))}
-              className="px-3 h-10 rounded-full text-accent text-[13px] font-semibold active:bg-accent/10"
+              className="px-3 h-10 rounded-full text-accent text-subhead font-semibold active:opacity-60"
             >Select all</button>
           </div>
           <div className="flex items-center gap-2 px-3 pb-2.5 pt-1">
@@ -808,14 +800,14 @@ export default function ApiFilesView(): JSX.Element {
                   setActiveView('contributor')
                 }}
                 disabled={selectedPaths.size === 0}
-                className="shrink-0 w-12 h-12 flex items-center justify-center rounded-full text-text-secondary active:bg-surface-overlay disabled:opacity-40"
+                className="shrink-0 w-12 h-12 flex items-center justify-center rounded-full text-text-secondary active:bg-[var(--fill)] disabled:opacity-40"
                 aria-label="Propose deletion"
               ><Trash2 size={19} /></button>
             )}
             <button
               onClick={downloadZip}
               disabled={selectedPaths.size === 0 || zipBusy}
-              className="flex-1 h-12 flex items-center justify-center gap-2 rounded-full bg-accent text-white text-[15px] font-semibold disabled:opacity-50 active:opacity-80"
+              className="flex-1 h-12 flex items-center justify-center gap-2 rounded-full bg-accent text-white text-headline disabled:opacity-50 active:opacity-80"
             >
               {zipBusy ? <><Loader2 size={17} className="animate-spin" /> {zipStatus === 'starting' ? 'Starting…' : zipProgress ? `Zipping ${zipProgress.done}/${zipProgress.total}…` : 'Downloading…'}</>
                 : zipStatus === 'done' ? <><Check size={17} /> Downloaded</>
@@ -831,7 +823,7 @@ export default function ApiFilesView(): JSX.Element {
           BottomNav publishes as a CSS var. */}
       {toast && (
         <div
-          className="fixed left-1/2 -translate-x-1/2 z-[75] flex items-center gap-2 px-4 py-2.5 rounded-full bg-surface-highest text-text-primary text-[13px] shadow-2xl animate-slide-up"
+          className="fixed left-1/2 -translate-x-1/2 z-[75] flex items-center gap-2 px-4 py-2.5 rounded-full glass text-text-primary text-footnote font-medium animate-slide-up"
           style={{ bottom: 'calc(var(--bottom-nav-height, 0px) + 92px)' }}
         >
           <Check size={14} className="text-accent" /> {toast}
@@ -839,7 +831,7 @@ export default function ApiFilesView(): JSX.Element {
       )}
       {!selectMode && zipStatus !== 'idle' && (
         <div
-          className="fixed left-1/2 -translate-x-1/2 z-[75] flex flex-col gap-1.5 px-4 py-2.5 rounded-2xl bg-surface-highest text-text-primary text-[13px] shadow-2xl animate-slide-up min-w-[220px]"
+          className="fixed left-1/2 -translate-x-1/2 z-[75] flex flex-col gap-1.5 px-4 py-2.5 rounded-2xl glass text-text-primary text-footnote animate-slide-up min-w-[220px]"
           style={{ bottom: 'calc(var(--bottom-nav-height, 0px) + 92px)' }}
         >
           <div className="flex items-center justify-center gap-2 whitespace-nowrap">
@@ -1006,6 +998,15 @@ export default function ApiFilesView(): JSX.Element {
                     disabled={!channelsReady}
                     onClick={() => { toggleApiFileLike(sheetEntry.path); closeSheet() }}
                   />
+                  {(
+                    <SheetItem icon={Sparkles} label="Synced lyrics" onClick={async () => {
+                      const entry = sheetEntry
+                      const songId = sheetTrackerId ?? null
+                      closeSheet()
+                      const channel = (await resolveTrackChannel()) ?? activeChannel
+                      useStore.getState().openLyricsGen({ track: fileToTrack(entry, channel), songId, tab: account?.is_donor ? 'create' : 'sync' })
+                    }} />
+                  )}
                   {sheetTrackerId != null && (
                     <SheetItem icon={Info} label="Find in Tracker" onClick={() => { openSongInfo(sheetEntry); closeSheet() }} />
                   )}

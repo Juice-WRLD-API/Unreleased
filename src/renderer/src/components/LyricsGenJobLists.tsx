@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { AlertCircle, CircleStop, Cpu, Loader2, Plus, RefreshCw, Search, Sparkles, Trash2 } from 'lucide-react'
 import {
-  cancelAdminLyricsJob, deleteLyricsJob, getLyricsAdminSettings, isFinished, listAdminLyricsJobs, setLyricsWhisperModel,
+  cancelAdminLyricsJob, deleteLyricsJob, getLyricsAdminSettings, isFinished, jobTitle, listAdminLyricsJobs, setLyricsWhisperModel,
   type LyricsAdminJobSummary, type LyricsAdminSettings, type LyricsGenJobSummary,
 } from '../lib/lyricsGenApi'
 import { isAbortError } from '../lib/apiClient'
@@ -10,9 +10,9 @@ import { showAppToast } from '../lib/appToast'
 import { useListMotion } from '../hooks/useListMotion'
 import ThemedSelect from './ThemedSelect'
 import { relativeTime } from './adminShared'
-import { ConfirmButton, MODE_INFO, ModeTile, StatusPill } from './lyricsGenShared'
+import { ConfirmButton, MODE_INFO, ModeTile, StatusPill, sourceHint } from './lyricsGenShared'
 
-// The "Your jobs" and "All jobs" tabs of the Generate lyrics dialog. Rows open
+// The "Your jobs" and "All jobs" tabs of the Synced lyrics dialog. Rows open
 // the job in the dialog's job view; finished jobs can be deleted from here,
 // and administrators can cancel anyone's running job.
 
@@ -31,15 +31,16 @@ function JobRow({ job, user, onOpen, action }: {
       <button onClick={onOpen} className="flex-1 min-w-0 flex items-center gap-3 pl-2.5 py-2.5 text-left">
         <ModeTile mode={job.mode} status={job.status} />
         <span className="flex-1 min-w-0">
-          <span className="block text-sm text-text-primary font-medium truncate" title={job.filename}>{job.filename || 'Untitled audio'}</span>
+          <span className="block text-sm text-text-primary font-medium truncate" title={sourceHint(job)}>{jobTitle(job) || 'Untitled audio'}</span>
           <span className="block text-[11px] text-text-muted truncate">
             {user && <><span className="text-text-secondary">{user}</span> · </>}
             {MODE_INFO[job.mode].title} · {relativeTime(job.created_at)}
             {job.language && <> · <span className="uppercase">{job.language}</span></>}
+            {job.source?.song && job.filename && <> · {job.filename}</>}
             {job.status === 'failed' && job.error && <> · <span className="text-red-300/90">{job.error}</span></>}
           </span>
         </span>
-        <StatusPill status={job.status} />
+        <StatusPill status={job.status} progress={job.progress} />
       </button>
       <span className="min-w-[28px] shrink-0 flex justify-end">{action}</span>
     </div>

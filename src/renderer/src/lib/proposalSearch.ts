@@ -37,6 +37,8 @@ export function proposalSearchText(p: SongEditProposal): string {
   const dataVals = Object.values(p.proposed_data ?? {})
     .filter(v => typeof v === 'string' || typeof v === 'number')
     .join(' ')
-  return [p.title, changeTypeLabel(p.change_type), p.editor_notes, p.song != null ? `song #${p.song}` : '', dataVals]
+  // List rows are summaries: changed_fields names the edited fields instead.
+  const fields = (p.changed_fields ?? []).join(' ')
+  return [p.title, changeTypeLabel(p.change_type), p.editor_notes, p.song != null ? `song #${p.song}` : '', dataVals, fields]
     .filter(Boolean).join(' ').toLowerCase()
 }

@@ -5,7 +5,7 @@ import logo from '../assets/logo.png'
 // Placeholder donor list - replace with the real names. Order here is
 // display order (most recent or most generous first, whatever you prefer).
 const DONORS: string[] = [
-  'Jane Doe',
+  'bye bye @hostile_cat04',
   'John Smith',
   'Anonymous',
 ]
@@ -20,7 +20,8 @@ const OTHERS: string[] = [
   'Xig (fuck this nigga)',
   'emzie',
   'flow',
-  'Pure'
+  'Pure',
+  "fuckass nigga @yourealtwin"
 ]
 
 export default function ThankYouView(): JSX.Element {
@@ -35,9 +36,9 @@ export default function ThankYouView(): JSX.Element {
         <button
           onClick={() => setActiveView(backView)}
           aria-label="Back"
-          className="w-11 h-11 flex items-center justify-center rounded-full bg-surface/80 backdrop-blur text-text-primary active:bg-surface-overlay"
+          className="glass-button w-11 h-11 flex items-center justify-center rounded-full text-text-primary active:opacity-60 transition-opacity"
         >
-          <ChevronLeft size={20} />
+          <ChevronLeft size={24} strokeWidth={2.25} className="-ml-0.5" />
         </button>
       </div>
       <div className="relative w-full max-w-3xl mx-auto px-5 md:px-8 pt-6 md:pt-24 pb-16 text-center">

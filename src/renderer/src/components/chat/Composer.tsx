@@ -1209,7 +1209,7 @@ const Composer = forwardRef<ComposerHandle, {
       )}
 
       <div
-        className={`rounded-2xl border bg-surface-raised/70 transition-colors ${
+        className={`rounded-[22px] md:rounded-2xl border bg-surface-raised/70 transition-colors ${
           disabledReason ? 'border-[var(--border)] opacity-70' : 'border-[var(--border)] focus-within:border-accent/50'
         }`}
       >
@@ -1290,10 +1290,10 @@ const Composer = forwardRef<ComposerHandle, {
                   addFiles(pasted)
                 }
               }}
-              className="w-full resize-none bg-transparent px-1.5 py-2 text-[0.9rem] leading-relaxed text-text-primary placeholder:text-text-muted focus:outline-none disabled:cursor-not-allowed"
+              className="w-full resize-none bg-transparent px-1.5 py-2 text-body md:text-[0.9rem] md:tracking-normal leading-relaxed text-text-primary placeholder:text-text-muted focus:outline-none disabled:cursor-not-allowed"
             />
             {showInlineParamChip && activeCommand && (
-              <div aria-hidden className="absolute inset-0 px-1.5 py-2 text-[0.9rem] leading-relaxed whitespace-pre-wrap break-words pointer-events-none overflow-hidden">
+              <div aria-hidden className="absolute inset-0 px-1.5 py-2 text-body md:text-[0.9rem] md:tracking-normal leading-relaxed whitespace-pre-wrap break-words pointer-events-none overflow-hidden">
                 <span className="invisible">{text}</span>
                 <span className="inline-block rounded border border-accent/40 bg-accent/15 px-1 text-accent text-[0.8em] font-medium align-baseline">
                   {activeCommand.info.params[activeCommand.paramIndex]}

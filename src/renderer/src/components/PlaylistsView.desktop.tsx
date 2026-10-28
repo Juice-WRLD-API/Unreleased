@@ -623,6 +623,8 @@ export default function PlaylistsView(): JSX.Element {
   const [showHeroMenu, setShowHeroMenu] = useState(false)
   const heroMenuRef = useRef<HTMLDivElement>(null)
   const heroBtnRef = useRef<HTMLButtonElement>(null)
+  const [libraryActionMenu, setLibraryActionMenu] = useState<'new' | null>(null)
+  const newBtnRef = useRef<HTMLButtonElement>(null)
 
   // Drag-to-reorder
   const [dragIdx, setDragIdx] = useState<number | null>(null)
@@ -2907,12 +2909,21 @@ export default function PlaylistsView(): JSX.Element {
           </div>
           {!creating && !creatingFolder && (
             <div className="flex items-center gap-2">
-              <button onClick={() => { setCreatingFolder(true); setNewFolderName('') }} title="New folder" className="flex items-center gap-1.5 px-4 py-2.5 rounded-full bg-surface-overlay text-text-primary text-sm font-semibold border border-[var(--border)] hover:bg-surface-raised active:scale-[0.97] transition-all">
-                <FolderPlus size={16} strokeWidth={2.2} /> New Folder
+              <button ref={newBtnRef} onClick={() => setLibraryActionMenu(v => v === 'new' ? null : 'new')} aria-haspopup="menu" aria-expanded={libraryActionMenu === 'new'} className="flex items-center gap-1.5 px-4 py-2.5 rounded-full bg-accent text-black text-sm font-semibold shadow-sm hover:shadow-md hover:brightness-105 active:scale-[0.97] transition-all">
+                <Plus size={16} strokeWidth={2.5} /> New
               </button>
-              <button onClick={() => setCreating(true)} className="flex items-center gap-1.5 px-4 py-2.5 rounded-full bg-accent text-black text-sm font-semibold shadow-sm hover:shadow-md hover:brightness-105 active:scale-[0.97] transition-all">
-                <Plus size={16} strokeWidth={2.5} /> New Playlist
-              </button>
+              {libraryActionMenu === 'new' && (
+                <AnchoredContextMenu
+                  anchorRef={newBtnRef}
+                  title="New"
+                  onClose={() => setLibraryActionMenu(null)}
+                  className="w-48"
+                  items={[
+                    { icon: ListMusic, label: 'Playlist', onSelect: () => setCreating(true) },
+                    { icon: FolderPlus, label: 'Folder', onSelect: () => { setCreatingFolder(true); setNewFolderName('') } },
+                  ]}
+                />
+              )}
             </div>
           )}
         </div>
@@ -2986,7 +2997,7 @@ export default function PlaylistsView(): JSX.Element {
           ], mainGridCols)}
 
           {playlists.length === 0 && (
-            <p className="text-text-muted text-sm col-span-full py-2">No synced playlists yet - click "New Playlist" to create one.</p>
+            <p className="text-text-muted text-sm col-span-full py-2">No synced playlists yet - choose Playlist from the "New" menu to create one.</p>
           )}
         </div>
 

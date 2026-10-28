@@ -273,6 +273,8 @@ interface ChatState {
   loadBans: (serverId: number, force?: boolean) => Promise<ServerBan[]>
   startDm: (userIds: number[], name?: string) => Promise<Conversation>
   resolveKey: (conversationId: number) => Promise<void>
+  askForKeys: (conversationId: number) => Promise<void>
+  resetKey: (conversationId: number) => Promise<void>
   decryptRoom: (conversationId: number) => Promise<void>
   adoptKeys: (conversationIds: number[]) => Promise<void>
   ensureNowPlaying: (userIds: number[]) => void
@@ -360,6 +362,7 @@ export const useChatStore = create<ChatState>((set, get) => {
         title: 'New device wants to link',
         body: `${label || 'A new device'} signed in to your account. Open chat to compare its number and approve. If this wasn't you, decline.`,
         level: 'warning',
+        target: { view: 'chat' },
         onOpen: () => {
           useStore.setState({ activeView: 'chat' })
           // The approve prompt lives in the room pane, so make sure one is open.
@@ -417,6 +420,7 @@ export const useChatStore = create<ChatState>((set, get) => {
       title,
       body,
       icon: msg.author.avatar,
+      target: { view: 'chat', room },
       onOpen: () => {
         useStore.setState({ activeView: 'chat' })
         const path = room.kind === 'channel' ? `/chat/c/${room.id}` : `/chat/dm/${room.id}`
@@ -934,9 +938,13 @@ export const useChatStore = create<ChatState>((set, get) => {
       || get().lastMessage[key]?.key_version === conv.current_key_version
   }
 
+  // Skips rooms already primed: at launch the prime pool reaches DMs the key
+  // check finished priming moments earlier. A reconnect clears primedRooms
+  // first, so it still re-primes everything.
   const primeRoom = (key: string): Promise<void> => {
     const pending = primesInFlight.get(key)
     if (pending) return pending
+    if (primedRooms.has(key)) return Promise.resolve()
     const p = fetchPrime(key).finally(() => primesInFlight.delete(key))
     primesInFlight.set(key, p)
     return p
@@ -1688,11 +1696,36 @@ export const useChatStore = create<ChatState>((set, get) => {
         const res = await m.resolveRoomKey(meId, conv, await hasMessagesAtCurrentVersion(conv))
         set((s) => ({ keyState: { ...s.keyState, [conversationId]: res.state } }))
         if (res.state === 'ready') void get().decryptRoom(conversationId)
+        // Rate limited inside, so every waiting room can ask.
+        else if (res.reason !== 'needs-link') void m.askForRoomKeys(meId).catch((err) => console.warn('[chat] key ask failed', err))
       } catch (err) {
         console.warn('[chat] key resolution failed', err)
         set((s) => ({ keyState: { ...s.keyState, [conversationId]: 'error' } }))
       }
       if (rerunResolve.delete(conversationId)) void get().resolveKey(conversationId)
+    },
+
+    askForKeys: async (conversationId) => {
+      const meId = get().meId
+      if (!meId) return
+      const m = await e2e()
+      await m.askForRoomKeys(meId, { force: true })
+      m.forgetPendingKeyFetches(conversationId)
+      await get().resolveKey(conversationId)
+    },
+
+    resetKey: async (conversationId) => {
+      const meId = get().meId
+      if (!meId) return
+      const conv = get().conversations.find((c) => c.id === conversationId) ?? await api.getConversation(conversationId)
+      const m = await e2e()
+      const res = await m.resetRoomKey(meId, conv)
+      if (res.state === 'ready') {
+        set((s) => ({
+          conversations: s.conversations.map((c) => c.id === conversationId ? { ...c, current_key_version: Math.max(c.current_key_version, res.version) } : c),
+        }))
+      }
+      await get().resolveKey(conversationId)
     },
 
     decryptRoom: async (conversationId) => {

@@ -1,45 +1,76 @@
-import { useCallback, useEffect, useRef, useState, type DragEvent } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type DragEvent } from 'react'
 import {
-  AlertCircle, AudioLines, Check, Clock, FileText, Heart, ListChecks, Loader2, LogIn, MicVocal, Music2, Plus, ShieldCheck, Sparkles, Upload, X,
+  AlertCircle, AudioLines, Check, Clock, Copy, Download, FileText, Heart, ListChecks, Loader2, LogIn, Maximize2, MicVocal, Minimize2, Music2, Plus,
+  ShieldCheck, Sparkles,
+  Upload, X,
 } from 'lucide-react'
 import { useStore } from '../store/useStore'
 import type { LyricsGenTarget } from '../types'
 import {
-  createLyricsJob, fetchTrackAudio, getLyricsGenOptions, getLyricsJob, isFinished, listLyricsJobs, looksLikeLrc, lyricsForMode,
+  createLyricsJob, createLyricsJobFromServer, fetchTrackAudio, findAdlibs, getLyricsGenOptions, getLyricsJob, isFinished, jobServerAudio, jobTitle,
+  listLyricsJobs, looksLikeLrc, lyricsToTime, removeAdlibs, sameServerAudio, serverAudioUrl, textForMode, trackServerAudio,
   LYRICS_AUDIO_EXTENSIONS, LYRICS_MAX_FILE_SIZE, LYRICS_MAX_TEXT,
-  type LyricsGenJob, type LyricsGenJobSummary, type LyricsGenMode, type LyricsGenOptions,
+  type LyricsGenJob, type LyricsGenJobSummary, type LyricsGenMode, type LyricsGenOptions, type LyricsServerAudio,
 } from '../lib/lyricsGenApi'
+import { jobTiming, timingOutput } from '../lib/lyricsTiming'
+import { hasWordTiming, linesFromPlain, parseSyncedLyrics, plainOf, serializeSyncedLyrics, syncProgress } from '../lib/syncedLyrics'
 import { getSongById } from '../lib/juicewrldApi'
 import { trackIdToSongId } from '../lib/userApi'
 import { extensionOf } from '../lib/donorFilesApi'
 import { isAbortError } from '../lib/apiClient'
 import { errorMessage, formatBytes } from '../lib/format'
 import { isDonorStreamUrl } from '../lib/donorPlayback'
+import { showAppToast } from '../lib/appToast'
+import { ls } from '../lib/persist'
 import { pickLocalFile } from '../lib/terminal/pick'
 import { useSlidingIndicator } from '../hooks/useSlidingIndicator'
 import { useContentMotion } from '../hooks/useContentMotion'
 import { ModalOverlay, LockToggle } from './Modal'
 import ThemedSelect from './ThemedSelect'
+import { Toggle } from './SettingsRow'
 import { relativeTime } from './adminShared'
-import { MODE_INFO } from './lyricsGenShared'
+import { MODE_INFO, outputName, saveText } from './lyricsGenShared'
 import LyricsGenJobView from './LyricsGenJobView'
 import { AdminJobs, MyJobs } from './LyricsGenJobLists'
+import LyricsGenTextInput, { shiftOffsets } from './LyricsGenTextInput'
+import LyricsSyncTab from './LyricsSyncTab'
+import { useAudioClock, useSyncMode } from './SyncedLyricsTool'
 
-// "Generate lyrics": the donor lyrics generation (Whisper on the server) as a
-// dialog, the same jobs the terminal's lyricsgen / lyricsjobs / lyricsmodel
-// reach. New job is a short form - the audio (a file, or a song's own audio),
-// what to make, the lyrics to time for the sync modes, the language - and a
-// started job opens straight into its live view. Your jobs lists the account's
-// jobs; administrators also get All jobs, with the Whisper model choice.
+// "Synced lyrics": timing lyrics to a song, by hand or with Whisper. Sync is
+// the Synced lyrics tool on audio the dialog holds, for anyone: tap along a
+// line or a word at a time, then nudge. The song editor's Sync opens it here,
+// on the song and its lyrics.
+// Generate is the donor lyrics generation (Whisper on the server), the same
+// jobs the terminal's lyricsgen / lyricsjobs / lyricsmodel reach: a short form
+// - the audio (a file, or a song's own audio), what to make, the lyrics to
+// time for the sync modes, the language - and a started job opens straight
+// into its live view, where a sync's timing is fine-tuned with the same tool.
+// Your jobs lists the account's jobs; administrators also get All jobs, with
+// the Whisper model choice.
 //
-// Results are previews: nothing here writes to a song. The audio is held by
-// the dialog, because the server deletes it after every job and a follow-up
-// (sync the transcript you just fixed) has to upload it again.
+// Results are previews: nothing here writes to a song, unless the song editor
+// opened the dialog and takes them back. A song or comp file the server
+// already has is named, not downloaded and sent back, and a follow-up (sync
+// the transcript you just fixed) names it again. Other audio is held by the
+// dialog, because the server deletes uploads after every job and a follow-up
+// has to upload it again.
 
-type Tab = 'create' | 'jobs' | 'admin'
+type Tab = 'sync' | 'create' | 'jobs' | 'admin'
 type SourceTrack = NonNullable<LyricsGenTarget['track']>
+/** The chosen audio: a file to upload, or audio the server has. `track` is the
+ *  song it came from, when there is one. */
+type AudioChoice =
+  | { file: File; server?: undefined; track: SourceTrack | null }
+  | { file?: undefined; server: LyricsServerAudio; track: SourceTrack }
+/** The audio a follow-up or retry should run on, when it isn't the one held. */
+type Expected = { name: string; server: LyricsServerAudio | null }
 
 const JOBS_POLL_MS = 5000
+const DROP_ADLIBS_KEY = 'lyricsGen:dropAdlibs'
+const SYNC_DRAFT_KEY = 'syncedLyrics:draft'
+/** Whether the dialog fills the window, for Sync and for the other tabs. */
+const SIZE_KEY = 'syncedLyrics:big'
+type BigSizes = { sync: boolean; other: boolean }
 const LANGUAGES = [
   { value: '', label: 'Detect it' },
   { value: 'en', label: 'English' },
@@ -55,6 +86,25 @@ const LANGUAGES = [
 
 const isAudioName = (name: string): boolean => LYRICS_AUDIO_EXTENSIONS.includes(extensionOf(name))
 const canLoad = (t: SourceTrack | null | undefined): t is SourceTrack => !!t?.streamUrl && (!!t.path || isDonorStreamUrl(t.streamUrl))
+const baseName = (path: string): string => path.split(/[\\/]/).pop() || path
+const audioName = (a: AudioChoice): string => (a.file ? a.file.name : baseName(a.server.path))
+
+/** A job's audio when the server has it, as a choice the form can hold. */
+function jobAudio(job: Pick<LyricsGenJob, 'filename' | 'source'>): { server: LyricsServerAudio; track: SourceTrack } | null {
+  const server = jobServerAudio(job)
+  if (!server) return null
+  const id = server.songId ? `jw-${server.songId}` : `comp:${server.channel ?? ''}:${server.path}`
+  return { server, track: { id, title: jobTitle(job) || baseName(server.path), artist: '', path: server.path, streamUrl: serverAudioUrl(server) } }
+}
+
+const matches = (a: AudioChoice, e: Expected): boolean =>
+  e.server ? !!a.server && sameServerAudio(a.server, e.server) : audioName(a) === e.name
+
+/** Lyrics for Sync: plain text becomes untimed lines; an LRC (line or word) is taken as it is. */
+function asSyncLrc(t: string): string {
+  const text = t.replace(/\r\n?/g, '\n').trim()
+  return looksLikeLrc(text) ? text : serializeSyncedLyrics(linesFromPlain(text))
+}
 
 export default function LyricsGenModal(): JSX.Element | null {
   const target = useStore((s) => s.lyricsGenModal)
@@ -71,14 +121,13 @@ function LyricsGenDialog({ target }: { target: LyricsGenTarget }): JSX.Element {
   const isDonor = !!account?.is_donor
   const isAdmin = !!account?.is_administrator
 
-  const [tab, setTab] = useState<Tab>(target.tab ?? (!isDonor && isAdmin ? 'admin' : 'create'))
+  const [tab, setTab] = useState<Tab>(target.tab ?? 'sync')
   const [openJob, setOpenJob] = useState<{ id: string; admin: boolean } | null>(null)
 
   // ── The form ──
-  const [audio, setAudio] = useState<File | null>(null)
-  // The song the audio came from (its lyrics can seed a sync), and the one on
-  // offer before any audio is chosen.
-  const [audioTrack, setAudioTrack] = useState<SourceTrack | null>(null)
+  // The audio, with the song it came from (its lyrics can seed a sync), and
+  // the song on offer before any audio is chosen.
+  const [audio, setAudio] = useState<AudioChoice | null>(null)
   const [suggested, setSuggested] = useState<SourceTrack | null>(target.track ?? null)
   const [loadingTrack, setLoadingTrack] = useState<{ track: SourceTrack; progress: number } | null>(null)
   const loadAbort = useRef<AbortController | null>(null)
@@ -89,14 +138,33 @@ function LyricsGenDialog({ target }: { target: LyricsGenTarget }): JSX.Element {
   const [modePicked, setModePicked] = useState(false)
   const [text, setText] = useState('')
   const [textBusy, setTextBusy] = useState(false)
-  const [language, setLanguage] = useState('')
-  // The file a follow-up or retry should run on, when it isn't the one held.
-  const [expectedAudio, setExpectedAudio] = useState<string | null>(null)
+  // Remove adlibs: every "(…)" is left out of the text sent, except the ones
+  // clicked back in, which are held by where they start in `text`.
+  const [dropAdlibs, setDropAdlibs] = useState(() => ls.get<boolean>(DROP_ADLIBS_KEY) ?? false)
+  const [keptAdlibs, setKeptAdlibs] = useState<ReadonlySet<number>>(() => new Set())
+  const [language, setLanguage] = useState('en')
+  const [expected, setExpected] = useState<Expected | null>(null)
   const [options, setOptions] = useState<LyricsGenOptions | null>(null)
   const [optionsError, setOptionsError] = useState<string | null>(null)
   const [uploading, setUploading] = useState<number | null>(null)
   const uploadAbort = useRef<AbortController | null>(null)
   const [formError, setFormError] = useState<string | null>(null)
+
+  // ── Sync by hand ──
+  // The lyrics being timed, kept on this device until they're cleared, so
+  // closing the dialog doesn't lose a half-done sync. The audio is the form's.
+  const [syncLrc, setSyncLrc] = useState(() => ls.get<string>(SYNC_DRAFT_KEY) ?? '')
+  // Sync opens big, with room for the lines; the forms and job lists don't
+  // need it. The header's toggle changes either, and it's remembered.
+  const [big, setBig] = useState<BigSizes>(() => ({ sync: true, other: false, ...ls.get<Partial<BigSizes>>(SIZE_KEY) }))
+  useEffect(() => { if (syncLrc) ls.set(SYNC_DRAFT_KEY, syncLrc); else ls.remove(SYNC_DRAFT_KEY) }, [syncLrc])
+  const syncLines = useMemo(() => parseSyncedLyrics(syncLrc), [syncLrc])
+  const syncSaved = target.sync?.saved ?? ''
+  const syncOriginal = useMemo(() => (syncSaved.trim() ? parseSyncedLyrics(syncSaved) : null), [syncSaved])
+  const [syncMode, setSyncMode] = useSyncMode(hasWordTiming(syncLines))
+  const fileUrl = useMemo(() => (audio?.file ? URL.createObjectURL(audio.file) : null), [audio?.file])
+  useEffect(() => () => { if (fileUrl) URL.revokeObjectURL(fileUrl) }, [fileUrl])
+  const syncSrc = fileUrl ?? (audio?.server ? serverAudioUrl(audio.server) : null)
 
   // ── The account's jobs ──
   const [jobs, setJobs] = useState<LyricsGenJobSummary[] | null>(null)
@@ -133,35 +201,53 @@ function LyricsGenDialog({ target }: { target: LyricsGenTarget }): JSX.Element {
 
   const loadTrack = useCallback((track: SourceTrack): void => {
     loadAbort.current?.abort()
+    setFormError(null)
+    const server = trackServerAudio(track)
+    if (server) {
+      loadAbort.current = null
+      setLoadingTrack(null)
+      setAudio({ server, track })
+      return
+    }
     const ac = new AbortController()
     loadAbort.current = ac
-    setFormError(null)
     setLoadingTrack({ track, progress: 0 })
     fetchTrackAudio(track, (progress) => setLoadingTrack({ track, progress }), ac.signal)
-      .then((file) => { setAudio(file); setAudioTrack(track) })
+      .then((file) => setAudio({ file, track }))
       .catch((e) => { if (!isAbortError(e)) setFormError(errorMessage(e, `Couldn't load ${track.title}`)) })
       .finally(() => { if (loadAbort.current === ac) { loadAbort.current = null; setLoadingTrack(null) } })
   }, [])
 
   // Opened (or re-opened) on a song: offer it, and load its audio straight
-  // away unless some audio is already here.
+  // away unless some audio is already here. The song editor's Sync brings
+  // its lyrics too, in place of the draft (which the toast can bring back),
+  // and always this song's audio.
   const audioRef = useRef(audio)
   audioRef.current = audio
+  const syncLrcRef = useRef(syncLrc)
+  syncLrcRef.current = syncLrc
   useEffect(() => {
     if (target.tab) setTab(target.tab)
+    if (target.sync) {
+      const before = syncLrcRef.current
+      const next = asSyncLrc(target.sync.text)
+      setSyncLrc(next)
+      if (before.trim() && before.trim() !== next) {
+        showAppToast('Opened on the song editor\'s lyrics, in place of the ones that were here', { tone: 'info', action: { label: 'Undo', onClick: () => setSyncLrc(before) } })
+      }
+    }
     if (!target.track) return
     setSuggested(target.track)
-    if (!audioRef.current && isDonor && canLoad(target.track)) {
-      setTab('create')
+    if ((target.sync || !audioRef.current) && canLoad(target.track)) {
       setOpenJob(null)
       loadTrack(target.track)
     }
-  }, [target, isDonor, loadTrack])
+  }, [target, loadTrack])
 
   useEffect(() => () => { loadAbort.current?.abort(); uploadAbort.current?.abort() }, [])
 
   const offer = suggested ?? (currentTrack && currentTrack.genre !== 'unsurfaced' ? currentTrack : null)
-  const lyricsTrack = audioTrack ?? offer
+  const lyricsTrack = audio?.track ?? offer
   const lyricsSongId = lyricsTrack ? (lyricsTrack === target.track && target.songId) || trackIdToSongId(lyricsTrack.id) : null
   const maxSize = options?.max_file_size || LYRICS_MAX_FILE_SIZE
 
@@ -169,10 +255,8 @@ function LyricsGenDialog({ target }: { target: LyricsGenTarget }): JSX.Element {
     loadAbort.current?.abort()
     if (!isAudioName(file.name)) { setFormError(`${file.name} isn't an audio file the server takes (${LYRICS_AUDIO_EXTENSIONS.join(', ')})`); return }
     if (!file.size) { setFormError(`${file.name} is empty`); return }
-    if (file.size > maxSize) { setFormError(`${file.name} is ${formatBytes(file.size)}. The limit is ${formatBytes(maxSize)}`); return }
     setFormError(null)
-    setAudio(file)
-    setAudioTrack(null)
+    setAudio({ file, track: null })
   }
   const pickAudio = (): void => { pickLocalFile('audio/*').then(takeFile, () => {}) }
   const onDrop = (e: DragEvent): void => {
@@ -183,15 +267,32 @@ function LyricsGenDialog({ target }: { target: LyricsGenTarget }): JSX.Element {
   }
 
   // ── Lyrics sources for the sync modes ──
-  // Text filled from a song or a job keeps both its versions: line sync gets
-  // the plain words, word sync the LRC (see lyricsForMode). Switching between
-  // the two swaps it for the other version, unless it has been edited since.
-  const [filled, setFilled] = useState<{ plain: string; lrc: string; text: string } | null>(null)
+  // Text filled from a song or a job is its plain words for both modes (see
+  // lyricsToTime). New text starts with every adlib left out again; an edit
+  // moves the kept ones along with it.
+  const replaceText = (t: string): void => {
+    setText(t.replace(/\r\n?/g, '\n'))
+    setKeptAdlibs(new Set())
+  }
+  const editText = (next: string): void => {
+    setKeptAdlibs((k) => shiftOffsets(k, text, next))
+    setText(next)
+  }
+  const toggleAdlib = (start: number): void => {
+    setKeptAdlibs((k) => {
+      const next = new Set(k)
+      if (!next.delete(start)) next.add(start)
+      return next
+    })
+  }
+  const toggleDropAdlibs = (): void => {
+    ls.set(DROP_ADLIBS_KEY, !dropAdlibs)
+    setDropAdlibs(!dropAdlibs)
+  }
   const fill = (plain: string, lrc: string): boolean => {
-    const t = lyricsForMode(mode, plain, lrc)
+    const t = lyricsToTime(plain, lrc)
     if (!t) return false
-    setText(t)
-    setFilled({ plain, lrc, text: t })
+    replaceText(t)
     setFormError(null)
     return true
   }
@@ -199,39 +300,59 @@ function LyricsGenDialog({ target }: { target: LyricsGenTarget }): JSX.Element {
     setMode(m)
     setModePicked(true)
     setFormError(null)
-    if (filled && m !== 'plain' && text.trim() === filled.text) {
-      const t = lyricsForMode(m, filled.plain, filled.lrc)
-      setText(t)
-      setFilled({ ...filled, text: t })
+  }
+
+  /** The song's plain and synced lyrics: the playing track's if it's this one, else the API's. */
+  const songLyrics = async (track: SourceTrack): Promise<{ plain: string; lrc: string }> => {
+    const full = currentTrackFull && currentTrackFull.id === track.id && !currentTrackFull.lyricsPending ? currentTrackFull : null
+    const plain = full?.lyrics ?? ''
+    const lrc = full?.syncedLyrics ?? ''
+    if (plain.trim() || lrc.trim() || !lyricsSongId) return { plain, lrc }
+    setTextBusy(true)
+    try {
+      const song = await getSongById(lyricsSongId)
+      return { plain: song.lyrics ?? '', lrc: song.synced_lyrics ?? '' }
+    } catch (e) {
+      throw new Error(errorMessage(e, `Couldn't load ${track.title}'s lyrics`))
+    } finally {
+      setTextBusy(false)
     }
   }
 
   const fillFromSong = async (): Promise<void> => {
     if (!lyricsTrack) return
-    const full = currentTrackFull && currentTrackFull.id === lyricsTrack.id && !currentTrackFull.lyricsPending ? currentTrackFull : null
-    let plain = full?.lyrics ?? ''
-    let lrc = full?.syncedLyrics ?? ''
-    if (!plain.trim() && !lrc.trim() && lyricsSongId) {
-      setTextBusy(true)
-      try {
-        const song = await getSongById(lyricsSongId)
-        plain = song.lyrics ?? ''
-        lrc = song.synced_lyrics ?? ''
-      } catch (e) {
-        setFormError(errorMessage(e, `Couldn't load ${lyricsTrack.title}'s lyrics`))
-        return
-      } finally {
-        setTextBusy(false)
-      }
+    try {
+      const { plain, lrc } = await songLyrics(lyricsTrack)
+      if (!fill(plain, lrc)) setFormError(`${lyricsTrack.title} has no lyrics yet. Transcribe it first, then sync the result`)
+    } catch (e) {
+      setFormError((e as Error).message)
     }
-    if (!fill(plain, lrc)) setFormError(`${lyricsTrack.title} has no lyrics yet. Transcribe it first, then sync the result`)
   }
+  // The audio a job ran on, for the next one: taken at once when the server
+  // has it (always for a follow-up, otherwise only while nothing is chosen),
+  // or else asked for.
+  const expectAudioOf = (job: Pick<LyricsGenJob, 'filename' | 'source'>, take: boolean): void => {
+    const own = jobAudio(job)
+    if (own && (take || !audioRef.current)) {
+      loadAbort.current?.abort()
+      setAudio(own)
+      setExpected(null)
+    } else setExpected({ name: own ? own.track.title : job.filename, server: own?.server ?? null })
+  }
+  const takeExpected = (): void => {
+    if (!expected?.server) return
+    const { songId, path, channel } = expected.server
+    loadAbort.current?.abort()
+    setAudio(jobAudio({ filename: expected.name, source: { channel: channel ?? null, path, song: songId ? { id: songId, public_id: null, name: expected.name } : null } }))
+    setExpected(null)
+  }
+
   const fillFromJob = async (id: string): Promise<void> => {
     setTextBusy(true)
     try {
       const job = await getLyricsJob(id)
       if (!fill(job.result.plain_lyrics || job.plain_lyrics || '', job.result.synced_lyrics ?? '')) setFormError('That job has no lyrics in it')
-      setExpectedAudio(job.filename)
+      expectAudioOf(job, false)
     } catch (e) {
       setFormError(errorMessage(e, 'Could not load that job'))
     } finally {
@@ -239,44 +360,130 @@ function LyricsGenDialog({ target }: { target: LyricsGenTarget }): JSX.Element {
     }
   }
   const fillFromFile = (): void => {
-    pickLocalFile('.txt,.lrc,text/plain').then((f) => f.text()).then((t) => { setText(t.trim()); setFilled(null); setFormError(null) }, () => {})
+    pickLocalFile('.txt,.lrc,text/plain').then((f) => f.text()).then((t) => { replaceText(t.trim()); setFormError(null) }, () => {})
   }
 
   // Follow-ups from a job: back to the form with its text, same audio.
-  const continueFrom = (job: Pick<LyricsGenJob, 'filename'>, nextMode: LyricsGenMode, nextText: string, lang?: string): void => {
+  const continueFrom = (job: Pick<LyricsGenJob, 'filename' | 'source'>, nextMode: LyricsGenMode, nextText: string, lang?: string): void => {
     setMode(nextMode)
     setModePicked(false)
-    setText(nextText.trim())
-    setFilled(null)
+    replaceText(nextText.trim())
     if (lang !== undefined) setLanguage(lang)
-    setExpectedAudio(job.filename)
+    expectAudioOf(job, true)
     setFormError(null)
     setOpenJob(null)
     setTab('create')
   }
 
+  // ── Lyrics for Sync ──
+  const takeSyncText = (t: string): void => setSyncLrc(asSyncLrc(t))
+  const syncFromSong = async (): Promise<void> => {
+    if (!lyricsTrack) return
+    try {
+      const { plain, lrc } = await songLyrics(lyricsTrack)
+      // An existing sync is the place to start: fix it rather than redo it.
+      const words = looksLikeLrc(lrc) ? lrc : lyricsToTime(plain, lrc)
+      if (words.trim()) takeSyncText(words)
+      else showAppToast(`${lyricsTrack.title} has no lyrics yet. Paste them, or have Whisper write them down under Generate`, { tone: 'info' })
+    } catch (e) {
+      showAppToast((e as Error).message)
+    }
+  }
+  const syncFromJob = async (id: string): Promise<void> => {
+    setTextBusy(true)
+    try {
+      const job = await getLyricsJob(id)
+      const text = job.mode === 'plain'
+        ? job.result.plain_lyrics ?? ''
+        : timingOutput(jobTiming(job).lines, job.mode === 'word_synced' ? 'enhanced_lrc' : 'lrc') ?? ''
+      if (text.trim()) takeSyncText(text)
+      else showAppToast('That job has no lyrics in it', { tone: 'info' })
+      expectAudioOf(job, false)
+    } catch (e) {
+      showAppToast(errorMessage(e, 'Could not load that job'))
+    } finally {
+      setTextBusy(false)
+    }
+  }
+  const syncFromFile = (): void => {
+    pickLocalFile('.txt,.lrc,text/plain').then((f) => f.text()).then(takeSyncText, () => {})
+  }
+  // A Whisper result, timing and all, to fix by hand here. Whatever Sync held
+  // before can be brought back from the toast.
+  const openInSync = (job: LyricsGenJob, lrc: string): void => {
+    const before = syncLrc
+    const next = lrc.trim()
+    setSyncLrc(next)
+    if (before.trim() && before.trim() !== next) {
+      showAppToast('Opened in Sync, in place of the lyrics that were there', { tone: 'info', action: { label: 'Undo', onClick: () => setSyncLrc(before) } })
+    }
+    expectAudioOf(job, true)
+    setOpenJob(null)
+    setTab('sync')
+  }
+  // Donors: have Whisper time what's in Sync, in Sync's mode.
+  const whisperFromSync = (): void => {
+    setMode(syncMode === 'words' ? 'word_synced' : 'synced')
+    setModePicked(false)
+    replaceText(plainOf(syncLines))
+    setFormError(null)
+    setTab('create')
+  }
+  // Back to the song editor that opened the dialog, if it's still on that song.
+  const applyLrc = (lrc: string): void => {
+    if (!target.apply) return
+    if (target.apply.onApply(lrc)) {
+      showAppToast('In the song editor now. Check it there, then submit', { tone: 'info' })
+      close()
+    } else showAppToast('The song editor has moved on to another song')
+  }
+
   const trimmed = text.trim()
   const needsText = mode !== 'plain'
+  const adlibs = useMemo(() => (needsText && dropAdlibs ? findAdlibs(text) : []), [needsText, dropAdlibs, text])
+  const adlibsLeftOut = adlibs.filter((a) => !keptAdlibs.has(a.start)).length
+  // What goes up: the text less its left-out adlibs, and for word sync no LRC times.
+  const sendText = useMemo(
+    () => (needsText ? textForMode(mode, dropAdlibs ? removeAdlibs(text, keptAdlibs) : text) : ''),
+    [needsText, mode, dropAdlibs, text, keptAdlibs],
+  )
   const modeOption = options?.options.find((o) => o.mode === mode)
   const blocked = !options ? (optionsError ? 'Lyrics generation is out of reach right now' : 'Checking the server…')
     : !options.available ? `Lyrics generation is off: ${options.unavailable_reason || 'unavailable'}`
     : modeOption && !modeOption.available ? `${MODE_INFO[mode].title} is off: ${modeOption.unavailable_reason || 'unavailable'}`
     : !audio ? 'Choose the audio first'
+    : audio.file && audio.file.size > maxSize ? `${audio.file.name} is ${formatBytes(audio.file.size)}. The limit is ${formatBytes(maxSize)}`
     : needsText && !trimmed ? 'Add the lyrics to time'
-    : needsText && trimmed.length > LYRICS_MAX_TEXT ? `The lyrics are over ${LYRICS_MAX_TEXT.toLocaleString()} characters`
+    : needsText && !sendText ? 'Nothing is left once the adlibs are out. Click some to send them'
+    : needsText && sendText.length > LYRICS_MAX_TEXT ? `The lyrics are over ${LYRICS_MAX_TEXT.toLocaleString()} characters`
     : null
+
+  const lrcNote = trimmed && looksLikeLrc(trimmed)
+    ? mode === 'word_synced' ? 'LRC times found. Word sync leaves them out and times the words alone' : 'LRC times found. Each line is timed within its own window'
+    : null
+  const adlibNote = !adlibs.length ? null
+    : adlibsLeftOut ? `${adlibsLeftOut} of ${adlibs.length} adlib${adlibs.length === 1 ? '' : 's'} left out. Click a grey one to send it`
+    : `${adlibs.length === 1 ? 'The adlib is' : `All ${adlibs.length} adlibs are`} sent. Click one to leave it out`
+  const sentLines = sendText.split('\n').filter((l) => l.trim()).length
+  const textNote = [adlibNote, lrcNote].filter(Boolean).join(' · ')
+    || (trimmed ? `${sentLines} line${sentLines === 1 ? '' : 's'}`
+      : dropAdlibs ? 'Your text is kept as written, less the adlibs in ( )' : 'Your text is kept exactly as written')
 
   const submit = async (): Promise<void> => {
     if (blocked || !audio || uploading !== null) return
     const ac = new AbortController()
     uploadAbort.current = ac
     setFormError(null)
-    setUploading(0)
+    // Server audio has nothing to upload: straight to "Starting…".
+    setUploading(audio.server ? 1 : 0)
     try {
-      const lyrics = needsText ? (looksLikeLrc(trimmed) ? { syncedLyrics: trimmed } : { plainLyrics: trimmed }) : {}
-      const job = await createLyricsJob(audio, { mode, language: language || undefined, ...lyrics }, setUploading, ac.signal)
+      const lyrics = needsText ? (looksLikeLrc(sendText) ? { syncedLyrics: sendText } : { plainLyrics: sendText }) : {}
+      const req = { mode, language: language || undefined, ...lyrics }
+      const job = audio.server
+        ? await createLyricsJobFromServer(audio.server, req, ac.signal)
+        : await createLyricsJob(audio.file, req, setUploading, ac.signal)
       setJobs((js) => [job, ...(js ?? []).filter((j) => j.id !== job.id)])
-      setExpectedAudio(null)
+      setExpected(null)
       setOpenJob({ id: job.id, admin: false })
     } catch (e) {
       if (!isAbortError(e)) setFormError(errorMessage(e, 'Lyrics generation failed to start'))
@@ -287,17 +494,111 @@ function LyricsGenDialog({ target }: { target: LyricsGenTarget }): JSX.Element {
   }
 
   const tabs: { id: Tab; label: string; icon: typeof Plus; badge?: number }[] = [
-    ...(isDonor ? [{ id: 'create' as Tab, label: 'New job', icon: Sparkles }, { id: 'jobs' as Tab, label: 'Your jobs', icon: ListChecks, badge: activeCount }] : []),
+    { id: 'sync', label: 'Sync', icon: Clock },
+    { id: 'create', label: 'Generate', icon: Sparkles },
+    ...(isDonor ? [{ id: 'jobs' as Tab, label: 'Your jobs', icon: ListChecks, badge: activeCount }] : []),
     ...(isAdmin ? [{ id: 'admin' as Tab, label: 'All jobs', icon: ShieldCheck }] : []),
   ]
-  const shownTab: Tab = tabs.some((t) => t.id === tab) ? tab : tabs[0]?.id ?? 'create'
+  const shownTab: Tab = tabs.some((t) => t.id === tab) ? tab : 'sync'
   const { containerRef: tabsRef, indicatorRef } = useSlidingIndicator<HTMLDivElement>(shownTab)
   const bodyRef = useRef<HTMLDivElement>(null)
   useContentMotion(bodyRef, `${shownTab}:${openJob?.id ?? ''}`)
 
   const showForm = isDonor && shownTab === 'create' && !openJob
+  const showSync = shownTab === 'sync' && !openJob
+  const { clock: syncClock, element: syncAudio } = useAudioClock(showSync ? syncSrc : null)
   const completedJobs = (jobs ?? []).filter((j) => j.status === 'completed')
-  const wrongAudio = expectedAudio && audio && audio.name !== expectedAudio
+  const wrongAudio = !!expected && !!audio && !matches(audio, expected)
+  const syncWords = hasWordTiming(syncLines)
+  const syncShown = syncLines.some((l) => !l.hidden)
+  const syncDone = syncProgress(syncLines, syncMode)
+  const syncName = audio?.track?.title ?? (audio ? audioName(audio) : 'lyrics')
+
+  // The audio, for Generate's first step and the top of Sync: loading, chosen, or a drop zone.
+  const audioField = (forSync: boolean): JSX.Element => (loadingTrack ? (
+    <div className="flex items-center gap-3 rounded-2xl border border-[var(--border)] bg-surface-overlay/40 p-3">
+      <Cover track={loadingTrack.track} />
+      <div className="flex-1 min-w-0">
+        <p className="text-sm text-text-primary font-medium truncate">Loading {loadingTrack.track.title}…</p>
+        <div className="mt-2 h-1.5 rounded-full bg-surface-highest overflow-hidden">
+          <div className="h-full w-full origin-left bg-accent transition-transform duration-200" style={{ transform: `scaleX(${loadingTrack.progress})` }} />
+        </div>
+      </div>
+      <button onClick={() => loadAbort.current?.abort()} title="Stop" className="w-7 h-7 rounded-lg flex items-center justify-center text-text-muted hover:text-text-primary hover:bg-surface-overlay transition-colors">
+        <X size={15} />
+      </button>
+    </div>
+  ) : audio ? (
+    <div className="flex items-center gap-3 rounded-2xl border border-accent/30 bg-accent/5 p-3">
+      {audio.track ? <Cover track={audio.track} /> : (
+        <span className="w-11 h-11 shrink-0 rounded-xl bg-accent/15 text-accent flex items-center justify-center"><AudioLines size={20} /></span>
+      )}
+      <div className="flex-1 min-w-0">
+        <p className="text-sm text-text-primary font-medium truncate" title={audio.server?.path ?? audioName(audio)}>{audio.track?.title ?? audioName(audio)}</p>
+        <p className="text-[11px] text-text-muted truncate">
+          {audio.server
+            ? `${audioName(audio)} · ${forSync ? 'streams from the server' : 'already on the server, nothing to upload'}`
+            : `${formatBytes(audio.file.size)} · ${audio.track ? audio.file.name : 'from this computer'}`}
+        </p>
+      </div>
+      <button onClick={pickAudio} disabled={uploading !== null} className={SMALL_BTN}>Change</button>
+      <button
+        onClick={() => setAudio(null)}
+        disabled={uploading !== null}
+        title="Remove"
+        className="w-7 h-7 rounded-lg flex items-center justify-center text-text-muted hover:text-text-primary hover:bg-surface-overlay transition-colors disabled:opacity-50"
+      >
+        <X size={15} />
+      </button>
+    </div>
+  ) : (
+    <div
+      onDragOver={(e) => { e.preventDefault(); setDragOver(true) }}
+      onDragLeave={() => setDragOver(false)}
+      onDrop={onDrop}
+      className={`rounded-2xl border-2 border-dashed px-4 ${forSync ? 'py-4' : 'py-6'} flex flex-col items-center text-center transition-colors ${
+        dragOver ? 'border-accent bg-accent/5' : 'border-[var(--border)] bg-surface-overlay/20'
+      }`}
+    >
+      <span className={`w-11 h-11 rounded-xl flex items-center justify-center transition-colors ${dragOver ? 'bg-accent text-white' : 'bg-surface-overlay text-text-muted'}`}>
+        <Upload size={19} />
+      </span>
+      <p className="mt-3 text-sm text-text-primary font-medium">Drop a song here</p>
+      <p className="mt-0.5 text-[11px] text-text-muted">
+        {forSync ? 'MP3, FLAC, WAV, M4A and more · it plays here and isn\'t uploaded' : `MP3, FLAC, WAV, M4A and more · up to ${formatBytes(maxSize)} and 30 minutes`}
+      </p>
+      <div className="mt-4 flex flex-wrap justify-center gap-2">
+        <button onClick={pickAudio} className={SMALL_BTN}><FileText size={13} /> Choose a file</button>
+        {canLoad(offer) && (
+          <button onClick={() => loadTrack(offer)} className={`${SMALL_BTN} max-w-[260px]`}>
+            <Music2 size={13} className="shrink-0" /> <span className="truncate">Use {offer.title}</span>
+          </button>
+        )}
+      </div>
+    </div>
+  ))
+  const expectedNote = (forSync: boolean): JSX.Element | null => (expected && (!audio || wrongAudio) && !loadingTrack ? (
+    <p className="mt-2 flex items-start gap-1.5 text-[11px] text-amber-300/90">
+      <AlertCircle size={12} className="shrink-0 mt-px" />
+      <span>
+        {audio ? `This isn't ${expected.name}, the audio that job used. ` : expected.server ? `That job used ${expected.name}. ` : `Choose ${expected.name} again. `}
+        {expected.server
+          ? <button onClick={takeExpected} disabled={uploading !== null} className="font-semibold underline underline-offset-2 hover:text-amber-200 transition-colors">Use it</button>
+          : forSync ? '' : 'The server deletes uploaded audio after every job, so each one uploads it.'}
+      </span>
+    </p>
+  ) : null)
+
+  const expanded = showSync ? big.sync : big.other
+  const toggleBig = (): void => {
+    const next = { ...big, [showSync ? 'sync' : 'other']: !expanded }
+    ls.set(SIZE_KEY, next)
+    setBig(next)
+  }
+
+  const copySync = (): void => {
+    navigator.clipboard.writeText(syncLrc).then(() => showAppToast('Copied the LRC', { tone: 'info' }), () => showAppToast('Could not copy'))
+  }
 
   return (
     <ModalOverlay
@@ -305,6 +606,7 @@ function LyricsGenDialog({ target }: { target: LyricsGenTarget }): JSX.Element {
       zIndexClassName="z-[60]"
       panelClassName="bg-surface border border-[var(--border)] rounded-t-2xl md:rounded-2xl shadow-2xl w-full md:max-w-[600px] h-[90svh] md:h-[740px] max-h-[92svh]"
       minWidth={420} minHeight={480}
+      expanded={expanded}
     >
       {({ onHandleMouseDown, locked, toggleLock, canLock }) => (
         <div className="bg-surface w-full h-full flex flex-col min-h-0">
@@ -320,70 +622,84 @@ function LyricsGenDialog({ target }: { target: LyricsGenTarget }): JSX.Element {
                 <MicVocal size={17} />
               </span>
               <div className="flex-1 min-w-0">
-                <h2 className="text-text-primary text-[15px] font-semibold leading-tight">Generate lyrics</h2>
-                <p className="text-[11px] text-text-muted truncate">Whisper on the server · previews only, nothing is saved to a song</p>
+                <h2 className="text-text-primary text-[15px] font-semibold leading-tight">Synced lyrics</h2>
+                <p className="text-[11px] text-text-muted truncate">
+                  {showSync ? 'Time lyrics to a song by hand, line by line or word by word' : 'Whisper on the server · previews only, nothing is saved to a song'}
+                </p>
               </div>
               <div className="flex items-center gap-1">
+                <button
+                  onClick={toggleBig}
+                  title={expanded ? 'Smaller window' : 'Bigger window'}
+                  aria-pressed={expanded}
+                  className="w-7 h-7 rounded-full flex items-center justify-center text-text-muted hover:text-text-primary hover:bg-surface-overlay transition-colors"
+                >
+                  {expanded ? <Minimize2 size={15} /> : <Maximize2 size={15} />}
+                </button>
                 {canLock && <LockToggle locked={locked} onClick={toggleLock} />}
                 <button onClick={close} title="Close" className="w-7 h-7 rounded-full flex items-center justify-center text-text-muted hover:text-text-primary hover:bg-surface-overlay transition-colors">
                   <X size={17} />
                 </button>
               </div>
             </div>
-            {tabs.length > 1 && (
-              <div ref={tabsRef} className="relative isolate mt-3.5 inline-flex p-1 rounded-xl bg-surface-overlay/70">
-                {tabs.map((t) => {
-                  const on = shownTab === t.id
-                  return (
-                    <button
-                      key={t.id}
-                      data-indicator-key={t.id}
-                      onClick={() => { setTab(t.id); setOpenJob(null) }}
-                      className={`inline-flex items-center gap-1.5 h-8 px-3.5 rounded-lg text-xs font-semibold transition-colors ${on ? 'text-text-primary' : 'text-text-muted hover:text-text-primary'}`}
-                    >
-                      <t.icon size={13} className={on ? 'text-accent' : ''} />
-                      {t.label}
-                      {!!t.badge && (
-                        <span className="inline-flex items-center gap-1 h-4 min-w-4 px-1.5 rounded-full bg-accent/20 text-accent text-[10px] tabular-nums">
-                          <span className="w-1 h-1 rounded-full bg-accent animate-pulse" />{t.badge}
-                        </span>
-                      )}
-                    </button>
-                  )
-                })}
-                <div ref={indicatorRef} aria-hidden="true" className="nav-indicator rounded-lg bg-surface-raised shadow-sm" />
-              </div>
-            )}
+            <div ref={tabsRef} className="relative isolate mt-3.5 inline-flex p-1 rounded-xl bg-surface-overlay/70">
+              {tabs.map((t) => {
+                const on = shownTab === t.id
+                return (
+                  <button
+                    key={t.id}
+                    data-indicator-key={t.id}
+                    onClick={() => { setTab(t.id); setOpenJob(null) }}
+                    className={`inline-flex items-center gap-1.5 h-8 px-3.5 rounded-lg text-xs font-semibold transition-colors ${on ? 'text-text-primary' : 'text-text-muted hover:text-text-primary'}`}
+                  >
+                    <t.icon size={13} className={on ? 'text-accent' : ''} />
+                    {t.label}
+                    {t.id === 'create' && !isDonor && <Heart size={10} className="text-pink-400/80" fill="currentColor" />}
+                    {!!t.badge && (
+                      <span className="inline-flex items-center gap-1 h-4 min-w-4 px-1.5 rounded-full bg-accent/20 text-accent text-[10px] tabular-nums">
+                        <span className="w-1 h-1 rounded-full bg-accent animate-pulse" />{t.badge}
+                      </span>
+                    )}
+                  </button>
+                )
+              })}
+              <div ref={indicatorRef} aria-hidden="true" className="nav-indicator rounded-lg bg-surface-raised shadow-sm" />
+            </div>
           </div>
 
           <div ref={bodyRef} className="flex-1 min-h-0 overflow-y-auto px-5 py-5">
-            {!account ? (
-              <Gate
-                icon={<LogIn size={24} className="text-accent" />}
-                tone="accent"
-                title="Sign in to generate lyrics"
-                blurb="Lyrics generation is for donors. Sign in to check your account."
-                action={<button onClick={() => setShowUserAuth(true)} className={PRIMARY_BTN}><LogIn size={15} /> Sign in</button>}
-              />
-            ) : !isDonor && shownTab !== 'admin' ? (
-              <Gate
-                icon={<Heart size={24} className="text-pink-400" fill="currentColor" />}
-                tone="pink"
-                title="A donor perk"
-                blurb="Donors can turn any song into lyrics, line-synced LRC or word-by-word karaoke timing, then review and download the result."
-              />
-            ) : openJob ? (
+            {syncAudio}
+            {openJob ? (
               <LyricsGenJobView
                 key={openJob.id}
                 jobId={openJob.id}
                 admin={openJob.admin}
-                audio={audio}
+                audio={audio?.file ?? null}
                 backLabel={openJob.admin ? 'All jobs' : shownTab === 'jobs' ? 'Your jobs' : 'New job'}
                 onBack={() => setOpenJob(null)}
                 onContinue={(job, m, t) => continueFrom(job, m, t)}
                 onRetry={(job) => continueFrom(job, job.mode, job.plain_lyrics ?? '', job.language ?? '')}
+                onEdit={openJob.admin ? undefined : openInSync}
+                apply={target.apply ? { label: target.apply.label, onApply: applyLrc } : undefined}
                 onDeleted={(id) => { setJobs((js) => js?.filter((j) => j.id !== id) ?? js); setOpenJob(null) }}
-                onUpdate={(job) => { if (!openJob.admin) setJobs((js) => js?.map((j) => (j.id === job.id ? { ...j, status: job.status, error: job.error, language: job.language } : j)) ?? js) }}
+                onUpdate={(job) => { if (!openJob.admin) setJobs((js) => js?.map((j) => (j.id === job.id ? { ...j, status: job.status, progress: job.progress, error: job.error, language: job.language } : j)) ?? js) }}
+              />
+            ) : shownTab === 'sync' ? (
+              <LyricsSyncTab
+                lines={syncLines}
+                original={syncOriginal}
+                onLines={setSyncLrc}
+                mode={syncMode}
+                onMode={setSyncMode}
+                clock={syncClock}
+                audioField={audioField(true)}
+                audioHint={expectedNote(true)}
+                song={lyricsTrack && (lyricsSongId || currentTrackFull?.id === lyricsTrack.id) ? { title: lyricsTrack.title, load: () => void syncFromSong() } : null}
+                jobs={completedJobs.map((j) => ({ value: j.id, label: `${jobTitle(j)} · ${MODE_INFO[j.mode].title} · ${relativeTime(j.created_at)}` }))}
+                onJob={(id) => void syncFromJob(id)}
+                onFile={syncFromFile}
+                onPaste={takeSyncText}
+                busy={textBusy}
               />
             ) : shownTab === 'jobs' ? (
               <MyJobs
@@ -397,6 +713,22 @@ function LyricsGenDialog({ target }: { target: LyricsGenTarget }): JSX.Element {
               />
             ) : shownTab === 'admin' ? (
               <AdminJobs onOpen={(id) => setOpenJob({ id, admin: true })} />
+            ) : !account ? (
+              <Gate
+                icon={<LogIn size={24} className="text-accent" />}
+                tone="accent"
+                title="Sign in to generate lyrics"
+                blurb="Whisper is for donors. Sign in to check your account. Sync works without one."
+                action={<button onClick={() => setShowUserAuth(true)} className={PRIMARY_BTN}><LogIn size={15} /> Sign in</button>}
+              />
+            ) : !isDonor ? (
+              <Gate
+                icon={<Heart size={24} className="text-pink-400" fill="currentColor" />}
+                tone="pink"
+                title="A donor perk"
+                blurb="Donors can have Whisper write a song's lyrics down, or time them by the line or by the word, then fine-tune the result. Anyone can time lyrics by hand."
+                action={<button onClick={() => setTab('sync')} className={PRIMARY_BTN}><Clock size={15} /> Sync by hand</button>}
+              />
             ) : (
               <div>
                 {options && !options.available && (
@@ -406,73 +738,8 @@ function LyricsGenDialog({ target }: { target: LyricsGenTarget }): JSX.Element {
 
                 {/* 1. Audio */}
                 <Step n={1} title="Audio" done={!!audio}>
-                  {loadingTrack ? (
-                    <div className="flex items-center gap-3 rounded-2xl border border-[var(--border)] bg-surface-overlay/40 p-3">
-                      <Cover track={loadingTrack.track} />
-                      <div className="flex-1 min-w-0">
-                        <p className="text-sm text-text-primary font-medium truncate">Loading {loadingTrack.track.title}…</p>
-                        <div className="mt-2 h-1.5 rounded-full bg-surface-highest overflow-hidden">
-                          <div className="h-full w-full origin-left bg-accent transition-transform duration-200" style={{ transform: `scaleX(${loadingTrack.progress})` }} />
-                        </div>
-                      </div>
-                      <button onClick={() => loadAbort.current?.abort()} title="Stop" className="w-7 h-7 rounded-lg flex items-center justify-center text-text-muted hover:text-text-primary hover:bg-surface-overlay transition-colors">
-                        <X size={15} />
-                      </button>
-                    </div>
-                  ) : audio ? (
-                    <div className="flex items-center gap-3 rounded-2xl border border-accent/30 bg-accent/5 p-3">
-                      {audioTrack ? <Cover track={audioTrack} /> : (
-                        <span className="w-11 h-11 shrink-0 rounded-xl bg-accent/15 text-accent flex items-center justify-center"><AudioLines size={20} /></span>
-                      )}
-                      <div className="flex-1 min-w-0">
-                        <p className="text-sm text-text-primary font-medium truncate" title={audio.name}>{audioTrack?.title ?? audio.name}</p>
-                        <p className="text-[11px] text-text-muted truncate">
-                          {formatBytes(audio.size)} · {audioTrack ? audio.name : 'from this computer'}
-                        </p>
-                      </div>
-                      <button onClick={pickAudio} disabled={uploading !== null} className={SMALL_BTN}>Change</button>
-                      <button
-                        onClick={() => { setAudio(null); setAudioTrack(null) }}
-                        disabled={uploading !== null}
-                        title="Remove"
-                        className="w-7 h-7 rounded-lg flex items-center justify-center text-text-muted hover:text-text-primary hover:bg-surface-overlay transition-colors disabled:opacity-50"
-                      >
-                        <X size={15} />
-                      </button>
-                    </div>
-                  ) : (
-                    <div
-                      onDragOver={(e) => { e.preventDefault(); setDragOver(true) }}
-                      onDragLeave={() => setDragOver(false)}
-                      onDrop={onDrop}
-                      className={`rounded-2xl border-2 border-dashed px-4 py-6 flex flex-col items-center text-center transition-colors ${
-                        dragOver ? 'border-accent bg-accent/5' : 'border-[var(--border)] bg-surface-overlay/20'
-                      }`}
-                    >
-                      <span className={`w-11 h-11 rounded-xl flex items-center justify-center transition-colors ${dragOver ? 'bg-accent text-white' : 'bg-surface-overlay text-text-muted'}`}>
-                        <Upload size={19} />
-                      </span>
-                      <p className="mt-3 text-sm text-text-primary font-medium">Drop a song here</p>
-                      <p className="mt-0.5 text-[11px] text-text-muted">MP3, FLAC, WAV, M4A and more · up to {formatBytes(maxSize)} and 30 minutes</p>
-                      <div className="mt-4 flex flex-wrap justify-center gap-2">
-                        <button onClick={pickAudio} className={SMALL_BTN}><FileText size={13} /> Choose a file</button>
-                        {canLoad(offer) && (
-                          <button onClick={() => loadTrack(offer)} className={`${SMALL_BTN} max-w-[260px]`}>
-                            <Music2 size={13} className="shrink-0" /> <span className="truncate">Use {offer.title}</span>
-                          </button>
-                        )}
-                      </div>
-                    </div>
-                  )}
-                  {expectedAudio && (!audio || wrongAudio) && !loadingTrack && (
-                    <p className="mt-2 flex items-start gap-1.5 text-[11px] text-amber-300/90">
-                      <AlertCircle size={12} className="shrink-0 mt-px" />
-                      <span>
-                        {audio ? `This isn't ${expectedAudio}, the audio that job used. ` : `Choose ${expectedAudio} again. `}
-                        The server deletes the audio after every job, so each one uploads it.
-                      </span>
-                    </p>
-                  )}
+                  {audioField(false)}
+                  {expectedNote(false)}
                 </Step>
 
                 {/* 2. Mode */}
@@ -511,7 +778,7 @@ function LyricsGenDialog({ target }: { target: LyricsGenTarget }): JSX.Element {
 
                 {/* 3. Lyrics (sync modes) */}
                 {needsText && (
-                  <Step n={3} title="Lyrics to time" done={!!trimmed && trimmed.length <= LYRICS_MAX_TEXT} className={modePicked ? 'animate-disclosure-in' : ''}>
+                  <Step n={3} title="Lyrics to time" done={!!sendText && sendText.length <= LYRICS_MAX_TEXT} className={modePicked ? 'animate-disclosure-in' : ''}>
                     <div className="flex flex-wrap items-center gap-1.5 mb-2">
                       {lyricsTrack && (lyricsSongId || currentTrackFull?.id === lyricsTrack.id) && (
                         <button onClick={() => void fillFromSong()} disabled={textBusy} className={CHIP}>
@@ -524,30 +791,37 @@ function LyricsGenDialog({ target }: { target: LyricsGenTarget }): JSX.Element {
                           onChange={(id) => void fillFromJob(id)}
                           placeholder="From a job"
                           disabled={textBusy}
-                          options={completedJobs.map((j) => ({ value: j.id, label: `${j.filename} · ${MODE_INFO[j.mode].title} · ${relativeTime(j.created_at)}` }))}
+                          options={completedJobs.map((j) => ({ value: j.id, label: `${jobTitle(j)} · ${MODE_INFO[j.mode].title} · ${relativeTime(j.created_at)}` }))}
                           className={`${CHIP} pr-2`}
                           menuClassName="max-w-[360px]"
                         />
                       )}
                       <button onClick={fillFromFile} disabled={textBusy} className={CHIP}><FileText size={12} /> Open .txt or .lrc</button>
                       {textBusy && <Loader2 size={13} className="animate-spin text-text-muted" />}
+                      <label
+                        title="Leave out everything in ( ). Click an adlib in the text to send it anyway"
+                        className="ml-auto inline-flex items-center gap-2 h-7 text-[11px] font-semibold text-text-secondary cursor-pointer select-none"
+                      >
+                        Remove adlibs
+                        <Toggle on={dropAdlibs} onClick={toggleDropAdlibs} locked={uploading !== null} lockedReason="Uploading" />
+                      </label>
                     </div>
-                    <textarea
+                    <LyricsGenTextInput
                       value={text}
-                      onChange={(e) => setText(e.target.value)}
+                      onChange={editText}
                       disabled={uploading !== null}
-                      spellCheck={false}
-                      placeholder={'One lyric line per line, exactly as sung.\nPaste an LRC to keep its line times as guides.'}
-                      className="w-full h-44 resize-y rounded-xl border border-[var(--border)] bg-surface-overlay/40 px-4 py-3 text-sm leading-relaxed text-text-primary placeholder:text-text-muted/70 focus:outline-none focus:border-accent/60 transition-colors"
+                      placeholder={mode === 'word_synced'
+                        ? 'One lyric line per line, exactly as sung.'
+                        : 'One lyric line per line, exactly as sung.\nPaste an LRC to keep its line times as guides.'}
+                      adlibs={dropAdlibs ? { kept: keptAdlibs, onToggle: toggleAdlib } : null}
                     />
                     <div className="mt-1.5 flex items-center justify-between gap-2 text-[11px]">
                       <span className="text-text-muted flex items-center gap-1.5 min-w-0">
-                        {trimmed && looksLikeLrc(trimmed)
-                          ? <><Clock size={11} className="text-accent shrink-0" /> <span className="truncate">LRC times found. Each line is timed within its own window</span></>
-                          : trimmed ? `${trimmed.split('\n').filter((l) => l.trim()).length} lines` : 'Your text is kept exactly as written'}
+                        {lrcNote && <Clock size={11} className="text-accent shrink-0" />}
+                        <span className="truncate" title={textNote}>{textNote}</span>
                       </span>
-                      <span className={`tabular-nums shrink-0 ${trimmed.length > LYRICS_MAX_TEXT ? 'text-red-300' : 'text-text-muted'}`}>
-                        {trimmed.length.toLocaleString()} / {LYRICS_MAX_TEXT.toLocaleString()}
+                      <span className={`tabular-nums shrink-0 ${sendText.length > LYRICS_MAX_TEXT ? 'text-red-300' : 'text-text-muted'}`}>
+                        {sendText.length.toLocaleString()} / {LYRICS_MAX_TEXT.toLocaleString()}
                       </span>
                     </div>
                   </Step>
@@ -564,13 +838,42 @@ function LyricsGenDialog({ target }: { target: LyricsGenTarget }): JSX.Element {
                       className="h-9 px-3 rounded-xl bg-surface-overlay border border-[var(--border)] text-sm text-text-primary min-w-[150px]"
                     />
                     <p className="flex-1 min-w-[180px] text-[11px] text-text-muted leading-snug">
-                      Whisper detects it from the start of the song. Set it for songs with a long intro.
+                      English unless you pick another. Detect it guesses from the start of the song, which can go wrong on a long intro.
                     </p>
                   </div>
                 </Step>
               </div>
             )}
           </div>
+
+          {showSync && syncShown && (
+            <div className="shrink-0 px-5 py-3 border-t border-[var(--border)] bg-surface flex items-center gap-2">
+              <p className="flex-1 min-w-0 text-[11px] text-text-muted leading-snug">
+                {syncDone.done === syncDone.total
+                  ? `Every ${syncMode === 'words' ? 'word' : 'line'} has a time.`
+                  : `${syncDone.done} of ${syncDone.total} ${syncMode === 'words' ? 'words' : 'lines'} timed.`}
+                {' '}Kept on this device until you start over.
+              </p>
+              {isDonor && (
+                <button onClick={whisperFromSync} title="Have Whisper time these lyrics, then fine-tune the result" className={SMALL_BTN}>
+                  <Sparkles size={13} /> Auto-sync
+                </button>
+              )}
+              <button onClick={copySync} className={SMALL_BTN}><Copy size={13} /> Copy</button>
+              <button
+                onClick={() => saveText(syncLrc, outputName(syncName, syncWords ? 'enhanced_lrc' : 'lrc'))}
+                title={syncWords ? 'Word LRC (.words.lrc), with the line times too' : 'Line LRC (.lrc)'}
+                className={SMALL_BTN}
+              >
+                <Download size={13} /> {syncWords ? '.words.lrc' : '.lrc'}
+              </button>
+              {target.apply && (
+                <button onClick={() => applyLrc(syncLrc)} className="inline-flex items-center gap-1.5 h-8 px-3.5 rounded-lg text-xs font-bold bg-accent text-white hover:bg-accent/90 transition-colors">
+                  <Check size={13} /> {target.apply.label}
+                </button>
+              )}
+            </div>
+          )}
 
           {showForm && (
             <div className="shrink-0 px-5 py-3 border-t border-[var(--border)] bg-surface flex items-center gap-3">
@@ -580,7 +883,9 @@ function LyricsGenDialog({ target }: { target: LyricsGenTarget }): JSX.Element {
                 </p>
               ) : (
                 <p className="flex-1 min-w-0 text-[11px] text-text-muted leading-snug">
-                  {uploading !== null ? `Uploading ${audio?.name}` : blocked ?? 'Two jobs can run at once, ten new ones an hour.'}
+                  {uploading !== null
+                    ? audio?.server ? `Starting on ${audio.track.title}` : `Uploading ${audio ? audioName(audio) : ''}`
+                    : blocked ?? 'Two jobs can run at once, ten new ones an hour.'}
                 </p>
               )}
               <button

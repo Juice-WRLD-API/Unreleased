@@ -73,14 +73,21 @@ export interface LibraryTrack {
   albumArt?: string | null    // base64 data URL
 }
 
-// What the "Generate lyrics" dialog opened on: a song to offer as the audio
+// What the "Synced lyrics" dialog opened on: a song to offer as the audio
 // (its stream, or its local file), and the tab to show first. Both optional -
 // opened from a menu with nothing playing, it starts empty.
 export interface LyricsGenTarget {
   track?: Pick<Track, 'id' | 'title' | 'artist' | 'path' | 'streamUrl' | 'imageUrl'>
   /** The API song behind `track`, whose lyrics can seed a sync job. */
   songId?: number | null
-  tab?: 'create' | 'jobs' | 'admin'
+  tab?: 'sync' | 'create' | 'jobs' | 'admin'
+  /** Opens Sync on these lyrics (an LRC, or plain lines to time) in place of
+   *  the draft. `saved` is the song's synced lyrics as saved, for the tool's
+   *  "moved" marks and Reset. */
+  sync?: { text: string; saved?: string }
+  /** Hands finished synced lyrics back to whoever opened the dialog (the song
+   *  editor). `onApply` is false when it can't take them any more. */
+  apply?: { label: string; onApply: (lrc: string) => boolean }
 }
 
 export interface LocalPlaylist {

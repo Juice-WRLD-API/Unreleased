@@ -258,7 +258,7 @@ export class KaraokeScene extends LyricScene {
   shade(animated: boolean): void {
     for (const [index, row] of this.rows) {
       const distance = Math.abs(index - this.anchor), sung = index === this.current
-      const opacity = sung ? 1 : this.browse != null ? 0.5 : Math.max(0.45 - 0.08 * (Math.max(distance, 1) - 1), 0.12)
+      const opacity = sung ? 1 : this.browse != null ? 0.85 : Math.max(0.8 - 0.1 * (Math.max(distance, 1) - 1), 0.35)
       const scale = sung ? 1 : 0.86
       // Out of focus near the line sung only: further lines are faint enough already.
       const soft = !sung && this.browse == null && distance <= 2 ? 1 : 0
@@ -354,7 +354,7 @@ export class KaraokeScene extends LyricScene {
       g.font = this.css
       const away = w * 4
       // A color picked for the other lines is painted whole: the row's own fading dims it as it does the white.
-      const dim = this.tune?.inactive || 'rgba(255,255,255,0.32)'
+      const dim = this.tune?.inactive || 'rgba(255,255,255,0.6)'
       g.fillStyle = dim
       if (blur) { g.shadowColor = dim; g.shadowBlur = blur * scale; g.shadowOffsetX = -away * scale }
       const ascent = this.metrics(this.size).ascent

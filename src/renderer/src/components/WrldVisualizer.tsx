@@ -1,8 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useShallow } from 'zustand/react/shallow'
-import { ChevronLeft, ChevronRight, Disc3, Monitor, Minimize2, Maximize2, Radio, Settings2, PictureInPicture2 } from 'lucide-react'
+import { Disc3, Monitor, Minimize2, Maximize2, Radio, Settings2, PictureInPicture2 } from 'lucide-react'
 import { Visualizer, VISUALIZERS, needsWebGL, type VizLayout } from '../lib/viz'
-import { LOOKS, lookOf } from '../desktop/light/looks'
 import { getAnalysisTap, resumeEffectsContext } from '../lib/audioEffects'
 import { smallCoverUrl, JWAPI_HOST } from '../lib/juicewrldApi'
 import { ERA_PALETTES } from '../lib/eraPalettes'
@@ -123,7 +122,8 @@ interface Props {
 export default function WrldVisualizer({
   rootRef, fullscreen, artUrl, title, artist, trackKey, albumKey, hasLyrics, txtPri, txtSec, fm, onEnter, onExit,
 }: Props): JSX.Element {
-  const isPlaying = useStore((s) => s.isPlaying)
+  // 999 FM plays with isPlaying off; the visualizer stops listening when this is false.
+  const isPlaying = useStore((s) => s.isPlaying || s.radioFmActive)
   const lyricsOverride = useStore((s) => s.lyricsOverride)
   // The screen light's look, while WRLD's Edge light is on.
   const vizEdgeOverlay = useWrldEdgeLook()
@@ -169,7 +169,7 @@ export default function WrldVisualizer({
     vizRef.current = viz
     setGlSupported(viz.glSupported)
     // A saved shader mode can't run without WebGL: the engine would quietly draw
-    // Aurora while the toolbar kept the shader's name. Show what's actually
+    // Aurora while the saved mode still named the shader. Show what's actually
     // drawn - unsaved, so the same choice still works where WebGL does.
     if (!viz.glSupported) {
       const { activeMode: cur, selectMode } = useVizStore.getState()
@@ -206,8 +206,8 @@ export default function WrldVisualizer({
     const viz = vizRef.current
     if (!viz) return
     viz.setPlaying(isPlaying)
-    // The graph is built when the player first attaches its elements; pick it
-    // up here in case this mounted before that happened.
+    // The graph is built on the first play (on mobile, once an effect is on);
+    // pick it up here in case this mounted before that happened.
     if (!viz.audioActive) {
       const tap = getAnalysisTap()
       if (tap) viz.enableAudioNode(tap.ctx, tap.node)
@@ -319,39 +319,6 @@ export default function WrldVisualizer({
     announce(vizName(next))
   }, [announce])
 
-  // ── Mode list: the toolbar's name opens every mode at once ─────────────────
-  const [showModes, setShowModes] = useState(false)
-  useEscapeToClose(() => setShowModes(false), showModes)
-  const modesRef = useRef<HTMLDivElement>(null)
-  // Opened from the keyboard, focus moves into the list; a click leaves it be.
-  const focusModes = useRef(false)
-  useEffect(() => {
-    if (!showModes) return
-    if (focusModes.current) {
-      const list = modesRef.current
-      const el = list?.querySelector<HTMLButtonElement>('[aria-checked="true"]:not(:disabled)')
-        ?? list?.querySelector<HTMLButtonElement>('[role="menuitemradio"]:not(:disabled)')
-      el?.focus()
-    }
-    const onDown = (e: MouseEvent): void => {
-      if (!modesRef.current?.contains(e.target as Node)) setShowModes(false)
-    }
-    document.addEventListener('mousedown', onDown)
-    return () => document.removeEventListener('mousedown', onDown)
-  }, [showModes])
-
-  const pickMode = (id: string): void => {
-    setShowModes(false)
-    useVizStore.getState().selectMode(id, true)
-    announce(vizName(id))
-  }
-
-  const pickEdge = (look: string | null): void => {
-    setShowModes(false)
-    useVizStore.getState().setVizEdgeOverlay(look)
-    announce(look ? lookOf(look).title : 'Edge light off')
-  }
-
   const toggleWidgets = (): void => {
     const { wrldWidgets: cur, setWrldWidgets } = useVizStore.getState()
     setWrldWidgets(!cur)
@@ -455,7 +422,7 @@ export default function WrldVisualizer({
         // Below a top-docked floating nav pill only when they'd overlap.
         style={underPill ? { top: 'calc(var(--nav-pill-top, 0px) + 1rem)' } : { top: '1rem' }}
         className={`absolute right-4 z-40 flex items-center gap-0.5 p-[5px] rounded-[14px] bg-black/40 backdrop-blur-xl border border-white/10 transition-[opacity,transform] duration-300 ${
-          idle && !showSettings && !showModes ? 'opacity-0 -translate-y-1.5 pointer-events-none' : ''
+          idle && !showSettings ? 'opacity-0 -translate-y-1.5 pointer-events-none' : ''
         }`}
         onMouseEnter={() => { overToolbar.current = true }}
         onMouseLeave={() => { overToolbar.current = false; wake() }}
@@ -470,92 +437,6 @@ export default function WrldVisualizer({
         >
           <Radio size={15} className={fm.active && fm.live ? 'animate-pulse' : ''} />
           <span>{fm.label}</span>
-        </button>
-        <span className="w-px h-5 mx-1 bg-white/10" />
-        <button className={`${tool} ${toolIdle}`} onClick={() => cycle(-1)} title="Previous visualizer (←)" aria-label="Previous visualizer">
-          <ChevronLeft size={19} />
-        </button>
-        <div ref={modesRef} className="relative">
-          <button
-            className={`h-9 min-w-[74px] px-1.5 rounded-[10px] text-center text-[11px] font-bold tracking-[0.1em] uppercase select-none transition-colors ${
-              showModes ? 'text-white bg-white/10' : 'text-white/90 hover:text-white hover:bg-white/10'
-            }`}
-            onClick={(e) => {
-              focusModes.current = e.detail === 0 // 0 = Enter/Space rather than a pointer
-              setShowSettings(false)
-              setShowModes((v) => !v)
-            }}
-            title="Choose a visualizer"
-            aria-haspopup="menu"
-            aria-expanded={showModes}
-          >
-            {/* With the visualizer Off and an Edge light on, the light is what's showing. */}
-            <span aria-live="polite">{activeMode === 'none' && shownEdge ? lookOf(shownEdge).title : vizName(activeMode)}</span>
-          </button>
-          {showModes && (
-            <div
-              role="menu"
-              aria-label="Visualizers"
-              className="absolute top-full left-1/2 -translate-x-1/2 mt-[11px] w-[272px] max-w-[calc(100vw-2rem)] max-h-[70vh] overflow-y-auto p-1.5 rounded-[14px] bg-black/70 backdrop-blur-xl border border-white/10 shadow-2xl"
-            >
-              {[
-                { label: null, modes: VISUALIZERS.filter((v) => v.id === 'none') },
-                { label: 'Classic', modes: VISUALIZERS.filter((v) => v.id !== 'none' && v.engine === '2d') },
-                { label: 'Shaders', modes: VISUALIZERS.filter((v) => v.engine === 'gl') },
-              ].map((sec) => (
-                <div key={sec.label ?? 'off'}>
-                  {sec.label && (
-                    <p className="px-2.5 pt-2.5 pb-1 text-[10px] font-bold tracking-[0.12em] uppercase text-white/40 select-none">{sec.label}</p>
-                  )}
-                  <div className={`grid gap-0.5 ${sec.label ? 'grid-cols-2' : 'grid-cols-1'}`}>
-                    {sec.modes.map((v) => {
-                      const on = v.id === activeMode
-                      const blocked = needsWebGL(v) && !glSupported
-                      return (
-                        <button
-                          key={v.id}
-                          role="menuitemradio"
-                          aria-checked={on}
-                          disabled={blocked}
-                          title={blocked ? 'Needs WebGL, which this browser has turned off' : undefined}
-                          onClick={() => pickMode(v.id)}
-                          className={`h-8 px-2.5 rounded-[9px] text-left text-[12px] font-semibold transition-colors disabled:opacity-30 disabled:cursor-not-allowed ${
-                            on ? toolOn : 'text-white/75 hover:text-white hover:bg-white/10'
-                          }`}
-                        >
-                          {v.name}
-                        </button>
-                      )
-                    })}
-                  </div>
-                </div>
-              ))}
-              {/* The Edge light goes round whichever visualizer is on, or shows on its own with it Off. */}
-              {glSupported && (
-                <div role="group" aria-label="Edge light">
-                  <p className="px-2.5 pt-2.5 pb-1 text-[10px] font-bold tracking-[0.12em] uppercase text-white/40 select-none">Edge light</p>
-                  <div className="grid gap-0.5 grid-cols-2">
-                    {[{ id: null, title: 'None' }, ...LOOKS].map((l) => (
-                      <button
-                        key={l.id ?? 'none'}
-                        role="menuitemradio"
-                        aria-checked={vizEdgeOverlay === l.id}
-                        onClick={() => pickEdge(l.id)}
-                        className={`h-8 px-2.5 rounded-[9px] text-left text-[12px] font-semibold transition-colors ${
-                          vizEdgeOverlay === l.id ? toolOn : 'text-white/75 hover:text-white hover:bg-white/10'
-                        }`}
-                      >
-                        {l.title}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-              )}
-            </div>
-          )}
-        </div>
-        <button className={`${tool} ${toolIdle}`} onClick={() => cycle(1)} title="Next visualizer (→)" aria-label="Next visualizer">
-          <ChevronRight size={19} />
         </button>
         <span className="w-px h-5 mx-1 bg-white/10" />
         <button

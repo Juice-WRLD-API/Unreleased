@@ -3,7 +3,10 @@ import { useShallow } from 'zustand/react/shallow'
 import { ViewType, Track, FullTrack, LibraryTrack, LocalPlaylist, GuestPlaylist, FollowedPlaylist, DonorPlaylist, LyricsGenTarget } from '../types'
 import { clearDonorPlaybackCache } from '../lib/donorPlayback'
 import { clearDonorImageCache } from '../lib/donorImageCache'
+import { clearDecryptedAttachments } from '../lib/chatAttachmentCache'
 import { clearDonorCoverCache } from '../lib/donorCoverArt'
+import { clearCoverArtImageCache } from '../lib/coverArtImages'
+import type { CoverArtTarget } from '../lib/coverArtApi'
 import { APP_VERSION } from '../lib/appVersion'
 import { ls } from '../lib/persist'
 import * as userApi from '../lib/userApi'
@@ -62,6 +65,7 @@ import { useSandboxStore } from '../components/Modal'
 import { runWhenIdle } from '../lib/platform'
 import { isMobileViewport } from '../hooks/useIsMobile'
 import { showAppToast } from '../lib/appToast'
+import { clearNotifications } from '../lib/notificationHistory'
 import { setNotificationsSignedIn } from '../lib/notificationSocket'
 
 // Lightweight localStorage persistence helper - see lib/persist.ts (it lives
@@ -87,65 +91,6 @@ export interface UploadItem {
   // live bytes/sec sample (undefined between samples/when idle).
   bytesReceived?: number
   speedBps?: number
-}
-
-// ─── Staged comp file change (in-session) ────────────────────
-//
-// Drag-and-drop in the Files tab doesn't propose anything on drop - it parks
-// the intended change here, the Uploads panel lists what's queued, and one
-// "Propose" there submits the lot (see lib/compStagedChanges). Dragging is
-// cheap to do by accident, and a reorganize is usually several drags that
-// only make sense together, so proposing each one the instant it lands would
-// spam reviewers with half a move.
-export interface StagedFileChange {
-  id: string
-  /** The subset of comp proposal change types drag-and-drop can produce. */
-  changeType: 'move' | 'move_folder' | 'create_folder' | 'upload'
-  /** Source path - the file/folder being moved, the folder to create, or
-   *  where an uploaded file will land. */
-  path: string
-  /** Full destination path; only for moves. */
-  destination?: string
-  /** The local file body, for an upload dropped in from the OS. Staged
-   *  changes live in memory only, so holding the File here is fine. */
-  file?: File
-  /** Uploads only: flags the proposal as a new leak. */
-  isNewLeak?: boolean
-  /** Sent as the proposal's contributor_notes. */
-  notes?: string
-  /** Channel slug the change belongs to, since the Files tab can switch
-   *  channels with changes still queued and each proposal carries its own. */
-  channel: string
-  /** Set when a propose attempt failed, so the row can show why and stay
-   *  queued for a retry. Cleared on the next attempt. */
-  error?: string
-}
-
-// ─── Staged song edit proposal (in-session) ──────────────────
-//
-// Same idea as StagedFileChange, applied to the Tracker's song editor, bulk
-// editor and "propose new song" modal: editing a song's metadata, proposing
-// its deletion, or proposing a brand new song doesn't submit anything on its
-// own - it parks the proposal here, the Uploads panel lists what's queued,
-// and one "Propose" there sends the lot (see lib/compStagedSongChanges).
-// Editing an *already-submitted* pending proposal (editingPropId set in
-// EditorPage) is a different action - that proposal already exists
-// server-side, so it's still updated immediately.
-export interface StagedSongChange {
-  id: string
-  /** Null for a 'create' change - a new song has no id yet. */
-  songId: number | null
-  changeType: 'update' | 'delete' | 'create'
-  /** Song title, for the queue row - not sent as part of proposed_data. */
-  title: string
-  proposedData: Record<string, unknown>
-  editorNotes: string
-  /** Channel slug the proposal belongs to. Absent lets the server pick a
-   *  default (the AddSongModal can be opened without one). */
-  channel?: string
-  /** Set when a propose attempt failed, so the row can show why and stay
-   *  queued for a retry. Cleared on the next attempt. */
-  error?: string
 }
 
 // Where the desktop nav menu sits - classic left sidebar, mirrored right, or a
@@ -229,6 +174,7 @@ interface AppState {
   /** Desktop Settings modal. Mobile widths still use the 'settings' view. */
   showSettings: boolean
   showDiagnostics: boolean
+  showRecognition: boolean
   showQueue: boolean
   // The bottom nav's overflow sheet - its trigger button lives on Home now,
   // not in the nav bar itself, so the open/close state has to live somewhere
@@ -453,9 +399,13 @@ interface AppState {
   // `reportModal` is the open report dialog's target (null = closed).
   pendingReports: PendingReport[]
   reportModal: ReportTarget | null
-  // The open "Generate lyrics" dialog (null = closed) and the song it was
+  // The open "Synced lyrics" dialog (null = closed) and the song it was
   // opened on. See components/LyricsGenModal.
   lyricsGenModal: LyricsGenTarget | null
+
+  // The song the "Submit cover art" dialog is open for (null = closed). See
+  // components/CoverArtSubmitModal.
+  coverArtModal: CoverArtTarget | null
   // Whether ErrorBoundary auto-submits a crash report the moment it catches
   // an error, through the same feedback pipeline (submitFeedback) the manual
   // "Report this error" button uses. On by default; Settings can turn it off
@@ -577,12 +527,9 @@ interface AppState {
   // Uploads (comp upload progress - see lib/compUploads)
   uploads: UploadItem[]
   showUploadManager: boolean
-  // Comp file changes staged by Files drag-and-drop, proposed as a batch from
-  // the Uploads panel (see lib/compStagedChanges).
-  stagedFileChanges: StagedFileChange[]
-  // Song edit/delete proposals staged by the Tracker's editors, proposed as a
-  // batch from the Uploads panel (see lib/compStagedSongChanges).
-  stagedSongChanges: StagedSongChange[]
+  // The notification area (NotificationCenter); its entries live in
+  // lib/notificationHistory, not here.
+  showNotifications: boolean
 }
 
 interface AppActions {
@@ -655,6 +602,7 @@ interface AppActions {
    *  clicks in chat messages and member lists. */
   openPublicProfile: (userId: number) => void
   setShowDiagnostics: (show: boolean) => void
+  setShowRecognition: (show: boolean) => void
   setShowQueue: (show: boolean) => void
   setShowMoreNav: (show: boolean) => void
   setShowEqPanel: (show: boolean) => void
@@ -805,7 +753,7 @@ interface AppActions {
   /** Queues a song issue report (wrong/missing info or lyrics) and tries to
    *  deliver it. `issues` is the set of checked problem types. Same delivered
    *  vs. still-queued resolution as `submitFeedback`. */
-  reportSong: (songId: number, songName: string, issues: SongIssueType[], message: string, contact?: string) => Promise<boolean>
+  reportSong: (songId: number, songName: string, issues: SongIssueType[], message: string, contact?: string, lyrics?: string) => Promise<boolean>
   /** Drops a queued report from the outbox (e.g. one stuck failing). */
   dismissReport: (id: string) => void
   /** Internal - appends a report to the outbox, kicks off delivery, and
@@ -855,6 +803,9 @@ interface AppActions {
   completeApprovedLogin: (token: string, user: userApi.AccountUser) => Promise<void>
   logoutAccount: () => Promise<void>
   refreshPlaylists: () => Promise<void>
+  /** refreshPlaylists(), unless this session already loaded the signed-in
+   *  account's playlists. */
+  ensurePlaylists: () => Promise<void>
   prefetchPlaylistDetails: () => Promise<void>
   prefetchApiData: () => Promise<void>
   setPendingPlaylistId: (id: number | null) => void
@@ -871,9 +822,12 @@ interface AppActions {
   // submits one update proposal per song.
   openBulkEditor: (songs: JWApiSong[]) => void
   closeBulkEditor: () => void
-  /** Opens / closes the donor "Generate lyrics" dialog, optionally on a song. */
+  /** Opens / closes the "Synced lyrics" dialog (hand sync, and Whisper for donors), optionally on a song. */
   openLyricsGen: (target?: LyricsGenTarget) => void
   closeLyricsGen: () => void
+  /** Opens / closes the "Submit cover art" dialog for a song. */
+  openCoverArtSubmit: (target: CoverArtTarget) => void
+  closeCoverArtSubmit: () => void
 
 
   setLibraryTracks: (tracks: LibraryTrack[]) => void
@@ -936,30 +890,18 @@ interface AppActions {
   removeUpload: (id: string) => void
   clearCompletedUploads: () => void
   setShowUploadManager: (show: boolean) => void
-
-  /** Queues drag-and-drop file changes; ids are assigned here. Returns nothing
-   *  - the Uploads panel is where they're reviewed and proposed. */
-  stageFileChanges: (changes: Omit<StagedFileChange, 'id'>[]) => void
-  updateStagedFileChange: (id: string, updates: Partial<StagedFileChange>) => void
-  unstageFileChange: (id: string) => void
-  clearStagedFileChanges: () => void
-
-  /** Queues a song edit/delete proposal; ids are assigned here. Replaces any
-   *  queued change of the same type already staged for that song/channel, so
-   *  editing a song again before proposing it just updates the queued patch
-   *  rather than piling up duplicates. */
-  stageSongChanges: (changes: Omit<StagedSongChange, 'id'>[]) => void
-  updateStagedSongChange: (id: string, updates: Partial<StagedSongChange>) => void
-  unstageSongChange: (id: string) => void
-  clearStagedSongChanges: () => void
+  setShowNotifications: (show: boolean) => void
 }
 
 export type AppStore = QueueSlice & DesktopSlice & AppState & AppActions
 
 // ─── Store ────────────────────────────────────────────────────────────────────
 
-// Dedup flag: prevents concurrent /playlists/ fetches
-let _playlistsInFlight = false
+// The /playlists/ fetch in flight, shared by concurrent refreshPlaylists callers
+let _playlistsInFlight: Promise<void> | null = null
+// Account whose playlists a refreshPlaylists() has loaded this session (see
+// ensurePlaylists).
+let _playlistsLoadedFor: number | null = null
 // Dedup flag: prevents the startup detail/cover prefetch from running twice
 // (e.g. loadAccount racing with a later refreshPlaylists on the same session)
 let _detailsPrefetchInFlight = false
@@ -1379,6 +1321,7 @@ export const useStore = create<AppStore>((set, get, store) => ({
   settingsTab: null,
   showSettings: typeof window !== 'undefined' && window.location.pathname === '/settings' && !isMobileViewport(),
   showDiagnostics: false,
+  showRecognition: false,
   showQueue: false,
   showMoreNav: false,
   showEqPanel: false,
@@ -1460,7 +1403,7 @@ export const useStore = create<AppStore>((set, get, store) => ({
     // Returning to Playlists with a playlist already open (it stays selected
     // across tab switches - see playlistsSelectedId above) should restore its
     // ?id= too, not just land on the bare list. Same idea for Admin: land
-    // back on whichever section (Users, Security, ...) was last open there
+    // back on whichever section (Users, Logs, ...) was last open there
     // instead of always resetting to the base /admin.
     const selectedPlaylistId = get().playlistsSelectedId
     const activeAdminTab = get().activeAdminTab
@@ -1565,6 +1508,7 @@ export const useStore = create<AppStore>((set, get, store) => ({
     set((s) => ({ activeView: 'public-profile', previousView: s.activeView === 'public-profile' ? s.previousView : s.activeView }))
   },
   setShowDiagnostics: (showDiagnostics) => set({ showDiagnostics }),
+  setShowRecognition: (showRecognition) => set({ showRecognition }),
   setShowQueue: (showQueue) => set({ showQueue }),
   setShowMoreNav: (showMoreNav) => set({ showMoreNav }),
   setShowEqPanel: (showEqPanel) => set({ showEqPanel }),
@@ -2230,14 +2174,15 @@ export const useStore = create<AppStore>((set, get, store) => ({
     })
   },
 
-  reportSong: async (songId, songName, issues, message, contact) => {
-    // A report needs at least a flagged issue or a written note to be worth
-    // sending - the form enforces this too, but guard here so no empty report
-    // can reach the outbox.
-    if (issues.length === 0 && !message.trim()) return false
+  reportSong: async (songId, songName, issues, message, contact, lyrics) => {
+    // A report needs at least a flagged issue, a written note or pasted lyrics
+    // to be worth sending - the form enforces this too, but guard here so no
+    // empty report can reach the outbox.
+    if (issues.length === 0 && !message.trim() && !lyrics?.trim()) return false
     return get()._enqueueReport({
       id: newReportId(), kind: 'song', songId, songName,
       issues, message: message.trim(),
+      ...(lyrics?.trim() ? { lyrics: lyrics.trim() } : {}),
       contact: contact?.trim() || undefined,
       appVersion: APP_VERSION, createdAt: Date.now(), attempts: 0,
     })
@@ -2421,8 +2366,10 @@ export const useStore = create<AppStore>((set, get, store) => ({
   },
 
   // ── Account ───────────────────────────────────────────────────────────────
-  account: null,
-  playlists: [],
+  // Painted from the offline cache so a returning user doesn't boot into the
+  // signed-out view; loadAccount() swaps in the server's copy once it answers.
+  account: userApi.peekCachedAccount(),
+  playlists: userApi.peekCachedPlaylists(),
   showUserAuth: false,
   pendingPlaylistId: null,
   setPendingPlaylistId: (id) => set({ pendingPlaylistId: id }),
@@ -2463,6 +2410,9 @@ export const useStore = create<AppStore>((set, get, store) => ({
     if (_loadAccountInFlight) return _loadAccountInFlight
     _loadAccountInFlight = (async () => {
       if (!userApi.getToken()) return
+      // Nothing below feeds the playlist list, so it loads alongside the
+      // profile instead of waiting behind favorites and the settings merge.
+      const playlistsLoaded = get().refreshPlaylists()
       try {
         const account = await userApi.getMe()
         set({ account })
@@ -2502,7 +2452,7 @@ export const useStore = create<AppStore>((set, get, store) => ({
       // Deliver any reports queued while signed out - a logged-in flush can
       // attach the account's Discord username as the contact field.
       get()._flushReports()
-      await get().refreshPlaylists()
+      await playlistsLoaded
       // Fire-and-forget: warm playlist tracks + covers in the background so the
       // Playlists page is ready before the user ever navigates to it. The list
       // request (include_items) already seeds those caches, so this only does
@@ -2586,6 +2536,8 @@ export const useStore = create<AppStore>((set, get, store) => ({
     ls.set('donorPlaylists', [])
     clearDonorPlaybackCache()
     clearDonorImageCache()
+    clearCoverArtImageCache()
+    clearDecryptedAttachments()
     clearDonorCoverCache()
     // Overrides stay on this device after signing out, the same way likes do -
     // they're re-merged upward on the next login.
@@ -2595,17 +2547,34 @@ export const useStore = create<AppStore>((set, get, store) => ({
     // to sign in on this machine would merge it in and push it to their own
     // profile. The server copy is authoritative from the next login anyway.
     get()._setListeningPlays([])
+    // Chat notifications quote the account's messages; the rest of the
+    // notification area (news, announcements, toasts) isn't anyone's.
+    clearNotifications(['chat'])
   },
 
-  refreshPlaylists: async () => {
-    if (!get().account) return
-    if (_playlistsInFlight) return
-    _playlistsInFlight = true
-    try {
-      const playlists = await userApi.getPlaylists()
-      set({ playlists })
-    } catch {}
-    finally { _playlistsInFlight = false }
+  // Keyed on the token rather than `account`, so loadAccount can start it
+  // before getMe answers.
+  refreshPlaylists: () => {
+    if (!userApi.getToken()) return Promise.resolve()
+    if (_playlistsInFlight) return _playlistsInFlight
+    _playlistsInFlight = (async () => {
+      try {
+        const accountId = get().account?.id ?? null
+        const playlists = await userApi.getPlaylists()
+        // Signed out while it was loading.
+        if (!userApi.getToken()) return
+        set({ playlists })
+        _playlistsLoadedFor = accountId
+      } catch {}
+    })().finally(() => { _playlistsInFlight = null })
+    return _playlistsInFlight
+  },
+  // The list carries every playlist's items (~1.5 MB for a big library), so
+  // callers that only need it loaded once (Home, on every visit) use this.
+  ensurePlaylists: async () => {
+    const id = get().account?.id
+    if (id == null || _playlistsLoadedFor === id) return
+    await get().refreshPlaylists()
   },
 
   // Warm the in-memory (and, via the API layer, localStorage) caches for every
@@ -2695,6 +2664,9 @@ export const useStore = create<AppStore>((set, get, store) => ({
     set({ lyricsGenModal: target })
   },
   closeLyricsGen: () => set({ lyricsGenModal: null }),
+  coverArtModal: null,
+  openCoverArtSubmit: (target) => set({ coverArtModal: target }),
+  closeCoverArtSubmit: () => set({ coverArtModal: null }),
   setPendingCompProposal: (pendingCompProposal) => set({ pendingCompProposal }),
   setPendingEditorSongId: (pendingEditorSongId) => set({ pendingEditorSongId }),
   openSongEditor: (songId) => {
@@ -3097,45 +3069,11 @@ export const useStore = create<AppStore>((set, get, store) => ({
   clearCompletedUploads: () => set((s) => ({
     uploads: s.uploads.filter((d) => d.state === 'downloading'),
   })),
-  setShowUploadManager: (show) => set({ showUploadManager: show }),
+  // Both panels hang off the top-right corner, so only one is open at a time.
+  setShowUploadManager: (show) => set(show ? { showUploadManager: true, showNotifications: false } : { showUploadManager: false }),
 
-  stagedFileChanges: [],
-  // One queued change per path: dragging an already-queued file somewhere else
-  // is a correction, not a second move, and proposing both would ask reviewers
-  // to send the same file to two places.
-  stageFileChanges: (changes) => set((s) => ({
-    stagedFileChanges: [
-      ...s.stagedFileChanges.filter((c) => !changes.some((n) => n.path === c.path && n.channel === c.channel)),
-      ...changes.map((c, i) => ({ ...c, id: `staged-${Date.now()}-${i}-${Math.random().toString(36).slice(2, 8)}` })),
-    ],
-  })),
-  updateStagedFileChange: (id, updates) => set((s) => ({
-    stagedFileChanges: s.stagedFileChanges.map((c) => c.id === id ? { ...c, ...updates } : c),
-  })),
-  unstageFileChange: (id) => set((s) => ({
-    stagedFileChanges: s.stagedFileChanges.filter((c) => c.id !== id),
-  })),
-  clearStagedFileChanges: () => set({ stagedFileChanges: [] }),
-
-  stagedSongChanges: [],
-  // One queued change per song/channel/type: editing a song again before it's
-  // proposed replaces the queued patch rather than piling up duplicates. A
-  // 'create' has no song id to key off of - each new-song draft is its own
-  // proposal, so those never collapse into each other.
-  stageSongChanges: (changes) => set((s) => ({
-    stagedSongChanges: [
-      ...s.stagedSongChanges.filter((c) => !changes.some((n) =>
-        n.songId != null && n.songId === c.songId && n.channel === c.channel && n.changeType === c.changeType)),
-      ...changes.map((c, i) => ({ ...c, id: `staged-song-${Date.now()}-${i}-${Math.random().toString(36).slice(2, 8)}` })),
-    ],
-  })),
-  updateStagedSongChange: (id, updates) => set((s) => ({
-    stagedSongChanges: s.stagedSongChanges.map((c) => c.id === id ? { ...c, ...updates } : c),
-  })),
-  unstageSongChange: (id) => set((s) => ({
-    stagedSongChanges: s.stagedSongChanges.filter((c) => c.id !== id),
-  })),
-  clearStagedSongChanges: () => set({ stagedSongChanges: [] }),
+  showNotifications: false,
+  setShowNotifications: (show) => set(show ? { showNotifications: true, showUploadManager: false } : { showNotifications: false }),
 }))
 
 // Notification-socket tickets wait for a confirmed account, not just a stored token.

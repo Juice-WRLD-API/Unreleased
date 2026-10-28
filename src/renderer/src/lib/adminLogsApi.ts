@@ -13,10 +13,11 @@ const LOGS_BASE = routeUrl('/accounts/admin/logs')
 
 export type LogLevel = 'DEBUG' | 'INFO' | 'WARNING' | 'ERROR' | 'CRITICAL'
 export type LogCategory = 'request' | 'audit' | 'security' | 'auth' | 'performance'
-  | 'files' | 'tasks' | 'chat' | 'cdn' | 'app'
+  | 'files' | 'comp' | 'lyrics' | 'tasks' | 'chat' | 'cdn' | 'app'
 
 export const LOG_LEVELS: LogLevel[] = ['DEBUG', 'INFO', 'WARNING', 'ERROR', 'CRITICAL']
-export const LOG_CATEGORIES: LogCategory[] = ['request', 'audit', 'security', 'auth', 'performance', 'files', 'tasks', 'chat', 'cdn', 'app']
+/** Used until `sources` says which categories the server has. */
+export const LOG_CATEGORIES: LogCategory[] = ['request', 'audit', 'security', 'auth', 'performance', 'files', 'comp', 'lyrics', 'tasks', 'chat', 'cdn', 'app']
 
 export interface LogEntry {
   /** UTC ISO, ending in Z. */
@@ -58,7 +59,18 @@ export const LOG_EVENTS = [
   'auth.passkey_added', 'auth.passkey_removed', 'auth.login_approval_requested', 'auth.login_approval_decided',
   'api_key.', 'api_key.created', 'api_key.updated', 'api_key.deleted',
   'proposal.reviewed', 'proposal.reversed',
-  'admin.', 'admin.application_reviewed', 'admin.user_updated', 'admin.badge_awarded', 'admin.request',
+  'proposal.batch_submitted', 'proposal.batch_reviewed', 'proposal.batch_reversed', 'proposal.batch_withdrawn',
+  'comp_proposal.', 'comp_proposal.submitted', 'comp_proposal.edited', 'comp_proposal.withdrawn', 'comp_proposal.reviewed',
+  'comp_proposal.reversed', 'comp_proposal.apply_failed', 'comp_proposal.reverse_failed',
+  'comp_proposal.batch_submitted', 'comp_proposal.batch_reviewed', 'comp_proposal.batch_reversed', 'comp_proposal.batch_withdrawn',
+  'comp.', 'comp.replace_started', 'comp.replace_progress', 'comp.replaced', 'comp.replace_failed', 'comp.replace_preview',
+  'comp.replace_locked', 'comp.replace_invalid',
+  'comp_upload.', 'comp_upload.started', 'comp_upload.expired', 'comp_upload.rejected', 'comp_upload.purged',
+  'lyrics.', 'lyrics.job_created', 'lyrics.job_started', 'lyrics.job_progress', 'lyrics.inference', 'lyrics.job_completed',
+  'lyrics.job_failed', 'lyrics.job_cancelled', 'lyrics.job_discarded', 'lyrics.job_skipped', 'lyrics.job_deleted',
+  'lyrics.model_loading', 'lyrics.model_loaded', 'lyrics.decode_failed', 'lyrics.unavailable', 'lyrics.job_refused',
+  'lyrics.queue_failed', 'lyrics.jobs_expired', 'lyrics.previews_removed', 'lyrics.settings_updated',
+  'admin.','admin.application_reviewed', 'admin.user_updated', 'admin.badge_awarded', 'admin.request',
   'access.', 'access.unauthenticated', 'access.denied', 'access.rate_limited',
   'logs.stream_ticket', 'logs.stream_opened',
   'task.failed', 'task.retry',
@@ -81,11 +93,15 @@ export interface LogFilters {
   status?: string
   /** Substring of the request path. */
   path?: string
+  /** Comp slug(s): entries about that comp (browsing, file errors, proposals,
+   *  uploads, replacements, lyrics jobs). The primary comp's slug also
+   *  matches the file views' `channel: null`. */
+  channel?: string
   /** Text in msg and exc. */
   q?: string
 }
 
-export const LOG_FILTER_KEYS: (keyof LogFilters)[] = ['level', 'category', 'event', 'user', 'ip', 'method', 'logger', 'status', 'path', 'q']
+export const LOG_FILTER_KEYS: (keyof LogFilters)[] = ['level', 'category', 'event', 'user', 'ip', 'method', 'logger', 'status', 'path', 'channel', 'q']
 
 export interface LogSearchParams extends LogFilters {
   /** ISO time, or a window back from now: `15m`, `2h`, `7d`. */

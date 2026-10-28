@@ -193,6 +193,37 @@ test('variable rows match visible intersections, including expanded cards and ex
   assert.equal(hook.result.end, 0)
 })
 
+test('parent scroll refs attach after child layout effects and still initialize the window', () => {
+  const el = elements(400)
+  const scrollRef = { current: null }
+  const hook = mount('useVirtualWindow', [scrollRef, el.refs[1], 1000, 50])
+  scrollRef.current = el.scroll
+  el.to(2000) // restored position before the deferred setup
+  hook.frame()
+  assert.equal(el.listening, true)
+  assert.equal(hook.result.start, 36)
+  assert.equal(hook.result.end, 52)
+  el.to(3000)
+  hook.frame()
+  assert.equal(hook.result.start, 56)
+  el.scroll.clientHeight = 800
+  hook.resize()
+  assert.equal(hook.result.end, 80)
+  hook.unmount()
+  assert.equal(el.listening, false)
+})
+
+test('unmount cancels setup while waiting for the parent ref', () => {
+  const el = elements()
+  const scrollRef = { current: null }
+  const hook = mount('useVirtualWindow', [scrollRef, el.refs[1], 100, 50])
+  hook.unmount()
+  scrollRef.current = el.scroll
+  hook.frame()
+  assert.equal(hook.pendingFrames, 0)
+  assert.equal(el.listening, false)
+})
+
 test('large variable grids locate visible rows without scanning the catalogue', () => {
   const el = elements(500)
   let reads = 0

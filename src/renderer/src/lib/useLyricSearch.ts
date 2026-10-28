@@ -7,7 +7,7 @@ const PAGE = 50
 /** The Lyrics tab's search: all matches computed locally from the cached catalogue,
  *  shown a page at a time. `fuzzy` defaults on. */
 export function useLyricSearch(query: string, fuzzy = true): {
-  results: JWApiSong[]; count: number; hasMore: boolean; loading: boolean; error: string | null; loadMore: () => void
+  results: JWApiSong[]; all: JWApiSong[]; count: number; hasMore: boolean; loading: boolean; error: string | null; loadMore: () => void
 } {
   const [matches, setMatches] = useState<JWApiSong[]>([])
   const [shown, setShown] = useState(PAGE)
@@ -26,5 +26,5 @@ export function useLyricSearch(query: string, fuzzy = true): {
   }, [query, fuzzy])
 
   const results = useMemo(() => matches.slice(0, shown), [matches, shown])
-  return { results, count: matches.length, hasMore: shown < matches.length, loading, error, loadMore: () => setShown((n) => n + PAGE) }
+  return { results, all: matches, count: matches.length, hasMore: shown < matches.length, loading, error, loadMore: () => setShown((n) => n + PAGE) }
 }

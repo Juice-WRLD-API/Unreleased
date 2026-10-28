@@ -1,3 +1,4 @@
+import { setTermFullscreen } from '../lib/terminal/fullscreenStore'
 import { SwapIcon } from './PlayerMotion'
 import { useEffect, useLayoutEffect, useRef, useState, memo, useCallback } from 'react'
 import { createPortal } from 'react-dom'
@@ -239,15 +240,18 @@ export default function WrldView(): JSX.Element {
   // native Escape-exits-fullscreen behavior.
   useEffect(() => {
     const onChange = (): void => setFullscreen(!!document.fullscreenElement)
+    onChange()
     document.addEventListener('fullscreenchange', onChange)
     return () => document.removeEventListener('fullscreenchange', onChange)
   }, [])
 
-  // If this page unmounts (navigating away) while still fullscreen, leave
-  // real OS/browser fullscreen too - otherwise the window would be stuck
-  // fullscreen with no obvious way back once the WRLD-specific toggle is gone.
+  // The terminal takes over fullscreen; other destinations leave it.
   useEffect(() => () => {
     if (!fullscreenRef.current) return
+    if (useStore.getState().activeView === 'terminal') {
+      setTermFullscreen(true)
+      return
+    }
     if (document.fullscreenElement) document.exitFullscreen?.().catch(() => {})
   }, [])
 
@@ -1644,13 +1648,14 @@ const FmLikeButton = memo(function FmLikeButton({ light }: { light: boolean }): 
 // (like LyricsPanel/FmProgressBar) so it reads the store directly instead of
 // drilling props from WrldView.
 const SongMenu = memo(function SongMenu({ light, onShareLyrics }: { light: boolean; onShareLyrics?: () => void }): JSX.Element {
-  const { currentTrack, radioFmActive, radioFmNowPlaying, radioFmMatchedSong, likedTrackIds, toggleLike } = useStore(useShallow(s => ({
+  const { currentTrack, radioFmActive, radioFmNowPlaying, radioFmMatchedSong, likedTrackIds, toggleLike, playNext } = useStore(useShallow(s => ({
     currentTrack: s.currentTrack,
     radioFmActive: s.radioFmActive,
     radioFmNowPlaying: s.radioFmNowPlaying,
     radioFmMatchedSong: s.radioFmMatchedSong,
     likedTrackIds: s.likedTrackIds,
     toggleLike: s.toggleLike,
+    playNext: s.playNext,
   })))
   const canEdit = useCanEdit()
 
@@ -1736,6 +1741,7 @@ const SongMenu = memo(function SongMenu({ light, onShareLyrics }: { light: boole
           onClose={() => setOpen(false)}
           canEdit={canEdit}
           onInfo={() => currentSongId != null && openInfo(currentSongId)}
+          onPlayNext={() => playNext(currentTrack)}
           liked={likedTrackIds.includes(currentTrack.id)}
           onToggleLike={() => toggleLike(currentTrack.id)}
           onShareLyrics={onShareLyrics}

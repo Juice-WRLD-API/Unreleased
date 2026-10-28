@@ -83,7 +83,7 @@ async function tail(filters: LogFilters, backlog: number, ctx: TermCtx): Promise
 export const LOG_COMMANDS: TermCommand[] = [
   {
     name: 'logs', aliases: ['serverlog'], group: 'Admin',
-    usage: 'logs [text] [--level L] [--category a,b] [--event e] [--user u] [--ip x] [--method M] [--path p] [--status 5xx] [--logger l] [--since 1h] [--until t] [--before t] [--limit N] [--scan MB] [--json]  ·  logs tail [filters] [--backlog N]  ·  logs stats [--hours N | --since 2h]  ·  logs files  ·  logs file <name> [text] [--lines N] [--level L]',
+    usage: 'logs [text] [--level L] [--category a,b] [--event e] [--user u] [--ip x] [--method M] [--path p] [--status 5xx] [--logger l] [--channel comp] [--since 1h] [--until t] [--before t] [--limit N] [--scan MB] [--json]  ·  logs tail [filters] [--backlog N]  ·  logs stats [--hours N | --since 2h]  ·  logs files  ·  logs file <name> [text] [--lines N] [--level L]',
     description: 'The server logs (the Admin page’s Logs tab): search entries newest first, watch them live, the numbers for a window, or the tail of a text log',
     covers: [
       'adminLogsApi.searchLogEvents', 'adminLogsApi.fetchLogStats', 'adminLogsApi.fetchLogSources',

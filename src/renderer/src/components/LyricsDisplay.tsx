@@ -127,7 +127,7 @@ export default function LyricsDisplay({ getTime, onSeek, compact, override }: Ly
         )}
         {canGenerate && (
           <button
-            onClick={() => useStore.getState().openLyricsGen({ track: currentTrackFull, songId: trackIdToSongId(currentTrackFull.id) })}
+            onClick={() => useStore.getState().openLyricsGen({ track: currentTrackFull, songId: trackIdToSongId(currentTrackFull.id), tab: 'create' })}
             className="mt-1 inline-flex items-center gap-1.5 h-8 px-3.5 rounded-full text-xs font-semibold bg-accent/15 text-accent hover:bg-accent/25 transition-colors"
           >
             <Sparkles size={13} /> Generate lyrics

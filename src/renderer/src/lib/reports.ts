@@ -66,7 +66,15 @@ export interface PendingSongReport extends BaseReport {
    *  server context, so a later rename/relink doesn't obscure what was meant. */
   songName: string
   issues: SongIssueType[]
+  /** Full lyrics pasted by the reporter, kept apart from the note because a
+   *  song's lyrics rarely fit in the note's limit. */
+  lyrics?: string
 }
+
+/** Longest note / pasted lyrics the report form accepts (the server takes
+ *  20000 characters for the whole message, wrapper lines included). */
+export const REPORT_NOTE_MAX = 2000
+export const REPORT_LYRICS_MAX = 15000
 
 export type PendingReport = PendingFeedback | PendingSongReport
 

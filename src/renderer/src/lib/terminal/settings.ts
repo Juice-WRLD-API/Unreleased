@@ -19,6 +19,7 @@ import { LOOKS } from '../../desktop/light/looks'
 import { NOTIFICATION_SOUNDS, getNotificationSoundId, playNotificationSound, setNotificationSoundId } from '../notifications'
 import { updatePrivacySettings } from '../userApi'
 import type { AudioFx } from '../audioEffects'
+import { IS_IOS } from '../platform'
 import { debugRecordingCount, debugRecordingStartedAt, discardDebugRecording, getDebugAnonymousPref, isDebugRecording, isDebugRecordingAnonymous, setDebugAnonymousPref, startDebugRecording, stopAndDownloadDebugRecording } from '../debugRecorder'
 import { describeEntry, describeLog, formatOffset, isProblem, openDebugLogBlob, openDebugLogFile, type DebugLog } from '../debugLog'
 import { asJson, fail, oneLine, parseArgs, parseBool, pickByName, type TermCommand, type TermCtx } from './types'
@@ -105,7 +106,8 @@ const SETTINGS: Setting[] = [
   num('speed', 'Playback speed', 0.5, 2, () => st().playbackSpeed, (v) => st().setPlaybackSpeed(v), 'x'),
   bool('crossfade', 'Crossfade between tracks', () => st().crossfadeEnabled, (v) => st().setCrossfade(v, st().crossfadeDuration)),
   num('crossfade-seconds', 'Crossfade length', 1, 12, () => st().crossfadeDuration, (v) => st().setCrossfade(st().crossfadeEnabled, v), 's'),
-  bool('pause-fade', 'Fade out on pause', () => st().pauseFadeEnabled, (v) => st().setPauseFade(v)),
+  // Not offered on iOS: Safari ignores <audio>.volume, so the fade can't run.
+  ...(IS_IOS ? [] : [bool('pause-fade', 'Fade out on pause', () => st().pauseFadeEnabled, (v) => st().setPauseFade(v))]),
   bool('remember-queue', 'Restore the queue, current track and position on this device (paused)', () => st().rememberQueue, (v) => st().setRememberQueue(v)),
   bool('skip-silence', 'Skip silence', () => st().skipSilence, (v) => st().setSkipSilence(v)),
   bool('eq', 'Equalizer on', () => st().eqEnabled, (v) => st().setEqEnabled(v)),

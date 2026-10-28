@@ -59,6 +59,14 @@ function stripSessionEditSuffix(title: string): string {
   return stripped
 }
 
+/** "Cheat Code (v1)" → "Cheat Code". An edit's file often leaves the session's
+ *  version tag off ("Cheat Code [Session Edit].mp3"), so the bare name is
+ *  tried too - but only while no other session claims it, since
+ *  "Fenty [Session Edit]" is plain Fenty's, not Fenty (v3)'s. */
+function withoutVersionTag(title: string): string {
+  return title.replace(/\s*[[(]v\d+(?:\.\d+)?[)\]]\s*$/i, '')
+}
+
 export interface SessionEditMatches {
   primary: Map<string, JWApiSong>
   alt: Map<string, JWApiSong>
@@ -93,7 +101,8 @@ async function fetchSessionEditMatches(): Promise<SessionEditMatches> {
       if (!primaryBySongId.has(primaryNorm)) primaryBySongId.set(primaryNorm, new Set())
       primaryBySongId.get(primaryNorm)!.add(song.id)
     }
-    const altKeys = [song.name, ...(song.track_titles ?? [])].flatMap(titleVariants)
+    const names = [song.name, ...(song.track_titles ?? [])].flatMap(titleVariants)
+    const altKeys = [...names, ...names.map(withoutVersionTag)]
     for (const key of altKeys) {
       const norm = normalizeSongTitle(key)
       if (norm === primaryNorm) continue
@@ -108,7 +117,9 @@ async function fetchSessionEditMatches(): Promise<SessionEditMatches> {
   }
   const alt = new Map<string, JWApiSong>()
   for (const [norm, ids] of altBySongId) {
-    if (primary.has(norm)) continue
+    // Any session named this keeps it from the others, even when it shares
+    // the name with another session and so isn't in `primary` itself.
+    if (primaryBySongId.has(norm)) continue
     if (ids.size === 1) alt.set(norm, songById.get([...ids][0])!)
   }
   return { primary, alt }
@@ -154,6 +165,18 @@ export class SessionEditNotFoundError extends Error {
 
 const lookups = new Map<string, Promise<SessionEditLink | null>>()
 
+async function findSessionEditFile(term: string, extra: Record<string, string>): Promise<SessionEditLink | null> {
+  const wanted = normalizeSongTitle(term)
+  if (!wanted) return null
+  const entries = await searchFiles(term, extra)
+  const hit = entries.find((e) =>
+    e.type === 'file' &&
+    e.path.toLowerCase().startsWith(SESSION_EDITS_PREFIX) &&
+    AUDIO_FILE.test(e.name) &&
+    normalizeSongTitle(stripSessionEditSuffix(e.name.replace(/\.[^.]+$/, ''))) === wanted)
+  return hit ? { path: hit.path, duration: hit.duration ?? null } : null
+}
+
 async function lookupSessionEdit(songId: number, channel: string): Promise<SessionEditLink | null> {
   const song = await getSongById(songId)
   const terms = [song.name, ...(song.track_titles ?? [])]
@@ -163,15 +186,17 @@ async function lookupSessionEdit(songId: number, channel: string): Promise<Sessi
   const extra: Record<string, string> = channel ? { channel } : {}
   // Primary name first; alternate titles only if it finds nothing.
   for (const term of terms) {
-    const wanted = normalizeSongTitle(term)
-    if (!wanted) continue
-    const entries = await searchFiles(term, extra)
-    const hit = entries.find((e) =>
-      e.type === 'file' &&
-      e.path.toLowerCase().startsWith(SESSION_EDITS_PREFIX) &&
-      AUDIO_FILE.test(e.name) &&
-      normalizeSongTitle(stripSessionEditSuffix(e.name.replace(/\.[^.]+$/, ''))) === wanted)
-    if (hit) return { path: hit.path, duration: hit.duration ?? null }
+    const link = await findSessionEditFile(term, extra)
+    if (link) return link
+  }
+  // Then the names without a version tag, where that bare name is this song's alone.
+  const bare = terms.map(withoutVersionTag).filter((t, i, a) => t && !terms.includes(t) && a.indexOf(t) === i)
+  if (!bare.length) return null
+  const { alt } = await loadSessionEditMatches()
+  for (const term of bare) {
+    if (alt.get(normalizeSongTitle(term))?.id !== songId) continue
+    const link = await findSessionEditFile(term, extra)
+    if (link) return link
   }
   return null
 }

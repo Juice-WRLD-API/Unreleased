@@ -15,6 +15,8 @@ export type FromFrame =
   | { type: 'size'; width: number; height: number }
   /** Right-clicked at this point in the frame: the widget's menu, or the lyrics' (`part`). */
   | { type: 'menu'; x: number; y: number; part?: 'lyrics' }
+  /** A card right-clicked at this point: the app's menu for its song, the one at `place` in the queue (`id` to be sure). */
+  | { type: 'song-menu'; x: number; y: number; place: number; id: string }
   /** A key pressed in the frame that the page doesn't use itself: the app's hotkeys still work after a click on it. */
   | { type: 'key'; key: string; code: string; ctrlKey: boolean; shiftKey: boolean; altKey: boolean; metaKey: boolean }
 

@@ -128,6 +128,14 @@ html:active-view-transition-type(palette)::view-transition-new(root) {
   animation-timing-function: cubic-bezier(0.4, 0, 0.2, 1);
 }
 
+/* A dialog growing or shrinking (ModalOverlay's `expanded`) cross-fades the same way. */
+html:active-view-transition-type(panel-resize)::view-transition { pointer-events: none; }
+html:active-view-transition-type(panel-resize)::view-transition-old(root),
+html:active-view-transition-type(panel-resize)::view-transition-new(root) {
+  animation-duration: 450ms;
+  animation-timing-function: cubic-bezier(0.4, 0, 0.2, 1);
+}
+
 /* ─── Gradient surfaces ──────────────────────────────────────────────────────────
    Two independent opt-ins, both toggled by useThemeEffects:
      .gradients          → Settings → Appearance → "App gradients"
@@ -466,7 +474,10 @@ input[type='range']:active::-moz-range-thumb {
    edge while the scrim fades. The entrance class is *removed* once it finishes
    (see Sheet.tsx): with fill-mode `both` the animation's final transform would
    outrank the inline one the drag-to-dismiss gesture writes.
-   Sheet.tsx's EXIT_MS is kept in sync with the sheet-out duration below. */
+   Sheet.tsx's EXIT_MS is kept in sync with the sheet-out duration below.
+   sheet-out composites (`add`) onto that inline offset instead of replacing
+   it, so a sheet swiped away carries on down from where the finger let go
+   rather than jumping back up to its resting spot first. */
 @keyframes sheet-in {
   from { transform: translateY(100%); }
   to   { transform: translateY(0); }
@@ -480,7 +491,7 @@ input[type='range']:active::-moz-range-thumb {
   to   { opacity: 1; }
 }
 .animate-sheet-in  { animation: sheet-in 0.26s cubic-bezier(0.16, 1, 0.3, 1) both; }
-.animate-sheet-out { animation: sheet-out 0.2s cubic-bezier(0.4, 0, 1, 1) both; }
+.animate-sheet-out { animation: sheet-out 0.2s cubic-bezier(0.4, 0, 1, 1) both; animation-composition: add; }
 .animate-scrim-in  { animation: scrim-in 0.2s ease both; }
 .animate-scrim-out { animation: scrim-in 0.18s ease reverse both; }
 
@@ -760,6 +771,161 @@ input[type='range']:active::-moz-range-thumb {
   }
 }
 
+/* ─── iOS-style mobile chrome ─────────────────────────────────────────────────
+   Fills and hairlines mixed from the skin's own text color, the way iOS's
+   systemFill/separator are, so every skin (custom ones included) gets them
+   without new skin vars. --fill backs search fields, gray buttons, chips and
+   the tab bar's selection pill; --fill-strong is their pressed state. */
+:root {
+  --fill: color-mix(in srgb, var(--text-primary) 9%, transparent);
+  --fill-strong: color-mix(in srgb, var(--text-primary) 16%, transparent);
+  --separator: var(--border);
+  /* Inset-grouped cells (mobile/Grouped) and the raised thumb of a segmented
+     control. Light skins: a faint gray card, a surface-colored thumb. Dark
+     skins lift both further off the page, as iOS does (#1c1c1e cells and a
+     #636366-ish thumb on black). */
+  --grouped: color-mix(in srgb, var(--text-primary) 5%, var(--surface));
+  --control-thumb: var(--surface);
+}
+.dark {
+  --grouped: color-mix(in srgb, var(--text-primary) 11%, var(--surface));
+  --control-thumb: color-mix(in srgb, var(--text-primary) 36%, var(--surface));
+}
+
+/* The floating glass of the mobile tab bar, mini player, sheets and collapsed
+   title bars: a see-through pane over whatever scrolls beneath it, a thin
+   light rim with a brighter top edge, and a soft shadow lifting it off the
+   page. */
+.glass {
+  background: var(--surface-raised);
+  background: color-mix(in srgb, var(--surface) 62%, transparent);
+  -webkit-backdrop-filter: blur(22px) saturate(1.8);
+  backdrop-filter: blur(22px) saturate(1.8);
+  box-shadow:
+    inset 0 0 0 0.5px color-mix(in srgb, var(--text-primary) 12%, transparent),
+    inset 0 1px 0 color-mix(in srgb, #fff 14%, transparent),
+    0 8px 28px rgb(0 0 0 / 0.22);
+}
+/* Denser variant for panels that carry body text (sheets): still frosted, but
+   busy artwork behind can't fight the rows for legibility. */
+.glass-thick {
+  background: var(--surface-raised);
+  background: color-mix(in srgb, var(--surface) 84%, transparent);
+  -webkit-backdrop-filter: blur(30px) saturate(1.8);
+  backdrop-filter: blur(30px) saturate(1.8);
+  box-shadow:
+    inset 0 0 0 0.5px color-mix(in srgb, var(--text-primary) 12%, transparent),
+    inset 0 1px 0 color-mix(in srgb, #fff 12%, transparent),
+    0 12px 40px rgb(0 0 0 / 0.3);
+}
+/* Bar backgrounds only (no lift): the collapsed large-title bar. */
+.glass-bar {
+  background: var(--surface);
+  background: color-mix(in srgb, var(--surface) 72%, transparent);
+  -webkit-backdrop-filter: blur(22px) saturate(1.8);
+  backdrop-filter: blur(22px) saturate(1.8);
+}
+/* Round toolbar buttons (back, ⋯, the large-title actions): the same glass at
+   button scale, with a lighter shadow so a row of them doesn't smudge. */
+.glass-button {
+  background: var(--surface-raised);
+  background: color-mix(in srgb, var(--surface) 55%, transparent);
+  -webkit-backdrop-filter: blur(16px) saturate(1.8);
+  backdrop-filter: blur(16px) saturate(1.8);
+  box-shadow:
+    inset 0 0 0 0.5px color-mix(in srgb, var(--text-primary) 14%, transparent),
+    inset 0 1px 0 color-mix(in srgb, #fff 14%, transparent),
+    0 2px 10px rgb(0 0 0 / 0.12);
+}
+@media (prefers-reduced-transparency: reduce) {
+  .glass, .glass-thick, .glass-bar, .glass-button {
+    background: var(--surface-raised);
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+  }
+}
+
+/* iOS hairlines: inset to where a row's text starts and running to its right
+   edge, drawn between rows only. --row-inset is the leading content's width
+   (an icon badge plus its gap); grouped rows bleed to the card's edges with
+   -mx-4 px-4, so their line starts after that padding too. */
+.grouped-row { position: relative; }
+.grouped-row::after {
+  content: '';
+  position: absolute;
+  left: calc(1rem + var(--row-inset, 0px));
+  right: 0;
+  bottom: 0;
+  height: 0.5px;
+  background: var(--separator);
+  pointer-events: none;
+}
+.grouped-row:last-child::after { display: none; }
+/* Song and playlist rows (mobile/ListRow): virtualized rows aren't DOM
+   siblings in order, so every row draws its own line under the text. */
+.list-row::after {
+  content: '';
+  position: absolute;
+  left: 4.75rem;
+  right: 0;
+  bottom: 0;
+  height: 0.5px;
+  background: var(--separator);
+  pointer-events: none;
+}
+/* Sheet action rows: a line between neighbours, none above a group gap. */
+.sheet-item { position: relative; }
+.sheet-item + .sheet-item::before {
+  content: '';
+  position: absolute;
+  left: var(--row-inset, 1.25rem);
+  right: 0;
+  top: 0;
+  height: 0.5px;
+  background: var(--separator);
+  pointer-events: none;
+}
+
+/* Room for the floating tab bar + mini player at the end of a mobile
+   scroller, so its last rows can scroll clear of the glass. --dock-h is
+   published by BottomNav. Mobile widths only (the same cutoff as
+   useIsMobile), so a view desktop shares keeps its own padding there. */
+@media (max-width: 767px) {
+  .pb-dock { padding-bottom: calc(var(--dock-h, 0px) + 1rem); }
+  /* The same inset hairline for rows a view shares with desktop (chat lists,
+     admin queues): drawn on phones only, starting --row-inset in. */
+  .m-hairline { position: relative; }
+  .m-hairline::after {
+    content: '';
+    position: absolute;
+    left: var(--row-inset, 1rem);
+    right: 0;
+    bottom: 0;
+    height: 0.5px;
+    background: var(--separator);
+    pointer-events: none;
+  }
+  /* .glass-thick for a panel desktop shares (the notification center): it
+     overrides that panel's own background, border and shadow on phones. */
+  .m-glass-thick {
+    background: color-mix(in srgb, var(--surface) 84%, transparent);
+    -webkit-backdrop-filter: blur(30px) saturate(1.8);
+    backdrop-filter: blur(30px) saturate(1.8);
+    border-color: transparent;
+    box-shadow:
+      inset 0 0 0 0.5px color-mix(in srgb, var(--text-primary) 12%, transparent),
+      inset 0 1px 0 color-mix(in srgb, #fff 12%, transparent),
+      0 12px 40px rgb(0 0 0 / 0.3);
+  }
+  @media (prefers-reduced-transparency: reduce) {
+    .m-glass-thick {
+      background: var(--surface-raised);
+      -webkit-backdrop-filter: none;
+      backdrop-filter: none;
+    }
+  }
+}
+
 /* The copy a closing modal or menu leaves behind to animate out on
    (hooks/useExitGhost). Inert, and frozen in the state it closed in: as a
    fresh element its own CSS entrances and transitions would start over - a
@@ -886,4 +1052,23 @@ img[data-img-fade="in"] { animation: img-fade-in 0.42s cubic-bezier(0.33, 0, 0.1
 [data-viz-idle] [data-viz-fade] {
   opacity: 0;
   pointer-events: none;
+}
+
+/* Song recognition (RecognitionModal). Ripples spread from the listen button
+   while recording; the level-driven glow is a transform set inline. */
+@keyframes recog-ripple {
+  from { transform: scale(1); opacity: 0.4; }
+  to   { transform: scale(1.85); opacity: 0; }
+}
+.recog-ripple { animation: recog-ripple 2.4s cubic-bezier(0.4, 0, 0.2, 1) infinite; }
+@keyframes recog-in {
+  from { opacity: 0; transform: translateY(6px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+.animate-recog-in { animation: recog-in 0.45s cubic-bezier(0.33, 0, 0.15, 1) both; }
+.recog-level { transition: transform 0.18s cubic-bezier(0.4, 0, 0.2, 1), opacity 0.18s cubic-bezier(0.4, 0, 0.2, 1); }
+@media (prefers-reduced-motion: reduce) {
+  .recog-ripple { animation: none; opacity: 0; }
+  .animate-recog-in { animation-duration: 0.01ms; }
+  .recog-level { transition: none; }
 }

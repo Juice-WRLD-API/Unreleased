@@ -22,11 +22,14 @@ Releases before 1.20.9 were built from the same code as the desktop app. Their n
 - **New** **Beta admin tab**: admins can manage beta access codes and publish, toggle or delete beta builds (also via the terminal's `beta` command)
 - **New** Chat attachments upload with a progress bar and can be cancelled from the Transfers panel
 - **New** The admin Feedback tab can hide duplicate crash reports
+- **New** **Notifications**: a notification area that keeps the chat messages, news posts, announcements, device alerts and app notices that popped up, grouped by day, with a badge for new ones. Click one to go to its chat room or post. Opens from the Notifications button in the side menu (it can be moved or hidden like the others), the bell on mobile Home, or the terminal's `notifications` command. Kept on this device for 30 days; signing out clears the chat ones
 - **Improve** Tracker fields are reordered by dragging instead of up/down buttons
 - **Improve** Profiles show their cached copy straight away while fresh data loads in the background
 - **Improve** Song lists skip fields they don't show (like lyrics), so they load faster
 - **Improve** Larger cover art on track pages
 - **Fix** Running a browser page translator over the site no longer crashes views
+- **Fix** Playback no longer stops by itself after a dead spot in the connection, a stalled radio pick, or the browser resuming audio after a call; songs that keep failing are skipped instead of stopping the queue, and pressing play after a "Couldn't play" retries properly
+- **Fix** On phones, the next song starts with the screen off or the app in the background: it loads during the last 30 seconds of the current song and takes over the moment that one ends, instead of downloading only after the music has stopped. Playback that stalls on a bad connection also resumes on its own again, instead of waiting until the app is opened
 
 ---
 

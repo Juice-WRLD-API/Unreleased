@@ -17,7 +17,7 @@ export async function defaultParseError(res: Response): Promise<string> {
   return `Request failed (${res.status})`
 }
 
-export interface ApiRequestOptions extends RequestInit {
+export interface ApiRequestOptions<T = unknown> extends RequestInit {
   // Opts a GET into the offline fallback cache — pass only for idempotent
   // reads whose staleness is acceptable (playlists, favorites, profile,
   // song/browse data). On a network-level failure (offline, DNS, etc.) the
@@ -26,6 +26,10 @@ export interface ApiRequestOptions extends RequestInit {
   // never fall back to cache.
   cacheKey?: string
   parseError?: (res: Response) => Promise<string>
+  // Reshapes a successful response before it's cached and returned, e.g. to
+  // drop fields nobody reads so the cached copy stays small. An offline
+  // fallback returns the reshaped copy.
+  transform?(data: T): T
 }
 
 // Identical GETs that overlap in time share a single network round-trip.
@@ -63,7 +67,7 @@ export function authHeaders(token: string | null): Record<string, string> {
 // common JSON case.
 export async function authedRequest<T>(
   url: string,
-  options: ApiRequestOptions = {},
+  options: ApiRequestOptions<T> = {},
   token: string | null,
 ): Promise<T> {
   const headers: Record<string, string> = { 'Content-Type': 'application/json', ...authHeaders(token) }
@@ -73,8 +77,8 @@ export async function authedRequest<T>(
   })
 }
 
-export async function apiRequest<T>(url: string, options: ApiRequestOptions = {}): Promise<T> {
-  const { cacheKey, parseError = defaultParseError, ...init } = options
+export async function apiRequest<T>(url: string, options: ApiRequestOptions<T> = {}): Promise<T> {
+  const { cacheKey, parseError = defaultParseError, transform, ...init } = options
 
   const method = (init.method ?? 'GET').toUpperCase()
   // A request with its own abort signal never joins (or leads) a shared
@@ -84,13 +88,13 @@ export async function apiRequest<T>(url: string, options: ApiRequestOptions = {}
     const key = dedupeKey(cacheKey, init)
     const existing = inFlight.get(key) as Promise<T> | undefined
     if (existing) return existing
-    const pending = sendRequest<T>(url, init, cacheKey, parseError)
+    const pending = sendRequest<T>(url, init, cacheKey, parseError, transform)
       .finally(() => { inFlight.delete(key) })
     inFlight.set(key, pending)
     return pending
   }
 
-  return sendRequest<T>(url, init, cacheKey, parseError)
+  return sendRequest<T>(url, init, cacheKey, parseError, transform)
 }
 
 async function sendRequest<T>(
@@ -98,6 +102,7 @@ async function sendRequest<T>(
   init: RequestInit,
   cacheKey: string | undefined,
   parseError: (res: Response) => Promise<string>,
+  transform?: (data: T) => T,
 ): Promise<T> {
   let res: Response
   try {
@@ -116,7 +121,8 @@ async function sendRequest<T>(
   if (res.status === 204) return undefined as T
 
   const text = await res.text()
-  const data = (text ? JSON.parse(text) : undefined) as T
+  const parsed = (text ? JSON.parse(text) : undefined) as T
+  const data = transform && parsed !== undefined ? transform(parsed) : parsed
   if (cacheKey) cacheSet(cacheKey, data)
   return data
 }

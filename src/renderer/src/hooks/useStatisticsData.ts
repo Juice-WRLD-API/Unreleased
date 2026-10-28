@@ -44,7 +44,8 @@ export function useStatisticsData() {
     if (!playStats) return
     const ids = new Set<number>()
     for (const s of playStats.top_songs) ids.add(s.id)
-    for (const p of playStats.recent_plays) ids.add(p.song_id)
+    // Radio plays of files outside the catalog have no song id.
+    for (const p of playStats.recent_plays) if (p.song_id != null) ids.add(p.song_id)
     if (ids.size === 0) return
     let cancelled = false
     resolveStatsSongs([...ids], () => undefined, () => cancelled)

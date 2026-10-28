@@ -1,60 +1,98 @@
-import { ChevronRight, MoreHorizontal, Play, ListMusic, Gamepad2, Flame, Music2, Disc3, User, Newspaper, Radio, Album, Music, Search, Sparkles } from 'lucide-react'
+import { useState } from 'react'
+import { ChevronRight, MoreHorizontal, Play, Flame, Heart, User, Newspaper, Radio, Music, Search, MicVocal, AudioLines, Bell, BarChart3 } from 'lucide-react'
 import { useStore } from '../store/useStore'
 import * as userApi from '../lib/userApi'
 import { AlbumArtThumbnail } from './AlbumArtThumbnail'
 import { ProgressiveCover } from './ProgressiveCover'
 import { useMobileNavSplit } from '../hooks/useMobileNavTabs'
 import { useHomeData } from '../hooks/useHomeData'
+import { useUnreadNotificationCount } from '../hooks/useNotificationHistory'
 import { hasChatAccess } from '../lib/chatAccess'
-import { hasHomeTools } from '../lib/homeSections'
+import OnThisDayTile from './OnThisDayTile'
 import { lazyOverlay } from '../lib/lazyView'
 import { PlaylistCoverThumb } from '../lib/homeViewShared'
+import { BarButton, CompactBar, LARGE_TITLE_COLLAPSE, LargeTitle, useScrolledPast } from './mobile/NavBar'
+import { GroupedRow, GroupedSection } from './mobile/Grouped'
 
 // Staff-only, and it reads the chat store - loading it lazily keeps the chat
 // client out of Home's chunk for everyone else.
 const HomeChatCard = lazyOverlay(() => import('./chat/HomeChatCard'))
 
 // The mobile landing screen. All of its data comes from useHomeData, which the
-// desktop shell shares - this file is layout only: a stack of horizontally
-// scrolling rails sized for a phone.
+// desktop shell shares - this file is layout only: Apple Music-style rails
+// under a large title, with the one-off entry points (radio, liked songs,
+// tools) as inset-grouped rows.
 
-function Section({ title, icon, action, children }: {
+// iOS system colors for the grouped rows' icon badges.
+const RED = '#ff3b30'
+const PINK = '#ff2d55'
+const PURPLE = '#af52de'
+const BLUE = '#007aff'
+
+/** A rail's tile width: about two and a half tiles to a phone screen, so the
+ *  rail reads as scrollable. */
+const TILE = 'w-[150px]'
+
+function Section({ title, onMore, children }: {
   title: string
-  icon: JSX.Element
-  action?: { label: string; onClick: () => void }
+  /** Makes the heading itself the way in ("Title ›"), as Apple Music does. */
+  onMore?: () => void
   children: React.ReactNode
 }): JSX.Element {
   return (
-    <section className="mb-6">
-      <div className="flex items-center gap-2 px-4 mb-2.5">
-        <span className="text-text-muted">{icon}</span>
-        <h2 className="text-text-primary text-[15px] font-bold flex-1 min-w-0 truncate">{title}</h2>
-        {action && (
-          <button onClick={action.onClick} className="flex items-center gap-0.5 text-text-muted text-xs font-medium active:text-text-primary shrink-0">
-            {action.label}<ChevronRight size={14} />
-          </button>
-        )}
-      </div>
+    <section className="mb-7">
+      {onMore ? (
+        <button onClick={onMore} className="flex items-center gap-0.5 px-4 mb-2 max-w-full active:opacity-60 transition-opacity">
+          <h2 className="text-title2 text-text-primary truncate">{title}</h2>
+          <ChevronRight size={22} strokeWidth={2.5} className="shrink-0 text-text-muted" />
+        </button>
+      ) : (
+        <h2 className="px-4 mb-2 text-title2 text-text-primary truncate">{title}</h2>
+      )}
       {children}
     </section>
   )
 }
 
-function StatCard({ value, label, onClick }: { value: string; label: string; onClick?: () => void }): JSX.Element {
-  const Tag = onClick ? 'button' : 'div'
+function Rail({ children }: { children: React.ReactNode }): JSX.Element {
+  return <div className="flex gap-3 overflow-x-auto no-scrollbar px-4 pb-1">{children}</div>
+}
+
+/** Square-art tile in a rail: artwork, then a title and a secondary line. */
+function ArtTile({ onClick, art, title, subtitle, playBadge }: {
+  onClick: () => void
+  art: React.ReactNode
+  title: string
+  subtitle?: string
+  playBadge?: boolean
+}): JSX.Element {
   return (
-    <Tag
-      onClick={onClick}
-      className="flex-1 min-w-0 rounded-xl bg-[var(--surface-overlay)] px-3 py-2.5 text-left active:bg-surface-highest transition-colors"
-    >
-      <p className="text-text-primary text-lg font-bold tabular-nums truncate">{value}</p>
-      <p className="text-[10px] font-semibold uppercase tracking-widest text-text-muted truncate">{label}</p>
-    </Tag>
+    <button onClick={onClick} className={`${TILE} shrink-0 text-left active:opacity-70 transition-opacity`}>
+      <div className="relative aspect-square rounded-[10px] overflow-hidden bg-[var(--fill)] mb-1.5 flex items-center justify-center">
+        {art}
+        {playBadge && (
+          <span className="glass-button absolute bottom-2 right-2 w-7 h-7 rounded-full flex items-center justify-center text-text-primary">
+            <Play size={13} className="ml-0.5" fill="currentColor" strokeWidth={0} />
+          </span>
+        )}
+      </div>
+      <p className="text-footnote text-text-primary truncate">{title}</p>
+      {subtitle && <p className="text-footnote text-text-secondary truncate">{subtitle}</p>}
+    </button>
+  )
+}
+
+function Stat({ value, label }: { value: string; label: string }): JSX.Element {
+  return (
+    <div className="min-w-0 px-3 py-3">
+      <p className="text-title2 text-text-primary tabular-nums truncate">{value}</p>
+      <p className="text-footnote text-text-secondary truncate">{label}</p>
+    </div>
   )
 }
 
 function EmptyNote({ children }: { children: React.ReactNode }): JSX.Element {
-  return <p className="px-4 text-text-muted text-xs">{children}</p>
+  return <p className="px-4 text-subhead text-text-muted">{children}</p>
 }
 
 export default function HomeViewMobile(): JSX.Element {
@@ -69,6 +107,9 @@ export default function HomeViewMobile(): JSX.Element {
   // rather than in the shared hook.
   const { moreTabs } = useMobileNavSplit()
   const setShowMoreNav = useStore((s) => s.setShowMoreNav)
+  const showNotifications = useStore((s) => s.showNotifications)
+  const setShowNotifications = useStore((s) => s.setShowNotifications)
+  const unreadNotifications = useUnreadNotificationCount()
   const setApiTrackerTab = useStore((s) => s.setApiTrackerTab)
   const setFocusApiTrackerSearch = useStore((s) => s.setFocusApiTrackerSearch)
   const openTrackerSearch = (): void => {
@@ -77,258 +118,255 @@ export default function HomeViewMobile(): JSX.Element {
     setActiveView('api-tracker')
   }
 
+  const [scrollEl, setScrollEl] = useState<HTMLDivElement | null>(null)
+  const collapsed = useScrolledPast(scrollEl, LARGE_TITLE_COLLAPSE)
+
+  const showLiked = showSection('liked') && likedTrackIds.length > 0
+  const showTools = showSection('tools')
+
   return (
-    <div className="flex-1 min-h-0 overflow-y-auto pt-2 pb-4">
-      <div className="flex items-center gap-2 px-4 pb-4">
-        <button
-          onClick={openOwnPublicProfile}
-          aria-label="Your public profile"
-          className="w-9 h-9 shrink-0 rounded-full overflow-hidden bg-[var(--surface-overlay)] flex items-center justify-center text-text-muted active:bg-surface-highest transition-colors"
-        >
-          {account?.avatar
-            ? <img src={account.avatar} alt="" className="w-full h-full object-cover" />
-            : <User size={17} />}
-        </button>
-        <h1 className="flex-1 min-w-0 text-text-primary text-[26px] font-bold leading-tight">Home</h1>
-        <button
-          onClick={openTrackerSearch}
-          aria-label="Search the catalog"
-          className="w-9 h-9 shrink-0 rounded-full flex items-center justify-center text-text-muted active:bg-[var(--surface-overlay)] transition-colors"
-        >
-          <Search size={19} />
-        </button>
-        {account && userApi.showStaffProfile(account) && (
-          <button
-            onClick={openProfile}
-            className="flex items-center gap-1.5 h-9 px-3 rounded-full bg-surface-raised active:bg-surface-highest text-text-secondary text-xs font-semibold transition-colors shrink-0"
-          >
-            {userApi.staffProfileLabel(account)}
-          </button>
-        )}
-        {moreTabs.length > 0 && (
-          <button
-            onClick={() => setShowMoreNav(true)}
-            aria-label="More"
-            className="w-9 h-9 shrink-0 rounded-full bg-[var(--surface-overlay)] flex items-center justify-center text-text-primary active:bg-surface-highest transition-colors"
-          >
-            <MoreHorizontal size={19} />
-          </button>
-        )}
-      </div>
-
-      {showSection('chat') && hasChatAccess(account) && <HomeChatCard variant="mobile" />}
-
-      {showSection('recent') && recent.length > 0 && (
-        <Section title="Recently played" icon={<Disc3 size={15} />}>
-          <div className="flex gap-3 overflow-x-auto no-scrollbar px-4 pb-1">
-            {recent.map((track) => (
-              <button
-                key={track.id}
-                onClick={() => openTrack(track)}
-                className="w-[116px] shrink-0 text-left active:opacity-70 transition-opacity"
+    <div className="relative flex-1 min-w-0 min-h-0 flex flex-col">
+      <CompactBar title="Home" shown={collapsed} />
+      <div ref={setScrollEl} className="flex-1 min-h-0 overflow-y-auto overscroll-contain pb-dock">
+        <LargeTitle
+          title="Home"
+          // The staff page, for accounts that have one. A link under the
+          // title rather than one more button beside it: the title's line is
+          // already full on a phone.
+          subtitle={account && userApi.showStaffProfile(account) ? (
+            <button onClick={openProfile} className="text-accent active:opacity-60 transition-opacity">
+              {userApi.staffProfileLabel(account)} ›
+            </button>
+          ) : undefined}
+          trailing={<>
+            <BarButton label="Search the catalog" onClick={openTrackerSearch}>
+              <Search size={20} strokeWidth={2.25} />
+            </BarButton>
+            {/* The notification area; on desktop it's a side-menu control. */}
+            <span data-notifications-toggle className="contents">
+              <BarButton
+                label={unreadNotifications > 0 ? `Notifications, ${unreadNotifications} new` : 'Notifications'}
+                onClick={() => setShowNotifications(!showNotifications)}
               >
-                <div className="relative w-[116px] h-[116px] rounded-xl overflow-hidden bg-surface-overlay mb-1.5">
-                  <AlbumArtThumbnail track={track} fill res={384} className="w-full h-full object-cover" />
-                  <span className="absolute bottom-1.5 right-1.5 w-7 h-7 rounded-full bg-black/65 flex items-center justify-center">
-                    <Play size={13} className="text-white ml-0.5" fill="currentColor" />
+                <Bell size={20} strokeWidth={2.25} />
+                {unreadNotifications > 0 && (
+                  <span className="absolute -top-0.5 -right-0.5 min-w-[18px] h-[18px] rounded-full bg-accent text-white text-caption2 font-bold flex items-center justify-center px-1">
+                    {unreadNotifications > 99 ? '99+' : unreadNotifications}
                   </span>
-                </div>
-                <p className="text-text-primary text-xs leading-snug truncate">{track.title}</p>
-                <p className="text-text-muted text-[11px] truncate mt-0.5">{track.artist}</p>
-              </button>
-            ))}
-          </div>
-        </Section>
-      )}
-
-      {showSection('news') && newsItems.length > 0 && (
-        <Section
-          title="News"
-          icon={<Newspaper size={15} />}
-          action={{ label: 'All', onClick: () => setActiveView('news') }}
-        >
-          <div className="flex gap-3 overflow-x-auto no-scrollbar px-4 pb-1">
-            {newsItems.slice(0, 8).map((item) => (
-              <button
-                key={item.id}
-                onClick={() => openNewsItem(item)}
-                className="w-[200px] shrink-0 text-left active:opacity-70 transition-opacity"
-              >
-                <div className="w-[200px] h-[112px] rounded-xl overflow-hidden bg-surface-overlay mb-1.5 flex items-center justify-center">
-                  {item.image_url
-                    ? <ProgressiveCover src={item.image_url} alt={item.title} className="w-full h-full object-cover" />
-                    : <Newspaper size={26} className="text-text-muted" />}
-                </div>
-                <p className="text-text-primary text-xs leading-snug line-clamp-2">{item.title}</p>
-                {item.category && <p className="text-text-muted text-[11px] truncate mt-0.5">{item.category}</p>}
-              </button>
-            ))}
-          </div>
-        </Section>
-      )}
-
-      {showSection('playlists') && (
-        <Section
-          title="Playlists"
-          icon={<ListMusic size={15} />}
-          action={{ label: 'All', onClick: () => setActiveView('playlists') }}
-        >
-          {playlistRow.length === 0 ? (
-            <EmptyNote>No playlists yet - build one from any song&apos;s menu.</EmptyNote>
-          ) : (
-            <div className="flex gap-3 overflow-x-auto no-scrollbar px-4 pb-1">
-              {playlistRow.map((p) => (
-                <button key={p.key} onClick={p.open} className="w-[116px] shrink-0 text-left active:opacity-70 transition-opacity">
-                  <div className="w-[116px] h-[116px] rounded-xl overflow-hidden bg-surface-overlay mb-1.5 flex items-center justify-center">
-                    <PlaylistCoverThumb cover={p.cover} mosaic={p.mosaic} alt={p.name} />
-                  </div>
-                  <p className="text-text-primary text-xs leading-snug truncate">{p.name}</p>
-                  <p className="text-text-muted text-[11px] truncate mt-0.5">{p.subtitle}</p>
-                </button>
-              ))}
-            </div>
-          )}
-        </Section>
-      )}
-
-      {/* TEMP: albums hidden on the home page */}
-      {false && showSection('albums') && albumRow.length > 0 && (
-        <Section
-          title="Albums"
-          icon={<Album size={15} />}
-          action={{ label: 'All', onClick: () => setActiveView('wrld') }}
-        >
-          <div className="flex gap-3 overflow-x-auto no-scrollbar px-4 pb-1">
-            {albumRow.map((a) => (
-              <button key={a.key} onClick={a.open} className="w-[116px] shrink-0 text-left active:opacity-70 transition-opacity">
-                <div className="relative w-[116px] h-[116px] rounded-xl overflow-hidden bg-surface-overlay mb-1.5 flex items-center justify-center">
-                  {a.cover ? (
-                    <img src={a.cover} alt={a.title} className="w-full h-full object-cover" />
-                  ) : (
-                    <Music size={22} className="text-text-muted" />
-                  )}
-                  <span className="absolute bottom-1.5 right-1.5 w-7 h-7 rounded-full bg-black/65 flex items-center justify-center">
-                    <Play size={13} className="text-white ml-0.5" fill="currentColor" />
-                  </span>
-                </div>
-                <p className="text-text-primary text-xs leading-snug truncate">{a.title}</p>
-                <p className="text-text-muted text-[11px] truncate mt-0.5">{a.subtitle}</p>
-              </button>
-            ))}
-          </div>
-        </Section>
-      )}
-
-      {showSection('games') && (
-        <Section title="Games" icon={<Gamepad2 size={15} />}>
-          <div className="flex gap-3 overflow-x-auto no-scrollbar px-4 pb-1">
-            {games.map((g) => (
-              <button
-                key={g.view}
-                onClick={() => setActiveView(g.view)}
-                className="w-[140px] shrink-0 rounded-xl bg-[var(--surface-overlay)] px-3.5 py-3 text-left active:bg-surface-highest transition-colors"
-              >
-                <p className="text-text-primary text-sm font-semibold truncate">{g.label}</p>
-                {g.kind === 'daily' ? (
-                  <>
-                    <div className="flex items-center gap-1 mt-1 text-text-muted">
-                      <Flame size={12} className={g.streak > 0 ? 'text-accent' : ''} />
-                      <span className="text-[11px] tabular-nums">{g.streak} day streak</span>
-                    </div>
-                    <p className={`text-[11px] mt-1.5 font-medium ${g.done ? 'text-accent' : 'text-text-muted'}`}>
-                      {g.done ? 'Played today' : 'Not played today'}
-                    </p>
-                  </>
-                ) : (
-                  <p className="text-[11px] mt-1.5 text-text-muted">{g.sub}</p>
                 )}
-              </button>
-            ))}
-          </div>
-        </Section>
-      )}
-
-      {showSection('radio') && (
-        <button
-          onClick={openRadioFm}
-          className="mx-4 mb-6 w-[calc(100%-2rem)] flex items-center gap-3 rounded-xl bg-[var(--surface-overlay)] px-3.5 py-3 active:bg-surface-highest transition-colors"
-        >
-          <span className={`w-9 h-9 rounded-lg flex items-center justify-center shrink-0 ${radioFmIsLive ? 'bg-red-600/15' : 'bg-accent/15'}`}>
-            <Radio size={17} className={radioFmIsLive ? 'text-red-500 animate-pulse' : 'text-accent'} />
-          </span>
-          <span className="flex-1 min-w-0 text-left">
-            <span className="flex items-center gap-1.5">
-              <span className="text-text-primary text-sm font-semibold">999 FM</span>
-              {radioFmIsLive && <span className="text-red-500 text-[10px] font-bold uppercase tracking-widest">Live</span>}
+              </BarButton>
             </span>
-            <span className="block text-text-muted text-xs truncate">
-              {radioFmIsLive && radioFmNowPlaying
-                ? `${radioFmNowPlaying.title} - ${radioFmNowPlaying.artist}`
-                : 'Juice WRLD radio, live 24/7'}
-            </span>
-          </span>
-          <ChevronRight size={16} className="text-text-muted shrink-0" />
-        </button>
-      )}
+            {moreTabs.length > 0 && (
+              <BarButton label="More" onClick={() => setShowMoreNav(true)}>
+                <MoreHorizontal size={20} strokeWidth={2.25} />
+              </BarButton>
+            )}
+            <button
+              onClick={openOwnPublicProfile}
+              aria-label="Your public profile"
+              className="glass-button w-11 h-11 shrink-0 rounded-full overflow-hidden flex items-center justify-center text-text-secondary active:opacity-60 transition-opacity"
+            >
+              {account?.avatar
+                ? <img src={account.avatar} alt="" className="w-full h-full object-cover" />
+                : <User size={20} />}
+            </button>
+          </>}
+        />
 
-      {showSection('listening') && (
-        <Section
-          title="Your listening"
-          icon={<Music2 size={15} />}
-          action={{ label: 'Wrapped', onClick: () => setActiveView('stats') }}
-        >
-          {totalPlays === 0 ? (
-            <EmptyNote>Play something and your stats will show up here.</EmptyNote>
-          ) : (
-            <div className="px-4 flex gap-3">
-              <StatCard value={totalPlays.toLocaleString()} label="Plays" />
-              <StatCard value={distinctSongs.toLocaleString()} label="Songs" />
-              <StatCard value={weekPlays.toLocaleString()} label="This week" />
+        <div className="pt-3">
+          {showSection('chat') && hasChatAccess(account) && <HomeChatCard variant="mobile" />}
+
+          {showSection('recent') && recent.length > 0 && (
+            <Section title="Recently Played">
+              <Rail>
+                {recent.map((track) => (
+                  <ArtTile
+                    key={track.id}
+                    onClick={() => openTrack(track)}
+                    art={<AlbumArtThumbnail track={track} fill res={384} className="w-full h-full object-cover" />}
+                    title={track.title}
+                    subtitle={track.artist}
+                    playBadge
+                  />
+                ))}
+              </Rail>
+            </Section>
+          )}
+
+          {showSection('onthisday') && (
+            <div className="px-4 mb-7">
+              <OnThisDayTile onContextMenu={() => {}} span="shrink-0" />
             </div>
           )}
-          {siteStats && (
-            <div className="px-4 pt-3">
-              <StatCard
-                value={siteStats.total_songs.toLocaleString()}
-                label="In the catalog"
-                onClick={() => setActiveView('statistics')}
+
+          {showSection('news') && newsItems.length > 0 && (
+            <Section title="News" onMore={() => setActiveView('news')}>
+              <Rail>
+                {newsItems.slice(0, 8).map((item) => (
+                  <button
+                    key={item.id}
+                    onClick={() => openNewsItem(item)}
+                    className="w-[240px] shrink-0 text-left active:opacity-70 transition-opacity"
+                  >
+                    <div className="w-[240px] aspect-video rounded-[10px] overflow-hidden bg-[var(--fill)] mb-1.5 flex items-center justify-center">
+                      {item.image_url
+                        ? <ProgressiveCover src={item.image_url} alt={item.title} className="w-full h-full object-cover" />
+                        : <Newspaper size={26} className="text-text-muted" />}
+                    </div>
+                    <p className="text-footnote text-text-primary line-clamp-2">{item.title}</p>
+                    {item.category && <p className="text-footnote text-text-secondary truncate">{item.category}</p>}
+                  </button>
+                ))}
+              </Rail>
+            </Section>
+          )}
+
+          {showSection('playlists') && (
+            <Section title="Playlists" onMore={() => setActiveView('playlists')}>
+              {playlistRow.length === 0 ? (
+                <EmptyNote>No playlists yet - build one from any song&apos;s menu.</EmptyNote>
+              ) : (
+                <Rail>
+                  {playlistRow.map((p) => (
+                    <ArtTile
+                      key={p.key}
+                      onClick={p.open}
+                      art={<PlaylistCoverThumb cover={p.cover} mosaic={p.mosaic} alt={p.name} />}
+                      title={p.name}
+                      subtitle={p.subtitle}
+                    />
+                  ))}
+                </Rail>
+              )}
+            </Section>
+          )}
+
+          {/* TEMP: albums hidden on the home page */}
+          {false && showSection('albums') && albumRow.length > 0 && (
+            <Section title="Albums" onMore={() => setActiveView('wrld')}>
+              <Rail>
+                {albumRow.map((a) => (
+                  <ArtTile
+                    key={a.key}
+                    onClick={a.open}
+                    art={a.cover
+                      ? <img src={a.cover} alt={a.title} className="w-full h-full object-cover" />
+                      : <Music size={22} className="text-text-muted" />}
+                    title={a.title}
+                    subtitle={a.subtitle}
+                    playBadge
+                  />
+                ))}
+              </Rail>
+            </Section>
+          )}
+
+          {showSection('games') && (
+            <Section title="Games">
+              <Rail>
+                {games.map((g) => (
+                  <button
+                    key={g.view}
+                    onClick={() => setActiveView(g.view)}
+                    className={`${TILE} shrink-0 rounded-[20px] bg-[var(--grouped)] px-4 py-3.5 text-left active:bg-[var(--fill-strong)] transition-colors`}
+                  >
+                    <p className="text-headline text-text-primary truncate">{g.label}</p>
+                    {g.kind === 'daily' ? (
+                      <>
+                        <div className="flex items-center gap-1 mt-1 text-text-secondary">
+                          <Flame size={13} className={g.streak > 0 ? 'text-accent' : ''} />
+                          <span className="text-footnote tabular-nums">{g.streak} day streak</span>
+                        </div>
+                        <p className={`text-footnote mt-0.5 ${g.done ? 'text-accent font-medium' : 'text-text-muted'}`}>
+                          {g.done ? 'Played today' : 'Not played today'}
+                        </p>
+                      </>
+                    ) : (
+                      <p className="text-footnote mt-1 text-text-secondary">{g.sub}</p>
+                    )}
+                  </button>
+                ))}
+              </Rail>
+            </Section>
+          )}
+
+          {showSection('radio') && (
+            <GroupedSection className="px-4 mb-7">
+              <GroupedRow
+                icon={Radio}
+                iconColor={radioFmIsLive ? RED : PINK}
+                label={<span className="flex items-center gap-2">
+                  999 FM
+                  {radioFmIsLive && <span className="px-1.5 rounded bg-[#ff3b30] text-white text-caption2 font-bold">LIVE</span>}
+                </span>}
+                sub={radioFmIsLive && radioFmNowPlaying
+                  ? `${radioFmNowPlaying.title} - ${radioFmNowPlaying.artist}`
+                  : 'Juice WRLD radio, live 24/7'}
+                onClick={openRadioFm}
               />
-            </div>
+            </GroupedSection>
           )}
-        </Section>
-      )}
 
-      {showSection('liked') && likedTrackIds.length > 0 && (
-        <button
-          onClick={() => setActiveView('liked')}
-          className="mx-4 w-[calc(100%-2rem)] flex items-center gap-3 rounded-xl bg-[var(--surface-overlay)] px-3.5 py-3 active:bg-surface-highest transition-colors"
-        >
-          <span className="w-9 h-9 rounded-lg bg-accent/15 flex items-center justify-center shrink-0">
-            <Music2 size={17} className="text-accent" />
-          </span>
-          <span className="flex-1 min-w-0 text-left">
-            <span className="block text-text-primary text-sm font-semibold">Liked songs</span>
-            <span className="block text-text-muted text-xs">{likedTrackIds.length} song{likedTrackIds.length === 1 ? '' : 's'}</span>
-          </span>
-          <ChevronRight size={16} className="text-text-muted shrink-0" />
-        </button>
-      )}
+          {showSection('listening') && (
+            <Section title="Your Listening" onMore={() => setActiveView('stats')}>
+              {totalPlays === 0 ? (
+                <EmptyNote>Play something and your stats will show up here.</EmptyNote>
+              ) : (
+                <div className="px-4">
+                  <div className="grid grid-cols-3 rounded-[20px] bg-[var(--grouped)] divide-x divide-[color:var(--separator)]">
+                    <Stat value={totalPlays.toLocaleString()} label="Plays" />
+                    <Stat value={distinctSongs.toLocaleString()} label="Songs" />
+                    <Stat value={weekPlays.toLocaleString()} label="This week" />
+                  </div>
+                </div>
+              )}
+              {siteStats && (
+                <GroupedSection className="px-4 pt-3">
+                  <GroupedRow
+                    icon={BarChart3}
+                    iconColor={BLUE}
+                    label="In the catalog"
+                    detail={siteStats.total_songs.toLocaleString()}
+                    onClick={() => setActiveView('statistics')}
+                  />
+                </GroupedSection>
+              )}
+            </Section>
+          )}
 
-      {showSection('tools') && hasHomeTools(account) && (
-        <button
-          onClick={() => useStore.getState().openLyricsGen()}
-          className="mx-4 w-[calc(100%-2rem)] flex items-center gap-3 rounded-xl bg-[var(--surface-overlay)] px-3.5 py-3 active:bg-surface-highest transition-colors"
-        >
-          <span className="w-9 h-9 rounded-lg bg-accent/15 flex items-center justify-center shrink-0">
-            <Sparkles size={17} className="text-accent" />
-          </span>
-          <span className="flex-1 min-w-0 text-left">
-            <span className="block text-text-primary text-sm font-semibold">Generate lyrics</span>
-            <span className="block text-text-muted text-xs">Transcribe a song, or time its lyrics</span>
-          </span>
-          <ChevronRight size={16} className="text-text-muted shrink-0" />
-        </button>
-      )}
+          {(showLiked || showTools) && (
+            <GroupedSection className="px-4 mb-7">
+              {showLiked && (
+                <GroupedRow
+                  icon={Heart}
+                  iconColor={PINK}
+                  label="Liked Songs"
+                  sub={`${likedTrackIds.length} song${likedTrackIds.length === 1 ? '' : 's'}`}
+                  onClick={() => setActiveView('liked')}
+                />
+              )}
+              {showTools && (
+                <>
+                <GroupedRow
+                  icon={MicVocal}
+                  iconColor={PURPLE}
+                  label="Synced Lyrics"
+                  sub="Time a song's lyrics by the line or the word"
+                  onClick={() => useStore.getState().openLyricsGen()}
+                />
+                <GroupedRow
+                  icon={AudioLines}
+                  iconColor={PURPLE}
+                  label="Identify Song"
+                  sub="Name a song from the mic or a file"
+                  onClick={() => useStore.getState().setShowRecognition(true)}
+                />
+                </>
+              )}
+            </GroupedSection>
+          )}
+        </div>
+      </div>
     </div>
   )
 }

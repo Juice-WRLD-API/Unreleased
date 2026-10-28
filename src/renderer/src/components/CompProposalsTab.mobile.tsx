@@ -39,7 +39,7 @@ function MediaPreview({ label, name, src, loading, error, bytes }: {
 
   return (
     <div>
-      <p className="text-[10px] font-bold uppercase tracking-wider text-text-muted mb-1.5">{label}</p>
+      <p className="text-footnote font-semibold text-text-secondary mb-1.5">{label}</p>
       {loading ? (
         <div className="h-20 rounded-lg bg-surface-overlay flex items-center justify-center">
           <Loader2 size={16} className="animate-spin text-text-muted" />
@@ -55,7 +55,7 @@ function MediaPreview({ label, name, src, loading, error, bytes }: {
           alt=""
           onLoad={(e) => setMeta(`${e.currentTarget.naturalWidth}×${e.currentTarget.naturalHeight}`)}
           onError={() => setBroken(true)}
-          className="max-h-56 max-w-full rounded-lg border border-[var(--border)] object-contain bg-surface-overlay"
+          className="max-h-56 max-w-full rounded-lg border border-[var(--separator)] object-contain bg-surface-overlay"
         />
       ) : (
         <audio
@@ -112,10 +112,10 @@ export default function CompProposalsTab({ embedded = false, onChanged }: { embe
 
   if (p) return (
     <div className={`flex-1 min-w-0 h-full flex flex-col overflow-hidden ${embedded ? '' : 'bg-[var(--surface)]'}`}>
-      <div className="shrink-0 flex items-center gap-1 px-2 py-1.5 border-b border-[var(--border)]">
+      <div className="shrink-0 flex items-center gap-2 px-2 py-1.5 border-b border-[var(--separator)]">
         <button onClick={() => setSelected(null)}
-          className="w-11 h-11 shrink-0 flex items-center justify-center rounded-full text-text-primary active:bg-surface-overlay transition-colors">
-          <ChevronLeft size={20} />
+          className="glass-button w-11 h-11 shrink-0 flex items-center justify-center rounded-full text-text-primary active:opacity-60 transition-opacity">
+          <ChevronLeft size={24} strokeWidth={2.25} className="-ml-0.5" />
         </button>
         <h2 className="flex-1 min-w-0 truncate text-text-primary text-[14px] font-bold font-mono">{p.file_path}</h2>
         <StatusChip status={p.status} />
@@ -170,14 +170,14 @@ export default function CompProposalsTab({ embedded = false, onChanged }: { embe
 
         {p.staging_filename && p.status === 'pending' && (
           <button onClick={() => downloadStaging(p)}
-            className="w-full h-10 rounded-lg text-sm text-text-secondary active:bg-surface-raised border border-[var(--border)] flex items-center justify-center gap-1.5">
+            className="w-full h-10 rounded-lg text-sm text-text-secondary active:bg-[var(--fill)] border border-[var(--separator)] flex items-center justify-center gap-1.5">
             <Download size={14} /> Staged file
           </button>
         )}
 
         {p.contributor_notes && (
           <div>
-            <p className="text-[10px] font-bold uppercase tracking-wider text-text-muted mb-1 flex items-center gap-1.5">
+            <p className="text-footnote font-semibold text-text-secondary mb-1 flex items-center gap-1.5">
               Contributor notes <CopyButton text={p.contributor_notes} label="contributor notes" />
             </p>
             <p className="text-text-secondary text-sm whitespace-pre-wrap">{p.contributor_notes}</p>
@@ -185,7 +185,7 @@ export default function CompProposalsTab({ embedded = false, onChanged }: { embe
         )}
         {(p.change_type === 'move_folder' || p.change_type === 'delete_folder') && Array.isArray(p.original_snapshot?.files) && (
           <div>
-            <p className="text-[10px] font-bold uppercase tracking-wider text-text-muted mb-1 flex items-center gap-1.5">
+            <p className="text-footnote font-semibold text-text-secondary mb-1 flex items-center gap-1.5">
               Affected files ({(p.original_snapshot.files as string[]).length})
               <CopyButton text={(p.original_snapshot.files as string[]).join('\n')} label="affected files" />
             </p>
@@ -198,7 +198,7 @@ export default function CompProposalsTab({ embedded = false, onChanged }: { embe
         )}
         {Object.keys(p.original_snapshot || {}).length > 0 && (
           <div>
-            <p className="text-[10px] font-bold uppercase tracking-wider text-text-muted mb-1 flex items-center gap-1.5">
+            <p className="text-footnote font-semibold text-text-secondary mb-1 flex items-center gap-1.5">
               Original snapshot <CopyButton text={JSON.stringify(p.original_snapshot, null, 2)} label="original snapshot" />
             </p>
             <pre className="text-xs font-mono text-text-muted bg-surface-overlay rounded-lg p-3 overflow-x-auto">{JSON.stringify(p.original_snapshot, null, 2)}</pre>
@@ -206,7 +206,7 @@ export default function CompProposalsTab({ embedded = false, onChanged }: { embe
         )}
         {p.review_notes && (
           <div>
-            <p className="text-[10px] font-bold uppercase tracking-wider text-text-muted mb-1 flex items-center gap-1.5">
+            <p className="text-footnote font-semibold text-text-secondary mb-1 flex items-center gap-1.5">
               Review notes <CopyButton text={p.review_notes} label="review notes" />
             </p>
             <p className="text-text-secondary text-sm whitespace-pre-wrap">{p.review_notes}</p>
@@ -215,9 +215,9 @@ export default function CompProposalsTab({ embedded = false, onChanged }: { embe
 
         {p.status === 'pending' && (
           <label className="block">
-            <span className="text-[10px] font-bold uppercase tracking-widest text-text-muted">Review note</span>
+            <span className="text-footnote font-semibold text-text-secondary">Review note</span>
             <textarea value={reviewNotes} onChange={e => setReviewNotes(e.target.value)} rows={3} placeholder="Optional…"
-              className="mt-1.5 w-full rounded-xl border border-[var(--border)] bg-surface-overlay px-3 py-2.5 text-sm text-text-primary focus:outline-none resize-none" />
+              className="mt-1.5 w-full rounded-xl border border-[var(--separator)] bg-surface-overlay px-3 py-2.5 text-sm text-text-primary focus:outline-none resize-none" />
           </label>
         )}
 
@@ -229,19 +229,19 @@ export default function CompProposalsTab({ embedded = false, onChanged }: { embe
         )}
       </div>
 
-      <div className="shrink-0 p-3 border-t border-[var(--border)] flex flex-col gap-2">
+      <div className="shrink-0 p-3 border-t border-[var(--separator)] flex flex-col gap-2">
         {actionId === p.id || bulkApproving ? (
           <div className="flex justify-center py-2.5"><Loader2 size={16} className="animate-spin text-text-muted" /></div>
         ) : p.status === 'pending' ? (
           <>
             <div className="flex items-center gap-2">
               <button onClick={() => doReview(p.id, 'reject')}
-                className="flex-1 h-11 rounded-xl bg-red-500/10 active:bg-red-500/20 text-red-400 text-sm font-semibold flex items-center justify-center gap-1.5">
+                className="flex-1 h-11 rounded-full bg-red-500/10 active:bg-red-500/20 text-red-500 text-headline flex items-center justify-center gap-1.5">
                 <XCircle size={15} /> Reject
               </button>
               {!approveBlockedReason && (
                 <button onClick={() => doReview(p.id, 'approve')}
-                  className="flex-1 h-11 rounded-xl bg-emerald-500/15 active:bg-emerald-500/25 text-emerald-400 text-sm font-semibold flex items-center justify-center gap-1.5">
+                  className="flex-1 h-11 rounded-full bg-emerald-500/15 active:bg-emerald-500/25 text-emerald-500 text-headline flex items-center justify-center gap-1.5">
                   <CheckCircle size={15} /> Approve
                 </button>
               )}
@@ -260,7 +260,7 @@ export default function CompProposalsTab({ embedded = false, onChanged }: { embe
               <Globe size={15} /> Propagation
             </button>
             <button onClick={() => doReverse(p.id)} disabled={actionId === p.id}
-              className="w-full h-11 rounded-xl text-sm text-text-muted active:text-amber-400 active:bg-amber-500/10 flex items-center justify-center gap-1.5">
+              className="w-full h-11 rounded-full bg-[var(--fill)] text-headline text-amber-500 active:bg-[var(--fill-strong)] flex items-center justify-center gap-1.5">
               <RotateCcw size={15} /> Reverse
             </button>
           </>
@@ -274,7 +274,7 @@ export default function CompProposalsTab({ embedded = false, onChanged }: { embe
 
   return (
     <div className={`flex-1 min-w-0 h-full flex flex-col overflow-hidden ${embedded ? '' : 'bg-[var(--surface)]'}`}>
-      <div className="shrink-0 p-3 border-b border-[var(--border)] flex gap-2 overflow-x-auto scrollbar-none">
+      <div className="shrink-0 p-3 border-b border-[var(--separator)] flex gap-2 overflow-x-auto scrollbar-none">
         {(['pending', 'approved', 'rejected', 'reversed', ''] as const).map(s => (
           <button key={s || 'all'} onClick={() => setStatus(s)}
             className={`shrink-0 px-3 py-1.5 rounded-full text-xs font-semibold capitalize transition-colors ${status === s ? 'bg-accent/15 text-accent' : 'text-text-muted bg-surface-overlay'}`}>
@@ -283,7 +283,7 @@ export default function CompProposalsTab({ embedded = false, onChanged }: { embe
         ))}
       </div>
       {loadError && (
-        <div className="mx-3 mt-3 flex items-start gap-2 px-3 py-2.5 rounded-xl bg-red-500/10 border border-red-500/20 text-red-400 text-xs shrink-0">
+        <div className="mx-3 mt-3 flex items-start gap-2 px-3 py-2.5 rounded-xl bg-red-500/10 text-red-500 text-footnote shrink-0">
           <AlertCircle size={13} className="shrink-0 mt-0.5" /> {loadError}
         </div>
       )}
@@ -292,7 +292,7 @@ export default function CompProposalsTab({ embedded = false, onChanged }: { embe
         {!loading && proposals.length === 0 && <Empty label="No comp proposals" />}
         {proposals.map(item => (
           <button key={item.id} onClick={() => { setSelected(item); setReviewNotes(''); setError(null) }}
-            className="w-full text-left px-3 py-3 border-b border-[var(--border)] transition-colors active:bg-surface-raised">
+            className="w-full text-left px-3 py-3 border-b border-[var(--separator)] transition-colors active:bg-[var(--fill)]">
             <div className="flex items-center gap-1.5 mb-1">
               <StatusChip status={item.status} />
               <span className="text-[9px] text-text-muted bg-surface-raised px-1.5 py-0.5 rounded">{userApi.compChangeTypeLabel(item.change_type)}</span>
