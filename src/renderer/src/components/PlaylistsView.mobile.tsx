@@ -802,7 +802,7 @@ export default function PlaylistsView(): JSX.Element {
     setBulkCreating(true)
     try {
       const playlist = await userApi.createPlaylist(name)
-      await Promise.all(ids.map(id => userApi.addToPlaylist(playlist.id, id).catch(() => {})))
+      await userApi.addSongsToPlaylist(playlist.id, ids).catch(() => undefined)
       membershipCache.current.set(playlist.id, new Set(ids))
       await refreshPlaylists()
       exitSelectMode()
