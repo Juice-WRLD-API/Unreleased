@@ -22,10 +22,11 @@ import { CONTRIBUTOR_ENABLED } from '../lib/userApi'
 import type { AdminUser, EditorApplication, ProposalStatus, SongEditProposal } from '../lib/userApi'
 import * as reportsApi from '../lib/reportsApi'
 import type { FeedbackRow, SongReportRow, SongReportStatus } from '../lib/reportsApi'
+import { adminCoverArtCounts } from '../lib/coverArtApi'
 import { useStrictModeSafeEffect } from './useStrictModeSafeEffect'
 import { errorMessage } from '../lib/format'
 
-export type AdminTab = 'proposals' | 'comp-proposals' | 'comp-replace' | 'applications' | 'reports' | 'feedback' | 'users' | 'stats' | 'channels' | 'eras' | 'cdn-nodes' | 'beta' | 'lyrics' | 'logs'
+export type AdminTab = 'proposals' | 'cover-art' | 'comp-proposals' | 'comp-replace' | 'applications' | 'reports' | 'feedback' | 'users' | 'stats' | 'channels' | 'eras' | 'cdn-nodes' | 'beta' | 'lyrics' | 'logs'
 
 // Deep-link paths for the standalone (non-embedded) admin console - each
 // section its own top-level URL instead of one flat "/admin" for every tab.
@@ -35,6 +36,7 @@ export type AdminTab = 'proposals' | 'comp-proposals' | 'comp-replace' | 'applic
 // "/admin" like an unrecognized tab would).
 export const ADMIN_TAB_PATHS: Partial<Record<AdminTab, string>> = {
   proposals: '/admin',
+  'cover-art': '/cover-art',
   'comp-proposals': '/comp-files',
   'comp-replace': '/comp-replace',
   applications: '/applications',
@@ -60,7 +62,7 @@ export type FeedbackFilter = 'human' | 'automated' | ''
 export interface AdminNavItem {
   id: AdminTab
   label: string
-  iconKey: 'proposals' | 'comp-proposals' | 'comp-replace' | 'applications' | 'reports' | 'feedback' | 'users' | 'stats' | 'channels' | 'eras' | 'cdn-nodes' | 'beta' | 'lyrics' | 'logs'
+  iconKey: 'proposals' | 'cover-art' | 'comp-proposals' | 'comp-replace' | 'applications' | 'reports' | 'feedback' | 'users' | 'stats' | 'channels' | 'eras' | 'cdn-nodes' | 'beta' | 'lyrics' | 'logs'
   badge?: number
 }
 
@@ -82,10 +84,28 @@ export interface UseAdminQueueOptions {
   /** Tab ids visible to a non-full-admin (manager) in the nav, filtered out of
    *  fullNav. Desktop: ['proposals', 'comp-proposals']. Mobile: ['comp-proposals']. */
   managerNavIds: AdminTab[]
+  /** Cover art is reviewed by managers of the primary channel and admins,
+   *  whatever channel is active (songs aren't per channel). Hides the tab
+   *  and skips its count otherwise. */
+  canReviewCoverArt?: boolean
 }
 
 export function useAdminQueue(opts: UseAdminQueueOptions) {
-  const { canLoad, isFullAdmin, gateNonProposalTabs, activeChannel, initialTab, forceTab, managerNavIds } = opts
+  const { canLoad, isFullAdmin, gateNonProposalTabs, activeChannel, initialTab, forceTab, managerNavIds, canReviewCoverArt = false } = opts
+
+  // The Cover art tab loads its own rows; only the pending count for its badge
+  // lives here, asked for on its own (?counts=1) so the badge shows before
+  // the tab is ever opened.
+  const [pendingCoverArt, setPendingCoverArt] = useState<number | null>(null)
+  const [coverArtCountKey, setCoverArtCountKey] = useState(0)
+  useEffect(() => {
+    if (!canLoad || !canReviewCoverArt) { setPendingCoverArt(null); return }
+    let stale = false
+    adminCoverArtCounts()
+      .then((c) => { if (!stale) setPendingCoverArt(c.pending) })
+      .catch(() => { if (!stale) setPendingCoverArt(null) })
+    return () => { stale = true }
+  }, [canLoad, canReviewCoverArt, coverArtCountKey])
 
   const [tab, setTab] = useState<AdminTab>(initialTab)
   const [loading, setLoading] = useState(false)
@@ -192,6 +212,9 @@ export function useAdminQueue(opts: UseAdminQueueOptions) {
 
   const fullNav: AdminNavItem[] = [
     { id: 'proposals',    label: 'Song edits',   iconKey: 'proposals',   badge: pendingProps || undefined },
+    ...(canReviewCoverArt ? [
+      { id: 'cover-art' as const, label: 'Cover art', iconKey: 'cover-art' as const, badge: pendingCoverArt || undefined },
+    ] : []),
     ...(CONTRIBUTOR_ENABLED ? [
       { id: 'comp-proposals' as const, label: 'Comp files', iconKey: 'comp-proposals' as const },
       { id: 'comp-replace' as const, label: 'Replace comp', iconKey: 'comp-replace' as const },
@@ -225,6 +248,8 @@ export function useAdminQueue(opts: UseAdminQueueOptions) {
     feedbackFilter, setFeedbackFilter,
     feedback,
     pendingApps, pendingProps, pendingReports,
+    pendingCoverArt,
+    refreshCoverArtCount: () => setCoverArtCountKey(k => k + 1),
     fullNav, nav,
   }
 }

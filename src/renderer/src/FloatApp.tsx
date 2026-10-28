@@ -5,11 +5,13 @@ import { useThemeEffects } from './lib/themeEffects'
 import { getSongById, JWApiSong } from './lib/juicewrldApi'
 import { showStaffProfile, staffProfileView } from './lib/userApi'
 import ErrorBoundary from './components/ErrorBoundary'
+import type { AdminTab } from './hooks/useAdminQueue'
 
 const Settings = lazy(() => import('./components/Settings'))
 const EditorProfileView = lazy(() => import('./components/EditorProfileView'))
 const ContributorProfileView = lazy(() => import('./components/ContributorProfileView'))
 const EditorPage = lazy(() => import('./components/EditorPage'))
+const AdminPage = lazy(() => import('./components/AdminPage'))
 const LocalEditorPage = lazy(() => import('./components/LocalEditorPage'))
 const MiniPlayer = lazy(() => import('./components/MiniPlayer'))
 const EqualizerPanel = lazy(() => import('./components/EqualizerPanel'))
@@ -19,6 +21,7 @@ const LyricsGenModal = lazy(() => import('./components/LyricsGenModal'))
 // trigger Vite's mixed-import warning without splitting anything.
 import SongInfoModal from './components/SongInfoModal'
 import ReportModal from './components/ReportModal'
+import CoverArtSubmitModal from './components/CoverArtSubmitModal'
 import ConvertFormatModal from './components/ConvertFormatModal'
 import AppToastHost from './components/AppToastHost'
 
@@ -205,6 +208,34 @@ function FloatProfile(): JSX.Element {
   )
 }
 
+// The admin console in its own window. The section rides in as ?tab= and,
+// for a window that's already open, over float-params - AdminPage follows
+// activeAdminTab while floating, so retargeting switches the section in place
+// instead of remounting every tab's loaded data.
+function FloatAdmin(): JSX.Element {
+  const { account } = useStorePick('account')
+  const [bootTab] = useState(() => (initialParam('tab') as AdminTab | null) ?? undefined)
+
+  useEffect(() => { useStore.getState().loadAccount() }, [])
+  useEffect(() => el?.onFloatParams?.((p: Record<string, string>) => {
+    if (p?.tab) useStore.getState().setActiveAdminTab(p.tab as AdminTab)
+  }), [])
+
+  if (!account) {
+    return (
+      <div className="flex-1 flex items-center justify-center">
+        <Loader2 size={20} className="animate-spin text-text-muted" />
+      </div>
+    )
+  }
+  return (
+    <div className="flex-1 min-h-0 overflow-hidden flex flex-col">
+      <AdminPage initialTab={bootTab} />
+      <AppToastHost />
+    </div>
+  )
+}
+
 // Shell for floating pop-out windows: main.js createFloatWindow opens a second
 // frameless BrowserWindow on the same bundle with ?float=<view> (+ params),
 // and main.tsx mounts this instead of <App/> — a single view filling the whole
@@ -223,7 +254,7 @@ export default function FloatApp({ view }: { view: string }): JSX.Element {
     // The equalizer pop-out matches the in-app popover's surface (bg-surface-
     // highest) so detaching it doesn't visibly change the panel's color.
     <div className={`h-dvh overflow-hidden flex flex-col ${view === 'equalizer' ? 'bg-surface-highest' : 'bg-surface'}`}>
-      {(view === 'editor' || view === 'local-editor' || view === 'equalizer' || view === 'profile') && <FloatTitleBar bordered={view !== 'editor'} />}
+      {(view === 'editor' || view === 'local-editor' || view === 'equalizer' || view === 'profile' || view === 'admin') && <FloatTitleBar bordered={view !== 'editor'} />}
       {/* A pop-out's view is the whole window's content, so an uncaught render
           error left nothing but a blank window with no way back — the boundary
           keeps the error (and its stack) visible and reloadable in place. */}
@@ -236,6 +267,7 @@ export default function FloatApp({ view }: { view: string }): JSX.Element {
             : view === 'mini-player' ? <MiniPlayer />
             : view === 'convert' ? <FloatConvert />
             : view === 'profile' ? <FloatProfile />
+            : view === 'admin' ? <FloatAdmin />
             : view === 'equalizer' ? (
               <div className="flex-1 min-h-0 overflow-y-auto flex justify-center">
                 <EqualizerPanel floating />
@@ -248,6 +280,8 @@ export default function FloatApp({ view }: { view: string }): JSX.Element {
           info report) — reportModal is per-window state, so the pop-out mounts
           its own instance rather than routing to the main window. */}
       <ReportModal />
+      {/* Same for "Submit cover art" from a pop-out's song info. */}
+      <CoverArtSubmitModal />
       {/* Convert dialog opened from *another* pop-out (with the convert pop-out
           setting off, openConvert falls back to an in-app dialog). The convert
           window itself renders it as its own view above, so skip it there. */}

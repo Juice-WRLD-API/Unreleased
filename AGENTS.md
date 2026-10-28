@@ -1,6 +1,6 @@
 # Agent guide: Juice WRLD API and Unreleased
 
-**Version 1.37** · updated 2026-10-27. Bump the version and date whenever you
+**Version 1.38** · updated 2026-10-28. Bump the version and date whenever you
 change this file (minor for fixes and additions, major for rewrites).
 
 **Keep this file current.** If you find something in the docs or this file that
@@ -391,6 +391,13 @@ Node 22.
 
 Newest first. One entry each: date, what went wrong, what to do instead. Delete
 entries that stop being true.
+
+- 2026-10-28: The pop-out "Edit metadata" window crashed with React #185
+  (maximum update depth). `LocalEditorPage` bounced to `backView` while it had
+  no track, which flipped `previousView`, which flipped `backView` and re-ran the
+  effect. The pop-out shows its page whatever `activeView` says, and its track
+  arrives only once the library loads. A "nothing here, go back" effect must
+  skip `IS_FLOAT_WINDOW` and read the back view from a ref, not its deps.
 
 - 2026-10-27: Desktop settings kept displays by Electron's `display.label`, which
   is the monitor model, so two monitors of one model shared a name: hiding one

@@ -4,12 +4,12 @@ import {
   Loader2, RefreshCw, FileEdit, KeyRound, Check, AlertCircle, RotateCcw,
   ChevronDown, ChevronUp, Shield, MessageSquare, Calendar,
   Hash, Plus, UserCheck, FileCheck, Activity, Pencil, X as XIcon, ChevronDown as ChevronDownIcon,
-  History, Play,
+  History, Play, PictureInPicture2,
 } from 'lucide-react'
 import { apiFetch, songToTrack } from '../lib/juicewrldApi'
-import { navigateFromWindow } from '../lib/windowSync'
+import { navigateFromWindow, attachToMainWindow } from '../lib/windowSync'
 import type { JWApiSong } from '../lib/juicewrldApi'
-import { useStore, useStorePick } from '../store/useStore'
+import { useStore, useStorePick, IS_FLOAT_WINDOW } from '../store/useStore'
 import { displayName } from '../store/chatStore'
 import { discordHandle } from '../lib/format'
 import * as userApi from '../lib/userApi'
@@ -19,6 +19,7 @@ import ReportsTab from './ReportsTab'
 import FeedbackTab from './FeedbackTab'
 import CompProposalsTab from './CompProposalsTab'
 import CompReplaceTab from './CompReplaceTab'
+import CoverArtTab from './CoverArtTab'
 import ChannelsTab from './ChannelsTab'
 import EraTab from './EraTab'
 import CdnNodesTab from './CdnNodesTab'
@@ -26,6 +27,7 @@ import BetaTab from './BetaTab'
 import LogsTab from './LogsTab'
 import LyricsGenAdminTab from './LyricsGenAdminTab'
 import { useStaffRoles } from '../hooks/useStaffRoles'
+import { useCanManage } from '../hooks/useChannelRoles'
 import { useAdminQueue, type AdminTab } from '../hooks/useAdminQueue'
 import { useOtpGate } from '../hooks/useOtpGate'
 import { useVisitedTabs } from '../hooks/useVisitedTabs'
@@ -62,8 +64,13 @@ export default function AdminPage({ embedded = false, initialTab, onExit }: {
   // there. See navigateFromWindow.
   const go = navigateFromWindow
   const isElectron = navigator.userAgent.includes('Electron')
+  // Also renders as its own window (FloatApp's `admin` view), which has its
+  // own title bar, so the main window's control clearance doesn't apply there.
+  const floating = IS_FLOAT_WINDOW && !embedded
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const el = (window as any).electron
   // The frameless window's controls sit over the top-right corner.
-  const needsWindowControlClearance = !embedded && isElectron && !showNowPlaying && !showQueue
+  const needsWindowControlClearance = !embedded && !floating && isElectron && !showNowPlaying && !showQueue
   // Falls back to the standalone console's own deep link (see
   // ADMIN_TAB_PATHS) when nobody passed an explicit initialTab - only
   // relevant when not embedded, since the embedded panel has no URL of its
@@ -75,6 +82,9 @@ export default function AdminPage({ embedded = false, initialTab, onExit }: {
   // a channel they don't actually manage. See useChannelRoles for the same
   // pattern used elsewhere.
   const { isAdmin: isFullAdmin, canReviewStaff: canAccessStaff } = useStaffRoles(account, activeChannel, channels)
+  // Cover art is the exception: songs aren't per channel, so the server asks
+  // for a primary-channel manager (or admin) whichever channel is active.
+  const canReviewCoverArt = useCanManage()
   const otpEnabled = !!account?.otp_enabled
 
   const {
@@ -89,6 +99,7 @@ export default function AdminPage({ embedded = false, initialTab, onExit }: {
     feedbackFilter, setFeedbackFilter,
     feedback,
     refresh,
+    refreshCoverArtCount,
     nav,
   } = useAdminQueue({
     canLoad: canAccessStaff,
@@ -96,7 +107,8 @@ export default function AdminPage({ embedded = false, initialTab, onExit }: {
     gateNonProposalTabs: true,
     activeChannel,
     initialTab: effectiveInitialTab ?? 'proposals',
-    managerNavIds: ['proposals', 'comp-proposals', 'comp-replace'],
+    managerNavIds: ['proposals', 'cover-art', 'comp-proposals', 'comp-replace'],
+    canReviewCoverArt,
   })
 
   // No more overview grid - every section already has its own deep link
@@ -111,6 +123,21 @@ export default function AdminPage({ embedded = false, initialTab, onExit }: {
   const switchTab = (t: AdminTab): void => {
     setTab(t)
     if (!embedded) setActiveAdminTab(t)
+  }
+  // A pop-out stays mounted when it's asked for another section (an admin
+  // tile clicked while it's open), so follow the store's tab instead of only
+  // reading it at mount.
+  useEffect(() => {
+    if (floating && activeAdminTab && activeAdminTab !== tab) setTab(activeAdminTab)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [floating, activeAdminTab])
+
+  // Moves the console into its own window and takes the main window back to
+  // where it was, so the page isn't open twice.
+  const detach = (): void => {
+    el?.openFloatWindow?.('admin', { tab })
+    const prev = useStore.getState().previousView
+    go(prev && prev !== 'admin' ? prev : 'api-tracker')
   }
 
   // Each tab's content, once mounted, stays mounted (just hidden) instead of
@@ -155,6 +182,14 @@ export default function AdminPage({ embedded = false, initialTab, onExit }: {
             className="flex items-center gap-1.5 p-1.5 -ml-1.5 rounded-lg hover:bg-surface-overlay transition-colors text-text-muted hover:text-text-primary text-xs font-semibold">
             <ChevronLeft size={16} /> Dashboard
           </button>
+        ) : floating ? (
+          // No "Back" in a pop-out - there's nothing behind it. Docking puts
+          // the console back in the main window and closes this one.
+          <button onClick={() => { attachToMainWindow({ view: 'admin', tab }); el?.closeSelf?.() }}
+            className="flex items-center gap-1.5 p-1.5 -ml-1.5 rounded-lg hover:bg-surface-overlay transition-colors text-text-muted hover:text-text-primary text-xs"
+            title="Move back into the main window">
+            <PictureInPicture2 size={13} /> Dock
+          </button>
         ) : !embedded ? (
           <button onClick={() => go('api-tracker')}
             className="p-1.5 rounded-lg hover:bg-surface-overlay transition-colors text-text-muted hover:text-text-primary">
@@ -170,10 +205,16 @@ export default function AdminPage({ embedded = false, initialTab, onExit }: {
         {/* A tab's data loads once per visit (see the sig comment in
             useAdminQueue) rather than refetching every time it's reselected -
             this is the explicit way back to fresh data instead. */}
-        {tab !== 'comp-proposals' && tab !== 'comp-replace' && tab !== 'channels' && tab !== 'eras' && tab !== 'cdn-nodes' && tab !== 'beta' && tab !== 'lyrics' && tab !== 'logs' && (
+        {tab !== 'cover-art' && tab !== 'comp-proposals' && tab !== 'comp-replace' && tab !== 'channels' && tab !== 'eras' && tab !== 'cdn-nodes' && tab !== 'beta' && tab !== 'lyrics' && tab !== 'logs' && (
           <button onClick={() => refresh()} disabled={loading} title="Refresh"
             className="shrink-0 p-1.5 rounded-lg text-accent hover:bg-surface-overlay transition-colors disabled:opacity-40">
             <RefreshCw size={12} className={loading ? 'animate-spin' : ''} />
+          </button>
+        )}
+        {!embedded && !floating && el?.openFloatWindow && (
+          <button onClick={detach} title="Open in its own window"
+            className="shrink-0 p-1.5 rounded-lg text-text-muted hover:text-text-primary hover:bg-surface-overlay transition-colors">
+            <PictureInPicture2 size={12} />
           </button>
         )}
       </div>
@@ -225,6 +266,11 @@ export default function AdminPage({ embedded = false, initialTab, onExit }: {
               })}
               channel={activeChannel}
             />
+          </div>
+        )}
+        {visited.has('cover-art') && canReviewCoverArt && (
+          <div className={tab === 'cover-art' ? 'h-full' : 'hidden'}>
+            <CoverArtTab onCountsChanged={refreshCoverArtCount} />
           </div>
         )}
         {visited.has('comp-proposals') && (

@@ -10,6 +10,8 @@ import { clearDonorPlaybackCache } from '../lib/donorPlayback'
 import { clearDonorImageCache } from '../lib/donorImageCache'
 import { clearDecryptedAttachments } from '../lib/chatAttachmentCache'
 import { clearDonorCoverCache } from '../lib/donorCoverArt'
+import { clearCoverArtImageCache } from '../lib/coverArtImages'
+import type { CoverArtTarget } from '../lib/coverArtApi'
 import * as preferencesApi from '../lib/preferencesApi'
 import * as profilePushApi from '../lib/profilePushApi'
 import { apiFetch, apiPeek, getSongById, buildStreamUrl, buildImageUrl, parseDuration, overrideCoverUrl, fetchChannels, getSongsByIds, songToTrack, peekTrackerCatalog, fetchTrackerCatalog, OMIT_BULK } from '../lib/juicewrldApi'
@@ -435,6 +437,10 @@ interface AppState {
   // opened on. See components/LyricsGenModal.
   lyricsGenModal: LyricsGenTarget | null
 
+  // The song the "Submit cover art" dialog is open for (null = closed). See
+  // components/CoverArtSubmitModal.
+  coverArtModal: CoverArtTarget | null
+
   // Playlist folders � a local-first grouping over both synced and local
   // playlists (keyed by "api:<id>"/"local:<id>"). Persisted to localStorage and
   // usable logged out; synced-playlist membership syncs to the account once the
@@ -806,6 +812,9 @@ interface AppActions {
   /** Opens / closes the "Synced lyrics" dialog (hand sync, and Whisper for donors), optionally on a song. */
   openLyricsGen: (target?: LyricsGenTarget) => void
   closeLyricsGen: () => void
+  /** Opens / closes the "Submit cover art" dialog for a song. */
+  openCoverArtSubmit: (target: CoverArtTarget) => void
+  closeCoverArtSubmit: () => void
   /** Queues a general feedback report and tries to deliver it. `contact` is
    *  the optional reach-me field the endpoint accepts. Resolves once that
    *  delivery attempt settles: `true` if it actually reached the server this
@@ -2261,6 +2270,9 @@ export const useStore = create<AppStore>((set, get, store) => ({
     set({ lyricsGenModal: target })
   },
   closeLyricsGen: () => set({ lyricsGenModal: null }),
+  coverArtModal: null,
+  openCoverArtSubmit: (target) => set({ coverArtModal: target }),
+  closeCoverArtSubmit: () => set({ coverArtModal: null }),
 
   _enqueueReport: async (report: PendingReport) => {
     const next = [...get().pendingReports, report]
@@ -2671,6 +2683,7 @@ export const useStore = create<AppStore>((set, get, store) => ({
     ls.set('donorPlaylists', [])
     clearDonorPlaybackCache()
     clearDonorImageCache()
+    clearCoverArtImageCache()
     clearDecryptedAttachments()
     clearDonorCoverCache()
     // Overrides stay on this device after signing out, the same way likes do -

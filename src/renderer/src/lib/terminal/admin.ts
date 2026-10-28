@@ -6,6 +6,7 @@ import {
   adminProposalCounts, adminReverseCompProposal, adminReverseProposal, adminReviewApplication, adminReviewCompProposal,
   adminReviewProposal, type ApplicationStatus, type ProposalStatus,
 } from '../userApi'
+import { adminCoverArtCounts } from '../coverArtApi'
 import { fail, type TermCommand } from './types'
 import { pageRows } from './more'
 
@@ -64,13 +65,14 @@ export const ADMIN_COMMANDS: TermCommand[] = [
   {
     name: 'pending', group: 'Admin', usage: 'pending', description: 'How much is waiting in each review queue',
     run: async (_a, ctx) => {
-      const [song, comp, apps, mods] = await Promise.allSettled([
-        adminProposalCounts(), adminCompProposalCounts(), adminListApplications('pending'), listSiteModeration({ activeOnly: true }),
+      const [song, comp, covers, apps, mods] = await Promise.allSettled([
+        adminProposalCounts(), adminCompProposalCounts(), adminCoverArtCounts(), adminListApplications('pending'), listSiteModeration({ activeOnly: true }),
       ])
       const n = <T,>(r: PromiseSettledResult<T>, pick: (v: T) => number): string => (r.status === 'fulfilled' ? String(pick(r.value)) : '?')
       ctx.print([
         `song proposals    ${n(song, (v) => v.pending)} pending`,
         `comp proposals    ${n(comp, (v) => v.pending)} pending`,
+        `cover art         ${n(covers, (v) => v.pending)} pending`,
         `applications      ${n(apps, (v) => v.length)} pending`,
         `site actions      ${n(mods, (v) => v.length)} active`,
       ].join('\n'))

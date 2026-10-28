@@ -532,6 +532,9 @@ const FLOAT_SIZES = {
   // pane), so it needs real width — below ~760 the detail pane stops being
   // usable and the tab strip starts scrolling.
   profile:       { width: 1180, height: 820, minWidth: 760, minHeight: 560 },
+  // The admin console's queues are the same master-detail splits as the
+  // profile's, so the same sizing applies.
+  admin:         { width: 1180, height: 820, minWidth: 760, minHeight: 560 },
 }
 // Window titles for the pop-outs. Every window boots the same renderer bundle,
 // whose <title> is "unreleased", so without these each pop-out would be an
@@ -546,6 +549,7 @@ const FLOAT_TITLES = {
   equalizer:      'Equalizer',
   convert:        'Convert Format',
   profile:        'Profile',
+  admin:          'Admin',
 }
 function floatTitle(view) {
   return `${FLOAT_TITLES[view] || 'Unreleased'} — Unreleased`

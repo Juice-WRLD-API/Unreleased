@@ -3,6 +3,7 @@ import { staffProfileView } from './userApi'
 import { setSongPrefsCache } from './songPrefs'
 import { setCustomSkinsCache } from './skins'
 import type { ViewType, LibraryTrack } from '../types'
+import type { AdminTab } from '../hooks/useAdminQueue'
 
 // State mirrored between the main window and pop-out windows (see FloatApp).
 // Each window runs its own renderer process with its own store instance, so
@@ -85,6 +86,8 @@ type AttachTarget =
   // views to show is derived from the account, so the main window works it out
   // rather than trusting a view name off the wire.
   | { view: 'profile' }
+  // The admin console lands back on whichever section the pop-out was showing.
+  | { view: 'admin'; tab: AdminTab }
 
 type SyncMessage =
   | { type: 'patch'; payload: SyncPatch }
@@ -194,6 +197,7 @@ export function initWindowSync(isFloat: boolean): void {
         // so we force the in-app view even when that page's auto-pop-out is on.
         if (t.view === 'settings') useStore.setState({ showSettings: true })
         else if (t.view === 'profile') s.setActiveView(staffProfileView(useStore.getState().account))
+        else if (t.view === 'admin') { s.setActiveAdminTab(t.tab); s.setActiveView('admin') }
         else if (t.view === 'editor') { useStore.setState({ pendingEditorSongId: t.songId }); s.setActiveView('editor') }
         else if (t.view === 'song-info') s.setInfoSongId(t.songId)
         else if (t.view === 'local-editor') {

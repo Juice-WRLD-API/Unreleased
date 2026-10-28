@@ -64,6 +64,7 @@ import { useDebugLogViewer } from './lib/debugLog'
 import ChatNotificationBanner from './components/ChatNotificationBanner'
 import UserAuthModal from './components/UserAuthModal'
 import ReportModal from './components/ReportModal'
+import CoverArtSubmitModal from './components/CoverArtSubmitModal'
 import ConvertFormatModal from './components/ConvertFormatModal'
 import BulkEditModal from './components/BulkEditModal'
 import UrlImportModal from './components/UrlImportModal'
@@ -432,6 +433,7 @@ export default function App(): JSX.Element {
       )}
       <ErrorBoundary fallback={null}><Suspense fallback={null}><LoginApprovalPrompt /></Suspense></ErrorBoundary>
       <ErrorBoundary variant="overlay"><ReportModal /></ErrorBoundary>
+      <ErrorBoundary variant="overlay"><CoverArtSubmitModal /></ErrorBoundary>
       <ErrorBoundary variant="overlay"><ConvertFormatModal /></ErrorBoundary>
       <ErrorBoundary variant="overlay"><BulkEditModal /></ErrorBoundary>
       <ErrorBoundary variant="overlay"><UrlImportModal /></ErrorBoundary>

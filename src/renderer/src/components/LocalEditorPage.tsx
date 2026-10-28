@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { Loader2, Check, AlertCircle, ChevronLeft, Music2, Upload, Trash2, PictureInPicture2, Minimize2, ImageIcon } from 'lucide-react'
 import { useStore, useStorePick, IS_FLOAT_WINDOW } from '../store/useStore'
 import { attachToMainWindow, broadcastLibraryTrackUpdate } from '../lib/windowSync'
@@ -132,9 +132,17 @@ export default function LocalEditorPage(): JSX.Element {
   }, [track?.filePath])
 
   // Landed here with nothing to edit — send the user back where they came from.
+  // Not in the pop-out: it shows this page whatever activeView says, and its
+  // track only arrives once the library loads from disk. Bouncing there flipped
+  // previousView, which flipped backView, which re-ran this effect until React
+  // stopped with "maximum update depth exceeded" (as EditorPage once did).
+  // backView is read from a ref so it can't re-trigger the effect that changes it.
+  const backViewRef = useRef(backView)
+  backViewRef.current = backView
   useEffect(() => {
-    if (!track) setActiveView(backView)
-  }, [track, setActiveView, backView])
+    if (IS_FLOAT_WINDOW) return
+    if (!track) setActiveView(backViewRef.current)
+  }, [track, setActiveView])
 
   if (!track || !fields || !original) {
     return (

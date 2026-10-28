@@ -98,7 +98,7 @@ export default function AppMenu({ variant = 'bar', collapsed = false }: { varian
     globalHotkeysEnabled, setGlobalHotkeysEnabled,
     developerMode, setDeveloperMode,
     addLibraryFolder, libraryScanning, libraryAutoRefresh, setLibraryAutoRefresh,
-    syncOfflinePlaylists, openReport, openLyricsGen,
+    syncOfflinePlaylists, openReport, openLyricsGen, openCoverArtSubmit,
     hotkeyBindings, navOrder,
   } = useStorePick(
     'account', 'logoutAccount', 'setShowUserAuth',
@@ -118,7 +118,7 @@ export default function AppMenu({ variant = 'bar', collapsed = false }: { varian
     'globalHotkeysEnabled', 'setGlobalHotkeysEnabled',
     'developerMode', 'setDeveloperMode',
     'addLibraryFolder', 'libraryScanning', 'libraryAutoRefresh', 'setLibraryAutoRefresh',
-    'syncOfflinePlaylists', 'openReport', 'openLyricsGen',
+    'syncOfflinePlaylists', 'openReport', 'openLyricsGen', 'openCoverArtSubmit',
     'hotkeyBindings', 'navOrder',
   )
 
@@ -256,6 +256,7 @@ export default function AppMenu({ variant = 'bar', collapsed = false }: { varian
         { kind: 'item', label: 'Like current song', hotkey: 'like', onClick: hk('like'), disabled: !currentTrack },
         { kind: 'sep' },
         { kind: 'item', label: 'Report an issue with this song', onClick: run(() => { if (currentSongId != null) openReport({ kind: 'song', songId: currentSongId, songName: currentTrack?.title ?? '' }) }), disabled: currentSongId == null },
+        { kind: 'item', label: 'Submit cover art for this song…', onClick: run(() => { if (currentSongId != null) openCoverArtSubmit({ songId: currentSongId, songName: currentTrack?.title ?? '', currentCover: currentTrack?.apiImageUrl ?? currentTrack?.imageUrl }) }), disabled: currentSongId == null || !account },
         { kind: 'sep' },
         { kind: 'item', label: 'Focus search', hotkey: 'focus-search', onClick: hk('focus-search') },
         { kind: 'item', label: 'Clear queue', hotkey: 'clear-queue', onClick: hk('clear-queue') },

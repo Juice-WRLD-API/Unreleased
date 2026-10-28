@@ -5,7 +5,7 @@ import {
   Clock, Hash, MicVocal, Music, Wrench, FileText, Piano, MapPin,
   Calendar, CalendarClock, CalendarDays, Droplets, Gauge, Layers,
   GitBranch, Info, StickyNote, Quote, Copy, Download, Loader2, LucideIcon, PictureInPicture2, Minimize2,
-  Activity, Music4
+  Activity, Music4, ImagePlus
 } from 'lucide-react'
 import { useStore, useStorePick } from '../store/useStore'
 import { useDragToDismiss } from '../hooks/useDragToDismiss'
@@ -95,6 +95,8 @@ export default function SongInfoModal({ song, onClose, onEdit, floating = false,
   const popoutSongInfo = useStore((s) => s.popoutWindows.songInfo)
   const songPrefs = useStore((s) => s.songPrefs)
   const openReport = useStore((s) => s.openReport)
+  const openCoverArtSubmit = useStore((s) => s.openCoverArtSubmit)
+  const signedIn = useStore((s) => !!s.account)
   const redirectToFloat = !floating && !docked && !!el?.openFloatWindow && popoutSongInfo
   useEffect(() => {
     if (redirectToFloat && song) {
@@ -501,6 +503,14 @@ export default function SongInfoModal({ song, onClose, onEdit, floating = false,
           >
             <Flag size={13} /> Report wrong or missing info / lyrics
           </button>
+          {signedIn && (
+            <button
+              onClick={() => openCoverArtSubmit({ songId: displaySong.id, songName: apiPrimaryTitle, currentCover: displaySong.image_url })}
+              className="mt-2 w-full flex items-center justify-center gap-2 py-2 rounded-lg border border-[var(--border)] text-text-muted hover:text-text-primary hover:bg-surface-overlay transition-colors text-xs"
+            >
+              <ImagePlus size={13} /> Submit cover art
+            </button>
+          )}
 
         </div>
       </div>

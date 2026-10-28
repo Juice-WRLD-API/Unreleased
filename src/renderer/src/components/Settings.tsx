@@ -8,6 +8,7 @@ import { DebugAnonymousToggle, DebugLogOpenButton, DebugRecordButton } from './D
 import { ADDRESSES as DONATION_ADDRESSES, AddressRow as DonationAddressRow } from './DonationNotice'
 import VizControls from './VizControls'
 import MyCdnNodes from './MyCdnNodes'
+import MyCoverArt from './MyCoverArt'
 import ApiKeys from './ApiKeys'
 import Passkeys from './Passkeys'
 import { useStore, useStorePick, type SidebarPosition, type AppMenuPosition, type PopoutWindowKind } from '../store/useStore'
@@ -1258,6 +1259,9 @@ export default function Settings({ floating = false }: { floating?: boolean }): 
                         <ChatKeyTransfer userId={account.id} />
                       </>
                     )}
+
+                    <p className="text-[10px] font-semibold uppercase tracking-widest text-text-muted mt-4 mb-1.5 px-0.5">My cover art</p>
+                    <MyCoverArt />
 
                     <p className="text-[10px] font-semibold uppercase tracking-widest text-text-muted mt-4 mb-1.5 px-0.5">My CDN nodes</p>
                     <MyCdnNodes />

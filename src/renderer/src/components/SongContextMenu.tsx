@@ -2,7 +2,7 @@ import { copyText } from '../lib/clipboard'
 import { useEffect, useState } from 'react'
 import type { ComponentProps } from 'react'
 import {
-  Info, ListPlus, ListEnd, Plus, Folder, Pencil, Download, HardDrive, PackageOpen, Check, Loader2, CheckSquare2, Heart, Trash2, ListMusic, CircleArrowDown, Flag, FileAudio2, Clipboard, ClipboardCopy, Copy, FolderInput, FileCog, Share2, X, Link2, Layers, MicVocal, Sparkles, Ellipsis,
+  Info, ListPlus, ListEnd, Plus, Folder, Pencil, Download, HardDrive, PackageOpen, Check, Loader2, CheckSquare2, Heart, Trash2, ListMusic, CircleArrowDown, Flag, FileAudio2, Clipboard, ClipboardCopy, Copy, FolderInput, FileCog, Share2, X, Link2, Layers, MicVocal, Sparkles, Ellipsis, ImagePlus,
 } from 'lucide-react'
 import { useStore, IS_FLOAT_WINDOW } from '../store/useStore'
 import { useShallow } from 'zustand/react/shallow'
@@ -261,8 +261,11 @@ export default function SongContextMenu({
   // local file or donor file). The dialog lives in the main window only.
   const canSyncLyrics = !IS_FLOAT_WINDOW && !isUnplayable && !!track.streamUrl
     && (!!track.path || isDonorStreamUrl(track.streamUrl))
-  // Sharing, lyrics and reporting share one flyout, so the top level stays
-  // short. A lone row is shown flat rather than as a submenu of one.
+  // Any signed-in account can send in cover art; a manager reviews it.
+  const canSubmitCover = hasValidSong && !!account
+  const hasShareRows = !!(canShareToChat || onShareLyrics || canSyncLyrics)
+  // Sharing, lyrics, cover art and reporting share one flyout, so the top
+  // level stays short. A lone row is shown flat rather than as a submenu of one.
   const moreRows = ([
     canShareToChat && { icon: Share2, label: 'Share to chat', keepOpen: true, onSelect: () => setShareOpen(true) },
     onShareLyrics && { icon: MicVocal, label: 'Share lyrics', onSelect: onShareLyrics },
@@ -271,10 +274,20 @@ export default function SongContextMenu({
       label: 'Synced lyrics',
       onSelect: () => useStore.getState().openLyricsGen({ track, songId, tab: account?.is_donor ? 'create' : 'sync' }),
     },
+    canSubmitCover && {
+      icon: ImagePlus,
+      label: 'Submit cover art',
+      separatorBefore: hasShareRows,
+      onSelect: () => useStore.getState().openCoverArtSubmit({
+        songId: songId as number,
+        songName: track.apiTitle || track.title,
+        currentCover: song?.image_url ?? track.apiImageUrl ?? track.imageUrl,
+      }),
+    },
     hasValidSong && {
       icon: Flag,
       label: 'Report issue',
-      separatorBefore: !!(canShareToChat || onShareLyrics || canSyncLyrics),
+      separatorBefore: hasShareRows && !canSubmitCover,
       onSelect: () => useStore.getState().openReport({ kind: 'song', songId: songId as number, songName: track.apiTitle || track.title }),
     },
   ] satisfies ContextMenuEntry[]).filter((r): r is Exclude<typeof r, false | undefined | null> => !!r)

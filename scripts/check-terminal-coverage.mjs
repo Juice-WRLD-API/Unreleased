@@ -41,6 +41,7 @@ const NOT_APPLICABLE = {
   'desktopBridge.*': 'answers the desktop widgets with searchSongs, userApi.getFavorites/getPlaylist and /songs/?era=, all reachable (search, liked, playlist, find)',
   'donorImageCache.*': 'caches donorFilesApi.fetchDonorFileBlob (donor get)',
   'donorCoverArt.*': 'caches donorFilesApi.fetchDonorFileBlob (donor get)',
+  'coverArtImages.*': 'caches coverArtApi.fetchCoverArtImage (coverart image)',
   'heardleMatchApi.*': 'live versus match runs over a websocket; the REST queue calls are covered by daily versus',
   'notificationSocket.*': 'live notification websocket, not a request/response call',
   // Loaders and wrappers over endpoints that have their own command.
