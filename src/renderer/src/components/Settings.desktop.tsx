@@ -24,6 +24,7 @@ import { useCustomFonts } from '../hooks/useCustomFonts'
 import { hasChatAccess, useChatStore } from '../store/chatStore'
 import ChatDevices from './chat/ChatDevices'
 import MyCdnNodes from './MyCdnNodes'
+import MyCoverArt from './MyCoverArt'
 import ApiKeys from './ApiKeys'
 import ChatKeyTransfer from './chat/ChatKeyTransfer'
 import { orderedNavItems, isNavItemVisible, DEFAULT_NAV_ORDER, DEFAULT_NAV_VISIBILITY, orderedNavControls, isNavControlAvailable, DEFAULT_NAV_CONTROL_ORDER, DEFAULT_NAV_CONTROL_VISIBILITY } from '../lib/navItems'
@@ -93,6 +94,7 @@ const SETTINGS_SEARCH_INDEX: { tab: Tab; label: string; sub?: string; devOnly?: 
   { tab: 'account', label: 'Bio' },
   { tab: 'account', label: 'Show listening history', sub: 'Visible to anyone with your profile link' },
   { tab: 'account', label: 'Show public playlists', sub: 'Lists playlists already marked public' },
+  { tab: 'account', label: 'My cover art', sub: 'Cover art you sent in for songs' },
   { tab: 'account', label: 'My CDN nodes', sub: 'Nodes linked to your account' },
   { tab: 'account', label: 'Two-factor authentication', sub: 'Whether sign-ins ask for an authenticator code' },
   { tab: 'account', label: 'Passkeys', sub: 'Sign in with your face, fingerprint, PIN, a security key or your phone' },
@@ -918,6 +920,9 @@ export default function Settings(): JSX.Element {
                         <ChatKeyTransfer userId={account.id} />
                       </>
                     )}
+
+                    <p className="text-[10px] font-semibold uppercase tracking-widest text-text-muted mt-4 mb-1.5 px-0.5">My cover art</p>
+                    <MyCoverArt />
 
                     <p className="text-[10px] font-semibold uppercase tracking-widest text-text-muted mt-4 mb-1.5 px-0.5">My CDN nodes</p>
                     <MyCdnNodes />

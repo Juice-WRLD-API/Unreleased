@@ -110,7 +110,7 @@ export default function EditorProfileView(): JSX.Element {
     avatarUploading, avatarError, handleAvatarFile,
     refreshKey, setRefreshKey, showAddSong, setShowAddSong, openAdmin,
     proposalsView, setProposalsView, expandedProposalId, setExpandedProposalId, compSearch, setCompSearch,
-    isContributor, isAdmin, isManager, canReviewReports, canReviewStaff,
+    isContributor, isAdmin, isManager, canReviewReports, canReviewStaff, canReviewCoverArt,
     loadingProposals, refreshing, filter, setFilter, search, setSearch, deletingId, resubmittingId,
     filteredProposals, handleDelete, handleResubmit, handleReview, reviewingId, canReviewProposals, tabCount, proposals,
     leaderboard, loadingLeaderboard, myEntry,
@@ -544,6 +544,7 @@ export default function EditorProfileView(): JSX.Element {
                         {!otpLocked && (
                           <>
                             <AdminStatBox label="Song edits" value={adminPreview?.pendingProposals} highlight={!!adminPreview?.pendingProposals} onClick={() => openAdmin('proposals')} />
+                            {canReviewCoverArt && <AdminStatBox label="Cover art" value={adminPreview?.pendingCoverArt} highlight={!!adminPreview?.pendingCoverArt} onClick={() => openAdmin('cover-art')} />}
                             <AdminStatBox label="Comp files" value={adminPreview?.pendingComp} highlight={!!adminPreview?.pendingComp} onClick={() => openAdmin('comp-proposals')} />
                             {CONTRIBUTOR_ENABLED && <AdminStatBox label="Replace comp" value="Open" onClick={() => openAdmin('comp-replace')} />}
                           </>

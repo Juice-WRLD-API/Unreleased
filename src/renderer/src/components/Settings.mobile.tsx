@@ -23,6 +23,7 @@ import { orderedNavItems, isNavItemVisible, DEFAULT_NAV_ORDER, DEFAULT_NAV_VISIB
 import { hasChatAccess, useChatStore } from '../store/chatStore'
 import ChatDevices from './chat/ChatDevices'
 import MyCdnNodes from './MyCdnNodes'
+import MyCoverArt from './MyCoverArt'
 import ApiKeys from './ApiKeys'
 import Passkeys from './Passkeys'
 import ChatKeyTransfer from './chat/ChatKeyTransfer'
@@ -176,6 +177,7 @@ const SETTINGS_SEARCH_INDEX: { tab: Tab; label: string; sub?: string; devOnly?: 
   { tab: 'about', label: 'Record debug log', sub: 'Record console messages and network requests to a file you can send us' },
   { tab: 'about', label: 'Open debug log', sub: 'View a saved debug log file - requests, errors and console messages' },
   { tab: 'about', label: 'About', sub: 'Version, GitHub, Discord, API links' },
+  { tab: 'account', label: 'My cover art', sub: 'Cover art you sent in for songs' },
   { tab: 'account', label: 'My CDN nodes', sub: 'Nodes linked to your account' },
   { tab: 'account', label: 'Two-factor authentication', sub: 'Whether sign-ins ask for an authenticator code' },
   { tab: 'account', label: 'Passkeys', sub: 'Sign in with your face, fingerprint, PIN, a security key or your phone' },
@@ -1038,6 +1040,9 @@ export default function Settings(): JSX.Element {
                         <ChatKeyTransfer userId={account.id} />
                       </SettingsCard>
                     )}
+                    <SettingsCard title="My cover art">
+                      <MyCoverArt />
+                    </SettingsCard>
                     <SettingsCard title="My CDN nodes">
                       <MyCdnNodes />
                     </SettingsCard>

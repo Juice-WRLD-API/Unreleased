@@ -5,6 +5,8 @@ import { clearDonorPlaybackCache } from '../lib/donorPlayback'
 import { clearDonorImageCache } from '../lib/donorImageCache'
 import { clearDecryptedAttachments } from '../lib/chatAttachmentCache'
 import { clearDonorCoverCache } from '../lib/donorCoverArt'
+import { clearCoverArtImageCache } from '../lib/coverArtImages'
+import type { CoverArtTarget } from '../lib/coverArtApi'
 import { APP_VERSION } from '../lib/appVersion'
 import { ls } from '../lib/persist'
 import * as userApi from '../lib/userApi'
@@ -400,6 +402,10 @@ interface AppState {
   // The open "Synced lyrics" dialog (null = closed) and the song it was
   // opened on. See components/LyricsGenModal.
   lyricsGenModal: LyricsGenTarget | null
+
+  // The song the "Submit cover art" dialog is open for (null = closed). See
+  // components/CoverArtSubmitModal.
+  coverArtModal: CoverArtTarget | null
   // Whether ErrorBoundary auto-submits a crash report the moment it catches
   // an error, through the same feedback pipeline (submitFeedback) the manual
   // "Report this error" button uses. On by default; Settings can turn it off
@@ -819,6 +825,9 @@ interface AppActions {
   /** Opens / closes the "Synced lyrics" dialog (hand sync, and Whisper for donors), optionally on a song. */
   openLyricsGen: (target?: LyricsGenTarget) => void
   closeLyricsGen: () => void
+  /** Opens / closes the "Submit cover art" dialog for a song. */
+  openCoverArtSubmit: (target: CoverArtTarget) => void
+  closeCoverArtSubmit: () => void
 
 
   setLibraryTracks: (tracks: LibraryTrack[]) => void
@@ -2527,6 +2536,7 @@ export const useStore = create<AppStore>((set, get, store) => ({
     ls.set('donorPlaylists', [])
     clearDonorPlaybackCache()
     clearDonorImageCache()
+    clearCoverArtImageCache()
     clearDecryptedAttachments()
     clearDonorCoverCache()
     // Overrides stay on this device after signing out, the same way likes do -
@@ -2654,6 +2664,9 @@ export const useStore = create<AppStore>((set, get, store) => ({
     set({ lyricsGenModal: target })
   },
   closeLyricsGen: () => set({ lyricsGenModal: null }),
+  coverArtModal: null,
+  openCoverArtSubmit: (target) => set({ coverArtModal: target }),
+  closeCoverArtSubmit: () => set({ coverArtModal: null }),
   setPendingCompProposal: (pendingCompProposal) => set({ pendingCompProposal }),
   setPendingEditorSongId: (pendingEditorSongId) => set({ pendingEditorSongId }),
   openSongEditor: (songId) => {

@@ -20,6 +20,7 @@ import {
 import ReportsTab from './ReportsTab.mobile'
 import FeedbackTab from './FeedbackTab'
 import CompProposalsTab from './CompProposalsTab.mobile'
+import CoverArtTab from './CoverArtTab'
 import ChannelsTab from './ChannelsTab.mobile'
 import EraTab from './EraTab.mobile'
 import CdnNodesTab from './CdnNodesTab.mobile'
@@ -27,6 +28,7 @@ import LogsTab from './LogsTab'
 import LyricsGenAdminTab from './LyricsGenAdminTab'
 import { useBackToClose } from '../hooks/useBackToClose'
 import { useStaffRoles } from '../hooks/useStaffRoles'
+import { useCanManage } from '../hooks/useChannelRoles'
 import { useAdminQueue, type AdminTab } from '../hooks/useAdminQueue'
 import { useOtpGate } from '../hooks/useOtpGate'
 import { useVisitedTabs } from '../hooks/useVisitedTabs'
@@ -76,6 +78,8 @@ export default function AdminPage({ embedded = false, initialTab, onExit }: {
   // channel, not "any channel" - see useChannelRoles.
   const { isAdmin, isManager, canReviewStaff } = useStaffRoles(account, activeChannel, channels)
   const managerOnly  = isManager && !isAdmin
+  // Cover art isn't per channel: the server asks for a primary-channel manager.
+  const canReviewCoverArt = useCanManage()
   const otpEnabled = !!account?.otp_enabled
 
   const {
@@ -90,6 +94,7 @@ export default function AdminPage({ embedded = false, initialTab, onExit }: {
     feedbackFilter, setFeedbackFilter,
     feedback,
     refresh,
+    refreshCoverArtCount,
     nav,
   } = useAdminQueue({
     canLoad: isAdmin,
@@ -101,8 +106,10 @@ export default function AdminPage({ embedded = false, initialTab, onExit }: {
     // page refresh) - managerOnly flips from false to true once it lands,
     // and the tab set at mount time (still 'proposals') would otherwise
     // strand a manager on a tab their nav bar no longer offers a button for.
+    // Cover art stays when it's in that nav (see useAdminQueue).
     forceTab: { when: managerOnly, tab: 'comp-proposals' },
-    managerNavIds: ['comp-proposals'],
+    managerNavIds: ['cover-art', 'comp-proposals'],
+    canReviewCoverArt,
   })
 
   // No more overview grid - every section already has its own deep link
@@ -162,7 +169,7 @@ export default function AdminPage({ embedded = false, initialTab, onExit }: {
           {/* A tab's data loads once per visit (see the sig comment in
               useAdminQueue) rather than refetching every time it's reselected -
               this is the explicit way back to fresh data instead. */}
-          {tab !== 'comp-proposals' && tab !== 'channels' && tab !== 'eras' && tab !== 'cdn-nodes' && tab !== 'lyrics' && tab !== 'logs' ? (
+          {tab !== 'cover-art' && tab !== 'comp-proposals' && tab !== 'channels' && tab !== 'eras' && tab !== 'cdn-nodes' && tab !== 'lyrics' && tab !== 'logs' ? (
             <BarButton label="Refresh" onClick={() => { if (!loading) refresh() }}>
               <RefreshCw size={18} className={loading ? 'animate-spin opacity-60' : ''} />
             </BarButton>
@@ -207,6 +214,11 @@ export default function AdminPage({ embedded = false, initialTab, onExit }: {
         {visited.has('proposals') && (
           <div className={tab === 'proposals' ? 'h-full' : 'hidden'}>
             <ProposalsTab proposals={proposals} status={propStatus} setStatus={setPropStatus} onChanged={() => refresh()} channel={activeChannel} />
+          </div>
+        )}
+        {visited.has('cover-art') && canReviewCoverArt && (
+          <div className={tab === 'cover-art' ? 'h-full' : 'hidden'}>
+            <CoverArtTab stacked onCountsChanged={refreshCoverArtCount} />
           </div>
         )}
         {visited.has('comp-proposals') && (

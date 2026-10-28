@@ -123,6 +123,7 @@ const RecognitionModal = lazyView(() => import('./components/RecognitionModal'))
 const LoginApprovalPrompt = lazyView(() => import('./components/LoginApprovalPrompt'))
 // Donors and administrators only - fetched the first time it opens.
 const LyricsGenModal = lazyOverlay(() => import('./components/LyricsGenModal'))
+const CoverArtSubmitModal = lazyOverlay(() => import('./components/CoverArtSubmitModal'))
 const BulkEditModal = lazyOverlay(() => import('./components/BulkEditModal'))
 const UploadManager = lazyOverlay(() => import('./components/UploadManager'))
 const NotificationCenter = lazyOverlay(() => import('./components/NotificationCenter'))
@@ -153,6 +154,7 @@ export default function App(): JSX.Element {
   const isMobile = useIsMobile()
   const debugLogOpen = useDebugLogViewer((s) => s.log !== null)
   const lyricsGenOpen = useStore((s) => s.lyricsGenModal !== null)
+  const coverArtOpen = useStore((s) => s.coverArtModal !== null)
   useThemeEffects()
   useChatBootstrap()
   // Seed auth token from env in local dev only - import.meta.env.DEV is false in production
@@ -475,6 +477,11 @@ export default function App(): JSX.Element {
       {lyricsGenOpen && (
         <ErrorBoundary variant="overlay" onDismiss={() => useStore.getState().closeLyricsGen()}>
           <LyricsGenModal />
+        </ErrorBoundary>
+      )}
+      {coverArtOpen && (
+        <ErrorBoundary variant="overlay" onDismiss={() => useStore.getState().closeCoverArtSubmit()}>
+          <CoverArtSubmitModal />
         </ErrorBoundary>
       )}
       {showRecognition && <ErrorBoundary variant="overlay"><Suspense fallback={null}><RecognitionModal /></Suspense></ErrorBoundary>}
