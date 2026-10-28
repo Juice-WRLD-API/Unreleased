@@ -905,6 +905,25 @@ input[type='range']:active::-moz-range-thumb {
     background: var(--separator);
     pointer-events: none;
   }
+  /* .glass-thick for a panel desktop shares (the notification center): it
+     overrides that panel's own background, border and shadow on phones. */
+  .m-glass-thick {
+    background: color-mix(in srgb, var(--surface) 84%, transparent);
+    -webkit-backdrop-filter: blur(30px) saturate(1.8);
+    backdrop-filter: blur(30px) saturate(1.8);
+    border-color: transparent;
+    box-shadow:
+      inset 0 0 0 0.5px color-mix(in srgb, var(--text-primary) 12%, transparent),
+      inset 0 1px 0 color-mix(in srgb, #fff 12%, transparent),
+      0 12px 40px rgb(0 0 0 / 0.3);
+  }
+  @media (prefers-reduced-transparency: reduce) {
+    .m-glass-thick {
+      background: var(--surface-raised);
+      -webkit-backdrop-filter: none;
+      backdrop-filter: none;
+    }
+  }
 }
 
 /* The copy a closing modal or menu leaves behind to animate out on

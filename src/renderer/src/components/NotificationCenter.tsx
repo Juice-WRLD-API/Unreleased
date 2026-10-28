@@ -123,7 +123,7 @@ export default function NotificationCenter(): JSX.Element {
     if (day !== lastDay) {
       lastDay = day
       rows.push(
-        <div key={`day-${day}`} data-flip-key={`day-${day}`} className="px-3 pt-3 pb-1 text-[10px] font-semibold uppercase tracking-wider text-text-muted">
+        <div key={`day-${day}`} data-flip-key={`day-${day}`} className="px-4 md:px-3 pt-3 pb-1 text-footnote font-semibold text-text-secondary md:text-[10px] md:uppercase md:tracking-wider md:text-text-muted">
           {dayLabel(day, today)}
         </div>,
       )
@@ -140,11 +140,13 @@ export default function NotificationCenter(): JSX.Element {
         top: 'calc(env(safe-area-inset-top, 0px) + 0.5rem)',
         maxHeight: 'min(600px, calc(100svh - env(safe-area-inset-top, 0px) - var(--bottom-nav-height, 0px) - 7rem))',
       }}
-      className="animate-menu-pop fixed right-3 z-[9990] w-[360px] max-w-[calc(100vw-1.5rem)] flex flex-col rounded-xl border border-[var(--border)] bg-[var(--surface)] shadow-[0_8px_32px_rgba(0,0,0,0.4)] overflow-hidden"
+      className="animate-menu-pop fixed right-3 z-[9990] w-[360px] max-w-[calc(100vw-1.5rem)] flex flex-col rounded-[22px] md:rounded-xl border border-[var(--border)] bg-[var(--surface)] shadow-[0_8px_32px_rgba(0,0,0,0.4)] m-glass-thick overflow-hidden"
     >
-      <div className="flex items-center gap-2 px-3 py-2.5 bg-[var(--surface-overlay)] border-b border-[var(--border)] shrink-0">
-        <Bell size={13} className="text-[var(--accent)] shrink-0" />
-        <span className="text-[var(--text-primary)] text-xs font-semibold flex-1">
+      {/* Phones: frosted like the other mobile sheets, the header part of
+          the glass rather than a gray strip. */}
+      <div className="flex items-center gap-2 px-4 md:px-3 py-3 md:py-2.5 max-md:bg-transparent bg-[var(--surface-overlay)] border-b border-[var(--separator)] md:border-[var(--border)] shrink-0">
+        <Bell size={13} className="hidden md:block text-[var(--accent)] shrink-0" />
+        <span className="text-[var(--text-primary)] text-headline md:text-xs md:font-semibold md:tracking-normal flex-1">
           Notifications
           {newCount > 0 && <span className="ml-1.5 px-1.5 py-0.5 rounded-full bg-[var(--accent)]/20 text-[var(--accent)] text-[10px] font-medium">{newCount} new</span>}
         </span>
@@ -152,24 +154,24 @@ export default function NotificationCenter(): JSX.Element {
           <button
             onClick={() => clearNotifications(active === 'all' ? undefined : [active])}
             title={active === 'all' ? 'Clear every notification' : `Clear ${KIND_LABEL[active].toLowerCase()} notifications`}
-            className="text-[10px] text-[var(--text-muted)] hover:text-[var(--text-primary)] transition-colors px-1 rounded"
+            className="text-body md:text-[10px] md:tracking-normal text-accent md:text-[var(--text-muted)] hover:text-[var(--text-primary)] max-md:active:opacity-60 transition-colors px-1 rounded"
           >
             Clear
           </button>
         )}
-        <button onClick={close} aria-label="Close" className="p-0.5 rounded text-[var(--text-muted)] hover:text-[var(--text-primary)] transition-colors">
-          <X size={13} />
+        <button onClick={close} aria-label="Close" className="max-md:w-[30px] max-md:h-[30px] max-md:rounded-full max-md:bg-[var(--fill)] max-md:flex max-md:items-center max-md:justify-center p-0.5 rounded text-[var(--text-muted)] hover:text-[var(--text-primary)] transition-colors">
+          <X size={13} className="max-md:w-4 max-md:h-4" />
         </button>
       </div>
       {kinds.length > 1 && (
-        <div className="flex gap-1 px-3 py-2 border-b border-[var(--border)] overflow-x-auto no-scrollbar shrink-0">
+        <div className="flex gap-2 md:gap-1 px-4 md:px-3 py-2.5 md:py-2 border-b border-[var(--separator)] md:border-[var(--border)] overflow-x-auto no-scrollbar shrink-0">
           {(['all', ...kinds] as const).map((k) => (
             <button
               key={k}
               onClick={() => setFilter(k)}
               aria-pressed={active === k}
-              className={`px-2.5 py-1 rounded-full text-[11px] font-medium whitespace-nowrap transition-colors ${
-                active === k ? 'bg-[var(--accent)] text-white' : 'bg-surface-raised text-text-secondary hover:text-text-primary'
+              className={`h-8 md:h-auto px-3.5 md:px-2.5 md:py-1 rounded-full text-subhead md:text-[11px] md:tracking-normal font-medium whitespace-nowrap transition-colors ${
+                active === k ? 'bg-text-primary text-surface md:bg-[var(--accent)] md:text-white' : 'bg-[var(--fill)] md:bg-surface-raised text-text-primary md:text-text-secondary hover:text-text-primary'
               }`}
             >
               {k === 'all' ? 'All' : KIND_LABEL[k]}
@@ -183,8 +185,8 @@ export default function NotificationCenter(): JSX.Element {
         {rows.length > 0 ? rows : (
           <div className="flex flex-col items-center gap-2 px-6 py-10 text-center">
             <Bell size={22} className="text-[var(--text-muted)]" />
-            <p className="text-[var(--text-primary)] text-sm font-medium">No notifications</p>
-            <p className="text-[var(--text-muted)] text-xs">Chat messages, news posts, announcements and app notices show up here after they pop up.</p>
+            <p className="text-[var(--text-primary)] text-headline md:text-sm md:font-medium md:tracking-normal">No notifications</p>
+            <p className="text-[var(--text-muted)] text-footnote md:text-xs md:tracking-normal">Chat messages, news posts, announcements and app notices show up here after they pop up.</p>
           </div>
         )}
       </div>
@@ -208,19 +210,19 @@ function NotificationRow({ entry, fresh, time, onOpen }: {
       data-flip-key={entry.id}
       {...clickable(() => (entry.target ? onOpen(entry) : setExpanded((x) => !x)))}
       title={entry.target ? undefined : expanded ? 'Show less' : 'Show all'}
-      className="group relative flex items-start gap-2.5 pl-4 pr-3 py-2.5 cursor-pointer outline-none hover:bg-surface-raised focus-visible:bg-surface-raised transition-colors"
+      className="group relative flex items-start gap-2.5 pl-4 pr-3 py-2.5 cursor-pointer outline-none hover:bg-surface-raised focus-visible:bg-surface-raised max-md:active:bg-[var(--fill)] transition-colors"
     >
       {fresh && <span aria-label="New" className="absolute left-1.5 top-[1.15rem] w-1.5 h-1.5 rounded-full bg-[var(--accent)]" />}
       <NotificationIcon entry={entry} />
       <div className="min-w-0 flex-1">
         <div className="flex items-start gap-2">
-          <p className={`min-w-0 flex-1 text-sm text-text-primary break-words ${textOnly ? clamp : 'font-semibold truncate'}`}>
+          <p className={`min-w-0 flex-1 text-subhead md:text-sm md:tracking-normal text-text-primary break-words ${textOnly ? clamp : 'font-semibold truncate'}`}>
             {entry.title}
             {(entry.count ?? 1) > 1 && <span className="ml-1.5 text-[11px] font-medium text-text-muted">×{entry.count}</span>}
           </p>
-          <span className="shrink-0 pt-0.5 text-[11px] text-text-muted tabular-nums">{time}</span>
+          <span className="shrink-0 pt-0.5 text-footnote md:text-[11px] md:tracking-normal text-text-muted tabular-nums">{time}</span>
         </div>
-        {entry.body && <p className={`text-xs text-text-muted break-words ${clamp}`}>{entry.body}</p>}
+        {entry.body && <p className={`text-footnote md:text-xs md:tracking-normal text-text-muted break-words ${clamp}`}>{entry.body}</p>}
       </div>
       <button
         onClick={(e) => { e.stopPropagation(); removeNotification(entry.id) }}

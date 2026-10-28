@@ -36,9 +36,9 @@ export default function ThankYouView(): JSX.Element {
         <button
           onClick={() => setActiveView(backView)}
           aria-label="Back"
-          className="w-11 h-11 flex items-center justify-center rounded-full bg-surface/80 backdrop-blur text-text-primary active:bg-surface-overlay"
+          className="glass-button w-11 h-11 flex items-center justify-center rounded-full text-text-primary active:opacity-60 transition-opacity"
         >
-          <ChevronLeft size={20} />
+          <ChevronLeft size={24} strokeWidth={2.25} className="-ml-0.5" />
         </button>
       </div>
       <div className="relative w-full max-w-3xl mx-auto px-5 md:px-8 pt-6 md:pt-24 pb-16 text-center">

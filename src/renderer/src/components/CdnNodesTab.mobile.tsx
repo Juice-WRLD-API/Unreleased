@@ -24,12 +24,12 @@ function NodeDetail({ node, latestManifest, onRefresh, busy, actionError, onBack
 
   return (
     <div className="flex-1 flex flex-col h-full overflow-hidden">
-      <div className="shrink-0 flex items-center gap-1 px-2 py-1.5 border-b border-[var(--border)]">
-        <button onClick={onBack} title="Back" className="w-11 h-11 shrink-0 flex items-center justify-center rounded-full text-text-primary active:bg-surface-overlay transition-colors">
-          <ChevronLeft size={20} />
+      <div className="shrink-0 flex items-center gap-2 px-2 py-1.5 border-b border-[var(--separator)]">
+        <button onClick={onBack} title="Back" className="glass-button w-11 h-11 shrink-0 flex items-center justify-center rounded-full text-text-primary active:opacity-60 transition-opacity">
+          <ChevronLeft size={24} strokeWidth={2.25} className="-ml-0.5" />
         </button>
         <div className="flex-1 min-w-0">
-          <p className="text-[15px] font-bold text-text-primary truncate">{node.name}</p>
+          <p className="text-headline text-text-primary truncate">{node.name}</p>
           <p className="text-[11px] text-text-muted truncate">{node.owner_username || 'Unclaimed'}{node.region ? ` · ${node.region}` : ''}</p>
         </div>
         <div className="shrink-0 pr-2 flex items-center gap-1">
@@ -44,9 +44,9 @@ function NodeDetail({ node, latestManifest, onRefresh, busy, actionError, onBack
         {actionError && (
           <p className="flex items-center gap-1.5 text-xs text-red-400"><AlertCircle size={12} /> {actionError}</p>
         )}
-        <hr className="border-[var(--border)]" />
+        <hr className="border-[var(--separator)]" />
         <CdnNodeFacts node={node} columns="grid-cols-2" />
-        <hr className="border-[var(--border)]" />
+        <hr className="border-[var(--separator)]" />
         <CdnNodeEventHistory nodeId={node.node_id} />
       </div>
     </div>
@@ -100,18 +100,18 @@ export default function CdnNodesTab(): JSX.Element {
 
   return (
     <div className="h-full flex flex-col overflow-hidden">
-      <div className="shrink-0 flex items-center justify-between px-4 py-2.5 border-b border-[var(--border)]">
+      <div className="shrink-0 flex items-center justify-between px-4 py-2.5 border-b border-[var(--separator)]">
         <p className="text-[11px] font-bold uppercase tracking-widest text-text-muted flex items-center gap-1.5">
           <Server size={12} /> CDN nodes
         </p>
         <button onClick={reload} disabled={loading} title="Refresh"
-          className="w-9 h-9 flex items-center justify-center rounded-full text-accent active:bg-surface-overlay disabled:opacity-40">
+          className="w-9 h-9 flex items-center justify-center rounded-full text-accent active:bg-[var(--fill)] disabled:opacity-40">
           <RefreshCw size={14} className={loading ? 'animate-spin' : ''} />
         </button>
       </div>
 
       {error && (
-        <div className="mx-3 mt-2 flex items-start gap-2 px-3 py-2.5 rounded-xl bg-red-500/10 border border-red-500/20 text-red-400 text-xs shrink-0">
+        <div className="mx-3 mt-2 flex items-start gap-2 px-3 py-2.5 rounded-xl bg-red-500/10 text-red-500 text-footnote shrink-0">
           <AlertCircle size={13} className="shrink-0 mt-0.5" /> {error}
         </div>
       )}
@@ -130,8 +130,8 @@ export default function CdnNodesTab(): JSX.Element {
           <div className="flex gap-1 overflow-x-auto scrollbar-none">
             {filters.map((f) => (
               <button key={f.id} onClick={() => setFilter(f.id)}
-                className={`shrink-0 flex items-center gap-1 px-3 py-1.5 rounded-full text-xs font-medium transition-colors ${
-                  filter === f.id ? 'bg-accent/15 text-accent' : 'text-text-muted active:bg-surface-overlay'
+                className={`shrink-0 flex items-center gap-1 h-8 px-3.5 rounded-full text-subhead font-medium transition-colors ${
+                  filter === f.id ? 'bg-text-primary text-surface' : 'bg-[var(--fill)] text-text-primary active:bg-[var(--fill-strong)]'
                 }`}>
                 {f.label}
                 <span className={`text-[10px] px-1 rounded-full ${filter === f.id ? 'bg-accent/20' : 'bg-surface-raised'}`}>{f.count}</span>
@@ -144,7 +144,7 @@ export default function CdnNodesTab(): JSX.Element {
         {visible.length === 0 && <div className="py-10"><Empty label={nodes.length === 0 ? 'No nodes registered' : 'No nodes'} /></div>}
         {visible.map((n) => (
           <button key={n.node_id} onClick={() => setSelectedId(n.node_id)}
-            className="w-full text-left px-4 py-3 border-t border-[var(--border)] active:bg-surface-raised transition-colors">
+            className="w-full text-left px-4 py-3 border-t border-[var(--separator)] active:bg-[var(--fill)] transition-colors">
             <div className="flex items-center gap-2">
               <Server size={13} className="text-text-muted shrink-0" />
               <span className="text-sm font-semibold text-text-primary truncate flex-1">{n.name}</span>

@@ -38,12 +38,12 @@ function AdminStatBox({ label, value, highlight, onClick }: {
     <Comp
       type={onClick ? 'button' : undefined}
       onClick={onClick}
-      className={`rounded-lg bg-[var(--surface-raised)]/60 px-2 py-1.5 text-center min-w-0 ${onClick ? 'active:bg-[var(--surface-raised)] transition-colors' : ''}`}
+      className={`rounded-xl bg-[var(--fill)] px-2 py-2 text-center min-w-0 ${onClick ? 'active:bg-[var(--fill-strong)] transition-colors' : ''}`}
     >
-      <p className={`text-base font-bold tabular-nums truncate ${highlight ? 'text-accent' : 'text-text-primary'}`}>
+      <p className={`text-headline tabular-nums truncate ${highlight ? 'text-accent' : 'text-text-primary'}`}>
         {value === null || value === undefined ? '—' : value}
       </p>
-      <p className="text-[9px] font-bold uppercase tracking-wider text-text-muted mt-0.5 truncate">{label}</p>
+      <p className="text-caption2 text-text-secondary mt-0.5 truncate">{label}</p>
     </Comp>
   )
 }
@@ -63,7 +63,7 @@ function LeaderboardRows({ entries, myUsername }: {
             key={entry.user_id}
             onClick={(e) => openUserCard({ id: entry.user_id, username: entry.discord_username || entry.username, display_name: entry.username || entry.discord_username, avatar: entry.discord_avatar, role: '' }, e)}
             className={`cursor-pointer flex items-center gap-3 px-2 py-2 rounded-xl transition-colors ${
-              isMe ? 'bg-accent/8 ring-1 ring-inset ring-accent/20' : ''
+              isMe ? 'bg-accent/10' : 'active:bg-[var(--fill)]'
             }`}
           >
             <span className="w-5 shrink-0 flex items-center justify-center">
@@ -82,12 +82,12 @@ function LeaderboardRows({ entries, myUsername }: {
               </div>
             )}
 
-            <p className={`flex-1 min-w-0 text-sm truncate ${isMe ? 'text-accent font-semibold' : 'text-text-primary'}`}>
+            <p className={`flex-1 min-w-0 text-body truncate ${isMe ? 'text-accent font-semibold' : 'text-text-primary'}`}>
               {entry.username || entry.discord_username}
               {isMe && <span className="ml-1.5 text-xs opacity-60 font-normal">you</span>}
             </p>
 
-            <span className={`text-sm tabular-nums shrink-0 font-semibold ${isMe ? 'text-accent' : rankStyle ? rankStyle.num : 'text-text-muted'}`}>
+            <span className={`text-subhead tabular-nums shrink-0 font-semibold ${isMe ? 'text-accent' : rankStyle ? rankStyle.num : 'text-text-muted'}`}>
               {entry.approved_count}
             </span>
           </div>
@@ -177,7 +177,7 @@ export default function EditorProfileView(): JSX.Element {
                     }}
                     maxLength={50}
                     disabled={savingName}
-                    className="min-w-0 flex-1 bg-[var(--surface-raised)] border border-[var(--border)] rounded-md px-1.5 py-0.5 text-text-primary text-[15px] font-bold focus:outline-none focus:ring-1 focus:ring-accent"
+                    className="min-w-0 flex-1 bg-[var(--surface-raised)] border border-[var(--separator)] rounded-md px-1.5 py-0.5 text-text-primary text-headline focus:outline-none focus:ring-1 focus:ring-accent"
                   />
                   <button
                     onClick={saveDisplayName}
@@ -190,27 +190,27 @@ export default function EditorProfileView(): JSX.Element {
                   <button
                     onClick={cancelEditName}
                     disabled={savingName}
-                    className="w-7 h-7 shrink-0 flex items-center justify-center rounded text-text-muted active:bg-surface-overlay transition-colors disabled:opacity-40"
+                    className="w-7 h-7 shrink-0 flex items-center justify-center rounded text-text-muted active:bg-[var(--fill)] transition-colors disabled:opacity-40"
                     title="Cancel"
                   >
                     <X size={14} />
                   </button>
                 </div>
               ) : (
-                <h1 className="text-text-primary text-[17px] font-bold leading-tight truncate flex items-center gap-1.5">
+                <h1 className="text-title3 text-text-primary truncate flex items-center gap-1.5">
                   {accountDisplayName(account, 'My Profile')}
                   <button
                     onClick={startEditName}
-                    className="p-0.5 rounded text-text-muted active:bg-surface-overlay transition-colors shrink-0"
+                    className="p-0.5 rounded text-text-muted active:bg-[var(--fill)] transition-colors shrink-0"
                     title="Edit display name"
                   >
                     <Pencil size={12} />
                   </button>
                 </h1>
               )}
-              {avatarError && <p className="text-[10px] text-red-400">{avatarError}</p>}
-              {nameError && <p className="text-[10px] text-red-400">{nameError}</p>}
-              <p className="text-[10px] font-bold uppercase tracking-widest text-text-muted truncate">
+              {avatarError && <p className="text-caption1 text-red-500">{avatarError}</p>}
+              {nameError && <p className="text-caption1 text-red-500">{nameError}</p>}
+              <p className="text-footnote text-text-secondary truncate">
                 {myEntry
                   ? `Rank #${myEntry.rank} · ${myEntry.approved_count} approved`
                   : !loadingProposals ? `${proposals.length} proposal${proposals.length !== 1 ? 's' : ''} submitted` : ''}
@@ -220,10 +220,10 @@ export default function EditorProfileView(): JSX.Element {
           <button
             onClick={() => setRefreshKey(k => k + 1)}
             disabled={refreshing}
-            className="w-11 h-11 shrink-0 flex items-center justify-center rounded-full text-text-muted active:bg-surface-overlay transition-colors disabled:opacity-40"
+            className="glass-button w-11 h-11 shrink-0 flex items-center justify-center rounded-full text-text-primary active:opacity-60 transition-opacity disabled:opacity-40"
             title="Refresh"
           >
-            <RefreshCw size={16} className={refreshing ? 'animate-spin' : ''} />
+            <RefreshCw size={18} className={refreshing ? 'animate-spin' : ''} />
           </button>
         </div>
 
@@ -231,12 +231,12 @@ export default function EditorProfileView(): JSX.Element {
         <div className="flex items-center gap-1.5 pl-2.5 pt-1.5 pb-2 flex-wrap">
           <RoleBadges isAdmin={isAdmin} isManager={isManager} isEditor={!!account?.is_editor} isContributor={isContributor} />
           {channels.length > 1 && (
-            <div className="flex items-center bg-surface-overlay rounded-full p-0.5 gap-0.5 shrink-0 ml-auto">
+            <div className="flex items-center bg-[var(--fill)] rounded-full p-0.5 gap-0.5 shrink-0 ml-auto">
               {channels.map((ch) => (
                 <button
                   key={ch.slug}
                   onClick={() => setActiveChannel(ch.slug)}
-                  className={`px-2 py-0.5 rounded-full text-[10px] font-semibold transition-colors ${activeChannel === ch.slug ? 'bg-surface-raised text-text-primary' : 'text-text-muted'}`}
+                  className={`px-2.5 py-1 rounded-full text-caption1 font-semibold transition-colors ${activeChannel === ch.slug ? 'bg-[var(--control-thumb)] text-text-primary shadow-sm' : 'text-text-secondary'}`}
                   title={ch.description || ch.name}
                 >{ch.name}</button>
               ))}
@@ -255,7 +255,7 @@ export default function EditorProfileView(): JSX.Element {
               {(account?.is_editor || account?.is_administrator) && (
                 <button
                   onClick={() => setShowAddSong(true)}
-                  className="flex items-center gap-1 h-8 px-3 rounded-full bg-accent/15 active:bg-accent/25 text-accent text-xs font-semibold transition-colors"
+                  className="flex items-center gap-1 h-9 px-3.5 rounded-full bg-[var(--fill)] active:bg-[var(--fill-strong)] text-accent text-subhead font-semibold transition-colors"
                 >
                   <Plus size={12} /> New song
                 </button>
@@ -263,7 +263,7 @@ export default function EditorProfileView(): JSX.Element {
               {account?.is_administrator && (
                 <button
                   onClick={() => setActiveView('albums-admin')}
-                  className="flex items-center gap-1 h-8 px-3 rounded-full bg-surface-raised active:bg-surface-highest text-text-secondary text-xs font-semibold transition-colors"
+                  className="flex items-center gap-1 h-9 px-3.5 rounded-full bg-[var(--fill)] active:bg-[var(--fill-strong)] text-text-primary text-subhead font-semibold transition-colors"
                 >
                   Edit albums
                 </button>
@@ -271,7 +271,7 @@ export default function EditorProfileView(): JSX.Element {
               {isContributor && (
                 <button
                   onClick={() => setActiveView('contributor')}
-                  className="flex items-center gap-1 h-8 px-3 rounded-full bg-accent/15 active:bg-accent/25 text-accent text-xs font-semibold transition-colors"
+                  className="flex items-center gap-1 h-9 px-3.5 rounded-full bg-[var(--fill)] active:bg-[var(--fill-strong)] text-accent text-subhead font-semibold transition-colors"
                 >
                   <Plus size={12} /> New comp proposal
                 </button>
@@ -287,16 +287,16 @@ export default function EditorProfileView(): JSX.Element {
               <div className="flex items-center gap-1 mb-2 shrink-0">
                 <button
                   onClick={() => setProposalsView('songs')}
-                  className={`flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-bold uppercase tracking-wider transition-colors ${
-                    proposalsView === 'songs' ? 'bg-accent/15 text-accent' : 'text-text-muted'
+                  className={`flex items-center gap-1.5 h-8 px-3 rounded-full text-subhead font-semibold transition-colors ${
+                    proposalsView === 'songs' ? 'bg-text-primary text-surface' : 'text-text-secondary active:bg-[var(--fill)]'
                   }`}
                 >
                   <FileEdit size={13} /> Proposals
                 </button>
                 <button
                   onClick={() => setProposalsView('comp')}
-                  className={`flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-bold uppercase tracking-wider transition-colors ${
-                    proposalsView === 'comp' ? 'bg-accent/15 text-accent' : 'text-text-muted'
+                  className={`flex items-center gap-1.5 h-8 px-3 rounded-full text-subhead font-semibold transition-colors ${
+                    proposalsView === 'comp' ? 'bg-text-primary text-surface' : 'text-text-secondary active:bg-[var(--fill)]'
                   }`}
                 >
                   <FolderOpen size={13} /> Comp files
@@ -308,13 +308,13 @@ export default function EditorProfileView(): JSX.Element {
               <>
                 <div className="mb-2 shrink-0">
                   <div className="relative mb-2">
-                    <Search size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-text-muted pointer-events-none" />
+                    <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-text-muted pointer-events-none" />
                     <input
                       type="text"
                       value={search}
                       onChange={(e) => setSearch(e.target.value)}
                       placeholder="Search proposals…"
-                      className="w-full bg-surface-overlay text-text-primary text-sm pl-9 pr-9 py-2.5 rounded-xl outline-none border border-transparent focus:border-accent/40 placeholder:text-text-muted"
+                      className="w-full bg-[var(--fill)] text-text-primary text-body pl-9 pr-9 h-9 rounded-full outline-none border border-transparent focus:border-accent/40 placeholder:text-text-muted"
                     />
                     {search && (
                       <button onClick={() => setSearch('')} className="absolute right-2.5 top-1/2 -translate-y-1/2 w-6 h-6 flex items-center justify-center text-text-muted active:text-text-primary">
@@ -330,13 +330,13 @@ export default function EditorProfileView(): JSX.Element {
                         <button
                           key={key}
                           onClick={() => setFilter(key)}
-                          className={`shrink-0 flex items-center gap-1 h-8 px-3 rounded-full text-xs font-semibold transition-colors ${
-                            active ? 'bg-accent/15 text-accent' : 'text-text-muted bg-surface-overlay'
+                          className={`shrink-0 flex items-center gap-1 h-8 px-3.5 rounded-full text-subhead font-medium transition-colors ${
+                            active ? 'bg-text-primary text-surface' : 'text-text-primary bg-[var(--fill)]'
                           }`}
                         >
                           {label}
                           {count > 0 && (
-                            <span className={`text-[10px] tabular-nums ${active ? 'text-accent/70' : 'text-text-muted'}`}>
+                            <span className={`text-caption1 tabular-nums ${active ? 'opacity-70' : 'text-text-muted'}`}>
                               {count}
                             </span>
                           )}
@@ -346,7 +346,7 @@ export default function EditorProfileView(): JSX.Element {
                     <button
                       onClick={() => setRefreshKey(k => k + 1)}
                       disabled={refreshing}
-                      className="shrink-0 ml-auto w-8 h-8 flex items-center justify-center rounded-full bg-surface-overlay text-text-muted active:text-text-primary disabled:opacity-40"
+                      className="shrink-0 ml-auto w-8 h-8 flex items-center justify-center rounded-full bg-[var(--fill)] text-text-primary active:bg-[var(--fill-strong)] disabled:opacity-40"
                       aria-label="Refresh"
                     >
                       <RefreshCw size={13} className={refreshing ? 'animate-spin' : ''} />
@@ -354,7 +354,7 @@ export default function EditorProfileView(): JSX.Element {
                     {(account?.is_editor || account?.is_administrator) && (
                       <button
                         onClick={() => setShowAddSong(true)}
-                        className="shrink-0 flex items-center gap-1 h-8 px-3 rounded-full bg-accent/15 active:bg-accent/25 text-accent text-xs font-semibold transition-colors"
+                        className="shrink-0 flex items-center gap-1 h-9 px-3.5 rounded-full bg-[var(--fill)] active:bg-[var(--fill-strong)] text-accent text-subhead font-semibold transition-colors"
                       >
                         <Plus size={12} /> New song
                       </button>
@@ -401,13 +401,13 @@ export default function EditorProfileView(): JSX.Element {
             ) : (
               <>
                 <div className="relative mb-2">
-                  <Search size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-text-muted pointer-events-none" />
+                  <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-text-muted pointer-events-none" />
                   <input
                     type="text"
                     value={compSearch}
                     onChange={(e) => setCompSearch(e.target.value)}
                     placeholder="Search comp files…"
-                    className="w-full bg-surface-overlay text-text-primary text-sm pl-9 pr-9 py-2.5 rounded-xl outline-none border border-transparent focus:border-accent/40 placeholder:text-text-muted"
+                    className="w-full bg-[var(--fill)] text-text-primary text-body pl-9 pr-9 h-9 rounded-full outline-none border border-transparent focus:border-accent/40 placeholder:text-text-muted"
                   />
                   {compSearch && (
                     <button onClick={() => setCompSearch('')} className="absolute right-2.5 top-1/2 -translate-y-1/2 w-6 h-6 flex items-center justify-center text-text-muted active:text-text-primary">
@@ -545,7 +545,7 @@ export default function EditorProfileView(): JSX.Element {
                     Total pending rollup, land here instead as plain
                     non-clickable numbers. */}
                 {isAdmin && !otpLocked && (
-                  <div className="flex-1 min-w-0 pl-3 border-l border-[var(--border)]">
+                  <div className="flex-1 min-w-0 pl-3 border-l border-[var(--separator)]">
                     <p className="text-[9px] font-bold uppercase tracking-wider text-text-muted/70 mb-1.5">Stats</p>
                     <div className="grid grid-cols-2 gap-1.5">
                       <AdminStatBox label="Total pending" value={adminPreview?.totalPending} highlight={!!adminPreview?.totalPending} />

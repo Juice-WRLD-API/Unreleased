@@ -15,16 +15,18 @@ export function Tile({ title, icon, action, controls, span = '', children }: {
   children: React.ReactNode
 }): JSX.Element {
   return (
-    <section className={`${span} min-w-0 min-h-0 flex flex-col overflow-hidden rounded-2xl border border-[var(--border)] bg-[var(--surface-overlay)]/50 p-4`}>
+    // Phones: an iOS inset-grouped card (no border, sentence-case headline,
+    // accent "See all"-style action); desktop keeps the bento tile.
+    <section className={`${span} min-w-0 min-h-0 flex flex-col overflow-hidden rounded-[20px] md:rounded-2xl md:border md:border-[var(--border)] bg-[var(--grouped)] md:bg-[var(--surface-overlay)]/50 p-4`}>
       {title && (
         <div className="flex items-center gap-2 mb-3 shrink-0">
           <span className="text-text-muted">{icon}</span>
-          <h2 className="text-text-primary text-sm font-bold uppercase tracking-wider flex-1 min-w-0 truncate">{title}</h2>
+          <h2 className="text-headline md:text-sm md:font-bold md:uppercase md:tracking-wider text-text-primary flex-1 min-w-0 truncate">{title}</h2>
           {controls}
           {action && (
             <button
               onClick={action.onClick}
-              className="flex items-center gap-0.5 px-2 py-0.5 -mr-2 rounded-lg text-text-muted text-xs font-semibold hover:text-text-primary hover:bg-[var(--surface-raised)] transition-colors shrink-0"
+              className="flex items-center gap-0.5 px-2 py-0.5 -mr-2 rounded-lg text-accent md:text-text-muted text-subhead md:text-xs md:tracking-normal font-semibold hover:text-text-primary hover:bg-[var(--surface-raised)] max-md:active:opacity-60 transition-colors shrink-0"
             >
               {action.label}<ChevronRight size={13} />
             </button>

@@ -36,6 +36,7 @@ import cdnService from '../lib/cdn'
 import { cacheClearAll } from '../lib/apiCache'
 import { NOTIFICATION_SOUNDS } from '../lib/notifications'
 import { formatBytes, accountDisplayName, initial } from '../lib/format'
+import { IS_IOS } from '../lib/platform'
 import type { ViewType } from '../types'
 import LegalModal, { type LegalDoc } from './LegalModal'
 import { ModalOverlay, LockToggle, useSandboxStore } from './Modal'
@@ -125,7 +126,8 @@ const SETTINGS_SEARCH_INDEX: { tab: Tab; label: string; sub?: string; devOnly?: 
   { tab: 'playback', label: 'Remember queue and now playing', sub: 'Restore your queue, current track and position on this device when you reopen. Playback stays paused.' },
   { tab: 'playback', label: 'Lyrics sync', sub: 'Offset lyrics timing' },
   { tab: 'playback', label: 'Crossfade' },
-  { tab: 'playback', label: 'Smooth fade when pausing' },
+  // iOS-excluded like the row below (Safari ignores <audio>.volume).
+  ...(IS_IOS ? [] : [{ tab: 'playback' as const, label: 'Smooth fade when pausing' }]),
   { tab: 'playback', label: 'Prefer OG version' },
   { tab: 'playback', label: 'Rotate suggested covers' },
   { tab: 'playback', label: 'Era covers', sub: 'Custom cover art per era, used when a song has no cover of its own' },
@@ -1831,12 +1833,16 @@ export default function Settings(): JSX.Element {
                     </div>
                   )}
                 </Row>
-                <Row
-                  icon={Waves}
-                  iconColor="#0ea5e9"
-                  label="Smooth fade when pausing"
-                  labelExtra={<div className="ml-2 translate-y-[3px]"><Toggle on={pauseFadeEnabled} onClick={() => setPauseFade(!pauseFadeEnabled)} /></div>}
-                />
+                {/* Hidden on iOS (iPads can land on this layout): Safari ignores
+                    <audio>.volume, so the fade ramp has nothing to animate. */}
+                {!IS_IOS && (
+                  <Row
+                    icon={Waves}
+                    iconColor="#0ea5e9"
+                    label="Smooth fade when pausing"
+                    labelExtra={<div className="ml-2 translate-y-[3px]"><Toggle on={pauseFadeEnabled} onClick={() => setPauseFade(!pauseFadeEnabled)} /></div>}
+                  />
+                )}
                 <Row
                   icon={FileText}
                   iconColor="#059669"

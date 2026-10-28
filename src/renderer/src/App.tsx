@@ -26,11 +26,11 @@ const HOLD_UNDER_TERMINAL: ViewType[] = ['editor', 'contributor', 'albums-admin'
 // + mini player) and pad their own ends for it (.pb-dock). Every other view
 // gets that room reserved on `main` instead, so its layout ends above the dock
 // exactly as it did when the dock took up space in the column.
-const MOBILE_SCROLL_UNDER: ViewType[] = ['home', 'playlists', 'liked', 'api-tracker', 'api-files', 'settings']
+const MOBILE_SCROLL_UNDER: ViewType[] = ['home', 'playlists', 'liked', 'api-tracker', 'api-files', 'settings', 'stats', 'docs']
 // Of those, the ones whose large title draws under the status bar: their own
 // nav bar pads itself by --top-inset (mobile/NavBar). Tracker and Files keep
 // the reserved strip - their search and tabs stay pinned at the top.
-const MOBILE_BLEED_TOP: ViewType[] = ['home', 'playlists', 'settings']
+const MOBILE_BLEED_TOP: ViewType[] = ['home', 'playlists', 'settings', 'stats', 'docs']
 
 function getViewFromPath(pathname: string): ViewType {
   if (pathname === '/home') return 'home'

@@ -88,7 +88,7 @@ function AdminProposalHistory({ userId, account }: { userId: number; account: Ac
 
   return (
     <div className="mt-3 space-y-1.5">
-      <p className="text-[10px] font-bold uppercase tracking-widest text-text-muted">Proposals</p>
+      <p className="text-footnote font-semibold text-text-secondary md:text-[10px] md:font-bold md:uppercase md:tracking-widest md:text-text-muted">Proposals</p>
       {error ? (
         <p className="text-text-muted text-xs italic">Couldn't load proposals.</p>
       ) : !rows ? (
@@ -456,10 +456,10 @@ export default function PublicProfileView(): JSX.Element {
     return (
       <div className="flex-1 flex flex-col items-center justify-center gap-3 text-text-muted">
         <User size={40} className="opacity-20" />
-        <p className="text-sm">Profile not found.</p>
+        <p className="text-subhead md:text-sm md:tracking-normal">Profile not found.</p>
         <button
           onClick={() => setActiveView(previousView && previousView !== 'public-profile' ? previousView : 'wrld')}
-          className="flex items-center gap-1.5 text-text-muted hover:text-text-primary text-sm transition-colors mt-1"
+          className="flex items-center gap-1.5 text-accent md:text-text-muted hover:text-text-primary text-body md:text-sm md:tracking-normal max-md:active:opacity-60 transition-colors mt-1"
         >
           <ChevronLeft size={15} /> Back to app
         </button>
@@ -475,7 +475,7 @@ export default function PublicProfileView(): JSX.Element {
     return (
       <div key={p.id}>
         <div
-          className="group flex items-center gap-3 px-3 py-2.5 hover:bg-surface-overlay rounded-lg cursor-pointer transition-colors"
+          className="group flex items-center gap-3 px-3 py-2.5 hover:bg-surface-overlay max-md:active:bg-[var(--fill)] rounded-xl md:rounded-lg cursor-pointer transition-colors"
           {...clickable(() => toggleExpandPlaylist(p))}
           onContextMenu={(e) => { e.preventDefault(); setPlaylistMenu({ playlist: p, x: e.clientX, y: e.clientY }) }}
         >
@@ -485,8 +485,8 @@ export default function PublicProfileView(): JSX.Element {
               : <Music2 size={16} className="text-text-muted opacity-40" />}
           </div>
           <div className="flex-1 min-w-0">
-            <p className="text-text-primary text-sm font-medium truncate">{p.name}</p>
-            <p className="text-text-muted text-xs">{p.track_count} tracks</p>
+            <p className="text-text-primary text-body md:text-sm md:font-medium md:tracking-normal truncate">{p.name}</p>
+            <p className="text-text-muted text-footnote md:text-xs md:tracking-normal">{p.track_count} tracks</p>
           </div>
           <button
             onClick={(e) => { e.stopPropagation(); setPlaylistMenu((prev) => prev?.playlist.id === p.id ? null : { playlist: p, x: e.clientX, y: e.clientY }) }}
@@ -520,7 +520,7 @@ export default function PublicProfileView(): JSX.Element {
                       onContextMenu={(e) => openTrackMenu(e, t)}
                     >
                       <AlbumArtThumbnail track={t} size={28} className="rounded-md" />
-                      <span className="text-text-primary text-sm flex-1 truncate" title={t.title}>{t.title}</span>
+                      <span className="text-text-primary text-body md:text-sm md:tracking-normal flex-1 truncate" title={t.title}>{t.title}</span>
                       <button
                         onClick={(e) => openTrackMenu(e, t)}
                         className="p-1 text-text-muted hover:text-text-primary transition-colors shrink-0"
@@ -543,7 +543,7 @@ export default function PublicProfileView(): JSX.Element {
     <div className="flex-1 flex flex-col min-h-0 overflow-y-auto px-5 py-6">
       <button
         onClick={() => setActiveView(previousView && previousView !== 'public-profile' ? previousView : 'wrld')}
-        className="flex items-center gap-1.5 self-start text-text-muted hover:text-text-primary text-sm transition-colors mb-4"
+        className="flex items-center gap-1.5 self-start text-accent md:text-text-muted hover:text-text-primary text-body md:text-sm md:tracking-normal max-md:active:opacity-60 transition-colors mb-4"
       >
         <ChevronLeft size={15} /> Back to app
       </button>
@@ -556,8 +556,8 @@ export default function PublicProfileView(): JSX.Element {
             : <div className="w-full h-full bg-accent/20 text-accent flex items-center justify-center text-2xl font-semibold">{initial(profile.display_name || profile.username)}</div>}
         </div>
         <div className="flex-1 min-w-0">
-          <h1 className="text-text-primary text-2xl font-bold truncate">{profile.display_name}</h1>
-          <p className="text-text-muted text-sm truncate">@{profile.username}</p>
+          <h1 className="text-title1 md:text-2xl md:font-bold md:tracking-normal text-text-primary truncate">{profile.display_name}</h1>
+          <p className="text-subhead md:text-sm md:tracking-normal text-text-secondary md:text-text-muted truncate">@{profile.username}</p>
           {(profile.is_editor || profile.is_contributor || profile.is_donor) && (
             <div className="flex items-center gap-2 mt-1">
               {profile.is_editor && (
@@ -619,8 +619,8 @@ export default function PublicProfileView(): JSX.Element {
       </div>
 
       {isAdmin && !isOwnProfile && adminOpen && (
-        <div className="mb-4 p-4 rounded-xl border border-[var(--border)] bg-surface-overlay/50 space-y-3">
-          <p className="text-[10px] font-bold uppercase tracking-widest text-text-muted">Admin actions</p>
+        <div className="mb-4 p-4 rounded-[20px] md:rounded-xl md:border md:border-[var(--border)] bg-[var(--grouped)] md:bg-surface-overlay/50 space-y-3">
+          <p className="text-footnote font-semibold text-text-secondary md:text-[10px] md:font-bold md:uppercase md:tracking-widest md:text-text-muted">Admin actions</p>
           {adminLoading ? (
             <div className="flex items-center gap-2 text-text-muted text-sm"><Loader2 size={14} className="animate-spin" /> Loading…</div>
           ) : !adminUser ? (
@@ -633,7 +633,7 @@ export default function PublicProfileView(): JSX.Element {
             <>
             {(adminUser.role === 'editor' || adminUser.contributor_enabled) && (
               <div className="space-y-1.5 mb-3">
-                <p className="text-[10px] font-bold uppercase tracking-widest text-text-muted">Auto-approve</p>
+                <p className="text-footnote font-semibold text-text-secondary md:text-[10px] md:font-bold md:uppercase md:tracking-widest md:text-text-muted">Auto-approve</p>
                 {adminUser.role === 'editor' && (
                   <label className="flex items-center justify-between gap-2 text-sm text-text-secondary cursor-pointer">
                     Song edit proposals
@@ -651,7 +651,7 @@ export default function PublicProfileView(): JSX.Element {
               </div>
             )}
             <div className="space-y-1.5 mb-3">
-              <p className="text-[10px] font-bold uppercase tracking-widest text-text-muted">Roles</p>
+              <p className="text-footnote font-semibold text-text-secondary md:text-[10px] md:font-bold md:uppercase md:tracking-widest md:text-text-muted">Roles</p>
               {([
                 ['Editor', adminUser.role === 'editor', (on: boolean) => ({ role: on ? 'editor' : 'applicant' } as const)],
                 ['Contributor', !!adminUser.contributor_enabled, (on: boolean) => ({ contributor_enabled: on })],
@@ -750,7 +750,7 @@ export default function PublicProfileView(): JSX.Element {
                       <Play size={12} fill="white" className="text-white ml-0.5" />
                     </div>
                   </div>
-                  <span className="text-text-primary text-sm flex-1 truncate" title={t.title}>{t.title}</span>
+                  <span className="text-text-primary text-body md:text-sm md:tracking-normal flex-1 truncate" title={t.title}>{t.title}</span>
                   <button
                     onClick={(e) => openTrackMenu(e, t)}
                     className="p-1.5 text-text-muted hover:text-text-primary transition-colors shrink-0"
