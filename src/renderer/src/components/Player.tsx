@@ -33,7 +33,7 @@ import { trackIdToSongId, showStaffProfile, staffProfileView } from '../lib/user
 import { rememberRecentTrack } from '../lib/recentTracks'
 import { useCanEdit } from '../hooks/useChannelRoles'
 import { toFileUrl } from '../lib/fileTypes'
-import { FullTrack } from '../types'
+import { FullTrack, OfflineTrackMeta, Track } from '../types'
 import SongContextMenu from './SongContextMenu'
 import ContextMenu from './ContextMenu'
 import EqualizerPanel from './EqualizerPanel'
@@ -50,6 +50,8 @@ import { showQueueEndedToast } from '../lib/queueEndedToast'
 import PlaybackNotice from './PlaybackNotice'
 import { ensureDonorCover } from '../lib/donorCoverArt'
 import { showAppToast } from '../lib/appToast'
+import { runLog } from '../lib/runLog'
+import { isOfflineCopyUnreadable, markOfflineCopyUnreadable } from '../lib/offlineCopies'
 import { CoverFade, LikePop, SwapIcon, TrackSwap } from './PlayerMotion'
 import { PopLayer } from './PopLayer'
 
@@ -60,7 +62,7 @@ import { PopLayer } from './PopLayer'
 // pending. Callers that can wait use ensureDonorUrl first.
 function resolvePlaybackUrl(track: { id: string; streamUrl?: string; path: string }): string {
   const offline = useStore.getState().offlineTracks[track.id]
-  if (offline) return toFileUrl(offline.localPath)
+  if (offline && !isOfflineCopyUnreadable(track.id, offline)) return toFileUrl(offline.localPath)
   if (isDonorStreamUrl(track.streamUrl)) return cachedDonorUrl(track.streamUrl) ?? ''
   return track.streamUrl ?? toFileUrl(track.path)
 }
@@ -89,26 +91,75 @@ function fillSessionArtist(trackId: string, streamUrl: string | undefined): void
 // the server, which comes back. 'playable': the file downloads fine now in a
 // type this browser plays. 'broken': a 4xx, or a type it can't play - that
 // won't come back.
+// Files on this computer (local-media://) are asked too: the protocol handler
+// answers a missing or unreadable file with a 500 carrying the fs error. They
+// are never 'down' - there's no connection to come back.
+// `reason` finishes the stop toast ("couldn't be played (reason)"); `detail`
+// goes to the run log.
 type SourceVerdict = 'down' | 'playable' | 'broken'
+interface SourceProbe { verdict: SourceVerdict; reason: string; detail: string }
 // A probe that hasn't answered by now counts as no answer: a request on a
 // dropped connection can hang for minutes instead of failing.
 const PROBE_TIMEOUT_MS = 10000
-async function probeSource(url: string): Promise<SourceVerdict> {
-  if (!/^https?:/.test(url)) return 'broken'
+async function probeSource(url: string): Promise<SourceProbe> {
+  const local = url.startsWith('local-media:')
+  if (!local && !/^https?:/.test(url)) {
+    return { verdict: 'broken', reason: "the player couldn't open them", detail: `no way to check a ${url.split(':')[0] || 'blank'} source` }
+  }
   const ctrl = new AbortController()
   const timer = window.setTimeout(() => ctrl.abort(), PROBE_TIMEOUT_MS)
   try {
     const res = await fetch(url, { headers: { Range: 'bytes=0-1' }, cache: 'no-store', signal: ctrl.signal })
+    if (local && !res.ok) {
+      const text = (await res.text().catch(() => '')).slice(0, 300)
+      const missing = /ENOENT|ENOTDIR/.test(text)
+      return { verdict: 'broken', reason: missing ? 'their files are missing from this computer' : "their files couldn't be read", detail: `HTTP ${res.status} ${text}` }
+    }
     void res.body?.cancel().catch(() => {})
-    if (res.status >= 500 || res.status === 429) return 'down'
-    if (!res.ok) return 'broken'
+    if (res.status >= 500 || res.status === 429) return { verdict: 'down', reason: `the server is having trouble: HTTP ${res.status}`, detail: `HTTP ${res.status}` }
+    if (!res.ok) return { verdict: 'broken', reason: `the server refused them: HTTP ${res.status}`, detail: `HTTP ${res.status}` }
     const type = res.headers.get('Content-Type')?.split(';')[0].trim() ?? ''
-    return !!type && document.createElement('audio').canPlayType(type) !== '' ? 'playable' : 'broken'
-  } catch {
-    return 'down'
+    if (!type || document.createElement('audio').canPlayType(type) === '') {
+      return {
+        verdict: 'broken',
+        reason: local ? `this player can't play their format: ${type || 'unknown type'}` : `the server didn't send audio: ${type || 'no type'}`,
+        detail: `HTTP ${res.status} ${type || 'no Content-Type'}`,
+      }
+    }
+    return { verdict: 'playable', reason: "they couldn't be decoded", detail: `HTTP ${res.status} ${type}` }
+  } catch (e) {
+    const detail = ctrl.signal.aborted ? `no answer in ${PROBE_TIMEOUT_MS / 1000}s` : String(e)
+    if (local) return { verdict: 'broken', reason: "their files couldn't be read", detail }
+    return { verdict: 'down', reason: "the server couldn't be reached", detail }
   } finally {
     clearTimeout(timer)
   }
+}
+
+// A folder move repoints the offline index on disk, not this window's copy of
+// it (Settings moves the folder without telling the player). Re-read it before
+// writing a downloaded copy off - at most every 30s, since with Sync the
+// index holds the whole catalogue.
+const OFFLINE_INDEX_REREAD_MS = 30000
+let offlineIndexReadAt = 0
+async function rereadOfflineIndex(): Promise<void> {
+  if (Date.now() - offlineIndexReadAt < OFFLINE_INDEX_REREAD_MS) return
+  offlineIndexReadAt = Date.now()
+  await useStore.getState().loadOfflineLibrary()
+}
+
+// For the run log: what a media element failed on, in words.
+function describeMediaError(err: MediaError | null): string {
+  if (!err) return 'no media error'
+  const kind = ['', 'aborted', 'network', 'decode', 'unsupported source'][err.code] ?? 'unknown'
+  return `MediaError ${err.code} (${kind})${err.message ? `: ${err.message}` : ''}`
+}
+
+function describeSource(url: string): string {
+  if (url.startsWith('local-media:')) {
+    try { return `file ${new URL(url).searchParams.get('p')}` } catch { return url }
+  }
+  return url.startsWith('blob:') ? 'blob' : url || '(none)'
 }
 
 // How long the pause-fade ramps volume when "smooth fade when pausing" is on.
@@ -1038,32 +1089,35 @@ export default function Player(): JSX.Element {
       recoveryProbe.current = probe
       const trackId = track.id
       const generation = recoveryGeneration.current
-      void probeSource(url).then((verdict) => {
+      void probeSource(url).then((result) => {
         if (recoveryProbe.current !== probe) return
         recoveryProbe.current = null
         const s = useStore.getState()
         // Paused, skipped or crossfaded away while the server answered.
         if (getActive() !== audio || !s.isPlaying || s.currentTrack?.id !== trackId
           || recoveryGeneration.current !== generation || cfActive.current || recoveryTimer.current != null) return
-        if (verdict === 'down' && Date.now() - recoveryStartedAt.current < RECOVERY_WINDOW_MS) {
-          console.warn(`Playback ${reason} - server unreachable, retrying "${track.title}" in ${SLOW_RETRY_MS / 1000}s`)
+        if (result.verdict === 'down' && Date.now() - recoveryStartedAt.current < RECOVERY_WINDOW_MS) {
+          runLog('playback', `${reason} on "${track.title}" (${trackId}), ${result.detail} - retrying in ${SLOW_RETRY_MS / 1000}s`)
           scheduleReload(audio, trackId, url, SLOW_RETRY_MS)
           return
         }
         if (recoveryLoading.current?.audio === audio) recoveryLoading.current = null
-        if (verdict === 'down') {
+        if (result.verdict === 'down') {
           // Still no connection. Stop pretending - a paused player the user
           // can tap is far better than a play button that lies.
-          console.error(`Playback recovery gave up on "${track.title}" after ${RECOVERY_WINDOW_MS / 60000} minutes unreachable (${reason})`)
-          showAppToast(`Couldn't play "${track.title}"`)
+          runLog('playback', `gave up on "${track.title}" (${trackId}) after ${RECOVERY_WINDOW_MS / 60000} minutes (${reason}), ${result.detail}`)
+          showAppToast(`Couldn't play "${track.title}" (${result.reason})`)
           setIsPlaying(false)
           return
         }
         // The server answers fine, so it's this file that won't play through
         // (cut short, or broken at this point). Stopping the whole queue on it
         // is the wrong call - move on, as with any other unplayable song.
-        console.error(`Playback recovery gave up on "${track.title}" after ${MAX_RECOVERY_ATTEMPTS} attempts (${reason}) - skipping it`)
-        skipUnplayableTrack()
+        const why = result.verdict === 'broken' ? result.reason
+          : reason === 'stalled' ? (lastProgressTime.current === 0 ? 'they never started playing' : 'playback kept stalling')
+          : reason === 'play-rejected' ? "the player wouldn't start them"
+          : 'they kept failing to load'
+        skipUnplayableTrack(why, `${reason} after ${MAX_RECOVERY_ATTEMPTS} reloads, ${describeMediaError(audio.error)}, ${describeSource(url)}, probe ${result.verdict}: ${result.detail}`)
       })
       return
     }
@@ -1075,22 +1129,57 @@ export default function Player(): JSX.Element {
     // This ref is authoritative: the element can retain an obsolete non-zero
     // currentTime when a user seek/restart throws during an error state.
     const resumeAt = recoveryResumeAt.current
-    console.warn(`Playback ${reason} - reloading "${track.title}" at ${resumeAt.toFixed(1)}s (attempt ${attempt + 1}/${MAX_RECOVERY_ATTEMPTS})`)
+    runLog('playback', `${reason} on "${track.title}" (${track.id}) - reloading at ${resumeAt.toFixed(1)}s (attempt ${attempt + 1}/${MAX_RECOVERY_ATTEMPTS})`)
     scheduleReload(audio, track.id, url, Math.min(1000 * 2 ** attempt, 8000))
   }
 
   // A source the browser can't play at all — a 404, a codec it doesn't
   // support — will never come back on retry, and stopping dead in the middle
   // of a queue is the same complaint from the user's side. Move past it.
-  const skipUnplayableTrack = (): void => {
+  // `reason` finishes the stop toast; `detail` is for the run log.
+  const skipUnplayableTrack = (reason: string, detail: string): void => {
+    const track = useStore.getState().currentTrack
+    const label = track ? `"${track.title}" (${track.id})` : 'the current track'
     if (consecutiveSkips.current >= MAX_CONSECUTIVE_SKIPS) {
-      console.error('Too many unplayable tracks in a row — stopping playback')
-      showAppToast("Stopped: several songs in a row couldn't be played")
+      const count = consecutiveSkips.current + 1
+      runLog('playback', `stopping after ${count} unplayable songs in a row, the last ${label}: ${detail}`)
+      showAppToast(`Stopped: ${count} songs in a row couldn't be played (${reason})`)
       setIsPlaying(false)
       return
     }
     consecutiveSkips.current++
+    runLog('playback', `skipping ${label}, ${consecutiveSkips.current} in a row: ${detail}`)
     if (!nextTrack()) setIsPlaying(false)
+  }
+
+  // A downloaded copy that won't open (deleted, its drive gone, or left behind
+  // by a folder move that didn't finish) used to count as an unplayable song,
+  // with no retry. With Sync on nearly every song plays from its copy, so they
+  // all failed the same way and playback stopped for good, restart or not.
+  // The song itself is fine: play the copy's new location if the index on
+  // disk moved, otherwise stream it. The next playlist resync downloads it
+  // again (see isOfflineCopyUnreadable).
+  const fallBackFromOfflineCopy = async (audio: HTMLAudioElement, track: Track, entry: OfflineTrackMeta, failure: string): Promise<void> => {
+    const src = audio.currentSrc || audio.src
+    // Holds off the watchdog's own reload of the same copy meanwhile.
+    const probe = {}
+    recoveryProbe.current = probe
+    clearRecoveryTimer()
+    const result = await probeSource(src)
+    markOfflineCopyUnreadable(track.id, entry)
+    await rereadOfflineIndex()
+    if (recoveryProbe.current !== probe) return
+    recoveryProbe.current = null
+    const s = useStore.getState()
+    if (getActive() !== audio || !s.isPlaying || s.currentTrack?.id !== track.id) return
+    const next = resolvePlaybackUrl(track)
+    runLog('playback', `downloaded copy of "${track.title}" (${track.id}) won't play: ${failure}, ${describeSource(src)}, ${result.detail}. ${next ? `Trying ${describeSource(next)}` : 'No other source'}`)
+    if (!next || sameMediaSrc(src, next)) {
+      skipUnplayableTrack(result.reason, `${failure}, ${result.detail}`)
+      return
+    }
+    recoveryAttempts.current = 0
+    scheduleReload(audio, track.id, next, 0)
   }
 
   // Data still arriving means the element is buffering, not dead. On a slow
@@ -1114,21 +1203,34 @@ export default function Player(): JSX.Element {
       if (cfActive.current && audio === getNext()) cancelCF()
       return
     }
-    console.error(`Audio error (${slot}): code ${err.code}`, err.message)
-    if (!useStore.getState().isPlaying) return
+    const src = audio.currentSrc || audio.src
+    const { currentTrack: track, offlineTracks, isPlaying: playing } = useStore.getState()
+    runLog('playback', `error on "${track?.title}" (${track?.id}) in ${slot}: ${describeMediaError(err)}, ${describeSource(src)}`)
+    if (!playing) return
+    const offline = track ? offlineTracks[track.id] : undefined
+    if (track && offline && src.startsWith('local-media:') && !isOfflineCopyUnreadable(track.id, offline)) {
+      void fallBackFromOfflineCopy(audio, track, offline, describeMediaError(err))
+      return
+    }
     // Unsupported before a single frame played = the file itself is the
     // problem, or the server errored on the first request (see probeSource) -
     // retry that, skip the rest. Mid-song it means the connection died, which
     // is recoverable.
     if (err.code === MediaError.MEDIA_ERR_SRC_NOT_SUPPORTED && lastProgressTime.current === 0) {
-      const trackId = useStore.getState().currentTrack?.id
-      void probeSource(audio.currentSrc || audio.src).then((verdict) => {
+      const trackId = track?.id
+      void probeSource(src).then((result) => {
         // Moved on while the server answered: skipped, paused, or a reload
         // already cleared the error.
         if (audio !== getActive() || !audio.error || !useStore.getState().isPlaying
           || useStore.getState().currentTrack?.id !== trackId) return
-        if (verdict !== 'broken') recoverPlayback('server error')
-        else skipUnplayableTrack()
+        // A file on this computer that reads fine, in a type this player
+        // plays, yet won't open is damaged: no reload changes that.
+        if (result.verdict === 'down' || (result.verdict === 'playable' && !src.startsWith('local-media:'))) {
+          runLog('playback', `"${track?.title}" (${trackId}) failed to open, ${result.detail} - retrying`)
+          recoverPlayback('server error')
+        } else {
+          skipUnplayableTrack(result.reason, `${describeMediaError(err)}, ${describeSource(src)}, probe ${result.verdict}: ${result.detail}`)
+        }
       })
       return
     }
@@ -1216,7 +1318,13 @@ export default function Player(): JSX.Element {
       if (!audio) return
       if (audio.ended) { onAudioEnded(audio); return }
       if (audio.error) { recoverPlayback('error'); return }
-      if (audio.paused) { playSlot(audio, () => recoverPlayback('play-rejected')); return }
+      if (audio.paused) {
+        playSlot(audio, (e) => {
+          runLog('playback', `play() refused on "${useStore.getState().currentTrack?.title}": ${String(e)}`)
+          recoverPlayback('play-rejected')
+        })
+        return
+      }
       // Playing on paper, but the clock isn't moving. Very common on mobile:
       // the connection goes away without the element ever firing 'error', so it
       // sits in a rebuffer that will never finish. Nothing else detects this.

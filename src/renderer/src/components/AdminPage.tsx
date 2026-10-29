@@ -11,7 +11,7 @@ import { navigateFromWindow, attachToMainWindow } from '../lib/windowSync'
 import type { JWApiSong } from '../lib/juicewrldApi'
 import { useStore, useStorePick, IS_FLOAT_WINDOW } from '../store/useStore'
 import { displayName } from '../store/chatStore'
-import { discordHandle } from '../lib/format'
+import { discordHandle, errorMessage } from '../lib/format'
 import * as userApi from '../lib/userApi'
 import type { EditorApplication, SongEditProposal, AdminUser, ProposalStatus } from '../lib/userApi'
 import { relativeTime, shortDate, STATUS_STYLE, StatusChip, Avatar, Empty, AppSection, QueueSearch, ProposalDiff } from './adminShared'
@@ -582,12 +582,11 @@ function ProposalsTab({ proposals, status, setStatus, onChanged, onReviewed, cha
 
   // Auto-select first item, and keep the selection inside the visible list -
   // searching can otherwise filter out the proposal the detail pane's
-  // Approve/Reject buttons are pointed at.
+  // Approve/Reject buttons are pointed at. Takes the row from the list rather
+  // than keeping `prev`, so a reviewed row that stays listed (the "All"
+  // filter) shows its new status instead of live Approve/Reject buttons.
   useEffect(() => {
-    setSelected(prev => {
-      if (prev && sortedProposals.some(p => p.id === prev.id)) return prev
-      return sortedProposals[0] ?? null
-    })
+    setSelected(prev => (prev && sortedProposals.find(p => p.id === prev.id)) ?? sortedProposals[0] ?? null)
   }, [sortedProposals])
 
   // A refetch replaces the rows wholesale, so a half-written revision no
@@ -600,14 +599,12 @@ function ProposalsTab({ proposals, status, setStatus, onChanged, onReviewed, cha
     try {
       const updated = await userApi.adminReviewProposal(id, { action, review_notes: notes[id] || '', channel })
       dropCache(id); setArchive(null)
-      // The endpoint hands back the updated row - apply it immediately rather
-      // than waiting on onChanged()'s full refetch, so the row leaves the
-      // pending list (or updates its status badge) right away instead of
-      // sitting there looking unactioned until the round-trip finishes.
+      // The endpoint hands back the updated row, so apply it in place instead
+      // of refetching the whole queue (which also covered the list with the
+      // loading overlay and collapsed "Show more"). Refresh is still there.
       onReviewed(updated)
-      onChanged()
     }
-    catch { showAppToast(`Couldn't ${action} the proposal`) } finally { setActionId(null) }
+    catch (e) { showAppToast(errorMessage(e, `Couldn't ${action} the proposal`)) } finally { setActionId(null) }
   }
 
   const doReverse = async (id: number) => {
@@ -617,9 +614,8 @@ function ProposalsTab({ proposals, status, setStatus, onChanged, onReviewed, cha
       const updated = await userApi.adminReverseProposal(id, channel)
       dropCache(id); setArchive(null)
       onReviewed(updated)
-      onChanged()
     }
-    catch { showAppToast("Couldn't reverse the proposal") } finally { setActionId(null) }
+    catch (e) { showAppToast(errorMessage(e, "Couldn't reverse the proposal")) } finally { setActionId(null) }
   }
 
   // Keyed off the full (unfiltered-by-search) list so the group header's

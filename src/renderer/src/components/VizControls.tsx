@@ -144,16 +144,6 @@ export default function VizControls({ modes = true }: { modes?: boolean }): JSX.
           ]}
         />
       ))}
-      {line('Layout', (
-        <Pills<'player' | 'widgets'>
-          value={s.wrldWidgets ? 'widgets' : 'player'}
-          onChange={(v) => s.setWrldWidgets(v === 'widgets')}
-          options={[
-            { value: 'widgets', label: 'Widgets', title: 'The desktop player, playlist and clock, here in WRLD. Hide all three for the visualizer only' },
-            { value: 'player', label: 'Player & lyrics' },
-          ]}
-        />
-      ))}
       <div className="flex items-center gap-2">
         <span className="text-text-muted text-[11px] w-[86px] shrink-0">Artwork colors</span>
         <Toggle on={s.vizUseArtwork} onClick={() => s.setVizUseArtwork(!s.vizUseArtwork)} />

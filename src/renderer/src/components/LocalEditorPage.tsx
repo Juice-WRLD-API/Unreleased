@@ -95,7 +95,9 @@ export default function LocalEditorPage(): JSX.Element {
     setLoading(true)
     setError(null)
     if (!el) { setLoading(false); return }
+    let stale = false
     el.readTrackMetadata(track.filePath).then((meta: Record<string, any> | null) => {
+      if (stale) return
       if (meta && !meta.error) {
         const loaded: MetaFields = {
           title: meta.title || track.title,
@@ -128,7 +130,8 @@ export default function LocalEditorPage(): JSX.Element {
         setFields(loaded)
       }
       setLoading(false)
-    }).catch(() => setLoading(false))
+    }).catch(() => { if (!stale) setLoading(false) })
+    return () => { stale = true }
   }, [track?.filePath])
 
   // Landed here with nothing to edit — send the user back where they came from.
@@ -235,7 +238,8 @@ export default function LocalEditorPage(): JSX.Element {
         comment: fields.comment,
         lyrics: fields.lyrics,
         syncedLyrics: fields.syncedLyrics,
-        albumArtBase64: fields.albumArt,
+        // '' (not null) asks the handler to remove the cover.
+        ...(artChanged ? { albumArtBase64: fields.albumArt ?? '' } : {}),
       })
       if (result.error) { setError(result.error); return }
       const updates = { ...common, hasAlbumArt: !!fields.albumArt }

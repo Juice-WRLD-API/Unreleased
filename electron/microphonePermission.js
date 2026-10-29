@@ -38,4 +38,19 @@ function canCaptureSystemAudio(request) {
   return request.platform === 'win32' && request.audioRequested && isAppMainFrame(request)
 }
 
-module.exports = { canRequestMicrophone, canCaptureSystemAudio }
+/**
+ * File System Access (the ZIP save picker, clientZip.ts). Electron runs the
+ * check before writing to a picked file, and sends it with no frame, so only
+ * the origin is known. Handles only ever come from a picker the user answered,
+ * so the app's own origin is enough: file: when packaged, the Vite server in dev.
+ * @param {{ origin: string, isDev: boolean }} request
+ */
+function canUseFileSystem(request) {
+  try {
+    const origin = new URL(request.origin)
+    if (request.isDev) return origin.origin === 'http://localhost:3018'
+    return origin.protocol === 'file:' && origin.host === ''
+  } catch { return false }
+}
+
+module.exports = { canRequestMicrophone, canCaptureSystemAudio, canUseFileSystem }

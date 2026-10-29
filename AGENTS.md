@@ -1,6 +1,6 @@
 # Agent guide: Juice WRLD API and Unreleased
 
-**Version 1.38** · updated 2026-10-28. Bump the version and date whenever you
+**Version 1.39** · updated 2026-10-29. Bump the version and date whenever you
 change this file (minor for fixes and additions, major for rewrites).
 
 **Keep this file current.** If you find something in the docs or this file that
@@ -391,6 +391,15 @@ Node 22.
 
 Newest first. One entry each: date, what went wrong, what to do instead. Delete
 entries that stop being true.
+
+- 2026-10-29: Desktop ZIP downloads failed at 0 files with "createWritable …
+  not allowed by the user agent". The save picker worked, but `main.js`'s
+  permission check handler refuses everything it doesn't name, and Electron
+  checks `fileSystem` (with no frame, origin only) before writing to a picked
+  file. A denied check never reaches the request handler, so nothing was
+  logged. `canUseFileSystem` in `electron/microphonePermission.js` now allows
+  the app's own origin. A web API that works in Chrome but fails in the app
+  probably needs its permission named in both handlers.
 
 - 2026-10-28: The pop-out "Edit metadata" window crashed with React #185
   (maximum update depth). `LocalEditorPage` bounced to `backView` while it had

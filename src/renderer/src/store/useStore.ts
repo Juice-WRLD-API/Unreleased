@@ -63,6 +63,7 @@ import { getLastfmSession } from '../lib/lastfm'
 import { runWhenIdle } from '../lib/platform'
 import { useSandboxStore } from '../components/Modal'
 import { showAppToast } from '../lib/appToast'
+import { isOfflineCopyUnreadable } from '../lib/offlineCopies'
 import { clearNotifications } from '../lib/notificationHistory'
 import { setNotificationsSignedIn } from '../lib/notificationSocket'
 import { migrateDonorPlaylists } from '../lib/donorPlaylistEntries'
@@ -1295,6 +1296,15 @@ function commitM3uImport(
 
 setActiveChannelCache(ls.get<string>('activeChannel') || '')
 
+// The speed lands on every <audio> as playbackRate. A synced profile value of
+// null (JSON's NaN) would set it to 0 - every song sits at 0:00 until the
+// stall check gives up and skips it - and anything else out of Chromium's
+// range throws where the rate is applied. Anything unusable plays at 1x.
+function safeSpeed(raw: unknown): number {
+  const n = typeof raw === 'number' ? raw : Number(raw)
+  return Number.isFinite(n) && n >= 0.25 && n <= 4 ? n : 1
+}
+
 export const useStore = create<AppStore>((set, get, store) => ({
   // -- Queue slice (all queue + playback logic) -------------------------------
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -1306,7 +1316,7 @@ export const useStore = create<AppStore>((set, get, store) => ({
   // -- Playback extras -------------------------------------------------------
   currentTrackFull: null,
   volume: ls.get<number>('volume') ?? 0.8,
-  playbackSpeed: ls.get<number>('playbackSpeed') ?? 1,
+  playbackSpeed: safeSpeed(ls.get<number>('playbackSpeed')),
   lyricsOffset: ls.get<number>('lyricsOffset') ?? 0,
 
   setCurrentTrackFull: (full) => {
@@ -1317,7 +1327,7 @@ export const useStore = create<AppStore>((set, get, store) => ({
     }
   },
   setVolume: (volume) => { set({ volume }); ls.set('volume', volume) },
-  setPlaybackSpeed: (speed) => { set({ playbackSpeed: speed }); ls.set('playbackSpeed', speed); get()._scheduleProfilePush(['userSettings']) },
+  setPlaybackSpeed: (raw) => { const speed = safeSpeed(raw); set({ playbackSpeed: speed }); ls.set('playbackSpeed', speed); get()._scheduleProfilePush(['userSettings']) },
   setLyricsOffset: (offset) => { set({ lyricsOffset: offset }); ls.set('lyricsOffset', offset) },
 
   // -- Equalizer / audio effects ---------------------------------------------
@@ -3257,7 +3267,10 @@ export const useStore = create<AppStore>((set, get, store) => ({
       // playlist that's mostly already offline showed "Downloading 1/40, 2/40�"
       // and looked like the whole thing was being fetched again.
       const offlineTracksNow = get().offlineTracks
-      const missingCount = songIds.filter((id) => !offlineTracksNow[`jw-${id}`]).length
+      // A copy the player found it can't open (deleted, or left behind by a
+      // folder move) counts as missing, so this downloads it again.
+      const haveCopy = (id: string): boolean => !!offlineTracksNow[id] && !isOfflineCopyUnreadable(id, offlineTracksNow[id])
+      const missingCount = songIds.filter((id) => !haveCopy(`jw-${id}`)).length
       const total = missingCount
       // Background resyncs (startup/focus/15-min interval � see syncOfflinePlaylists)
       // re-run this for every already-synced playlist just to pick up metadata
@@ -3309,7 +3322,7 @@ export const useStore = create<AppStore>((set, get, store) => ({
         // Looping through every already-cached song's metadata refresh made
         // downloading a mostly-synced playlist with a few new songs feel like
         // the whole thing was being fetched again.
-        if (offlineTracksNow[id]) continue
+        if (haveCopy(id)) continue
         const offProgress = el.onOfflineDownloadProgress?.((d: { id: string; percent: number; received?: number; total?: number }) => {
           if (d.id !== id || !announced) return
           const totalBytes = cumulativeBytes + (d.received || 0)

@@ -7,6 +7,7 @@ import {
 import { DebugAnonymousToggle, DebugLogOpenButton, DebugRecordButton } from './DebugRecorder'
 import { ADDRESSES as DONATION_ADDRESSES, AddressRow as DonationAddressRow } from './DonationNotice'
 import VizControls from './VizControls'
+import { useVizStore } from '../store/vizStore'
 import MyCdnNodes from './MyCdnNodes'
 import MyCoverArt from './MyCoverArt'
 import ApiKeys from './ApiKeys'
@@ -111,6 +112,8 @@ const SETTINGS_SEARCH_INDEX: { tab: Tab; label: string; sub?: string; electronOn
   { tab: 'account', label: 'Bio' },
   { tab: 'account', label: 'Show listening history', sub: 'Visible to anyone with your profile link' },
   { tab: 'account', label: 'Show public playlists', sub: 'Lists playlists already marked public' },
+  { tab: 'account', label: "Share what you're listening to", sub: "Shows the track you're currently playing on your profile" },
+  { tab: 'account', label: 'My cover art', sub: 'Cover art you submitted' },
   { tab: 'account', label: 'My CDN nodes', sub: 'Nodes linked to your account' },
   { tab: 'account', label: 'Two-factor authentication', sub: 'Whether sign-ins ask for an authenticator code' },
   { tab: 'account', label: 'Passkeys', sub: 'Sign in with your face, fingerprint, PIN, a security key or your phone' },
@@ -120,9 +123,11 @@ const SETTINGS_SEARCH_INDEX: { tab: Tab; label: string; sub?: string; electronOn
   // Appearance
   { tab: 'appearance', label: 'Skin', sub: 'Custom skin colors and presets' },
   { tab: 'appearance', label: 'Accent color' },
-  { tab: 'appearance', label: 'Gradient surfaces', sub: 'Accent-tinted gradients behind the app, sidebar, and player' },
-  { tab: 'appearance', label: 'Surface gradients', sub: 'Accent-tinted gradients on toggle groups, search bars, badges, and menus' },
+  { tab: 'appearance', label: 'App gradients', sub: 'Accent-tinted gradients behind the app and sidebar' },
+  { tab: 'appearance', label: 'Control gradients', sub: 'Accent-tinted gradients on the player bar, toggle groups, search bars, badges, and menus' },
   { tab: 'appearance', label: 'Theme background in WRLD', sub: "Use the app's theme behind the WRLD tab instead of the playing song's cover" },
+  { tab: 'appearance', label: 'Old WRLD style', sub: "WRLD's own player and lyrics instead of the widgets" },
+  { tab: 'appearance', label: 'Playlist header art', sub: "Blurred cover art behind a playlist's header" },
   { tab: 'appearance', label: 'App font' },
   { tab: 'appearance', label: 'Lyrics font' },
   { tab: 'appearance', label: 'Custom fonts' },
@@ -131,11 +136,13 @@ const SETTINGS_SEARCH_INDEX: { tab: Tab; label: string; sub?: string; electronOn
   { tab: 'appearance', label: 'Lyrics alignment' },
   { tab: 'appearance', label: 'Blur inactive lyrics', sub: 'Soften every synced line except the one playing' },
   { tab: 'appearance', label: 'Lyric colors', sub: 'Current line and other lines' },
-  { tab: 'appearance', label: 'WRLD visualizer', sub: 'Visualizer, Edge light, quality, input boost, auto-switch, visualizer-only or widgets layout, artwork colors' },
+  { tab: 'appearance', label: 'WRLD visualizer', sub: 'Visualizer, Edge light, quality, input boost, auto-switch, artwork colors' },
   // Preferences
   { tab: 'preferences', label: 'Full era names', sub: 'Show eras spelled out instead of abbreviated' },
+  { tab: 'preferences', label: 'Add song info to downloads', sub: "Write the song's name, artist, cover and lyrics into downloaded MP3s" },
   { tab: 'preferences', label: 'Auto-hide navigation', sub: 'Hide the nav menu until the pointer reaches its edge' },
   { tab: 'preferences', label: 'Navigation position', sub: 'Where the nav menu sits — left, right, top, bottom' },
+  { tab: 'preferences', label: 'Navigation style', sub: 'Classic or a floating pill' },
   { tab: 'preferences', label: 'App menu button', sub: 'Where the File / Edit / View… menu opens from', electronOnly: true },
   { tab: 'preferences', label: 'Home screen', sub: 'Choose which sections show on the Home tab' },
   { tab: 'preferences', label: 'Menu items', sub: 'Reorder or hide sidebar tabs' },
@@ -160,7 +167,6 @@ const SETTINGS_SEARCH_INDEX: { tab: Tab; label: string; sub?: string; electronOn
   // Library
   { tab: 'library', label: 'Library folders', sub: 'Local folders scanned into your library', electronOnly: true },
   { tab: 'library', label: 'Auto-refresh changed files', electronOnly: true },
-  // App
   // Desktop (the light round the screen, the desktop's own windows and the
   // desk cleared are Windows only; the tab, its lyric styles, the Edge light
   // and the widgets' looks - for WRLD's Widgets layout - are everywhere)
@@ -181,6 +187,7 @@ const SETTINGS_SEARCH_INDEX: { tab: Tab; label: string; sub?: string; electronOn
   { tab: 'desktop', label: 'Clear desk', sub: 'Cover the displays showing the desktop, taskbar too', electronOnly: true },
   { tab: 'desktop', label: 'Visualizer on the cleared desk', sub: 'WRLD’s visualizer behind the widgets in place of the wallpaper', electronOnly: true },
   { tab: 'desktop', label: 'Displays', sub: 'Which screens get the light and the widgets', electronOnly: true },
+  // App
   { tab: 'app', label: 'Download folder', electronOnly: true },
   { tab: 'app', label: 'Offline songs folder', electronOnly: true },
   { tab: 'app', label: 'Offline downloads' , electronOnly: true },
@@ -191,6 +198,7 @@ const SETTINGS_SEARCH_INDEX: { tab: Tab; label: string; sub?: string; electronOn
   { tab: 'app', label: 'Minimize to tray on close', electronOnly: true },
   { tab: 'app', label: 'Show current song in the window title', electronOnly: true },
   { tab: 'app', label: 'Remember window sizes', electronOnly: true },
+  { tab: 'app', label: 'Sandbox', sub: 'Dock modals into a pill at the top of the window', electronOnly: true },
   { tab: 'app', label: 'Confirm before quitting while playing', electronOnly: true },
   { tab: 'app', label: 'Media key overlay', electronOnly: true },
   { tab: 'app', label: 'Solo mini player', electronOnly: true },
@@ -201,7 +209,6 @@ const SETTINGS_SEARCH_INDEX: { tab: Tab; label: string; sub?: string; electronOn
   // Developer
   { tab: 'developer', label: 'Diagnostic logs', electronOnly: true, devOnly: true },
   { tab: 'developer', label: 'Clear cache', sub: 'Removes cached API responses and cover art', electronOnly: true, devOnly: true },
-  { tab: 'developer', label: 'Update source', electronOnly: true, devOnly: true },
   { tab: 'developer', label: 'Online installer', sub: 'Repairs or reinstalls the app', electronOnly: true, devOnly: true },
   { tab: 'developer', label: 'API servers', sub: 'Main API base and per-path route rules', electronOnly: true, devOnly: true },
   // Feedback / About
@@ -510,8 +517,7 @@ export default function Settings({ floating = false }: { floating?: boolean }): 
     hotkeyBindings, setHotkeyBinding, resetHotkeyBindings, resetGlobalHotkeyBindings, hotkeySeekSeconds, setHotkeySeekSeconds,
     globalHotkeysEnabled, setGlobalHotkeysEnabled,
     globalHotkeyBindings, setGlobalHotkeyBinding,
-    updateStatus,
-    libraryFolders, addLibraryFolder, removeLibraryFolder, scanLibrary, libraryScanning, libraryTracks, libraryLastScanned,
+    libraryFolders, addLibraryFolder, removeLibraryFolder, scanLibrary, libraryScanning, libraryLastScanned,
     libraryAutoRefresh, setLibraryAutoRefresh,
     developerMode, setDeveloperMode,
     lastfmUser, setLastfmUser, lastfmEnabled, setLastfmEnabled,
@@ -532,7 +538,11 @@ export default function Settings({ floating = false }: { floating?: boolean }): 
     fullEraNames, setFullEraNames,
     autoReportErrors, setAutoReportErrors,
     embedSongInfoOnDownload, setEmbedSongInfoOnDownload,
-  } = useStorePick('setShowSettings', 'setActiveView', 'account', 'theme', 'setTheme', 'customSkins', 'saveCustomSkin', 'deleteCustomSkin', 'accentColor', 'setAccentColor', 'settingsTab', 'setSettingsTab', 'sidebarPosition', 'setSidebarPosition', 'appMenuPosition', 'setAppMenuPosition', 'navStyle', 'setNavStyle', 'autoHideNav', 'setAutoHideNav', 'autoHideNavZone', 'setAutoHideNavZone', 'navOrder', 'setNavOrder', 'navVisibility', 'setNavItemVisible', 'homeSectionVisibility', 'setHomeSectionVisible', 'navControlOrder', 'setNavControlOrder', 'navControlVisibility', 'setNavControlVisible', 'audioOutput', 'setAudioOutput', 'crossfadeEnabled', 'crossfadeDuration', 'setCrossfade', 'pauseFadeEnabled', 'setPauseFade', 'rememberQueue', 'setRememberQueue', 'preferOgVersion', 'setPreferOgVersion', 'rotateSuggestedCovers', 'setRotateSuggestedCovers', 'mediaOverlayEnabled', 'setMediaOverlayEnabled', 'popoutWindows', 'setPopoutWindow', 'lyricsOffset', 'setLyricsOffset', 'sleepTimerEnd', 'setSleepTimer', 'hotkeyBindings', 'setHotkeyBinding', 'resetHotkeyBindings', 'resetGlobalHotkeyBindings', 'hotkeySeekSeconds', 'setHotkeySeekSeconds', 'globalHotkeysEnabled', 'setGlobalHotkeysEnabled', 'globalHotkeyBindings', 'setGlobalHotkeyBinding', 'updateStatus', 'libraryFolders', 'addLibraryFolder', 'removeLibraryFolder', 'scanLibrary', 'libraryScanning', 'libraryTracks', 'libraryLastScanned', 'libraryAutoRefresh', 'setLibraryAutoRefresh', 'developerMode', 'setDeveloperMode', 'lastfmUser', 'setLastfmUser', 'lastfmEnabled', 'setLastfmEnabled', 'appTextScale', 'setAppTextScale', 'lyricsScale', 'setLyricsScale', 'lyricsAlign', 'setLyricsAlign', 'lyricsBlur', 'setLyricsBlur', 'lyricsBlurAmount', 'setLyricsBlurAmount', 'lyricsColorActive', 'setLyricsColorActive', 'lyricsColorInactive', 'setLyricsColorInactive', 'appFont', 'setAppFont', 'lyricsFont', 'setLyricsFont', 'gradientsEnabled', 'setGradientsEnabled', 'surfaceGradientsEnabled', 'setSurfaceGradientsEnabled', 'wrldThemeBackground', 'setWrldThemeBackground', 'refreshPlaylists', 'fullEraNames', 'setFullEraNames', 'logoutAccount', 'setShowUserAuth', 'playlistHeroEnabledDark', 'playlistHeroEnabledLight', 'setPlaylistHeroEnabled', 'autoReportErrors', 'setAutoReportErrors', 'embedSongInfoOnDownload', 'setEmbedSongInfoOnDownload')
+  } = useStorePick('setShowSettings', 'setActiveView', 'account', 'theme', 'setTheme', 'customSkins', 'saveCustomSkin', 'deleteCustomSkin', 'accentColor', 'setAccentColor', 'settingsTab', 'setSettingsTab', 'sidebarPosition', 'setSidebarPosition', 'appMenuPosition', 'setAppMenuPosition', 'navStyle', 'setNavStyle', 'autoHideNav', 'setAutoHideNav', 'autoHideNavZone', 'setAutoHideNavZone', 'navOrder', 'setNavOrder', 'navVisibility', 'setNavItemVisible', 'homeSectionVisibility', 'setHomeSectionVisible', 'navControlOrder', 'setNavControlOrder', 'navControlVisibility', 'setNavControlVisible', 'audioOutput', 'setAudioOutput', 'crossfadeEnabled', 'crossfadeDuration', 'setCrossfade', 'pauseFadeEnabled', 'setPauseFade', 'rememberQueue', 'setRememberQueue', 'preferOgVersion', 'setPreferOgVersion', 'rotateSuggestedCovers', 'setRotateSuggestedCovers', 'mediaOverlayEnabled', 'setMediaOverlayEnabled', 'popoutWindows', 'setPopoutWindow', 'lyricsOffset', 'setLyricsOffset', 'sleepTimerEnd', 'setSleepTimer', 'hotkeyBindings', 'setHotkeyBinding', 'resetHotkeyBindings', 'resetGlobalHotkeyBindings', 'hotkeySeekSeconds', 'setHotkeySeekSeconds', 'globalHotkeysEnabled', 'setGlobalHotkeysEnabled', 'globalHotkeyBindings', 'setGlobalHotkeyBinding', 'libraryFolders', 'addLibraryFolder', 'removeLibraryFolder', 'scanLibrary', 'libraryScanning', 'libraryLastScanned', 'libraryAutoRefresh', 'setLibraryAutoRefresh', 'developerMode', 'setDeveloperMode', 'lastfmUser', 'setLastfmUser', 'lastfmEnabled', 'setLastfmEnabled', 'appTextScale', 'setAppTextScale', 'lyricsScale', 'setLyricsScale', 'lyricsAlign', 'setLyricsAlign', 'lyricsBlur', 'setLyricsBlur', 'lyricsBlurAmount', 'setLyricsBlurAmount', 'lyricsColorActive', 'setLyricsColorActive', 'lyricsColorInactive', 'setLyricsColorInactive', 'appFont', 'setAppFont', 'lyricsFont', 'setLyricsFont', 'gradientsEnabled', 'setGradientsEnabled', 'surfaceGradientsEnabled', 'setSurfaceGradientsEnabled', 'wrldThemeBackground', 'setWrldThemeBackground', 'refreshPlaylists', 'fullEraNames', 'setFullEraNames', 'logoutAccount', 'setShowUserAuth', 'playlistHeroEnabledDark', 'playlistHeroEnabledLight', 'setPlaylistHeroEnabled', 'autoReportErrors', 'setAutoReportErrors', 'embedSongInfoOnDownload', 'setEmbedSongInfoOnDownload')
+  const wrldWidgets = useVizStore(s => s.wrldWidgets)
+  const setWrldWidgets = useVizStore(s => s.setWrldWidgets)
+  // Only the count is shown; the track list itself changes on every scan.
+  const libraryTrackCount = useStore((s) => s.libraryTracks.length)
 
   function startEditName(): void {
     setNameInput(accountDisplayName(account))
@@ -861,7 +871,11 @@ export default function Settings({ floating = false }: { floating?: boolean }): 
     return () => off?.()
   }, [isElectron, el])
 
+  // Read once rather than subscribed: the listener above follows every update
+  // after mount, and a subscription would re-render all of Settings on each
+  // download progress tick.
   useEffect(() => {
+    const updateStatus = useStore.getState().updateStatus
     if (!updateStatus) return
     if (updateStatus.type === 'downloading') { setUpdateState('downloading'); setUpdatePercent(updateStatus.percent ?? 0) }
     else if (updateStatus.type === 'downloaded') { setUpdateState('downloaded'); setUpdateVersion(updateStatus.version ?? null) }
@@ -1513,6 +1527,14 @@ export default function Settings({ floating = false }: { floating?: boolean }): 
                   sub="Use the app's theme behind the WRLD tab instead of the playing song's cover"
                 >
                   <Toggle on={wrldThemeBackground} onClick={() => setWrldThemeBackground(!wrldThemeBackground)} />
+                </Row>
+                <Row
+                  icon={Disc}
+                  iconColor="#8b5cf6"
+                  label="Old WRLD style"
+                  sub="WRLD's own player and lyrics instead of the widgets"
+                >
+                  <Toggle on={!wrldWidgets} onClick={() => setWrldWidgets(!wrldWidgets)} />
                 </Row>
                 <Row
                   icon={Images}
@@ -2566,7 +2588,7 @@ export default function Settings({ floating = false }: { floating?: boolean }): 
                 </div>
                 {libraryLastScanned && (
                   <p className="text-text-muted text-[10px] mt-2">
-                    Last scanned: {new Date(libraryLastScanned).toLocaleString()} · {libraryTracks.length} tracks
+                    Last scanned: {new Date(libraryLastScanned).toLocaleString()} · {libraryTrackCount} tracks
                   </p>
                 )}
                 <div className="flex items-center justify-between py-3 mt-2 border-t border-[var(--border)]">

@@ -10,7 +10,7 @@ const { Readable } = require('stream')
 const discordRpc = require('./discordRpc')
 const { configureRuntime } = require('./platform')
 const { registerPasskeyIpc } = require('./passkey')
-const { canRequestMicrophone, canCaptureSystemAudio } = require('./microphonePermission')
+const { canRequestMicrophone, canCaptureSystemAudio, canUseFileSystem } = require('./microphonePermission')
 const { createLaunchGate } = require('./launchUpdate')
 
 // Response() only accepts web ReadableStreams, not Node streams
@@ -251,7 +251,8 @@ function downloadFile(url, dest, onProgress, headers, signal) {
     function doGet(u, extra) {
       const opts = new URL(u)
       req = https.get({ hostname: opts.hostname, path: opts.pathname + opts.search, headers: { 'User-Agent': 'Unreleased-App', ...extra } }, (res) => {
-        if (res.statusCode === 302 || res.statusCode === 301) { res.resume(); return doGet(res.headers.location, null) }
+        // Location may be relative.
+        if (res.statusCode === 302 || res.statusCode === 301) { res.resume(); return doGet(new URL(res.headers.location || '', u).href, null) }
         if (res.statusCode !== 200) { res.resume(); return ko(new Error(`HTTP ${res.statusCode}`)) }
         const total = parseInt(res.headers['content-length'] || '0', 10)
         let received = 0
@@ -802,12 +803,20 @@ function broadcastFloatWindows() {
 // tray) isn't force-revealed on restore.
 let miniPlayerHiddenWindows = []
 
+// The main window and the pop-outs: the windows running the app's own renderer.
+// Desktop's lights and widgets, the updating window and the passkey/login
+// windows are not among them.
+function appWindows() {
+  return [mainWindow, ...floatWindows.values()].filter((w) => !!w && !w.isDestroyed())
+}
+
+// Adds to the list rather than starting it afresh: reopening the mini player
+// while it's open would otherwise forget the windows it already hid.
 function hideWindowsForMiniPlayer() {
   const mini = floatWindows.get('mini-player')
-  miniPlayerHiddenWindows = []
-  for (const win of BrowserWindow.getAllWindows()) {
-    if (win === mini || win.isDestroyed() || !win.isVisible()) continue
-    miniPlayerHiddenWindows.push(win)
+  for (const win of appWindows()) {
+    if (win === mini || !win.isVisible()) continue
+    if (!miniPlayerHiddenWindows.includes(win)) miniPlayerHiddenWindows.push(win)
     win.hide()
   }
 }
@@ -983,10 +992,19 @@ function safeOpenExternal(url) {
 // attacker origin, which then inherits this window's preload bridge.
 // Opening a *new* window for an external link is setWindowOpenHandler's job,
 // not this one's.
+// Compared parsed, not by prefix: "file://" also matched file://host/share
+// paths, and "http://localhost:3018" matched http://localhost:3018.evil.test.
+function isAppNavigation(url) {
+  try {
+    const u = new URL(url)
+    return isDev ? u.origin === 'http://localhost:3018' : u.protocol === 'file:' && u.host === ''
+  } catch {
+    return false
+  }
+}
 function guardNavigation(win) {
-  const allowedOrigin = isDev ? 'http://localhost:3018' : 'file://'
   win.webContents.on('will-navigate', (event, url) => {
-    if (!url.startsWith(allowedOrigin)) event.preventDefault()
+    if (!isAppNavigation(url)) event.preventDefault()
   })
 }
 
@@ -1202,42 +1220,48 @@ function createWindow() {
   mainWindow.on('enter-full-screen', () => mainWindow.webContents.send('fullscreen-changed', true))
   mainWindow.on('leave-full-screen', () => mainWindow.webContents.send('fullscreen-changed', false))
 
-  // Track file downloads via session
-  mainWindow.webContents.session.on('will-download', (event, item) => {
-    const filename = item.getFilename()
-    const savePath = path.join(appSettings.downloadPath, filename)
-    item.setSavePath(savePath)
+  // The session outlives the window, and macOS makes a new main window on
+  // activate: listen once.
+  const downloads = mainWindow.webContents.session
+  if (!downloads.listeners('will-download').includes(trackDownload)) downloads.on('will-download', trackDownload)
+}
 
-    // The window can be destroyed while a download is still running (quit
-    // during a transfer) — sending on destroyed webContents throws in main.
-    const send = (channel, payload) => {
-      if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send(channel, payload)
-    }
+// Track file downloads via session
+/** @param {Electron.Event} _event @param {Electron.DownloadItem} item */
+function trackDownload(_event, item) {
+  const filename = item.getFilename()
+  const savePath = path.join(appSettings.downloadPath, filename)
+  item.setSavePath(savePath)
 
-    send('download-started', {
-      filename,
-      savePath,
-      total: item.getTotalBytes(),
-    })
+  // The window can be destroyed while a download is still running (quit
+  // during a transfer) — sending on destroyed webContents throws in main.
+  const send = (channel, payload) => {
+    if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send(channel, payload)
+  }
 
-    item.on('updated', (_, state) => {
-      if (state === 'progressing') {
-        const total = item.getTotalBytes()
-        send('download-progress', {
-          filename,
-          received: item.getReceivedBytes(),
-          total,
-          percent: total > 0 ? Math.round((item.getReceivedBytes() / total) * 100) : 0,
-        })
-      }
-    })
+  send('download-started', {
+    filename,
+    savePath,
+    total: item.getTotalBytes(),
+  })
 
-    item.once('done', (_, state) => {
-      send('download-done', {
+  item.on('updated', (_, state) => {
+    if (state === 'progressing') {
+      const total = item.getTotalBytes()
+      send('download-progress', {
         filename,
-        state,
-        savePath: item.getSavePath(),
+        received: item.getReceivedBytes(),
+        total,
+        percent: total > 0 ? Math.round((item.getReceivedBytes() / total) * 100) : 0,
       })
+    }
+  })
+
+  item.once('done', (_, state) => {
+    send('download-done', {
+      filename,
+      state,
+      savePath: item.getSavePath(),
     })
   })
 }
@@ -1275,7 +1299,7 @@ ipcMain.handle('force-update', async () => {
     return new Promise((resolve, reject) => {
       const opts = new URL(url)
       https.get({ hostname: opts.hostname, path: opts.pathname + opts.search, headers: { 'User-Agent': 'Unreleased-App', 'Accept': 'application/vnd.github+json' } }, (res) => {
-        if (res.statusCode === 302 || res.statusCode === 301) return fetchJson(res.headers.location).then(resolve).catch(reject)
+        if (res.statusCode === 302 || res.statusCode === 301) { res.resume(); return fetchJson(new URL(res.headers.location || '', url).href).then(resolve).catch(reject) }
         // A 403 (rate limit) still returns parseable JSON — without this check
         // it flowed through and died later on `release.assets` being undefined,
         // surfacing a cryptic TypeError instead of the real cause.
@@ -1506,8 +1530,10 @@ ipcMain.handle('toggle-always-on-top-self', (event) => {
 // restore semantics match the solo-mode setting.
 ipcMain.handle('hide-other-windows', (event) => {
   const sender = BrowserWindow.fromWebContents(event.sender)
-  for (const win of BrowserWindow.getAllWindows()) {
-    if (win === sender || win.isDestroyed()) continue
+  // Only the app's own windows: closing every window also took Desktop's
+  // light and widgets down, and they don't come back by themselves.
+  for (const win of appWindows()) {
+    if (win === sender) continue
     if (win === mainWindow) {
       if (win.isVisible() || win.isMinimized()) {
         if (!miniPlayerHiddenWindows.includes(win)) miniPlayerHiddenWindows.push(win)
@@ -1533,10 +1559,9 @@ function isValidWindowSyncMessage(msg) {
 ipcMain.on('window-sync', (event, msg) => {
   if (!isValidWindowSyncMessage(msg)) return
   if (!BrowserWindow.fromWebContents(event.sender)) return
-  for (const win of BrowserWindow.getAllWindows()) {
-    if (!win.isDestroyed() && win.webContents.id !== event.sender.id) {
-      win.webContents.send('window-sync', msg)
-    }
+  // Only windows with this preload hear 'window-sync'.
+  for (const win of appWindows()) {
+    if (win.webContents.id !== event.sender.id) win.webContents.send('window-sync', msg)
   }
 })
 
@@ -2619,18 +2644,20 @@ ipcMain.handle('scan-library', async (_, folders, previousTracks) => {
   // pool — tag parsing is the expensive part, and strictly one-file-at-a-time
   // left the disk and CPU idling in turns. Results land in indexed slots so
   // the track order still matches the walk order exactly.
+  // Async, so a big library (or a slow network drive) doesn't freeze every
+  // window while it's listed. Still one folder at a time, in order.
   const files = []
-  function walk(dirPath) {
+  async function walk(dirPath) {
     let entries
-    try { entries = fs.readdirSync(dirPath, { withFileTypes: true }) } catch { return }
+    try { entries = await fs.promises.readdir(dirPath, { withFileTypes: true }) } catch { return }
     for (const entry of entries) {
       if (entry.name.startsWith('.')) continue
       const fullPath = path.join(dirPath, entry.name)
-      if (entry.isDirectory()) walk(fullPath)
+      if (entry.isDirectory()) await walk(fullPath)
       else if (entry.isFile() && AUDIO_EXTS.has(path.extname(entry.name).toLowerCase())) files.push(fullPath)
     }
   }
-  for (const folder of folders) walk(folder)
+  for (const folder of Array.isArray(folders) ? folders : []) await walk(folder)
 
   const tracks = new Array(files.length)
   const errors = []
@@ -2646,7 +2673,7 @@ ipcMain.handle('scan-library', async (_, folders, previousTracks) => {
       const prev = prevByPath.get(fullPath)
       if (prev) {
         try {
-          const stat = fs.statSync(fullPath)
+          const stat = await fs.promises.stat(fullPath)
           if (prev.fileSize === stat.size && prev.lastModified === stat.mtimeMs) {
             tracks[i] = prev
             continue
@@ -2657,7 +2684,7 @@ ipcMain.handle('scan-library', async (_, folders, previousTracks) => {
         const metadata = await mm.parseFile(fullPath, { duration: true, skipCovers: true })
         const common = metadata.common
         const format = metadata.format
-        const stat = fs.statSync(fullPath)
+        const stat = await fs.promises.stat(fullPath)
         tracks[i] = {
           id: 'local-' + fullPath,
           filePath: fullPath,
@@ -3942,7 +3969,8 @@ app.whenReady().then(() => {
   // that gap explicitly rather than relying on the default.
   // The exceptions are audio-only access from the main app frame:
   // recognition requests a microphone only on Listen, and on Windows can
-  // record device audio (loopback) instead.
+  // record device audio (loopback) instead. And writing to a file the user
+  // picked in a save dialog (ZIP downloads), from the app's own pages.
   const appDocumentUrl = pathToFileURL(path.join(__dirname, '../dist/index.html')).href
   const microphoneAllowed = (webContents, url, isMainFrame, mediaTypes) => canRequestMicrophone({
     url, mainUrl: mainDocumentUrl, appUrl: appDocumentUrl, isDev,
@@ -3954,7 +3982,14 @@ app.whenReady().then(() => {
     isMainWindow: !!mainWindow && webContents === mainWindow.webContents,
     isMainFrame, audioRequested: true, platform: process.platform,
   })
-  session.defaultSession.setPermissionCheckHandler((webContents, permission, _origin, details) => {
+  session.defaultSession.setPermissionCheckHandler((webContents, permission, origin, details) => {
+    // A denied check marks the picked file read-only, and createWritable then
+    // fails without ever reaching the request handler.
+    if (permission === 'fileSystem') {
+      const ok = canUseFileSystem({ origin, isDev })
+      if (!ok) runLog('permissions', 'fileSystem check denied', JSON.stringify({ origin, access: details.fileAccessType }))
+      return ok
+    }
     // Same gate as the request handler below; the user prompt still decides.
     // getDisplayMedia also checks 'media'/video for its throwaway screen track; the request
     // handler still refuses real camera requests, so this only unblocks device-audio capture.
@@ -3967,6 +4002,10 @@ app.whenReady().then(() => {
       && microphoneAllowed(webContents, details.requestingUrl || '', details.isMainFrame, ['audio'])
   })
   session.defaultSession.setPermissionRequestHandler((webContents, permission, callback, details) => {
+    if (permission === 'fileSystem' && canUseFileSystem({ origin: details.requestingUrl, isDev })) {
+      callback(true)
+      return
+    }
     // The display-media handler below asks the user and picks the streams.
     if (permission === 'display-capture') {
       const ok = systemAudioAllowed(webContents, details.requestingUrl, details.isMainFrame)

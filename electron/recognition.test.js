@@ -3,7 +3,7 @@ const fs = require('node:fs')
 const path = require('node:path')
 const test = require('node:test')
 const ts = require('typescript')
-const { canRequestMicrophone, canCaptureSystemAudio } = require('./microphonePermission')
+const { canRequestMicrophone, canCaptureSystemAudio, canUseFileSystem } = require('./microphonePermission')
 
 function loadRenderer(name, imports = {}, globals = {}) {
   const source = fs.readFileSync(path.join(__dirname, '../src/renderer/src/lib', name + '.ts'), 'utf8')
@@ -49,6 +49,18 @@ test('microphone permission is restricted to the app main frame and audio', () =
   }
   assert.equal(canRequestMicrophone({ ...request, isDev: true, url: 'http://localhost:3018/tracker', mainUrl: 'http://localhost:3018/' }), true)
   assert.equal(canRequestMicrophone({ ...request, isDev: true, url: 'http://localhost:3018.evil.test/', mainUrl: 'http://localhost:3018/' }), false)
+})
+
+test('file system access is limited to the app origin', () => {
+  // Checks arrive with the bare origin, requests with the frame URL.
+  for (const origin of ['file:///', 'file:///C:/tracker']) assert.equal(canUseFileSystem({ origin, isDev: false }), true)
+  for (const origin of ['', 'null', 'file://evil-host/share', 'https://juicewrldapi.com', 'http://localhost:3018']) {
+    assert.equal(canUseFileSystem({ origin, isDev: false }), false)
+  }
+  assert.equal(canUseFileSystem({ origin: 'http://localhost:3018/', isDev: true }), true)
+  for (const origin of ['http://localhost:3018.evil.test/', 'file:///', 'https://juicewrldapi.com']) {
+    assert.equal(canUseFileSystem({ origin, isDev: true }), false)
+  }
 })
 
 test('packaged macOS app and helpers declare microphone access', () => {

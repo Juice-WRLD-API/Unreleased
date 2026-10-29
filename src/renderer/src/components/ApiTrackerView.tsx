@@ -40,6 +40,7 @@ import { fetchAllCompactGroups, filterCompactGroups, invalidateCompactGroupsCach
 import type { CompactGroup } from '../lib/compactGroups'
 import { useVirtualWindow, useVariableVirtualWindow } from '../hooks/useVirtualWindow'
 import { runLog } from '../lib/runLog'
+import { showAppToast } from '../lib/appToast'
 import { formatDuration, displayDate, dateSortValue, compareDates } from '../lib/format'
 import { parseSearchQuery, matchesFieldFilters, filterApiFields, textMatches } from '../lib/trackerSearch'
 import { displaySongName } from '../lib/songPrefs'
@@ -1389,7 +1390,7 @@ const SongCard = memo(function SongCard({
               void resolveSongFile(song).then((f) => {
                 if (isPrimaryChannelSlug(useStore.getState().channels, f.channel)) void startCdnFileDownload(f.path, `${title}.mp3`, f.url, undefined, song.id)
                 else triggerDownload(f.url, `${title}.mp3`)
-              }, console.error)
+              }, (err) => showAppToast(`Couldn't download: ${(err as Error).message}`, { tone: 'error' }))
             }}
             disabled={!canPlay}
             className="shrink-0 h-full px-3 rounded-lg bg-surface-overlay hover:bg-surface-raised text-text-secondary disabled:opacity-40 transition-colors"
@@ -2095,9 +2096,11 @@ export default function ApiTrackerView(): JSX.Element {
     if ((trackerTab !== 'calendar' && trackerTab !== 'producers') || calendarFetchedRef.current) return
     calendarFetchedRef.current = true
     setCalendarLoading(true)
+    setCalendarError(null)
     apiFetch<JWApiSong[]>('/songs/', { all: 'true', omit: OMIT_BULK })
       .then(setCalendarSongs)
-      .catch((err) => setCalendarError(err.message))
+      // Leave the ref unset so coming back to the tab tries again.
+      .catch((err) => { calendarFetchedRef.current = false; setCalendarError(err.message) })
       .finally(() => setCalendarLoading(false))
   }, [trackerTab])
 
@@ -2200,8 +2203,10 @@ export default function ApiTrackerView(): JSX.Element {
 
   // Clicking a badge on a song row jumps to "just this one" rather than
   // adding to the current multi-select, matching the old single-filter UX.
-  const handleCategoryClick = useCallback((cat: Category) => { setCategoryFilter(new Set(cat ? [cat] : [])); resetSongs() }, [resetSongs])
-  const handleEraClick = useCallback((eraName: string) => { setEraFilter(new Set(eraName ? [eraName] : [])); resetSongs() }, [resetSongs])
+  // The filters only apply to the Songs tab, so badges on the Lyrics /
+  // Overview / Producers rows switch to it.
+  const handleCategoryClick = useCallback((cat: Category) => { setCategoryFilter(new Set(cat ? [cat] : [])); setTrackerTab('songs'); resetSongs() }, [resetSongs])
+  const handleEraClick = useCallback((eraName: string) => { setEraFilter(new Set(eraName ? [eraName] : [])); setTrackerTab('songs'); resetSongs() }, [resetSongs])
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const isFirstDebounce = useRef(true)
 
@@ -2326,7 +2331,6 @@ export default function ApiTrackerView(): JSX.Element {
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [catalog, renamedHits, matchesFilters, parsedSearch.filters, searchPrefs],
   )
-  const count = songs.length
 
   // Only the title sort reads the prefs, so other sorts don't re-run on every
   // playcount bump.
@@ -2428,13 +2432,15 @@ export default function ApiTrackerView(): JSX.Element {
     if (savedTrackerScrollTop === 0 || el.scrollTop !== 0) return
     if (el.scrollHeight - el.clientHeight < savedTrackerScrollTop) return
     el.scrollTop = savedTrackerScrollTop
-  }, [compactView, filteredCompactGroups.length, sortedSongs.length])
+  }, [trackerTab, compactView, filteredCompactGroups.length, sortedSongs.length])
+  // The scroller only exists on the Songs tab, so rebind when the tab changes.
   useEffect(() => {
     const el = listScrollRef.current
     if (!el) return
-    const id = setInterval(() => { if (el.scrollHeight > el.clientHeight) savedTrackerScrollTop = el.scrollTop }, 100)
-    return () => clearInterval(id)
-  }, [])
+    const onScroll = (): void => { if (el.scrollHeight > el.clientHeight) savedTrackerScrollTop = el.scrollTop }
+    el.addEventListener('scroll', onScroll, { passive: true })
+    return () => el.removeEventListener('scroll', onScroll)
+  }, [trackerTab])
 
   // Multi-select - select mode, the selected-songs Map, Escape-to-exit, and
   // Ctrl/Cmd+A "select all" are all handled by the shared hook (see its docs
@@ -2551,6 +2557,7 @@ export default function ApiTrackerView(): JSX.Element {
       return
     }
     const ids = selectedSongs.map(s => s.id)
+    let cancelled = false
     Promise.all(
       playlists.map(p =>
         userApi.getPlaylist(p.id)
@@ -2560,7 +2567,8 @@ export default function ApiTrackerView(): JSX.Element {
           })
           .catch(() => ({ id: p.id, allIn: false }))
       )
-    ).then(results => setBulkContained(new Set(results.filter(r => r.allIn).map(r => r.id))))
+    ).then(results => { if (!cancelled) setBulkContained(new Set(results.filter(r => r.allIn).map(r => r.id))) })
+    return () => { cancelled = true }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [playlists, account, selectedSongs, showBulkPlaylists, bulkContextMenu?.showPlaylists])
 
@@ -3474,7 +3482,7 @@ export default function ApiTrackerView(): JSX.Element {
               </div>
             )}
             {!loading && sortedSongs.length > 0 && (
-              <p className="text-center text-text-muted text-xs py-4">{count.toLocaleString()} songs total</p>
+              <p className="text-center text-text-muted text-xs py-4">{sortedSongs.length.toLocaleString()} songs total</p>
             )}
           </div>
         </div>
@@ -3699,9 +3707,12 @@ export default function ApiTrackerView(): JSX.Element {
             try {
               await setGroupVersionTitle(titlePromptGroupId, title)
               invalidateCompactGroupsCache()
+              setTitlePromptGroupId(null)
+            } catch (e) {
+              // Stay open so the title can be retried (or skipped).
+              showAppToast(`Couldn't save the title: ${(e as Error).message}`, { tone: 'error' })
             } finally {
               setSavingTitlePrompt(false)
-              setTitlePromptGroupId(null)
             }
           }}
         />

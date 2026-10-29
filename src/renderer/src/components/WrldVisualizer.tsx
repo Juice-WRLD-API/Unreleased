@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useShallow } from 'zustand/react/shallow'
-import { Disc3, Monitor, Minimize2, Maximize2, Radio, Settings2, PictureInPicture2 } from 'lucide-react'
+import { Monitor, Minimize2, Maximize2, Radio, Settings2, PictureInPicture2 } from 'lucide-react'
 import { Visualizer, VISUALIZERS, needsWebGL, type VizLayout } from '../lib/viz'
 import { getAnalysisTap, resumeEffectsContext } from '../lib/audioEffects'
 import { smallCoverUrl, JWAPI_HOST } from '../lib/juicewrldApi'
@@ -129,12 +129,11 @@ export default function WrldVisualizer({
   const lyricsOverride = useStore((s) => s.lyricsOverride)
   // The screen light's look, while WRLD's Edge light is on.
   const vizEdgeOverlay = useWrldEdgeLook()
-  const { activeMode, vizQuality, vizUseArtwork, vizBoost, wrldWidgets, covered } = useVizStore(useShallow((s) => ({
+  const { activeMode, vizQuality, vizUseArtwork, vizBoost, covered } = useVizStore(useShallow((s) => ({
     activeMode: s.activeMode,
     vizQuality: s.vizQuality,
     vizUseArtwork: s.vizUseArtwork,
     vizBoost: s.vizBoost,
-    wrldWidgets: s.wrldWidgets,
     covered: s.vizCovered > 0,
   })))
 
@@ -321,12 +320,6 @@ export default function WrldVisualizer({
     announce(vizName(next))
   }, [announce])
 
-  const toggleWidgets = (): void => {
-    const { wrldWidgets: cur, setWrldWidgets } = useVizStore.getState()
-    setWrldWidgets(!cur)
-    announce(cur ? 'Old style on' : 'Old style off')
-  }
-
   // The real widgets out on the desktop (Windows). Off puts away whichever are out and remembers them; on brings
   // that same set back, or all three the first time.
   const desktopWidgetsSupported = desktopWindowsSupported()
@@ -442,15 +435,6 @@ export default function WrldVisualizer({
           <span>{fm.label}</span>
         </button>
         <span className="w-px h-5 mx-1 bg-white/10" />
-        <button
-          className={`${tool} ${wrldWidgets ? toolIdle : toolOn}`}
-          onClick={toggleWidgets}
-          title={wrldWidgets ? 'Old style is off: click for the original player' : 'Old style is on: click for the widgets'}
-          aria-label={wrldWidgets ? 'Old style is off' : 'Old style is on'}
-          aria-pressed={!wrldWidgets}
-        >
-          <Disc3 size={17} />
-        </button>
         {desktopWidgetsSupported && (
           <button
             className={`${tool} ${desktopWidgetsOn ? toolOn : toolIdle}`}

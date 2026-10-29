@@ -15,7 +15,7 @@ import { FolderJumpBox } from './FolderJumpBox'
 import { SearchHelpButton } from './SearchHelpPopover'
 import { useStore, useStorePick } from '../store/useStore'
 import {
-  breadcrumbs, parentFolder, fileToTrack, sortEntries, pathToUrl, fileEntryLinkUrl, findSongByFilename, triggerDownload,
+  breadcrumbs, parentFolder, fileToTrack, sortEntries, folderLinkUrl, fileEntryLinkUrl, findSongByFilename, triggerDownload,
   type ViewMode, type SortBy, type SortDir,
 } from '../lib/apiFilesShared'
 import { useApiFilesBrowse } from '../hooks/useApiFilesBrowse'
@@ -123,6 +123,10 @@ function ApiCoverThumb({ path, size = 36 }: { path: string; size?: number }): JS
     <img
       src={buildCoverArtUrl(path, true, activeChannel)}
       alt=""
+      // The listing isn't windowed, so a big folder would otherwise request
+      // every row's cover at once.
+      loading="lazy"
+      decoding="async"
       className="rounded object-cover"
       style={{ width: size, height: size }}
       onError={() => setErrored(true)}
@@ -147,6 +151,8 @@ function ApiImageThumb({ path, size = 36 }: { path: string; size?: number }): JS
       // degraded copy. The lightbox still opens the original.
       src={smallCoverUrl(buildStreamUrl(path, activeChannel))}
       alt=""
+      loading="lazy"
+      decoding="async"
       className="rounded object-cover"
       style={{ width: size, height: size }}
       onError={() => setErrored(true)}
@@ -420,10 +426,11 @@ export default function ApiFilesBrowser(): JSX.Element {
   }
 
   const openSongInfo = async (entry: JWApiFileEntry): Promise<void> => {
-    const match = await findSongByFilename(entry.name)
+    // The menu only offers this once the match is resolved; same lookup.
+    const id = trackerMatches.get(entry.path) ?? (await findSongByFilename(entry.name))?.id
     // Global infoSongId (not local state) so the info panel survives
     // switching to another tab, which unmounts this view.
-    if (match) useStore.getState().setInfoSongId(match.id)
+    if (id != null) useStore.getState().setInfoSongId(id)
   }
 
   const openContextMenu = (entry: JWApiFileEntry, x: number, y: number): void => {
@@ -1416,7 +1423,7 @@ export default function ApiFilesBrowser(): JSX.Element {
                         <Folder size={40} className={`transition-colors ${isSelected ? 'text-accent' : 'text-text-secondary group-hover:text-accent'}`} />
                       ) : mt === 'audio' ? (
                         <>
-                          <ProgressiveCover src={buildCoverArtUrl(entry.path, false, activeChannel)} className="w-full h-full object-cover"
+                          <ProgressiveCover lazy src={buildCoverArtUrl(entry.path, false, activeChannel)} className="w-full h-full object-cover"
                             onError={(e) => { (e.target as HTMLImageElement).style.display = 'none' }} />
                           {!selectMode && (
                             <div className="absolute inset-0 flex items-center justify-center bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none">
@@ -1428,7 +1435,7 @@ export default function ApiFilesBrowser(): JSX.Element {
                         </>
                       ) : mt === 'image' ? (
                         <>
-                          <ProgressiveCover src={buildStreamUrl(entry.path, activeChannel)} alt={entry.name} className="w-full h-full object-cover"
+                          <ProgressiveCover lazy src={buildStreamUrl(entry.path, activeChannel)} alt={entry.name} className="w-full h-full object-cover"
                             onError={(e) => { (e.target as HTMLImageElement).style.display = 'none' }} />
                           {!selectMode && (
                             <div className="absolute inset-0 bg-black/30 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
@@ -1894,7 +1901,7 @@ export default function ApiFilesBrowser(): JSX.Element {
             },
             localMode
               ? { icon: ExternalLink, label: 'Open in file manager', onSelect: () => openLocalFile(localPath) }
-              : { icon: Link, label: 'Copy folder link', onSelect: () => copyTextToClipboard(window.location.origin + pathToUrl(currentPath), 'link') },
+              : { icon: Link, label: 'Copy folder link', onSelect: () => copyTextToClipboard(folderLinkUrl(currentPath), 'link') },
           ]}
         />
       )}
