@@ -21,6 +21,7 @@ import { embedForDownload, embedSafe } from './downloadEmbed'
 import { triggerDownload } from './apiFilesShared'
 import { errorMessage } from './format'
 import { showAppToast } from './appToast'
+import { runLog } from './runLog'
 import { useStore } from '../store/useStore'
 import { isMobileViewport } from '../hooks/useIsMobile'
 
@@ -175,7 +176,7 @@ export async function writeZip(target: ZipTarget, items: ZipItem[], opts: WriteZ
  *  the limit is saved by itself, unzipped. One part keeps the plain name. */
 async function writeMemoryParts(
   filename: string,
-  entries: AsyncGenerator<{ name: string; input: Response | Blob }>,
+  entries: AsyncGenerator<{ name: string; input: Response | Blob; url: string }>,
   result: ZipResult,
   opts: WriteZipOpts
 ): Promise<ZipResult> {
@@ -196,14 +197,14 @@ async function writeMemoryParts(
     if (!last) onPart?.(parts + 1)
   }
 
-  for await (const { name, input } of entries) {
+  for await (const { name, input, url } of entries) {
     const baseName = name.split('/').pop() || name
     const length = input instanceof Blob ? input.size : Number(input.headers.get('content-length')) || 0
     if (length > MEMORY_ZIP_LIMIT) {
       // Too big for any part: let the browser download it straight from the
       // server rather than pulling it into memory first.
       if (input instanceof Blob) saveBlob(input, baseName)
-      else { void input.body?.cancel(); triggerDownload(input.url, baseName) }
+      else { void input.body?.cancel(); triggerDownload(url, baseName) }
       bytes += length
       onBytes?.(bytes)
       continue
@@ -324,7 +325,7 @@ async function* zipEntries(
   result: ZipResult,
   onDone: (done: number) => void,
   signal?: AbortSignal
-): AsyncGenerator<{ name: string; input: Response | Blob; lastModified?: Date }> {
+): AsyncGenerator<{ name: string; input: Response | Blob; url: string; lastModified?: Date }> {
   const pending = items.map(() => null as Promise<Response | Blob | null> | null)
   const start = (i: number): void => {
     if (i < items.length && !pending[i]) pending[i] = fetchItem(items[i], signal)
@@ -339,7 +340,7 @@ async function* zipEntries(
     start(i + PREFETCH)
     if (input) {
       result.saved++
-      yield { name: items[i].name, input }
+      yield { name: items[i].name, input, url: items[i].url }
     } else {
       result.failed++
     }
@@ -365,12 +366,160 @@ async function fetchItemRaw(item: ZipItem, signal?: AbortSignal): Promise<Respon
     const cdn = await cdnService.tryDownload(item.cdnPath).catch(() => null)
     if (cdn) return cdn.blob
   }
-  try {
-    const res = await fetch(item.url, { credentials: 'omit', signal })
-    return res.ok ? res : null
-  } catch {
-    return null
+  const opened = await openZipItem(item, signal)
+  return opened ? resumableZipBody(item, opened, signal) : null
+}
+
+// A connection can stop sending partway through a file without ever failing:
+// no error, no close. Nothing timed that out, so one stalled file left a
+// many-GB ZIP sitting at the same percent for good, and one that did fail
+// threw the whole archive away. Now a file whose bytes stop for STALL_MS while
+// the ZIP waits on it, or whose connection drops, picks up where it stopped.
+const STALL_MS = 30_000
+// No response headers by now counts as a failed request.
+const HEADERS_TIMEOUT_MS = 60_000
+// Tries for a file's first request (network errors, 5xx, 429)...
+const OPEN_ATTEMPTS = 3
+// ...and times one file may resume before the ZIP gives up on it.
+const MAX_RESUMES = 5
+
+interface OpenedItem { res: Response; request: AbortController }
+
+function logZip(message: string): void {
+  console.warn(`[zip] ${message}`)
+  runLog('zip', message)
+}
+
+/** An AbortController of its own that also follows `signal` (the user's
+ *  cancel), so one stalled request can be dropped without the rest. */
+function linkedAbort(signal?: AbortSignal): AbortController {
+  const ctrl = new AbortController()
+  if (signal?.aborted) ctrl.abort(signal.reason)
+  else signal?.addEventListener('abort', () => ctrl.abort(signal.reason), { once: true })
+  return ctrl
+}
+
+/** Waits before another try: longer each time, and for as long as the
+ *  device is offline. Rejects if `signal` fires. */
+async function zipRetryPause(attempt: number, signal?: AbortSignal): Promise<void> {
+  const wait = (ms: number | null): Promise<void> => new Promise((resolve, reject) => {
+    const done = (): void => { clearTimeout(timer); window.removeEventListener('online', done); signal?.removeEventListener('abort', stop); resolve() }
+    const stop = (): void => { clearTimeout(timer); window.removeEventListener('online', done); reject(signal?.reason ?? new DOMException('Aborted', 'AbortError')) }
+    const timer = ms == null ? undefined : setTimeout(done, ms)
+    if (ms == null) window.addEventListener('online', done)
+    signal?.addEventListener('abort', stop, { once: true })
+    if (signal?.aborted) stop()
+  })
+  if (navigator.onLine === false) await wait(null)
+  await wait(Math.min(2000 * 2 ** (attempt - 1), 20_000))
+}
+
+/** The item's request, retried a few times on a network error, 5xx or 429.
+ *  Null when the server says no (4xx) or every try failed. */
+async function openZipItem(item: ZipItem, signal?: AbortSignal, headers?: Record<string, string>): Promise<OpenedItem | null> {
+  for (let attempt = 1; ; attempt++) {
+    const request = linkedAbort(signal)
+    const timer = setTimeout(() => request.abort(new DOMException('No response', 'TimeoutError')), HEADERS_TIMEOUT_MS)
+    let failure: string
+    try {
+      const res = await fetch(item.url, { credentials: 'omit', signal: request.signal, headers })
+      if (res.ok) return { res, request }
+      void res.body?.cancel().catch(() => {})
+      failure = `HTTP ${res.status}`
+      if (res.status < 500 && res.status !== 429) { logZip(`"${item.name}": ${failure}, left out`); return null }
+    } catch (e) {
+      if (signal?.aborted) return null
+      failure = e instanceof Error ? `${e.name}: ${e.message}` : String(e)
+    } finally {
+      clearTimeout(timer)
+    }
+    if (attempt >= OPEN_ATTEMPTS) { logZip(`"${item.name}": ${failure} after ${attempt} tries, left out`); return null }
+    logZip(`"${item.name}": ${failure}, trying again (${attempt}/${OPEN_ATTEMPTS})`)
+    try { await zipRetryPause(attempt, signal) } catch { return null }
   }
+}
+
+/** The response with a body that resumes after a stall or a dropped
+ *  connection: a Range request for the rest, checked to be the same file
+ *  (size and ETag) so the bytes join up. client-zip reads the body, size and
+ *  date off the Response, so the stand-in carries the same headers. */
+function resumableZipBody(item: ZipItem, opened: OpenedItem, signal?: AbortSignal): Response {
+  const first = opened.res
+  if (!first.body) return first
+  const total = Number(first.headers.get('content-length')) || 0
+  const etag = first.headers.get('etag')
+  let request = opened.request
+  let reader: ReadableStreamDefaultReader<Uint8Array> | null = first.body.getReader()
+  let received = 0
+  let resumes = 0
+  let failure = ''
+  let waiting = false
+  let lastByteAt = Date.now()
+  // Started on the first read, and judged only while the ZIP is waiting on
+  // this file: a prefetched file sits unread until its turn, which isn't a stall.
+  let watchdog: ReturnType<typeof setInterval> | null = null
+  const finish = (): void => { if (watchdog) clearInterval(watchdog) }
+
+  const giveUp = (why: string): Error => {
+    finish()
+    logZip(`"${item.name}": giving up at ${received} of ${total || '?'} bytes, ${why}`)
+    return new Error(`Couldn't download "${item.name.split('/').pop()}": ${why}`)
+  }
+
+  const body = new ReadableStream<Uint8Array>({
+    async pull(controller) {
+      watchdog ??= setInterval(() => {
+        if (waiting && Date.now() - lastByteAt > STALL_MS) request.abort(new DOMException(`no data for ${STALL_MS / 1000}s`, 'TimeoutError'))
+      }, 5000)
+      for (;;) {
+        if (reader) {
+          try {
+            waiting = true
+            lastByteAt = Date.now()
+            const { done, value } = await reader.read()
+            waiting = false
+            if (done) {
+              if (total && received < total) throw new Error(`the connection closed at ${received} of ${total} bytes`)
+              finish()
+              controller.close()
+              return
+            }
+            received += value.byteLength
+            controller.enqueue(value)
+            return
+          } catch (e) {
+            waiting = false
+            if (signal?.aborted) { finish(); throw signal.reason ?? e }
+            const reason = request.signal.reason
+            failure = reason instanceof DOMException && reason.name === 'TimeoutError' ? reason.message
+              : e instanceof Error ? e.message : String(e)
+          }
+          reader.cancel().catch(() => {})
+          reader = null
+        }
+        if (!total || ++resumes > MAX_RESUMES) throw giveUp(total ? `the connection kept dropping (${failure})` : failure)
+        logZip(`"${item.name}": ${failure} at ${received} of ${total} bytes, resuming (${resumes}/${MAX_RESUMES})`)
+        try { await zipRetryPause(resumes, signal) } catch (e) { finish(); throw e }
+        const next = await openZipItem(item, signal, { Range: `bytes=${received}-` })
+        if (signal?.aborted) { finish(); throw signal.reason }
+        if (!next) { failure = 'the server would not resume'; continue }
+        const range = /^bytes (\d+)-\d+\/(\d+)$/.exec(next.res.headers.get('content-range') ?? '')
+        const sameFile = next.res.status === 206 && range && Number(range[1]) === received && Number(range[2]) === total
+          && (!etag || !next.res.headers.get('etag') || next.res.headers.get('etag') === etag)
+        if (!sameFile || !next.res.body) {
+          next.request.abort()
+          throw giveUp(`the server sent the file again from another point or as another version (HTTP ${next.res.status})`)
+        }
+        request = next.request
+        reader = next.res.body.getReader()
+      }
+    },
+    cancel(reason) {
+      finish()
+      void reader?.cancel(reason).catch(() => {})
+    },
+  })
+  return new Response(body, { status: first.status, headers: first.headers })
 }
 
 /** Two selected folders can both hold "Untitled.mp3" - suffix repeats the
