@@ -64,10 +64,25 @@ async function requestImageBlob(url: string, signal?: AbortSignal): Promise<Blob
   return blob
 }
 
+/** Desktop only: the main process has no CORS, so it reads site /assets/
+ *  covers directly instead of going through a third-party proxy. */
+async function requestImageBlobViaMain(url: string): Promise<Blob> {
+  const res = await (window as any).electron.fetchImageBytes(url)
+  if (!res?.dataUrl) throw new Error(res?.error || 'Image request failed')
+  return await (await fetch(res.dataUrl)).blob()
+}
+
 export async function fetchImageBlob(url: string): Promise<Blob> {
   try {
     return await requestImageBlob(url)
   } catch (err) {
+    if ((window as any).electron?.fetchImageBytes && /^https:/i.test(url)) {
+      try {
+        return await requestImageBlobViaMain(url)
+      } catch {
+        // Fall through to the proxies below.
+      }
+    }
     if (!isProxyableCoverUrl(url)) throw err
     for (const proxy of CORS_PROXIES) {
       try {
@@ -137,6 +152,21 @@ export async function fetchImageDataUrl(url: string): Promise<string> {
 export async function saveCoverImage(url: string, title: string): Promise<'saved' | 'canceled'> {
   const blob = await fetchImageBlob(url)
   const name = coverFileName(title, blob.type)
+  // Desktop: native Save-as dialog (a blob link would drop into the download
+  // tracker with no way to pick a place).
+  const el = (window as any).electron
+  if (el?.saveImageFile) {
+    const dataUrl = await new Promise<string>((resolve, reject) => {
+      const reader = new FileReader()
+      reader.onload = () => resolve(reader.result as string)
+      reader.onerror = () => reject(reader.error ?? new Error('Could not read image'))
+      reader.readAsDataURL(blob)
+    })
+    const res = await el.saveImageFile({ defaultName: name, dataUrl })
+    if (res?.canceled) return 'canceled'
+    if (res?.error) throw new Error(res.error)
+    return 'saved'
+  }
   // The cover's own URL is cross-origin, where `download` is ignored and the
   // browser navigates to the image instead - so hand the anchor a same-origin
   // blob: URL, which does honour the attribute (and the filename).

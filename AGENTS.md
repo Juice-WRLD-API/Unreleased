@@ -1,6 +1,6 @@
 # Agent guide: Juice WRLD API and Unreleased
 
-**Version 1.46** · updated 2026-10-30. Bump the version and date whenever you
+**Version 1.47** · updated 2026-10-30. Bump the version and date whenever you
 change this file (minor for fixes and additions, major for rewrites).
 
 **Keep this file current.** If you find something in the docs or this file that
@@ -405,6 +405,12 @@ Node 22.
 
 Newest first. One entry each: date, what went wrong, what to do instead. Delete
 entries that stop being true.
+
+- 2026-10-30: Q_scal's v2.6.14 React #185 stack maps to `CoverFade`'s cached-image
+  layout effect (`Hh` in the published Windows bundle). Check cached images on
+  source changes, not on the layer state the effect itself writes, and keep
+  duplicate load/transition events idempotent. Map minified names using the actual
+  release asset: a local rebuild of the same tag can assign different names.
 
 - 2026-10-30: My proposals walked every page of `/accounts/editor/proposals/` (11+ requests at 2,000 proposals) so the tab counts and search could run on the client. The endpoint now takes `status` and `q` and returns `counts` (whole list per status), and `useMyProposals` loads one page and the next on scroll (`getMyProposalsPage`, `LoadMoreSentinel`). `getMyProposals` still walks everything, for the terminal; don't use it for UI lists. The comp list (`/contributor/proposals/`) is still one unpaginated call.
 

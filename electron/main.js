@@ -2379,6 +2379,30 @@ function fetchImageBuffer(url) {
   })
 }
 
+// Covers under the site's /assets/ send no CORS header, so the renderer can't
+// read their bytes with fetch(); the main process can. Returns the original
+// bytes (not a thumbnail) with the mime sniffed from the file header.
+function sniffImageMime(buf) {
+  if (buf.length >= 8 && buf.readUInt32BE(0) === 0x89504e47) return 'image/png'
+  if (buf.length >= 3 && buf[0] === 0xff && buf[1] === 0xd8) return 'image/jpeg'
+  if (buf.length >= 12 && buf.toString('ascii', 0, 4) === 'RIFF' && buf.toString('ascii', 8, 12) === 'WEBP') return 'image/webp'
+  if (buf.length >= 6 && buf.toString('ascii', 0, 3) === 'GIF') return 'image/gif'
+  if (buf.length >= 12 && buf.toString('ascii', 4, 8) === 'ftyp' && /avif|avis/.test(buf.toString('ascii', 8, 12))) return 'image/avif'
+  if (buf.length >= 2 && buf.toString('ascii', 0, 2) === 'BM') return 'image/bmp'
+  return null
+}
+ipcMain.handle('fetch-image-bytes', async (_, url) => {
+  if (typeof url !== 'string' || !/^https:\/\//i.test(url)) return { error: 'Invalid image URL' }
+  try {
+    const buf = await fetchImageBuffer(url)
+    const mime = sniffImageMime(buf)
+    if (!mime) return { error: 'Not an image' }
+    return { dataUrl: `data:${mime};base64,${buf.toString('base64')}` }
+  } catch (e) {
+    return { error: e.message || 'Failed to fetch image' }
+  }
+})
+
 // Offline covers live under userData rather than the (user-movable) audio
 // folder, so offline-set-library-path never has to carry them along. One JPEG
 // per track id, capped at 640px like every other stored cover.
