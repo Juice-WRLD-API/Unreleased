@@ -537,18 +537,25 @@ function ProposalsTab({ proposals, status, setStatus, onChanged, onReviewed, cha
     return m
   }, [proposals])
 
-  // Reviews every pending proposal from one editor - parallel across songs,
-  // in order within a song (see adminReviewProposalsBatch). Fired from the
-  // list view, so there's no detail selection to reconcile afterward - just
-  // a single refetch once the batch settles.
+  // Reviews every pending proposal from one editor in one backend request.
   const doReviewAllForUser = async (editorId: number, action: 'approve' | 'reject') => {
     const pending = proposals.filter(x => x.editor_id === editorId && x.status === 'pending')
     if (pending.length === 0) return
     if (!confirm(`${action === 'approve' ? 'Approve' : 'Deny'} all ${pending.length} pending proposal${pending.length !== 1 ? 's' : ''} from ${pending[0].editor_username} (#${editorId})?`)) return
     setAcceptingAllUser(editorId)
     try {
-      await userApi.adminReviewProposalsBatch(pending, action, channel, (updated) => dropCache(updated.id))
-      setArchive(null)
+      const result = await userApi.adminReviewProposalsBatch(pending.map(p => p.id), action, channel)
+      for (const row of result.results) {
+        const original = pending.find(p => p.id === row.id)
+        if (!row.proposal || !original) continue
+        dropCache(row.id); setArchive(null)
+        onReviewed({ ...original, ...row.proposal })
+      }
+      const failed = result.results.filter(row => row.result === 'failed' || row.result === 'not_run')
+      if (failed.length) showAppToast(`${failed.length} proposals weren't reviewed. ${failed[0].detail ?? 'Try again.'}`)
+      onChanged()
+    } catch (e) {
+      showAppToast(errorMessage(e, `Couldn't ${action} the proposals`))
       onChanged()
     } finally {
       setAcceptingAllUser(null)
@@ -732,7 +739,7 @@ function ProposalsTab({ proposals, status, setStatus, onChanged, onReviewed, cha
 
       {/* Actions */}
       <div className="shrink-0 p-3 border-t border-[var(--separator)] flex items-center gap-2">
-        {actionId === p.id ? (
+        {actionId !== null || acceptingAllUser !== null ? (
           <div className="flex-1 flex justify-center py-2.5"><Loader2 size={16} className="animate-spin text-text-muted" /></div>
         ) : p.status === 'pending' ? (
           <>
@@ -750,7 +757,7 @@ function ProposalsTab({ proposals, status, setStatus, onChanged, onReviewed, cha
             </button>
           </>
         ) : p.status === 'approved' ? (
-          <button onClick={() => doReverse(p.id)} disabled={actionId === p.id}
+          <button onClick={() => doReverse(p.id)} disabled={actionId !== null || acceptingAllUser !== null}
             className="w-full h-11 rounded-full bg-[var(--fill)] text-headline text-amber-500 active:bg-[var(--fill-strong)] transition-colors flex items-center justify-center gap-1.5 disabled:opacity-40">
             <RotateCcw size={15} /> Reverse
           </button>
@@ -797,7 +804,7 @@ function ProposalsTab({ proposals, status, setStatus, onChanged, onReviewed, cha
             item={item}
             showUserHeader={sortBy === 'user' && (idx === 0 || pageOf[idx - 1].editor_id !== item.editor_id)}
             pendingCount={pendingByUser.get(item.editor_id) ?? 0}
-            accepting={acceptingAllUser === item.editor_id}
+            accepting={acceptingAllUser !== null || actionId !== null}
             onSelect={setSelected}
             onAcceptAll={(id) => doReviewAllForUser(id, 'approve')}
             onRejectAll={(id) => doReviewAllForUser(id, 'reject')}

@@ -586,19 +586,25 @@ function ProposalsTab({ proposals, status, setStatus, onChanged, onReviewed, cha
     return m
   }, [proposals])
 
-  // Reviews every pending proposal from one editor - parallel across songs,
-  // in order within a song (see adminReviewProposalsBatch). Each success is
-  // applied via onReviewed as it lands, same as a single Approve.
+  // Reviews every pending proposal from one editor in one backend request.
   const doReviewAllForUser = async (editorId: number, action: 'approve' | 'reject') => {
     const pending = proposals.filter(x => x.editor_id === editorId && x.status === 'pending')
     if (pending.length === 0) return
     if (!confirm(`${action === 'approve' ? 'Approve' : 'Deny'} all ${pending.length} pending proposal${pending.length !== 1 ? 's' : ''} from ${pending[0].editor_username} (#${editorId})?`)) return
     setAcceptingAllUser(editorId)
     try {
-      await userApi.adminReviewProposalsBatch(pending, action, channel, (updated) => {
-        dropCache(updated.id); setArchive(null)
-        onReviewed(updated)
-      })
+      const result = await userApi.adminReviewProposalsBatch(pending.map(p => p.id), action, channel)
+      for (const row of result.results) {
+        const original = pending.find(p => p.id === row.id)
+        if (!row.proposal || !original) continue
+        dropCache(row.id); setArchive(null)
+        onReviewed({ ...original, ...row.proposal })
+      }
+      const failed = result.results.filter(row => row.result === 'failed' || row.result === 'not_run')
+      if (failed.length) showAppToast(`${failed.length} proposals weren't reviewed. ${failed[0].detail ?? 'Try again.'}`)
+      onChanged()
+    } catch (e) {
+      showAppToast(errorMessage(e, `Couldn't ${action} the proposals`))
       onChanged()
     } finally {
       setAcceptingAllUser(null)
@@ -655,7 +661,7 @@ function ProposalsTab({ proposals, status, setStatus, onChanged, onReviewed, cha
               active={selected?.id === item.id}
               showUserHeader={sortBy === 'user' && (idx === 0 || pageOf[idx - 1].editor_id !== item.editor_id)}
               pendingCount={pendingByUser.get(item.editor_id) ?? 0}
-              accepting={acceptingAllUser === item.editor_id}
+              accepting={acceptingAllUser !== null || actionId !== null}
               onSelect={setSelected}
               onAcceptAll={(id) => doReviewAllForUser(id, 'approve')}
               onRejectAll={(id) => doReviewAllForUser(id, 'reject')}
@@ -733,7 +739,7 @@ function ProposalsTab({ proposals, status, setStatus, onChanged, onReviewed, cha
                 {/* Actions */}
                 {p.status === 'pending' && (
                   <div className="flex items-center gap-2 shrink-0">
-                    {actionId === p.id ? <Loader2 size={14} className="animate-spin text-text-muted" /> : (
+                    {actionId !== null || acceptingAllUser !== null ? <Loader2 size={14} className="animate-spin text-text-muted" /> : (
                       <>
                         <button onClick={() => setRevising(true)}
                           className="px-3 py-1.5 rounded-lg bg-[var(--surface-overlay)] hover:bg-[var(--surface-raised)] text-text-secondary text-xs font-semibold transition-colors flex items-center gap-1.5 border border-[var(--border)]">
@@ -752,7 +758,7 @@ function ProposalsTab({ proposals, status, setStatus, onChanged, onReviewed, cha
                   </div>
                 )}
                 {p.status === 'approved' && (
-                  <button onClick={() => doReverse(p.id)} disabled={actionId === p.id}
+                  <button onClick={() => doReverse(p.id)} disabled={actionId !== null || acceptingAllUser !== null}
                     className="px-3 py-1.5 rounded-lg text-xs text-text-muted hover:text-amber-400 hover:bg-amber-500/10 transition-colors flex items-center gap-1.5 disabled:opacity-40">
                     {actionId === p.id ? <Loader2 size={13} className="animate-spin" /> : <RotateCcw size={13} />} Reverse
                   </button>
