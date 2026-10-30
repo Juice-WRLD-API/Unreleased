@@ -523,7 +523,7 @@ export default function EditorPage({ initialSongId = null }: {
 
             <Card title="Identity" overflowVisible>
               <FieldRow label="Title" value={name} original={String(base.name || '')} onChange={setName} />
-              <FieldRow label="Album" value={album} original={String(base.album || '')} onChange={setAlbum} suggest="album" />
+              <TextareaRow rows={2} label="Album" value={album} original={String(base.album || '')} onChange={setAlbum} suggest="album" />
               <TextareaRow
                 label="Alt titles (one per line)" value={altNames}
                 original={Array.isArray(base.track_titles) ? (base.track_titles as string[]).join('\n') : ''}
@@ -553,10 +553,10 @@ export default function EditorPage({ initialSongId = null }: {
             </Card>
 
             <Card title="Credits" overflowVisible>
-              <FieldRow label="Credited artists" value={artists} original={String(base.credited_artists || '')} onChange={setArtists} suggest="credited_artists" />
+              <TextareaRow rows={2} label="Credited artists" value={artists} original={String(base.credited_artists || '')} onChange={setArtists} suggest="credited_artists" />
               <FieldGrid>
-                <FieldRow label="Producers" value={prod} original={String(base.producers || '')} onChange={setProd} suggest="producers" />
-                <FieldRow label="Engineers" value={eng}  original={String(base.engineers || '')} onChange={setEng} suggest="engineers" />
+                <TextareaRow rows={2} label="Producers" value={prod} original={String(base.producers || '')} onChange={setProd} suggest="producers" />
+                <TextareaRow rows={2} label="Engineers" value={eng}  original={String(base.engineers || '')} onChange={setEng} suggest="engineers" />
               </FieldGrid>
             </Card>
 
@@ -643,14 +643,14 @@ export default function EditorPage({ initialSongId = null }: {
                 <TextareaRow label="Bitrate" value={bitrate} original={String(base.bitrate || '')}  onChange={setBitrate}    rows={2} placeholder="320 kbps" mono />
                 <FieldGrid>
                   <TextareaRow label="Leak type" value={leak} original={String(base.leak_type || '')} onChange={setLeak} rows={2} placeholder="HQ, LQ…" suggest="leak_type" />
-                  <FieldRow label="File names"        value={fileNames}        original={String(base.file_names || '')}            onChange={setFileNames} />
-                  <FieldRow label="Instrumentals"     value={instrumentals}    original={String(base.instrumentals || '')}         onChange={setInstrumentals} placeholder="Versions available" />
-                  <FieldRow label="Inst. names"       value={instrumentalNames} original={String(base.instrumental_names || '')}   onChange={setInstrumentalNames} />
+                  <TextareaRow rows={2} label="File names"        value={fileNames}        original={String(base.file_names || '')}            onChange={setFileNames} />
+                  <TextareaRow rows={2} label="Instrumentals"     value={instrumentals}    original={String(base.instrumentals || '')}         onChange={setInstrumentals} placeholder="Versions available" />
+                  <TextareaRow rows={2} label="Inst. names"       value={instrumentalNames} original={String(base.instrumental_names || '')}   onChange={setInstrumentalNames} />
                   <FieldRow label="Cover URL"         value={imageUrl}         original={String(base.image_url || '')}             onChange={setImageUrl} mono onBrowse={() => setPickingImage(true)} />
                   {cat === 'recording_session' && (
                     <>
-                      <FieldRow label="Session titles" value={sessionTitles} original={String(base.session_titles || '')} onChange={setSessionTitles} />
-                      <FieldRow label="Session tracking" value={sessionTracking} original={String(base.session_tracking || '')} onChange={setSessionTracking} />
+                      <TextareaRow rows={2} label="Session titles" value={sessionTitles} original={String(base.session_titles || '')} onChange={setSessionTitles} />
+                      <TextareaRow rows={2} label="Session tracking" value={sessionTracking} original={String(base.session_tracking || '')} onChange={setSessionTracking} />
                     </>
                   )}
                 </FieldGrid>
