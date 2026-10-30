@@ -1,6 +1,6 @@
 # Agent guide: Juice WRLD API and Unreleased
 
-**Version 1.45** · updated 2026-10-30. Bump the version and date whenever you
+**Version 1.46** · updated 2026-10-30. Bump the version and date whenever you
 change this file (minor for fixes and additions, major for rewrites).
 
 **Keep this file current.** If you find something in the docs or this file that
@@ -69,7 +69,9 @@ version number (desktop 2.5.x, web 2.3.x, Android/iOS 3.2.x, beta 3.0.x-beta as 
 - The shorthand **port-c**: on `web`, port the change to `app`; on `app`, port it
   to `web`. Then commit and push both.
 - The shorthand **port-b**: commit and push the current branch only, with no
-  porting, authored as the user and with no AI attribution lines.
+  porting, authored as the user and with no AI attribution lines. If the push
+  is rejected because `origin` moved ahead, `git pull --rebase` and push again
+  (no force, no merge commit); stop and report if the rebase conflicts.
 
 ### Finishing the job
 

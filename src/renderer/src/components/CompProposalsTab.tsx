@@ -88,7 +88,7 @@ export default function CompProposalsTab({ embedded = false, onChanged }: { embe
   const {
     status, setStatus, proposals, selected, setSelected, loading, actionId,
     reviewNotes, setReviewNotes, error, setError, loadError,
-    doReview, doReverse, downloadStaging, bulkApproving, doAcceptAll,
+    doReview, doReverse, downloadStaging, bulkApproving, doReviewAll,
   } = useCompProposalsQueue(activeChannel, onChanged, true)
   const [query, setQuery] = useState('')
   const [propagationId, setPropagationId] = useState<number | null>(null)
@@ -139,19 +139,17 @@ export default function CompProposalsTab({ embedded = false, onChanged }: { embe
   const p = selected
   const approveBlockedReason = compApproveBlockedReason(p, account)
 
-  // Every other pending proposal from the same contributor, minus anything
-  // this reviewer isn't allowed to approve (delete_folder gating) - scoped
-  // to the current status/search-independent `proposals` list so the count
-  // matches what "Accept all" would actually act on.
+  // Denial remains available for proposals this reviewer cannot approve.
   const pendingFromContributor = p
-    ? proposals.filter(x => x.contributor_username === p.contributor_username && x.status === 'pending' && !compApproveBlockedReason(x, account))
+    ? proposals.filter(x => x.contributor_id === p.contributor_id && x.status === 'pending')
     : []
+  const approvableFromContributor = pendingFromContributor.filter(x => !compApproveBlockedReason(x, account))
 
-  const doAcceptAllForContributor = (): void => {
-    const ids = pendingFromContributor.map(x => x.id)
+  const doReviewAllForContributor = (action: 'approve' | 'reject'): void => {
+    const ids = (action === 'approve' ? approvableFromContributor : pendingFromContributor).map(x => x.id)
     if (ids.length === 0) return
-    if (!confirm(`Approve all ${ids.length} pending comp proposal${ids.length !== 1 ? 's' : ''} from ${p!.contributor_username}?`)) return
-    doAcceptAll(ids)
+    if (!confirm(`${action === 'approve' ? 'Approve' : 'Deny'} all ${ids.length} pending comp proposal${ids.length !== 1 ? 's' : ''} from ${p!.contributor_username}?`)) return
+    void doReviewAll(ids, action)
   }
 
   return (
@@ -233,14 +231,14 @@ export default function CompProposalsTab({ embedded = false, onChanged }: { embe
                     )}
                   </div>
                 </div>
-                <div className="flex items-center gap-2 shrink-0">
+                <div className="flex items-center justify-end flex-wrap gap-2">
                   {p.staging_filename && p.status === 'pending' && (
                     <button onClick={() => downloadStaging(p)} className="px-3 py-1.5 rounded-lg text-xs text-text-muted hover:text-text-primary border border-[var(--border)] flex items-center gap-1.5">
                       <Download size={13} /> Staged file
                     </button>
                   )}
                   {p.status === 'pending' && (
-                    actionId === p.id || bulkApproving ? <Loader2 size={14} className="animate-spin text-text-muted" /> : (
+                    actionId !== null || bulkApproving ? <Loader2 size={14} className="animate-spin text-text-muted" /> : (
                       <>
                         <button onClick={() => doReview(p.id, 'reject')} className="px-3 py-1.5 rounded-lg bg-red-500/10 text-red-400 text-xs font-semibold flex items-center gap-1.5">
                           <XCircle size={13} /> Reject
@@ -250,9 +248,14 @@ export default function CompProposalsTab({ embedded = false, onChanged }: { embe
                             <CheckCircle size={13} /> Approve
                           </button>
                         )}
+                        {approvableFromContributor.length > 1 && (
+                          <button onClick={() => doReviewAllForContributor('approve')} className="px-3 py-1.5 rounded-lg bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 text-xs font-semibold flex items-center gap-1.5">
+                            <CheckCircle size={13} /> Accept all ({approvableFromContributor.length})
+                          </button>
+                        )}
                         {pendingFromContributor.length > 1 && (
-                          <button onClick={doAcceptAllForContributor} className="px-3 py-1.5 rounded-lg bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 text-xs font-semibold flex items-center gap-1.5">
-                            <CheckCircle size={13} /> Accept all ({pendingFromContributor.length})
+                          <button onClick={() => doReviewAllForContributor('reject')} className="px-3 py-1.5 rounded-lg bg-red-500/10 hover:bg-red-500/20 text-red-400 text-xs font-semibold flex items-center gap-1.5">
+                            <XCircle size={13} /> Deny all ({pendingFromContributor.length})
                           </button>
                         )}
                       </>

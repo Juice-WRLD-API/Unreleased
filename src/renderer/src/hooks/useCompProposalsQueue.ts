@@ -62,7 +62,7 @@ export function useCompProposalsQueue(
   doReverse: (id: number) => Promise<void>
   downloadStaging: (p: CompFileProposal) => void
   bulkApproving: boolean
-  doAcceptAll: (ids: number[]) => Promise<void>
+  doReviewAll: (ids: number[], action: 'approve' | 'reject') => Promise<void>
 } {
   const [status, setStatus] = useState<ProposalStatus | ''>('pending')
   const [proposals, setProposals] = useState<CompFileProposal[]>([])
@@ -133,28 +133,24 @@ export function useCompProposalsQueue(
     }
   }, [reviewNotes, activeChannel, applyOptimistic, applyReviewResult, reload])
 
-  // Approves a batch of already-filtered ids (caller excludes anything the
-  // reviewer isn't allowed to approve, e.g. delete_folder gating) in
-  // sequence rather than in parallel - folder moves/renames can depend on
-  // each other landing in order. review_notes is left blank: the notes box
-  // reflects whatever's currently selected, which has no bearing on the
-  // rest of the batch. A per-item failure is counted rather than thrown so one
-  // bad row doesn't stop the rest; the count is reported once at the end.
-  const doAcceptAll = useCallback(async (ids: number[]): Promise<void> => {
+  // The backend preserves proposal order for dependent file/folder changes.
+  const doReviewAll = useCallback(async (ids: number[], action: 'approve' | 'reject'): Promise<void> => {
     if (ids.length === 0) return
     setBulkApproving(true)
     setError(null)
-    let failed = 0
     try {
-      for (const id of ids) {
-        try {
-          const updated = await userApi.adminReviewCompProposal(id, { action: 'approve', review_notes: '', channel: activeChannel })
-          if (applyOptimistic) applyReviewResult(updated)
-        } catch { failed++ }
+      const result = await userApi.adminReviewCompProposalsBatch(ids, action, activeChannel)
+      if (applyOptimistic) {
+        for (const row of result.results) {
+          if (row.proposal) applyReviewResult(row.proposal)
+        }
       }
-      if (failed > 0) showAppToast(`Couldn't approve ${failed} of ${ids.length} proposals`)
-      reload()
+      const failed = result.results.filter(row => row.result === 'failed' || row.result === 'not_run')
+      if (failed.length) showAppToast(`${failed.length} proposals weren't reviewed. ${failed[0].detail ?? 'Try again.'}`)
+    } catch (e) {
+      showAppToast(errorMessage(e, `Could not ${action} these proposals`))
     } finally {
+      reload()
       setBulkApproving(false)
     }
   }, [activeChannel, applyOptimistic, applyReviewResult, reload])
@@ -194,6 +190,6 @@ export function useCompProposalsQueue(
   return {
     status, setStatus, proposals, selected, setSelected, loading, actionId,
     reviewNotes, setReviewNotes, error, setError, loadError, reload,
-    doReview, doReverse, downloadStaging, bulkApproving, doAcceptAll,
+    doReview, doReverse, downloadStaging, bulkApproving, doReviewAll,
   }
 }
