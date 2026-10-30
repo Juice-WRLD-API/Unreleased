@@ -1,12 +1,14 @@
 # Agent guide: Juice WRLD API and Unreleased
 
-**Version 1.43** · updated 2026-10-30. Bump the version and date whenever you
+**Version 1.44** · updated 2026-10-30. Bump the version and date whenever you
 change this file (minor for fixes and additions, major for rewrites).
 
 **Keep this file current.** If you find something in the docs or this file that
 doesn't match the real behaviour, or you make a mistake a future agent could
 make too, add it here as you go: fix the wrong line, or add a short entry to
 section 10 (what went wrong, what to do instead). Then bump the version.
+Don't write down what the code or a quick look already shows; entries are for
+things a future agent would get wrong.
 
 Read this before working on the Juice WRLD API (juicewrldapi.com), the Unreleased
 player on any platform, or one of the tools around them. It covers how the
@@ -75,7 +77,6 @@ version number (desktop 2.5.x, web 2.3.x, Android/iOS 3.2.x, beta 3.0.x-beta as 
   gap: other code paths that should carry a new field, the edit flow for a new
   create flow, and above all the **terminal command** for a UI change (see
   section 5).
-- Run the non-interactive checks before calling something done (section 7).
 - Don't launch a dev server or browser preview to check your work unless the
   user asked for it in that turn.
 - Long builds (`electron:build`, release scripts) go in a new visible terminal
