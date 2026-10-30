@@ -814,7 +814,7 @@ interface AppActions {
   openLyricsGen: (target?: LyricsGenTarget) => void
   closeLyricsGen: () => void
   /** Opens / closes the "Submit cover art" dialog for a song. */
-  openCoverArtSubmit: (target: CoverArtTarget) => void
+  openCoverArtSubmit: (target?: CoverArtTarget) => void
   closeCoverArtSubmit: () => void
   /** Queues a general feedback report and tries to deliver it. `contact` is
    *  the optional reach-me field the endpoint accepts. Resolves once that
@@ -2282,7 +2282,7 @@ export const useStore = create<AppStore>((set, get, store) => ({
   },
   closeLyricsGen: () => set({ lyricsGenModal: null }),
   coverArtModal: null,
-  openCoverArtSubmit: (target) => set({ coverArtModal: target }),
+  openCoverArtSubmit: (target) => set({ coverArtModal: target ?? { songId: null, songName: '' } }),
   closeCoverArtSubmit: () => set({ coverArtModal: null }),
 
   _enqueueReport: async (report: PendingReport) => {

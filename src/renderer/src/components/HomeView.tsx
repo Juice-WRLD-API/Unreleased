@@ -1,5 +1,5 @@
 import { useRef, useState } from 'react'
-import { ChevronRight, Play, ListMusic, Gamepad2, Flame, Music2, Disc3, User, Newspaper, Radio, Heart, Search, MoreHorizontal, Album, Music, Wrench, MicVocal, RefreshCw, AudioLines } from 'lucide-react'
+import { ChevronRight, Play, ListMusic, Gamepad2, Flame, Music2, Disc3, User, Newspaper, Radio, Heart, Search, MoreHorizontal, Album, Music, Wrench, MicVocal, RefreshCw, AudioLines, ImagePlus } from 'lucide-react'
 import { AlbumArtThumbnail } from './AlbumArtThumbnail'
 import { ProgressiveCover } from './ProgressiveCover'
 import { Tile } from './Tile'
@@ -538,6 +538,12 @@ export default function HomeView(): JSX.Element {
                       title="Identify song"
                       subtitle="Name a song from the mic, this PC or a file"
                       onClick={() => useStore.getState().setShowRecognition(true)}
+                    />
+                    <ShortcutCard
+                      icon={<ImagePlus size={18} className="text-accent" />}
+                      title="Submit cover art"
+                      subtitle="Send in better art for any song"
+                      onClick={() => useStore.getState().openCoverArtSubmit()}
                     />
                   </ToolsTile>
                 )}

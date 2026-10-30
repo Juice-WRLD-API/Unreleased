@@ -347,13 +347,6 @@ export default function ApiFilesBrowser(): JSX.Element {
     await el.openPath(filePath)
   }
 
-  const uploadLocalFiles = async (): Promise<void> => {
-    const el = (window as any).electron
-    if (!el || !localPath) return
-    const result = await el.localUpload(localPath)
-    if (result?.ok) await browseLocal(localPath)
-  }
-
   // ── Local file management ──────────────────────────────────────────────────
   // Main owns validation, collision handling and the delete confirm; the
   // renderer just collects the name and re-reads the folder afterwards.
@@ -1136,25 +1129,6 @@ export default function ApiFilesBrowser(): JSX.Element {
           {localMode && (
             <>
               {/* Local folder actions */}
-              <div className="flex items-center gap-1.5 mb-3">
-                <button
-                  onClick={pickLocalFolder}
-                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-surface-overlay hover:bg-surface-raised border border-[var(--border)] text-text-secondary text-xs font-medium transition-colors"
-                ><FolderOpen size={13} /> Change folder</button>
-                {localPath && (
-                  <>
-                    <button
-                      onClick={() => startCreate('directory')}
-                      className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-surface-overlay hover:bg-surface-raised border border-[var(--border)] text-text-secondary text-xs font-medium transition-colors"
-                    ><FolderPlus size={13} /> New folder</button>
-                    <button
-                      onClick={() => startCreate('file')}
-                      className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-surface-overlay hover:bg-surface-raised border border-[var(--border)] text-text-secondary text-xs font-medium transition-colors"
-                    ><FilePlus size={13} /> New file</button>
-                  </>
-                )}
-              </div>
-
               {/* Inline name prompt — used for both "new file/folder" and
                   rename, so there's one place that validates and reports. */}
               {nameEditor && (
@@ -1826,8 +1800,14 @@ export default function ApiFilesBrowser(): JSX.Element {
               { icon: Clipboard, label: 'Copy path', onSelect: () => copyPath(entry) },
               { icon: Pencil, label: 'Rename', onSelect: () => startRename(entry) },
               'divider',
-              { icon: FolderPlus, label: 'New folder', onSelect: () => startCreate('directory') },
-              { icon: FilePlus, label: 'New file', onSelect: () => startCreate('file') },
+              {
+                icon: FilePlus,
+                label: 'New',
+                children: [
+                  { icon: FolderPlus, label: 'Folder', onSelect: () => startCreate('directory') },
+                  { icon: FilePlus, label: 'File', onSelect: () => startCreate('file') },
+                ],
+              },
               'divider',
               { icon: Trash2, label: 'Delete', danger: true, onSelect: () => void deleteLocal([entry.path]) },
             ]}
@@ -1880,22 +1860,36 @@ export default function ApiFilesBrowser(): JSX.Element {
               },
             },
             localMode && 'divider',
-            localMode && { icon: FolderPlus, label: 'New folder', onSelect: () => startCreate('directory') },
-            localMode && { icon: FilePlus, label: 'New file', onSelect: () => startCreate('file') },
-            localMode && { icon: Upload, label: 'Upload file', onSelect: () => uploadLocalFiles() },
+            localMode && {
+              icon: FilePlus,
+              label: 'New',
+              children: [
+                { icon: FolderPlus, label: 'Folder', onSelect: () => startCreate('directory') },
+                { icon: FilePlus, label: 'File', onSelect: () => startCreate('file') },
+                'divider' as const,
+                { icon: FolderOpen, label: 'Change folder…', onSelect: pickLocalFolder },
+              ],
+            },
             !localMode && canPropose && 'divider',
-            !localMode && canPropose && { icon: FolderPlus, label: 'New folder', onSelect: () => setNewFolderPrompt('') },
-            !localMode && canPropose && { icon: Upload, label: 'Upload files', onSelect: () => openUploadPicker(currentPath, 'files') },
-            !localMode && canPropose && { icon: FolderInput, label: 'Upload folder', onSelect: () => openUploadPicker(currentPath, 'folder') },
-            // The Contributor page is still where an upload gets notes or a
-            // rename before it's proposed.
             !localMode && canPropose && {
-              icon: FileText,
-              label: 'Upload with notes…',
-              onSelect: () => {
-                setPendingCompProposal({ paths: [currentPath], changeType: 'upload' })
-                setActiveView('contributor')
-              },
+              icon: FilePlus,
+              label: 'New',
+              children: [
+                { icon: FolderPlus, label: 'Folder', onSelect: () => setNewFolderPrompt('') },
+                'divider' as const,
+                { icon: Upload, label: 'Upload files', onSelect: () => openUploadPicker(currentPath, 'files') },
+                { icon: FolderInput, label: 'Upload folder', onSelect: () => openUploadPicker(currentPath, 'folder') },
+                // The Contributor page is still where an upload gets notes or a
+                // rename before it's proposed.
+                {
+                  icon: FileText,
+                  label: 'Upload with notes…',
+                  onSelect: () => {
+                    setPendingCompProposal({ paths: [currentPath], changeType: 'upload' })
+                    setActiveView('contributor')
+                  },
+                },
+              ],
             },
             'divider',
             {
