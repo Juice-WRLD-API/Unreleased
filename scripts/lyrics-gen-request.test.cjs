@@ -41,6 +41,7 @@ test('existing-server lyrics jobs work with a multipart-only endpoint without up
     './juicewrldApi': {},
     './donorFilesApi': { DONOR_ALLOWED_EXTENSIONS: [] },
     './donorPlayback': {},
+    './lyricsTiming': { saveTimingDraft: () => {} },
   })
   const signal = new AbortController().signal
   const job = await api.createLyricsJobFromServer(

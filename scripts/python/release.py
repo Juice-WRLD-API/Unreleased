@@ -714,12 +714,10 @@ def step_release(version, token, notes, state):
     state["token"] = token
 
     if not notes:
-        # Auto-generate from commits since last tag
-        notes = capture(
-            f'git log $(git describe --tags --abbrev=0 2>nul)..HEAD --pretty="- %s" --no-merges 2>nul'
-            if sys.platform == "win32" else
-            f'git log $(git describe --tags --abbrev=0 2>/dev/null)..HEAD --pretty="- %s" --no-merges 2>/dev/null'
-        ) or f"Release {tag}"
+        # Auto-generate from commits since last tag. Looked up first: cmd.exe
+        # has no $(...), so the one-liner never produced notes on Windows.
+        last_tag = capture("git describe --tags --abbrev=0")
+        notes = (last_tag and capture(f'git log {last_tag}..HEAD --pretty="- %s" --no-merges')) or f"Release {tag}"
 
     _publish_github_release(REPO_OWNER, REPO_NAME, tag, notes, token, state,
                              id_key="release_id", new_key="release_created_new")

@@ -6,7 +6,8 @@ export function downloadBlob(content: string, mime: string, filename: string): v
   const blob = new Blob([content], { type: mime })
   const url = URL.createObjectURL(blob)
   const a = document.createElement('a'); a.href = url; a.download = filename; a.click()
-  URL.revokeObjectURL(url)
+  // Revoking in the same tick can cancel the download before it starts.
+  setTimeout(() => URL.revokeObjectURL(url), 30_000)
 }
 
 export function playlistJsonPayload(detail: PlaylistDetail): {

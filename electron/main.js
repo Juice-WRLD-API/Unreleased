@@ -1568,24 +1568,23 @@ ipcMain.on('window-sync', (event, msg) => {
 // ── IPC: local file browsing ──────────────────────────────────────────────────
 ipcMain.handle('browse-local', async (_, dirPath) => {
   try {
+    // Async: a big folder, or one on a slow network drive, held every window up.
     const target = dirPath || app.getPath('home')
-    const st = fs.statSync(target)
+    const st = await fs.promises.stat(target)
     if (!st.isDirectory()) return { error: 'Not a directory', path: target, entries: [] }
-    const names = fs.readdirSync(target)
-    const entries = []
-    for (const name of names) {
-      if (name.startsWith('.')) continue
+    const names = (await fs.promises.readdir(target)).filter((name) => !name.startsWith('.'))
+    const entries = (await Promise.all(names.map(async (name) => {
       try {
         const fullPath = path.join(target, name)
-        const s = fs.statSync(fullPath)
-        entries.push({
+        const s = await fs.promises.stat(fullPath)
+        return {
           name,
           path: fullPath,
           type: s.isDirectory() ? 'directory' : 'file',
           size: s.isFile() ? s.size : null,
-        })
-      } catch {}
-    }
+        }
+      } catch { return null }
+    }))).filter((e) => e !== null)
     entries.sort((a, b) => {
       if (a.type !== b.type) return a.type === 'directory' ? -1 : 1
       return a.name.localeCompare(b.name)
@@ -1750,7 +1749,7 @@ ipcMain.handle('local-upload', async (event, dirPath) => {
   for (const src of result.filePaths) {
     const target = uniqueDestPath(dirPath, path.basename(src))
     try {
-      fs.copyFileSync(src, target)
+      await fs.promises.copyFile(src, target, fs.constants.COPYFILE_EXCL)
       paths.push(target)
     } catch (e) {
       fileOpError(event, 'Upload', path.basename(src), e.message)
@@ -2200,13 +2199,15 @@ function fileOpError(event, action, name, message) {
   })
 }
 
+// Copies run async (a sync copy to another drive froze every window) and with
+// COPYFILE_EXCL, so a name taken while one runs fails instead of being overwritten.
 ipcMain.handle('copy-library-file', async (event, filePath) => {
   if (typeof filePath !== 'string' || !filePath) return { error: 'No file path' }
   const destDir = await pickDestFolder(event, filePath, 'Copy song to folder')
   if (!destDir) return { canceled: true }
   const target = uniqueDestPath(destDir, path.basename(filePath))
   try {
-    fs.copyFileSync(filePath, target)
+    await fs.promises.copyFile(filePath, target, fs.constants.COPYFILE_EXCL)
     return { ok: true, path: target }
   } catch (e) {
     fileOpError(event, 'Copy', path.basename(filePath), e.message)
@@ -2229,8 +2230,8 @@ ipcMain.handle('move-library-file', async (event, filePath) => {
       // rename() can't cross volumes — fall back to copy-then-remove so moving
       // to another drive still works.
       if (e.code !== 'EXDEV') throw e
-      fs.copyFileSync(filePath, target)
-      fs.unlinkSync(filePath)
+      await fs.promises.copyFile(filePath, target, fs.constants.COPYFILE_EXCL)
+      await fs.promises.unlink(filePath)
     }
     return { ok: true, path: target }
   } catch (e) {
@@ -2403,16 +2404,17 @@ ipcMain.handle('offline-get-library', () => loadOfflineLibrary())
 // Reads actual file sizes off disk (rather than trusting cached metadata)
 // so the Settings display stays accurate even for tracks downloaded before
 // size tracking existed, or if a file was moved/edited outside the app.
-ipcMain.handle('offline-get-stats', () => {
+// Async: with Sync on that's thousands of files, too many to stat on the main thread.
+ipcMain.handle('offline-get-stats', async () => {
   const lib = loadOfflineLibrary()
   let totalSize = 0
   let count = 0
-  for (const track of Object.values(lib.tracks)) {
+  await Promise.all(Object.values(lib.tracks).map(async (track) => {
     try {
-      totalSize += fs.statSync(track.localPath).size
+      totalSize += (await fs.promises.stat(track.localPath)).size
       count++
     } catch {}
-  }
+  }))
   return { count, totalSize }
 })
 
@@ -2458,17 +2460,23 @@ ipcMain.handle('offline-cancel-downloads', (_, ids) => {
   return true
 })
 
-async function downloadOfflineTrack({ id, url, ext, path: songPath, meta }, signal) {
+async function downloadOfflineTrack({ id, url, ext: rawExt, path: songPath, meta }, signal) {
   if (!isAllowedLibraryDownloadHost(url)) return { error: 'Download blocked: untrusted host' }
+  // Both name a file in the offline folder. The renderer takes ext from the
+  // song's path, which for a path with no extension is the path itself.
+  if (typeof id !== 'string' || !/^[\w-]+$/.test(id)) return { error: 'Invalid track id' }
+  const ext = typeof rawExt === 'string' && /^[a-z0-9]{1,8}$/i.test(rawExt) ? rawExt.toLowerCase() : 'mp3'
   const existing = loadOfflineLibrary().tracks[id]
-  const localPath = path.join(getOfflineAudioDir(), `${id}.${ext || 'mp3'}`)
+  const localPath = path.join(getOfflineAudioDir(), `${id}.${ext}`)
 
   // Audio unchanged and still on disk — just refresh the display metadata
   // (title/lyrics/art may have been edited without the file itself moving).
   if (existing && existing.path === songPath && fs.existsSync(existing.localPath)) {
     const cover = await snapshotOfflineCover(id, meta?.imageUrl, existing)
     updateOfflineLibrary((library) => {
-      library.tracks[id] = { ...(library.tracks[id] || existing), ...meta, ...cover, path: songPath }
+      const prev = library.tracks[id] || existing
+      // meta can't move localPath: removing the track deletes that file.
+      library.tracks[id] = { ...prev, ...meta, ...cover, path: songPath, localPath: prev.localPath }
     })
     let size = 0
     try { size = fs.statSync(existing.localPath).size } catch {}
@@ -2487,7 +2495,7 @@ async function downloadOfflineTrack({ id, url, ext, path: songPath, meta }, sign
 
   const cover = await snapshotOfflineCover(id, meta?.imageUrl, existing)
   updateOfflineLibrary((library) => {
-    library.tracks[id] = { ...meta, ...cover, path: songPath, localPath, ext: ext || 'mp3', downloadedAt: Date.now() }
+    library.tracks[id] = { ...meta, ...cover, path: songPath, localPath, ext, downloadedAt: Date.now() }
   })
   // The song's audio moved to a file of another type: the old copy is no
   // longer anyone's.
@@ -2759,14 +2767,16 @@ function artMemPut(key, dataUri) {
   if (artMemCache.size > ART_MEM_MAX) artMemCache.delete(artMemCache.keys().next().value)
 }
 
-function artCacheGet(key) {
+// Async: every Library row asks for its cover, so a sync read here stalled
+// every window while a list scrolled.
+async function artCacheGet(key) {
   if (artMemCache.has(key)) {
     const hit = artMemCache.get(key)
     artMemPut(key, hit) // refresh LRU position
     return hit
   }
   try {
-    const data = fs.readFileSync(path.join(artCacheDir, key), 'utf-8')
+    const data = await fs.promises.readFile(path.join(artCacheDir, key), 'utf-8')
     artMemPut(key, data)
     return data
   } catch { return undefined }
@@ -2782,9 +2792,9 @@ function artCachePut(key, dataUri) {
 
 ipcMain.handle('read-album-art', async (_, filePath, maxSize = 256) => {
   let st
-  try { st = fs.statSync(filePath) } catch { return null }
+  try { st = await fs.promises.stat(filePath) } catch { return null }
   const key = crypto.createHash('sha1').update(`${filePath}|${st.mtimeMs}|${st.size}|${maxSize}`).digest('hex')
-  const cached = artCacheGet(key)
+  const cached = await artCacheGet(key)
   if (cached !== undefined) return cached || null
 
   let mm
@@ -3199,12 +3209,19 @@ function downloadTool(tool, onProgress) {
         try { fs.unlinkSync(gzPath) } catch {}
         throw new Error(`Checksum mismatch for ${tool} — downloaded file discarded`)
       }
-      await new Promise((resolve, reject) => {
-        const zlib = require('zlib')
-        fs.createReadStream(gzPath).pipe(zlib.createGunzip()).pipe(fs.createWriteStream(dest))
-          .on('finish', resolve).on('error', reject)
-      })
-      try { fs.unlinkSync(gzPath) } catch {}
+      // pipeline() fails on an error in any stage (a bare pipe() chain only
+      // heard the last one, and hung), and the temp name keeps a half-written
+      // binary from passing as installed.
+      const part = dest + '.part'
+      try {
+        await require('stream/promises').pipeline(fs.createReadStream(gzPath), require('zlib').createGunzip(), fs.createWriteStream(part))
+        fs.renameSync(part, dest)
+      } catch (e) {
+        try { fs.unlinkSync(part) } catch {}
+        throw e
+      } finally {
+        try { fs.unlinkSync(gzPath) } catch {}
+      }
     } else {
       await downloadAnyUrl(spec.url(), dest, onProgress, 0, false, true)
       const expected = await fetchYtDlpChecksum(spec.checksumFileName())
@@ -3789,10 +3806,13 @@ ipcMain.handle('open-discord-login', (_, authorizeUrl) => {
     const CALLBACK_HOST = 'player.juicewrldapi.com'
     const CALLBACK_PATH = '/auth/discord/callback'
 
-    const intercept = (_, url) => {
+    const intercept = (event, url) => {
       try {
         const parsed = new URL(url)
         if (parsed.hostname === CALLBACK_HOST && parsed.pathname === CALLBACK_PATH) {
+          // The app exchanges the code itself; don't let the web player's
+          // callback page load and spend it first.
+          event.preventDefault()
           const code = parsed.searchParams.get('code')
           const state = parsed.searchParams.get('state')
           loginWin.close()

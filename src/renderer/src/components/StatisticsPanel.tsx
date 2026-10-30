@@ -15,7 +15,7 @@ export default function StatisticsPanelDesktop({ onOpenEra }: { onOpenEra: (eraN
     canEdit, playTrack, playNext,
     stats, playStats, songMap, playById, ctxMenu, setCtxMenu, openContextMenu,
     eraRows, maxEraCount, timelineRows, timelineStart, timelineEnd,
-    topEraRows, maxTopEraPlays, maxTopSongPlays, loading,
+    topEraRows, maxTopEraPlays, maxTopSongPlays, loading, loadFailed,
   } = useStatisticsData()
 
   return (
@@ -29,6 +29,8 @@ export default function StatisticsPanelDesktop({ onOpenEra }: { onOpenEra: (eraN
               <div className="h-32 bg-surface-raised animate-pulse rounded-xl" />
               <div className="h-64 bg-surface-raised animate-pulse rounded-xl" />
             </div>
+          ) : loadFailed ? (
+            <p className="py-16 text-center text-sm text-text-muted">Couldn&apos;t load statistics. Check your connection and open the tab again.</p>
           ) : (
             <>
               {/* Hero */}

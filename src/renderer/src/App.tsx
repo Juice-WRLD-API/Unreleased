@@ -150,10 +150,25 @@ function WindowControls(): JSX.Element {
   )
 }
 
+// Window focus fires on every alt-tab and every click between the main window
+// and a pop-out. The refreshes it triggers are heavy (every playlist with its
+// items, a GET per offline playlist, a library walk), so focus runs each at
+// most this often; startup has just done them all.
+const FOCUS_REFRESH_MS = 30_000
+function throttledFocus(fn: () => void): () => void {
+  let last = Date.now()
+  return () => {
+    const now = Date.now()
+    if (now - last < FOCUS_REFRESH_MS) return
+    last = now
+    fn()
+  }
+}
+
 export default function App(): JSX.Element {
   const showRecognition = useStore((s) => s.showRecognition)
-  const { showNowPlaying, showQueue, showSettings, setShowSettings, showDiagnostics, setShowDiagnostics, activeView, sidebarPosition, navStyle, appMenuPosition, loadAccount, completeDiscordLogin, showUserAuth, setShowUserAuth, loadLibrary, wrldFullscreen, loadOfflineLibrary, syncOfflinePlaylists, libraryAutoRefresh, libraryFolders, scanLibrary, prefetchApiData, refreshPlaylists, activeChannel, previousView, autoHideNav, showNotifications, setShowNotifications } = useStorePick(
-    'showNowPlaying', 'showQueue', 'showSettings', 'setShowSettings', 'showDiagnostics', 'setShowDiagnostics', 'activeView', 'sidebarPosition', 'navStyle', 'appMenuPosition', 'loadAccount', 'completeDiscordLogin', 'showUserAuth', 'setShowUserAuth', 'loadLibrary', 'wrldFullscreen', 'loadOfflineLibrary', 'syncOfflinePlaylists', 'libraryAutoRefresh', 'libraryFolders', 'scanLibrary', 'prefetchApiData', 'refreshPlaylists', 'activeChannel', 'previousView', 'autoHideNav', 'showNotifications', 'setShowNotifications')
+  const { showNowPlaying, showQueue, showSettings, setShowSettings, showDiagnostics, setShowDiagnostics, activeView, sidebarPosition, navStyle, appMenuPosition, loadAccount, completeDiscordLogin, showUserAuth, setShowUserAuth, loadLibrary, wrldFullscreen, loadOfflineLibrary, syncOfflinePlaylists, libraryAutoRefresh, libraryFolders, scanLibrary, prefetchApiData, refreshPlaylists, previousView, autoHideNav, showNotifications, setShowNotifications } = useStorePick(
+    'showNowPlaying', 'showQueue', 'showSettings', 'setShowSettings', 'showDiagnostics', 'setShowDiagnostics', 'activeView', 'sidebarPosition', 'navStyle', 'appMenuPosition', 'loadAccount', 'completeDiscordLogin', 'showUserAuth', 'setShowUserAuth', 'loadLibrary', 'wrldFullscreen', 'loadOfflineLibrary', 'syncOfflinePlaylists', 'libraryAutoRefresh', 'libraryFolders', 'scanLibrary', 'prefetchApiData', 'refreshPlaylists', 'previousView', 'autoHideNav', 'showNotifications', 'setShowNotifications')
   // Opening the terminal from a view that holds unsaved local state (the song
   // editor's draft, a half-filled submission, an open playlist...) must not
   // unmount it - closing the terminal would otherwise remount it empty. Derived
@@ -229,7 +244,7 @@ export default function App(): JSX.Element {
   useEffect(() => {
     if (!(window as any).electron) return
     loadOfflineLibrary().then(() => syncOfflinePlaylists())
-    const onFocus = (): void => { syncOfflinePlaylists() }
+    const onFocus = throttledFocus(() => { syncOfflinePlaylists() })
     window.addEventListener('focus', onFocus)
     const interval = setInterval(() => syncOfflinePlaylists(), 15 * 60 * 1000)
     return () => { window.removeEventListener('focus', onFocus); clearInterval(interval) }
@@ -243,7 +258,7 @@ export default function App(): JSX.Element {
   // otherwise reach this window until it's restarted. refreshPlaylists() is a
   // no-op while signed out.
   useEffect(() => {
-    const onFocus = (): void => { refreshPlaylists() }
+    const onFocus = throttledFocus(() => { refreshPlaylists() })
     window.addEventListener('focus', onFocus)
     return () => window.removeEventListener('focus', onFocus)
   }, [refreshPlaylists])
@@ -256,7 +271,7 @@ export default function App(): JSX.Element {
     if (!(window as any).electron) return
     if (!libraryAutoRefresh || libraryFolders.length === 0) return
     loadLibrary().then(() => scanLibrary())
-    const onFocus = (): void => { scanLibrary() }
+    const onFocus = throttledFocus(() => { scanLibrary() })
     window.addEventListener('focus', onFocus)
     const interval = setInterval(() => scanLibrary(), 15 * 60 * 1000)
     return () => { window.removeEventListener('focus', onFocus); clearInterval(interval) }

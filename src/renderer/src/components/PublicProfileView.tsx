@@ -268,25 +268,39 @@ export default function PublicProfileView(): JSX.Element {
     window.history.replaceState({ view: 'tierlist' }, '', `/tierlist?id=${id}`)
   }
 
+  // The view stays mounted when one profile links to another, so a new id
+  // starts from that user's cached copy (or the skeleton) rather than showing
+  // the previous user, or a "not found" left over from an earlier id.
   useEffect(() => {
     if (!Number.isFinite(userId) || userId <= 0) { setNotFound(true); setLoading(false); return }
+    let cancelled = false
+    const cached = peekPublicProfile(userId) ?? null
+    setProfile(cached)
+    setNotFound(false)
+    setLoading(cached === null)
+    setExpandedPlaylistId(null)
+    setExpandedDetail(null)
     getPublicProfile(userId)
-      .then(setProfile)
-      .catch(() => setNotFound(true))
-      .finally(() => setLoading(false))
+      .then((p) => { if (!cancelled) setProfile(p) })
+      .catch(() => { if (!cancelled && !cached) setNotFound(true) })
+      .finally(() => { if (!cancelled) setLoading(false) })
+    return () => { cancelled = true }
   }, [userId])
 
   // Admins get a "Manage" panel with the same role/status controls as the
-  // admin console's Users tab - fetched only for admins viewing someone
+  // admin console's Users tab - fetched only once an admin opens it on someone
   // else's profile, since a non-admin's request would just 403.
+  const profileId = profile?.id ?? null
   useEffect(() => {
-    if (!isAdmin || isOwnProfile || !profile) { setAdminUser(null); return }
+    if (!isAdmin || isOwnProfile || profileId === null || !adminOpen) { setAdminUser(null); setAdminLoading(false); return }
+    let cancelled = false
     setAdminLoading(true)
-    adminGetUser(profile.id)
-      .then(setAdminUser)
-      .catch(() => setAdminUser(null))
-      .finally(() => setAdminLoading(false))
-  }, [isAdmin, isOwnProfile, profile])
+    adminGetUser(profileId)
+      .then((u) => { if (!cancelled) setAdminUser(u) })
+      .catch(() => { if (!cancelled) setAdminUser(null) })
+      .finally(() => { if (!cancelled) setAdminLoading(false) })
+    return () => { cancelled = true }
+  }, [isAdmin, isOwnProfile, profileId, adminOpen])
 
   const doAdminUpdate = async (payload: Parameters<typeof adminUpdateUser>[1]): Promise<void> => {
     if (!adminUser) return
@@ -305,15 +319,18 @@ export default function PublicProfileView(): JSX.Element {
     const newest = [...plays]
       .sort((a, b) => Date.parse(b.played_at) - Date.parse(a.played_at))
       .slice(0, RECENT_PLAYS_DISPLAY_LIMIT)
+    let cancelled = false
     setRecentLoading(true)
     getSongsByIds(newest.map(p => p.song))
       .then(songs => {
+        if (cancelled) return
         const byId = new Map(songs.map(s => [s.id, s]))
         const tracks = newest.map(p => byId.get(p.song)).filter((s): s is NonNullable<typeof s> => !!s).map(songToTrack)
         setRecentTracks(tracks)
       })
-      .catch(() => setRecentTracks([]))
-      .finally(() => setRecentLoading(false))
+      .catch(() => { if (!cancelled) setRecentTracks([]) })
+      .finally(() => { if (!cancelled) setRecentLoading(false) })
+    return () => { cancelled = true }
   }, [effectivePlayHistory])
 
   // Live "currently listening" indicator: fetched once, refetched on every
@@ -606,7 +623,8 @@ export default function PublicProfileView(): JSX.Element {
             </button>
             {isAdmin && (
               <button
-                onClick={() => setAdminOpen((v) => !v)}
+                // Loading from the first frame, not "couldn't load" until the fetch starts.
+                onClick={() => { if (!adminOpen) setAdminLoading(true); setAdminOpen(!adminOpen) }}
                 title="Admin actions"
                 className={`flex items-center gap-1.5 px-3.5 py-2 rounded-full text-sm font-bold transition-colors ${
                   adminOpen

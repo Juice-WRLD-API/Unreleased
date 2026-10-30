@@ -269,6 +269,7 @@ export const ACCOUNT_COMMANDS: TermCommand[] = [
         useStore.setState({ account: await updateNowPlaying(null) })
         ctx.print('now playing cleared', 'ok')
       } else if (sub.toLowerCase() === 'set') {
+        if (more.length === 0) fail('usage: nowplaying set <song>')
         const song = await songFromArg(more.join(' '))
         useStore.setState({ account: await updateNowPlaying({ song: song.id, path: song.path, position: 0 }) })
         ctx.print(`now playing set to ${song.name}`, 'ok')
@@ -439,7 +440,7 @@ export const ACCOUNT_COMMANDS: TermCommand[] = [
         ctx.print(`${table(list.map((f, i) => [String(i + 1), f.song.name, f.song.era?.name ?? f.song.category]))}\n${list.length} liked`)
         return
       }
-      if (sub !== 'add' && sub !== 'rm' && sub !== 'remove') fail('usage: favorites [ls | add <song> | rm <song>]')
+      if ((sub !== 'add' && sub !== 'rm' && sub !== 'remove') || rest.length === 0) fail('usage: favorites [ls | add <song> | rm <song>]')
       const song = await songFromArg(rest.join(' '))
       const id = `jw-${song.id}`
       const liked = st().likedTrackIds.includes(id)

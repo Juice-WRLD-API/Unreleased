@@ -59,10 +59,22 @@ export function TrackSwap({ swapKey, order, className, children }: {
  *  its fade ends. Fills its parent. */
 export function CoverFade({ src, alt = '', onError }: { src: string; alt?: string; onError?: () => void }): JSX.Element {
   const [layers, setLayers] = useState([{ src, ready: false }])
+  const box = useRef<HTMLDivElement>(null)
   const top = layers[layers.length - 1]
   if (top.src !== src) setLayers(top.ready ? [top, { src, ready: false }] : [{ src, ready: false }])
+  // An image that has already loaded fires no load event. When the src flips A -> B -> A
+  // before B loads (offline cover vs. API cover as a song starts), React keeps A's <img>
+  // by key, so it never became ready and the cover stayed invisible.
+  useLayoutEffect(() => {
+    const loaded = [...(box.current?.querySelectorAll('img') ?? [])]
+      .filter((img) => img.complete && img.naturalWidth > 0)
+      .map((img) => img.getAttribute('src'))
+    if (layers.some((l) => !l.ready && loaded.includes(l.src))) {
+      setLayers((ls) => ls.map((x) => (!x.ready && loaded.includes(x.src) ? { ...x, ready: true } : x)))
+    }
+  }, [layers])
   return (
-    <div className="relative w-full h-full">
+    <div ref={box} className="relative w-full h-full">
       {layers.map((l, i) => {
         const isTop = i === layers.length - 1
         return (

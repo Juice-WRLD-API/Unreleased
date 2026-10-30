@@ -8,6 +8,7 @@ import {
 import { openNotificationTarget } from '../lib/openNotification'
 import { useNotificationHistory } from '../hooks/useNotificationHistory'
 import { useBackToClose } from '../hooks/useBackToClose'
+import { useEscapeToClose } from '../hooks/useEscapeToClose'
 import { useListMotion } from '../hooks/useListMotion'
 import { clickable } from '../lib/a11y'
 import { PopLayer } from './PopLayer'
@@ -64,6 +65,9 @@ export default function NotificationCenter(): JSX.Element {
   const entries = useNotificationHistory()
   const close = useCallback(() => setShowNotifications(false), [setShowNotifications])
   useBackToClose(close)
+  // Through the shared Escape stack, so a dialog opened over the panel closes
+  // first instead of both closing on one press.
+  useEscapeToClose(close)
 
   const panelRef = useRef<HTMLDivElement>(null)
   const listRef = useRef<HTMLDivElement>(null)
@@ -75,13 +79,8 @@ export default function NotificationCenter(): JSX.Element {
       if (!t || panelRef.current?.contains(t) || t.closest?.('[data-notifications-toggle]')) return
       close()
     }
-    const onKey = (e: KeyboardEvent): void => { if (e.key === 'Escape') close() }
     document.addEventListener('pointerdown', onDown)
-    document.addEventListener('keydown', onKey)
-    return () => {
-      document.removeEventListener('pointerdown', onDown)
-      document.removeEventListener('keydown', onKey)
-    }
+    return () => document.removeEventListener('pointerdown', onDown)
   }, [close])
 
   // Opening the area is reading it: the badge clears at once, and what was

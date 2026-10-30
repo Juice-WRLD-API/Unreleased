@@ -2399,9 +2399,10 @@ export default function Settings({ floating = false }: { floating?: boolean }): 
               </div>
             )}
 
-            {/* ── Shortcuts ── */}
+            {/* ── Desktop ── */}
             {!settingsQueryTrimmed && tab === 'desktop' && <DesktopSettings />}
 
+            {/* ── Shortcuts ── */}
             {!settingsQueryTrimmed && tab === 'shortcuts' && (
               <div>
                 <div className="flex items-center justify-between mb-1">
@@ -2563,6 +2564,8 @@ export default function Settings({ floating = false }: { floating?: boolean }): 
                       <span className="flex-1 text-text-primary text-xs truncate" title={folder}>{folder}</span>
                       <button
                         onClick={() => removeLibraryFolder(folder)}
+                        title="Remove folder"
+                        aria-label={`Remove ${folder}`}
                         className="text-text-muted hover:text-red-400 transition-colors text-xs px-1"
                       >
                         ×

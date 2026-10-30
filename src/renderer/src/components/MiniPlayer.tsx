@@ -21,7 +21,7 @@ import {
   Volume2,
   VolumeX,
 } from 'lucide-react'
-import { useStorePick } from '../store/useStore'
+import { useStore, useStorePick } from '../store/useStore'
 import { sendPlayerCommand } from '../lib/windowSync'
 import { formatDuration } from '../lib/format'
 import { AlbumArtThumbnail } from './AlbumArtThumbnail'
@@ -230,17 +230,62 @@ function MiniQueue(): JSX.Element {
   )
 }
 
+// The seek bar and its times. Playback position syncs over IPC ~4x/sec;
+// reading it in MiniPlayer re-rendered the open lyrics or queue panel on every
+// tick, so only this row subscribes to it.
+function MiniProgress({ fm, fmElapsedMs, fmDurationMs, fmProgress, duration, seekDrag, setSeekDrag, commitSeek, disabled }: {
+  fm: boolean
+  fmElapsedMs: number
+  fmDurationMs: number
+  fmProgress: number
+  duration: number
+  seekDrag: number | null
+  setSeekDrag: (v: number | null) => void
+  commitSeek: () => void
+  disabled: boolean
+}): JSX.Element {
+  const { progress, currentTime } = useStorePick('progress', 'currentTime')
+  const shownProgress = fm ? fmProgress : (seekDrag !== null ? seekDrag : progress)
+  return (
+    <div className="flex items-center gap-2" style={noDrag}>
+      <span className="text-text-muted text-[10px] w-9 text-right tabular-nums">
+        {fm
+          ? formatDuration(Math.floor(fmElapsedMs / 1000))
+          : formatDuration(seekDrag !== null ? seekDrag * duration : currentTime)}
+      </span>
+      <div className="flex-1 progress-track">
+        <input
+          type="range" min={0} max={1} step={0.001}
+          value={shownProgress}
+          onMouseDown={fm ? undefined : () => setSeekDrag(progress)}
+          onTouchStart={fm ? undefined : () => setSeekDrag(progress)}
+          onChange={(e) => { if (!fm) setSeekDrag(parseFloat(e.target.value)) }}
+          onMouseUp={fm ? undefined : commitSeek}
+          onTouchEnd={fm ? undefined : commitSeek}
+          onKeyUp={fm ? undefined : commitSeek}
+          disabled={disabled}
+          className="w-full"
+          style={{ '--val': `${shownProgress * 100}%`, ...(fm ? { pointerEvents: 'none' as const } : {}) } as CSSProperties}
+        />
+      </div>
+      <span className="text-text-muted text-[10px] w-9 tabular-nums">
+        {fm ? formatDuration(Math.floor(fmDurationMs / 1000)) : formatDuration(duration)}
+      </span>
+    </div>
+  )
+}
+
 // Compact always-on-top pop-out player. Renders inside a small frameless
 // float window (see main.js FLOAT_SIZES['mini-player']); playback state is
 // mirrored from the main window over window-sync, and every control sends a
 // command back — no audio element lives here.
 export default function MiniPlayer(): JSX.Element {
   const {
-    currentTrack, currentTrackFull, isPlaying, progress, currentTime,
+    currentTrack, currentTrackFull, isPlaying,
     shuffle, repeat, likedTrackIds, volume, playbackSpeed,
     radioFmActive, radioFmNowPlaying, radioFmMatchedSong,
     toggleLike, setVolume,
-  } = useStorePick('currentTrack', 'currentTrackFull', 'isPlaying', 'progress', 'currentTime', 'shuffle', 'repeat', 'likedTrackIds', 'volume', 'playbackSpeed', 'radioFmActive', 'radioFmNowPlaying', 'radioFmMatchedSong', 'toggleLike', 'setVolume')
+  } = useStorePick('currentTrack', 'currentTrackFull', 'isPlaying', 'shuffle', 'repeat', 'likedTrackIds', 'volume', 'playbackSpeed', 'radioFmActive', 'radioFmNowPlaying', 'radioFmMatchedSong', 'toggleLike', 'setVolume')
 
   const fm = radioFmActive
   // Wayland compositors intentionally reject application-driven window
@@ -273,14 +318,14 @@ export default function MiniPlayer(): JSX.Element {
   // ── Interpolated playback clock ───────────────────────────────────────────
   // currentTime only syncs over IPC ~4x/sec; synced lyrics need a smooth
   // clock, so interpolate between patches using the synced playback speed.
-  const baseRef = useRef({ t: 0, at: performance.now() })
-  useEffect(() => { baseRef.current = { t: currentTime, at: performance.now() } }, [currentTime])
+  const baseRef = useRef<{ t: number; at: number } | null>(null)
+  if (!baseRef.current) baseRef.current = { t: useStore.getState().currentTime, at: performance.now() }
   const playingRef = useRef(isPlaying)
   playingRef.current = isPlaying
   const speedRef = useRef(playbackSpeed)
   speedRef.current = playbackSpeed
   const getTime = useCallback((): number => {
-    const { t, at } = baseRef.current
+    const { t, at } = baseRef.current!
     if (!playingRef.current) return t
     return t + ((performance.now() - at) / 1000) * speedRef.current
   }, [])
@@ -332,9 +377,13 @@ export default function MiniPlayer(): JSX.Element {
       setSeekDrag(null)
     }
   }
-  useEffect(() => {
+  // Follows the clock without re-rendering on it: rebases the lyrics clock,
+  // and lets go of a committed drag once the post-seek position arrives.
+  useEffect(() => useStore.subscribe((s, prev) => {
+    if (s.currentTime === prev.currentTime) return
+    baseRef.current = { t: s.currentTime, at: performance.now() }
     if (seekCommittedRef.current) { seekCommittedRef.current = false; setSeekDrag(null) }
-  }, [currentTime])
+  }), [])
 
   // ── Volume / mute (volume is a synced store key — the main window's
   // Player applies it to the audio element) ─────────────────────────────────
@@ -370,7 +419,6 @@ export default function MiniPlayer(): JSX.Element {
   const canLike = !!currentTrack && !fm && /^jw-\d+$/.test(currentTrack.id)
   const liked = !!currentTrack && likedTrackIds.includes(currentTrack.id)
   const controlsDisabled = !currentTrack || fm
-  const shownProgress = fm ? fmProgress : (seekDrag !== null ? seekDrag : progress)
 
   const lyricsOverride = fm
     ? { lyrics: radioFmMatchedSong?.lyrics ?? null, syncedLyrics: radioFmMatchedSong?.syncedLyrics ?? null }
@@ -499,31 +547,11 @@ export default function MiniPlayer(): JSX.Element {
             </div>
 
             {/* Progress */}
-            <div className="flex items-center gap-2" style={noDrag}>
-              <span className="text-text-muted text-[10px] w-9 text-right tabular-nums">
-                {fm
-                  ? formatDuration(Math.floor(fmElapsedMs / 1000))
-                  : formatDuration(seekDrag !== null ? seekDrag * duration : currentTime)}
-              </span>
-              <div className="flex-1 progress-track">
-                <input
-                  type="range" min={0} max={1} step={0.001}
-                  value={shownProgress}
-                  onMouseDown={fm ? undefined : () => setSeekDrag(progress)}
-                  onTouchStart={fm ? undefined : () => setSeekDrag(progress)}
-                  onChange={(e) => { if (!fm) setSeekDrag(parseFloat(e.target.value)) }}
-                  onMouseUp={fm ? undefined : commitSeek}
-                  onTouchEnd={fm ? undefined : commitSeek}
-                  onKeyUp={fm ? undefined : commitSeek}
-                  disabled={!currentTrack && !fm}
-                  className="w-full"
-                  style={{ '--val': `${shownProgress * 100}%`, ...(fm ? { pointerEvents: 'none' as const } : {}) } as CSSProperties}
-                />
-              </div>
-              <span className="text-text-muted text-[10px] w-9 tabular-nums">
-                {fm ? formatDuration(Math.floor(fmDurationMs / 1000)) : formatDuration(duration)}
-              </span>
-            </div>
+            <MiniProgress
+              fm={fm} fmElapsedMs={fmElapsedMs} fmDurationMs={fmDurationMs} fmProgress={fmProgress}
+              duration={duration} seekDrag={seekDrag} setSeekDrag={setSeekDrag} commitSeek={commitSeek}
+              disabled={!currentTrack && !fm}
+            />
 
             {/* Bottom row: panel toggles + volume */}
             <div className="flex items-center justify-between pt-0.5" style={noDrag}>

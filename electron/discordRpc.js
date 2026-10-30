@@ -46,11 +46,15 @@ function scheduleReconnect() {
 
 function createClient() {
   const c = new Client({ clientId: CLIENT_ID })
+  // A client dropped by setEnabled(false) can still finish logging in; it
+  // mustn't mark the current one connected, or connect() never runs again.
   c.on('ready', () => {
+    if (c !== client) return
     connected = true
     if (pendingOp) { const op = pendingOp; pendingOp = null; applyOp(op) }
   })
   c.on('disconnected', () => {
+    if (c !== client) return
     connected = false
     scheduleReconnect()
   })
@@ -101,7 +105,9 @@ function setEnabled(value) {
       const old = client
       client = null
       connected = false
-      old.user?.clearActivity().catch(() => {}).finally(() => old.destroy().catch(() => {}))
+      // Not logged in yet has no user, but still a connection attempt to close.
+      const cleared = old.user ? old.user.clearActivity().catch(() => {}) : Promise.resolve()
+      cleared.finally(() => old.destroy().catch(() => {}))
     }
   }
 }

@@ -7,7 +7,7 @@ import {
   adminReviewProposal, type ApplicationStatus, type ProposalStatus,
 } from '../userApi'
 import { adminCoverArtCounts } from '../coverArtApi'
-import { fail, type TermCommand } from './types'
+import { confirmAction, fail, takeYes, type TermCommand } from './types'
 import { pageRows } from './more'
 
 // The Admin page's review queues, user list and site moderation list, as
@@ -156,12 +156,13 @@ export const ADMIN_COMMANDS: TermCommand[] = [
     run: async (args, ctx) => { const r = parseReviewArgs(args, 'reject [song|comp|app] <id> [note]'); ctx.print(await review(r.kind, r.id, 'reject', r.notes), 'ok') },
   },
   {
-    name: 'reverse', group: 'Admin', usage: 'reverse [song|comp] <id>', description: 'Undo an approved proposal',
+    name: 'reverse', group: 'Admin', usage: 'reverse [song|comp] <id> [-y]', description: 'Undo an approved proposal',
     complete: (before, partial) => (before.length === 0 ? ['song', 'comp'].filter((s) => s.startsWith(partial.toLowerCase())) : []),
     run: async (args, ctx) => {
-      const { kind, id } = parseReviewArgs(args, 'reverse [song|comp] <id>')
+      const { text, yes } = takeYes(args)
+      const { kind, id } = parseReviewArgs(text, 'reverse [song|comp] <id> [-y]')
       if (kind === 'app') fail('applications can’t be reversed')
-      if (!window.confirm(`Reverse ${kind} proposal #${id}? This undoes the change it made.`)) { ctx.print('cancelled', 'dim'); return }
+      if (!confirmAction(ctx, `Reverse ${kind} proposal #${id}? This undoes the change it made.`, yes)) return
       if (kind === 'song') await adminReverseProposal(id)
       else await adminReverseCompProposal(id)
       ctx.print(`${kind} proposal #${id} reversed`, 'ok')

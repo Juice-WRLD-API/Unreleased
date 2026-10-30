@@ -1,6 +1,6 @@
 # Agent guide: Juice WRLD API and Unreleased
 
-**Version 1.39** · updated 2026-10-29. Bump the version and date whenever you
+**Version 1.40** · updated 2026-10-30. Bump the version and date whenever you
 change this file (minor for fixes and additions, major for rewrites).
 
 **Keep this file current.** If you find something in the docs or this file that
@@ -391,6 +391,15 @@ Node 22.
 
 Newest first. One entry each: date, what went wrong, what to do instead. Delete
 entries that stop being true.
+
+- 2026-10-30: The player bar's cover sometimes stayed blank for a whole song.
+  `CoverFade` (`components/PlayerMotion.tsx`) showed a layer only from its
+  `onLoad`; when the URL flipped offline copy -> API -> offline copy as a song
+  started, React kept the already-loaded `<img>` by key and no load event came.
+  It now also marks layers ready when their image is already `complete`. An
+  `<img>` reused by key never fires `load` again; check `complete` too.
+  Promo videos are made with the `unreleased-promo-video` skill in
+  `../.claude/skills/`.
 
 - 2026-10-29: Desktop ZIP downloads failed at 0 files with "createWritable …
   not allowed by the user agent". The save picker worked, but `main.js`'s

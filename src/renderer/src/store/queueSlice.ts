@@ -382,7 +382,10 @@ export const createQueueSlice: StateCreator<any, [], [], QueueSlice> = (set, get
   // audible for a second first. Keyed on the up-next row changing, so the
   // replacement itself just re-checks once and stops.
   api.subscribe((state: QueueSlice, prev: QueueSlice) => {
-    if (state.radioMode) return
+    // Pop-outs mirror the queue read-only. Swapping here too sent their own
+    // copy back over window-sync, which could overwrite a newer queue in the
+    // main window or land a different random pick than the main window's.
+    if (state.radioMode || isFloat) return
     const i = state.queueIndex + 1
     const next = state.queue[i]
     if (!next || next.id === prev.queue[prev.queueIndex + 1]?.id) return
@@ -827,6 +830,10 @@ export const createQueueSlice: StateCreator<any, [], [], QueueSlice> = (set, get
 
   removeFromQueue: (index) =>
     set((s: QueueSlice) => {
+      // The playing row stays: removing it left queueIndex on the wrong song
+      // (Next skipped one) and the remembered queue no longer matched the
+      // current track, so it was thrown away on restart. Skip it instead.
+      if (index === s.queueIndex || index < 0 || index >= s.queue.length) return {}
       const next = s.queue.filter((_, i) => i !== index)
       const newIndex = index <= s.queueIndex ? Math.max(0, s.queueIndex - 1) : s.queueIndex
       // Matched by id — the two lists are ordered differently, so the index

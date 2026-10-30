@@ -2041,8 +2041,9 @@ export const useStore = create<AppStore>((set, get, store) => ({
         const op = wasLiked ? userApi.removeFavorite(songId) : userApi.addFavorite(songId)
         op.catch(() => {
           const current = get().likedTrackIds
+          // A second click may already have put it back - don't list it twice.
           const reverted = wasLiked
-            ? [...current, trackId]
+            ? (current.includes(trackId) ? current : [...current, trackId])
             : current.filter((id) => id !== trackId)
           set({ likedTrackIds: reverted })
           ls.set('likedTrackIds', reverted)

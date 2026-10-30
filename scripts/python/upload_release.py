@@ -3,16 +3,16 @@
 upload_release.py — Upload assets to a GitHub release.
 
 Usage:
-    python scripts/dev/upload_release.py <file> [<file2> ...] [--tag v1.7.9]
+    python scripts/python/upload_release.py <file> [<file2> ...] [--tag v1.7.9]
 
 Examples:
-    python scripts/dev/upload_release.py "release/Unreleased-Setup-1.7.9.exe"
-    python scripts/dev/upload_release.py "release/Unreleased-Setup-1.7.9.exe" "release/latest.yml" "release/Unreleased-Setup-1.7.9.exe.blockmap"
-    python scripts/dev/upload_release.py release/* --tag v1.7.8
+    python scripts/python/upload_release.py "release/Unreleased-Setup-1.7.9.exe"
+    python scripts/python/upload_release.py "release/Unreleased-Setup-1.7.9.exe" "release/latest.yml" "release/Unreleased-Setup-1.7.9.exe.blockmap"
+    python scripts/python/upload_release.py release/* --tag v1.7.8
 
 The script:
   - Reads GH_TOKEN from environment or .env.local
-  - Gets (or creates) the release for the given tag
+  - Gets the release for the given tag (it must already exist)
   - Deletes any existing asset with the same name
   - Streams the upload with a live progress bar
   - Prints the download URL on success
@@ -60,7 +60,9 @@ def api_request(method, path, token, data=None):
     req = urllib.request.Request(url, data=body, headers=headers, method=method)
     try:
         with urllib.request.urlopen(req) as resp:
-            return json.loads(resp.read())
+            # DELETE answers 204 with no body.
+            raw = resp.read()
+            return json.loads(raw) if raw else {}
     except urllib.error.HTTPError as e:
         body = e.read().decode(errors="replace")
         print(f"HTTP {e.code} on {method} {url}: {body[:300]}")

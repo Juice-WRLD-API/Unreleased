@@ -4,7 +4,7 @@ import { AlbumArtThumbnail } from './AlbumArtThumbnail'
 import { ProgressiveCover } from './ProgressiveCover'
 import { Tile } from './Tile'
 import OnThisDayTile from './OnThisDayTile'
-import { useHomeData, type GameCard, type HomePlaylistCard, type HomeAlbumCard } from '../hooks/useHomeData'
+import { useHomeData, HOME_ALBUMS_SHOWN, type GameCard, type HomePlaylistCard, type HomeAlbumCard } from '../hooks/useHomeData'
 import { useElementSize } from '../hooks/useElementSize'
 import { useStore, useStorePick } from '../store/useStore'
 import { useCanEdit } from '../hooks/useChannelRoles'
@@ -393,8 +393,7 @@ export default function HomeView(): JSX.Element {
   const showOnThisDay = showSection('onthisday')
   const showNews = showSection('news') && newsItems.length > 0
   const showPlaylists = showSection('playlists')
-  // TEMP: albums hidden on the home page
-  const showAlbums = false && showSection('albums') && albumRow.length > 0
+  const showAlbums = HOME_ALBUMS_SHOWN && showSection('albums') && albumRow.length > 0
   const showRadio = showSection('radio')
   const showLiked = showSection('liked') && likedTrackIds.length > 0
   const showGames = showSection('games')

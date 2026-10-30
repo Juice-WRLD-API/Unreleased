@@ -9,6 +9,7 @@ import { cancelZipTask, isZipTaskId } from '../lib/clientZip'
 import { PopLayer } from './PopLayer'
 import { useListMotion } from '../hooks/useListMotion'
 import { useContentMotion } from '../hooks/useContentMotion'
+import { useEscapeToClose } from '../hooks/useEscapeToClose'
 
 export default function DownloadManager(): JSX.Element | null {
   const { downloads, showDownloadManager, setShowDownloadManager, addDownload, updateDownload, clearCompletedDownloads, setUpdateStatus, wrldFullscreen } = useStorePick('downloads', 'showDownloadManager', 'setShowDownloadManager', 'addDownload', 'updateDownload', 'clearCompletedDownloads', 'setUpdateStatus', 'wrldFullscreen')
@@ -94,6 +95,8 @@ export default function DownloadManager(): JSX.Element | null {
     window.addEventListener('resize', place)
     return () => window.removeEventListener('resize', place)
   }, [showDownloadManager, sidebarPosition, navStyle, autoHideNav, downloads.length > 0])
+
+  useEscapeToClose(() => setShowDownloadManager(false), !!el && showDownloadManager && !wrldFullscreen)
 
   if (!el) return null
   // WRLD's immersive fullscreen hides the nav this panel pops out of, so

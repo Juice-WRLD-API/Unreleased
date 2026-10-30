@@ -215,7 +215,7 @@ function useCatalogueCopy(filename: string | null): string | null {
     void searchSongs(title, 20).then((songs) => {
       const paths = new Set(songs.map((s) => s.path).filter((p) => p && (p.split(/[\\/]/).pop() ?? '').toLowerCase() === filename.toLowerCase()))
       if (live && paths.size === 1) setUrl(buildStreamUrl([...paths][0]))
-    })
+    }, () => { /* no match to play along with; the audio can still be picked */ })
     return () => { live = false }
   }, [filename])
   return url

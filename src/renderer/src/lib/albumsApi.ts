@@ -1,9 +1,9 @@
-import { JWAPI_BASE, apiFetch, buildImageUrl, resolvePrefCoverUrl, type JWApiSong } from './juicewrldApi'
+import { routeUrl, apiFetch, buildImageUrl, resolvePrefCoverUrl, type JWApiSong } from './juicewrldApi'
 import type { SongPrefMap } from './songPrefs'
 import { apiRequest } from './apiClient'
 import { getToken } from './userApi'
 
-const ACCOUNT_BASE = `${JWAPI_BASE}/accounts`
+const ACCOUNT_BASE = routeUrl('/accounts')
 
 export interface Artist {
   id: number

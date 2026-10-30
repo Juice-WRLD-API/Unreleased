@@ -70,8 +70,6 @@ contextBridge.exposeInMainWorld('electron', {
     ipcRenderer.on('window-sync', fn)
     return () => ipcRenderer.removeListener('window-sync', fn)
   },
-  // Fired when an already-open pop-out is asked to show something new
-  // (e.g. "Info" clicked on a different song).
   // Which pop-out views are currently open — fires on every open/close so a
   // window can avoid showing an in-app copy of an already-popped-out view.
   onFloatWindows: (cb) => {
@@ -79,6 +77,8 @@ contextBridge.exposeInMainWorld('electron', {
     ipcRenderer.on('float-windows', fn)
     return () => ipcRenderer.removeListener('float-windows', fn)
   },
+  // Fired when an already-open pop-out is asked to show something new
+  // (e.g. "Info" clicked on a different song).
   onFloatParams: (cb) => {
     const fn = (_, params) => cb(params)
     ipcRenderer.on('float-params', fn)

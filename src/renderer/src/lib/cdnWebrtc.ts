@@ -3,12 +3,12 @@
 // node; the caller (cdn.ts) walks the ranked node list and retries on any
 // failure.
 import type { CdnResolveNode } from './cdn'
-import { JWAPI_BASE } from './juicewrldApi'
+import { routeUrl } from './juicewrldApi'
 
 // Signaling must hit the same server that answered /cdn/resolve/ - it issued
 // the node token and is the one the node's own socket is registered with.
 const WS_BASE = (() => {
-  const url = new URL(`${JWAPI_BASE}/cdn`)
+  const url = new URL(routeUrl('/cdn'))
   const proto = url.protocol === 'https:' ? 'wss:' : 'ws:'
   return `${proto}//${url.host}${url.pathname.replace(/\/$/, '')}`
 })()

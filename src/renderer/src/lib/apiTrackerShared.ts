@@ -33,7 +33,7 @@ export function getInitialSearch(): string {
     const q = new URLSearchParams(window.location.search).get('q')
     if (q) return q
   }
-  return localStorage.getItem(LS_TRACKER_SEARCH) || ''
+  try { return localStorage.getItem(LS_TRACKER_SEARCH) || '' } catch { return '' }
 }
 
 // ─── Era color palette (Calendar tab) ─────────────────────────────────────────

@@ -40,6 +40,7 @@ import { useHeardleGuessing } from '../hooks/useHeardleGuessing'
 import { useHeardleStats } from '../hooks/useHeardleStats'
 import { useHeardleLeaderboard } from '../hooks/useHeardleLeaderboard'
 import { useHeardleSettingsPanel } from '../hooks/useHeardleSettingsPanel'
+import { useEscapeToClose } from '../hooks/useEscapeToClose'
 
 // ─── Settings panel ───────────────────────────────────────────────────────────
 //
@@ -58,6 +59,7 @@ function SettingsPanel({ settings, onChange, eras, mode, onClose }: {
   onClose: () => void
 }) {
   const { ladder, set, toggleEra, toggleCategory } = useHeardleSettingsPanel(settings, onChange)
+  useEscapeToClose(onClose)
 
   return (
     <MotionOverlay className="fixed inset-0 z-[200] flex items-center justify-center bg-black/60 p-4" onClick={onClose}>
@@ -212,6 +214,7 @@ function SettingsPanel({ settings, onChange, eras, mode, onClose }: {
  *  on open rather than mirroring the round's state. */
 function StatsPanel({ initialMode, onClose }: { initialMode: DailyMode; onClose: () => void }) {
   const { tab, setTab, stats, max, winRate } = useHeardleStats(initialMode)
+  useEscapeToClose(onClose)
   return (
     <MotionOverlay className="fixed inset-0 z-[200] flex items-center justify-center bg-black/60 p-4" onClick={onClose}>
       <div
@@ -289,6 +292,7 @@ function LeaderboardPanel({ initialMode, signedIn, onClose }: {
   const {
     board, setBoard, mode, setMode, entries, me, loading, error, pending, needsSignIn, score, emptyMessage,
   } = useHeardleLeaderboard(initialMode, signedIn)
+  useEscapeToClose(onClose)
 
   const openUserCard = useOpenUserCard()
   const row = (e: LeaderboardEntry, isMe: boolean): JSX.Element => (
@@ -800,7 +804,9 @@ export default function HeardleView(): JSX.Element {
             {MODES.map((m) => (
               <button
                 key={m.id}
-                onClick={() => setMode(m.id)}
+                // A switch that keeps the same answer (Unlimited to 1v1) would
+                // otherwise leave the clip playing under the new tab.
+                onClick={() => { if (m.id !== mode) stopPlayback(); setMode(m.id) }}
                 title={m.hint}
                 className={`pb-1.5 text-xs font-bold uppercase tracking-[0.2em] border-b-2 transition-colors ${
                   mode === m.id

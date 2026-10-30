@@ -377,6 +377,11 @@ export function getSongById(id: number, signal?: AbortSignal): Promise<JWApiSong
   const now = Date.now()
   const cached = songByIdCache.get(id)
   if (cached && now - cached.ts < SONG_BY_ID_TTL_MS) return cached.promise
+  // Expired entries hold whole songs (lyrics too); drop them now and then
+  // rather than keeping every song played this session.
+  if (songByIdCache.size >= 200) {
+    for (const [k, v] of songByIdCache) if (now - v.ts >= SONG_BY_ID_TTL_MS) songByIdCache.delete(k)
+  }
   const entry = { promise: apiFetch<JWApiSong>(`/songs/${id}/`), ts: now }
   songByIdCache.set(id, entry)
   entry.promise.catch(() => { if (songByIdCache.get(id) === entry) songByIdCache.delete(id) })
@@ -458,7 +463,7 @@ function triggerBlobDownload(url: string, filename: string, onBeforeNavigate?: (
 }
 
 export async function downloadZipSelection(paths: string[], filename: string, onBeforeNavigate?: () => void): Promise<boolean> {
-  const res = await fetch(`${JWAPI_BASE}/files/zip-selection/`, {
+  const res = await fetch(routeUrl('/files/zip-selection/'), {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ paths }),
@@ -959,7 +964,8 @@ export async function searchSongs(title: string, limit = 8): Promise<JWApiSong[]
 /** Picks the best cover URL from a playlist summary or detail object.
  *  cover_image may contain a base64 data URI; cover_image_url may be a relative path. */
 export function playlistCoverUrl(p: { cover_image_url?: string | null; cover_image?: string | null }): string | undefined {
-  return buildImageUrl(p.cover_image_url ?? p.cover_image ?? undefined)
+  // `||`: a removed cover comes back as "" rather than null.
+  return buildImageUrl(p.cover_image_url || p.cover_image || undefined)
 }
 
 // ─── Duration parse ───────────────────────────────────────────────────────────

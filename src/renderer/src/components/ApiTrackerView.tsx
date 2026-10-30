@@ -548,7 +548,7 @@ function fieldMenuAnchor(e: React.MouseEvent, index: number): TrackerFieldMenuSt
 // ─── Song row (list mode) ─────────────────────────────────────────────────────
 const SongRow = memo(function SongRow({
   song, onPlay, onCategoryClick, onEraClick, onInfo, onContextMenu,
-  selectMode, selected, onToggleSelect, versionLabel, compact,
+  selectMode, selected, onToggleSelect, versionLabel, compact, lazyCover,
 }: {
   song: JWApiSong
   onPlay: (song: JWApiSong) => void
@@ -567,6 +567,9 @@ const SongRow = memo(function SongRow({
    *  same header cell whether the row above it is a collapsed group or an
    *  expanded version. */
   compact?: boolean
+  /** Rows outside a virtual window (Overview / Producers lists) load their
+   *  covers lazily, so a long list doesn't request every cover at once. */
+  lazyCover?: boolean
 }): JSX.Element {
   // This song's personal override, if any. Selecting just this song's row keeps
   // the map's other churn from re-rendering the row, and songToTrack picks up
@@ -598,7 +601,7 @@ const SongRow = memo(function SongRow({
 
       {/* Cover art */}
       <div className="relative shrink-0 w-10 h-10 md:w-9 md:h-9 rounded overflow-hidden bg-surface-overlay">
-        <AlbumArtThumbnail track={track} size={36} shimmer={false} eager />
+        <AlbumArtThumbnail track={track} size={36} shimmer={false} eager={!lazyCover} />
         {canPlay && !selectMode && (
           <button
             className="absolute inset-0 items-center justify-center bg-black/60 opacity-0 group-hover:opacity-100 transition-opacity hidden md:flex"
@@ -1622,7 +1625,8 @@ const LyricResultRow = memo(function LyricResultRow({
 
       {/* Cover art */}
       <div className="relative shrink-0 w-11 h-11 rounded overflow-hidden bg-surface-overlay">
-        <AlbumArtThumbnail track={track} size={44} shimmer={false} eager />
+        {/* Lyric results aren't windowed - Load more appends to one list. */}
+        <AlbumArtThumbnail track={track} size={44} shimmer={false} />
         {canPlay && !selectMode && (
           <button
             className="absolute inset-0 items-center justify-center bg-black/60 opacity-0 group-hover:opacity-100 transition-opacity hidden md:flex"
@@ -3159,6 +3163,7 @@ export default function ApiTrackerView(): JSX.Element {
                           selectMode={selectMode}
                           selected={selected.has(song.id)}
                           onToggleSelect={toggleSelect}
+                          lazyCover
                         />
                       ))}
                     </div>
@@ -3184,6 +3189,7 @@ export default function ApiTrackerView(): JSX.Element {
                           selectMode={selectMode}
                           selected={selected.has(song.id)}
                           onToggleSelect={toggleSelect}
+                          lazyCover
                         />
                       ))}
                     </div>
@@ -3284,6 +3290,7 @@ export default function ApiTrackerView(): JSX.Element {
                           selectMode={selectMode}
                           selected={selected.has(song.id)}
                           onToggleSelect={toggleSelect}
+                          lazyCover
                         />
                       ))}
                     </div>
@@ -3308,6 +3315,7 @@ export default function ApiTrackerView(): JSX.Element {
                           selectMode={selectMode}
                           selected={selected.has(song.id)}
                           onToggleSelect={toggleSelect}
+                          lazyCover
                         />
                       ))}
                     </div>

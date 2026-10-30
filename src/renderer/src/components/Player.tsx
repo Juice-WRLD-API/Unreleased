@@ -162,6 +162,9 @@ function describeSource(url: string): string {
   return url.startsWith('blob:') ? 'blob' : url || '(none)'
 }
 
+// Hotkey actions that keep firing while their key is held down.
+const REPEATABLE_HOTKEYS = new Set(['seek-forward', 'seek-backward', 'volume-up', 'volume-down', 'speed-up', 'speed-down'])
+
 // How long the pause-fade ramps volume when "smooth fade when pausing" is on.
 const PAUSE_FADE_MS = 400
 
@@ -232,10 +235,53 @@ function ElapsedTime(): JSX.Element {
   return <>{formatDuration(currentTime)}</>
 }
 
+// 999 FM's elapsed time, ticking locally between WS updates. Same reasoning as
+// above: a 500ms tick in the Player body re-rendered all of it twice a second
+// for as long as FM played, so only the parts that show it tick.
+function useFmElapsedMs(): number {
+  const active = useStore((s) => s.radioFmActive)
+  const elapsed = useStore((s) => s.radioFmNowPlaying?.elapsed_ms)
+  const [ms, setMs] = useState(0)
+  const base = useRef({ elapsed: 0, at: 0 })
+  const tick = useRef<ReturnType<typeof setInterval> | null>(null)
+  // Keyed on elapsed_ms rather than the whole now-playing object: that object is
+  // replaced on every metadata broadcast, which tore the interval down and
+  // rebuilt it faster than its own 500ms tick, so the bar sat still.
+  useEffect(() => {
+    if (!active || !elapsed) {
+      if (tick.current) { clearInterval(tick.current); tick.current = null }
+      setMs(0)
+      return
+    }
+    base.current = { elapsed, at: Date.now() }
+    setMs(elapsed)
+    if (!tick.current) {
+      tick.current = setInterval(() => setMs(base.current.elapsed + (Date.now() - base.current.at)), 500)
+    }
+  }, [active, elapsed])
+  useEffect(() => () => { if (tick.current) { clearInterval(tick.current); tick.current = null } }, [])
+  return ms
+}
+
+function useFmProgress(): number {
+  const elapsed = useFmElapsedMs()
+  const duration = useStore((s) => s.radioFmNowPlaying?.duration_ms ?? 0)
+  return duration > 0 ? Math.min(elapsed / duration, 1) : 0
+}
+
+function FmProgressFill({ className }: { className: string }): JSX.Element {
+  const progress = useFmProgress()
+  return <div className={className} style={{ width: `${progress * 100}%` }} />
+}
+
+function FmElapsedTime(): JSX.Element {
+  const elapsed = useFmElapsedMs()
+  return <>{formatDuration(Math.floor(elapsed / 1000))}</>
+}
+
 interface SeekRangeProps {
   seekDrag: number | null
   radioFmActive: boolean
-  fmProgress: number
   disabled: boolean
   onMouseDown?: () => void
   onTouchStart?: () => void
@@ -244,8 +290,9 @@ interface SeekRangeProps {
   onTouchEnd?: () => void
   onKeyUp?: () => void
 }
-function SeekRange({ seekDrag, radioFmActive, fmProgress, ...rest }: SeekRangeProps): JSX.Element {
+function SeekRange({ seekDrag, radioFmActive, ...rest }: SeekRangeProps): JSX.Element {
   const progress = useStore((s) => s.progress)
+  const fmProgress = useFmProgress()
   const v = radioFmActive ? fmProgress : (seekDrag !== null ? seekDrag : progress)
   return (
     <input
@@ -323,7 +370,6 @@ export default function Player(): JSX.Element {
   const currentSongId = currentTrack ? trackIdToSongId(currentTrack.id) : null
   const { radioMode, radioNext } = useStorePick('radioMode', 'radioNext')
   const { radioFmActive, radioFmNowPlaying, radioFmMatchedSong } = useStorePick('radioFmActive', 'radioFmNowPlaying', 'radioFmMatchedSong')
-  const { libraryTracks } = useStorePick('libraryTracks')
   const { globalHotkeysEnabled, globalHotkeyBindings } = useStorePick('globalHotkeysEnabled', 'globalHotkeyBindings')
   const { mediaOverlayEnabled } = useStorePick('mediaOverlayEnabled')
   const { eqEnabled, eqGains, eqBalance, eqMono, eqBoost, skipSilence } = useStorePick('eqEnabled', 'eqGains', 'eqBalance', 'eqMono', 'eqBoost', 'skipSilence')
@@ -365,32 +411,8 @@ export default function Player(): JSX.Element {
   }
 
 
-  // FM elapsed time — ticks locally between WS updates
-  const [fmElapsedMs, setFmElapsedMs] = useState(0)
-  const fmBaseRef = useRef<{ elapsed: number; at: number }>({ elapsed: 0, at: 0 })
-  const fmTickRef = useRef<ReturnType<typeof setInterval> | null>(null)
-  const fmElapsed = radioFmNowPlaying?.elapsed_ms
-  // Keyed on elapsed_ms rather than the whole now-playing object: that object is
-  // replaced on every metadata broadcast, which tore the interval down and
-  // rebuilt it faster than its own 500ms tick, so the bar sat still.
-  useEffect(() => {
-    if (!radioFmActive || !fmElapsed) {
-      if (fmTickRef.current) { clearInterval(fmTickRef.current); fmTickRef.current = null }
-      setFmElapsedMs(0)
-      return
-    }
-    fmBaseRef.current = { elapsed: fmElapsed, at: Date.now() }
-    setFmElapsedMs(fmElapsed)
-    if (!fmTickRef.current) {
-      fmTickRef.current = setInterval(() => {
-        const { elapsed, at } = fmBaseRef.current
-        setFmElapsedMs(elapsed + (Date.now() - at))
-      }, 500)
-    }
-  }, [radioFmActive, fmElapsed])
-  useEffect(() => () => { if (fmTickRef.current) clearInterval(fmTickRef.current) }, [])
+  // FM elapsed time ticks in FmElapsedTime / FmProgressFill / SeekRange.
   const fmDurationMs = radioFmNowPlaying?.duration_ms ?? 0
-  const fmProgress = fmDurationMs > 0 ? Math.min(fmElapsedMs / fmDurationMs, 1) : 0
   // Global infoSongId (not local state) so the info panel survives switching
   // to another tab, which unmounts this view.
   const openSongInfo = (): void => {
@@ -826,7 +848,9 @@ export default function Player(): JSX.Element {
         a.src = url
         a.volume = volumeRef.current
         applyRate(a)
-        if (s.isPlaying) a.play().catch(console.error)
+        // Through playSlot like every other play: it wakes the effects graph
+        // and lets a quick pause wait for this play() to settle.
+        if (s.isPlaying) playSlot(a)
       }).catch((err) => {
         console.error('Could not load donor file', err)
         if (useStore.getState().currentTrack?.id !== trackId) return
@@ -1991,7 +2015,7 @@ export default function Player(): JSX.Element {
       if (currentSongId != null) { useStore.getState().openSongEditor(currentSongId); return }
       // Local file — open the local-metadata editor instead of the API editor.
       if (currentTrack?.id.startsWith('local-')) {
-        const lt = libraryTracks.find((t) => t.id === currentTrack.id)
+        const lt = useStore.getState().libraryTracks.find((t) => t.id === currentTrack.id)
         if (lt) useStore.getState().openLocalEditor(lt)
       }
     },
@@ -2080,6 +2104,9 @@ export default function Player(): JSX.Element {
       const fn = hotkeyActionsRef.current[id]
       if (!fn) return
       e.preventDefault()
+      // A held key repeats. That's wanted for stepping (seek, volume, speed),
+      // but a held Space or L flipped play/pause or the like on and off.
+      if (e.repeat && !REPEATABLE_HOTKEYS.has(id)) return
       lastInAppFire.current = { id, at: Date.now() }
       fn()
     }
@@ -2243,6 +2270,9 @@ export default function Player(): JSX.Element {
   const [outputRect, setOutputRect] = useState<{ left: number; top: number; bottom: number } | null>(null)
 
   useEffect(() => {
+    // Absent in some iOS Safari contexts; addEventListener on it would throw
+    // and take the whole player down with it.
+    if (!navigator.mediaDevices) return
     const enumerate = async (): Promise<void> => {
       try {
         const devices = await navigator.mediaDevices.enumerateDevices()
@@ -2332,7 +2362,7 @@ export default function Player(): JSX.Element {
         {/* Thin progress bar */}
         {radioFmActive ? (
           <div className="h-[2px] bg-red-900/40 relative">
-            <div className="h-full bg-red-400 absolute left-0 top-0 transition-none" style={{ width: `${fmProgress * 100}%` }} />
+            <FmProgressFill className="h-full bg-red-400 absolute left-0 top-0 transition-none" />
           </div>
         ) : (
         // Seekable. The visible line is 2px but the hit area is padded taller
@@ -2362,13 +2392,18 @@ export default function Player(): JSX.Element {
             let last = pctAt(e.touches[0].clientX)
             setSeekDrag(last)
             const onMove = (ev: TouchEvent): void => { last = pctAt(ev.touches[0].clientX); setSeekDrag(last) }
-            const onEnd = (): void => {
+            const detach = (): void => {
               document.removeEventListener('touchmove', onMove)
               document.removeEventListener('touchend', onEnd)
-              seekToPercent(last); setSeekDrag(null)
+              document.removeEventListener('touchcancel', onCancel)
             }
+            const onEnd = (): void => { detach(); seekToPercent(last); setSeekDrag(null) }
+            // A cancelled touch (system gesture, incoming call) never sends
+            // touchend - without this the bar stayed frozen on the drag.
+            const onCancel = (): void => { detach(); setSeekDrag(null) }
             document.addEventListener('touchmove', onMove, { passive: true })
             document.addEventListener('touchend', onEnd)
+            document.addEventListener('touchcancel', onCancel)
           }}
         >
           <div className="h-[2px] bg-surface-overlay relative">
@@ -2453,7 +2488,7 @@ export default function Player(): JSX.Element {
           {/* Thin progress line along the top edge */}
           {radioFmActive ? (
             <div className="absolute top-0 left-0 right-0 h-[2px] bg-red-900/40">
-              <div className="h-full bg-red-400" style={{ width: `${fmProgress * 100}%` }} />
+              <FmProgressFill className="h-full bg-red-400" />
             </div>
           ) : (
             <div className="absolute top-0 left-0 right-0 h-[2px] bg-surface-overlay">
@@ -2482,7 +2517,7 @@ export default function Player(): JSX.Element {
           </TrackSwap>
           <span className="text-text-muted text-xs tabular-nums shrink-0">
             {radioFmActive
-              ? `${formatDuration(Math.floor(fmElapsedMs / 1000))} / ${formatDuration(Math.floor(fmDurationMs / 1000))}`
+              ? <><FmElapsedTime /> / {formatDuration(Math.floor(fmDurationMs / 1000))}</>
               : <><ElapsedTime /> / {formatDuration(duration)}</>}
           </span>
           <button
@@ -2584,7 +2619,7 @@ export default function Player(): JSX.Element {
                       liked={likedTrackIds.includes(currentTrack.id)}
                       onToggleLike={() => toggleLike(currentTrack.id)}
                       onEditLocalMetadata={currentSongId == null && currentTrack.id.startsWith('local-') ? () => {
-                        const lt = libraryTracks.find(t => t.id === currentTrack.id)
+                        const lt = useStore.getState().libraryTracks.find(t => t.id === currentTrack.id)
                         if (lt) useStore.getState().openLocalEditor(lt)
                       } : undefined}
                     />
@@ -2643,12 +2678,12 @@ export default function Player(): JSX.Element {
           <div className="flex items-center gap-2 w-full max-w-xl">
             <span className="text-text-muted text-xs w-10 text-right tabular-nums">
               {radioFmActive
-                ? formatDuration(Math.floor(fmElapsedMs / 1000))
+                ? <FmElapsedTime />
                 : <ElapsedTime />}
             </span>
             <div className="flex-1 progress-track">
               <SeekRange
-                seekDrag={seekDrag} radioFmActive={radioFmActive} fmProgress={fmProgress}
+                seekDrag={seekDrag} radioFmActive={radioFmActive}
                 onMouseDown={radioFmActive ? undefined : handleSeekMouseDown}
                 onTouchStart={radioFmActive ? undefined : handleSeekMouseDown}
                 onChange={handleSeekChange}

@@ -72,7 +72,7 @@ const LOOKUP: TermCommand = {
       section('People', users.slice(0, 8).map((u) => `${profileLink(u.id, u.username)}${u.display && u.display !== u.username ? ` (${u.display})` : ''}  #${u.id}   → user ${u.username}`), users.length),
       section('Rooms', rooms.slice(0, 8), rooms.length),
       section('Playlists', playlists.slice(0, 8), playlists.length),
-      section('Songs', songs.map((s, i) => `${s.name}  (${s.era?.name ?? s.category})   → find ${s.name}`).slice(0, 5)),
+      section('Songs', songs.map((s) => `${s.name}  (${s.era?.name ?? s.category})   → find ${s.name}`).slice(0, 5)),
       section('Settings', settings.slice(0, 8), settings.length),
       section('Commands', commands.slice(0, 8), commands.length),
     ].filter(Boolean)

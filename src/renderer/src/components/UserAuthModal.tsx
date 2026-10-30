@@ -62,9 +62,17 @@ export default function UserAuthModal({ onClose }: Props): JSX.Element {
       const req = await userApi.requestLoginApproval(username.trim(), password)
       setApproval({ code: req.code })
       const deadline = Date.now() + req.expires_in * 1000
-      pollRef.current = window.setInterval(async () => {
+      stopPolling()
+      // One poll at a time: on a slow connection the next tick used to start
+      // while the last was out, and both could complete the same login.
+      let inFlight = false
+      const timer = window.setInterval(async () => {
+        if (inFlight) return
+        inFlight = true
         try {
           const res = await userApi.pollLoginApproval(req.id, req.secret)
+          // Stopped (cancelled, closed, a newer request) while this was out.
+          if (pollRef.current !== timer) return
           if (res.status === 'approved') {
             stopPolling()
             await completeApprovedLogin(res.token, res.user)
@@ -75,11 +83,15 @@ export default function UserAuthModal({ onClose }: Props): JSX.Element {
             setError(res.status === 'denied' ? 'The other device denied this login.' : 'The request expired. Try again.')
           }
         } catch (err) {
+          if (pollRef.current !== timer) return
           stopPolling()
           setApproval(null)
           setError(errorMessage(err, 'The request expired. Try again.'))
+        } finally {
+          inFlight = false
         }
       }, 2000)
+      pollRef.current = timer
     } catch (err) {
       setError(errorMessage(err, 'Could not send the request.'))
     } finally {

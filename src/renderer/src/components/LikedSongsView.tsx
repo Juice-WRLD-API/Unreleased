@@ -13,7 +13,7 @@ import { formatDuration } from '../lib/format'
 import { clickable } from '../lib/a11y'
 
 export default function LikedSongsView(): JSX.Element {
-  const { account, playTrack, playCollection, playNext, toggleLike, setShowUserAuth, setActiveView, previousView, setPendingEditorSongId, libraryTracks, likedTrackIds } = useStorePick('account', 'playTrack', 'playCollection', 'playNext', 'toggleLike', 'setShowUserAuth', 'setActiveView', 'previousView','setPendingEditorSongId', 'libraryTracks', 'likedTrackIds')
+  const { account, playTrack, playCollection, playNext, addToQueue, toggleLike, setShowUserAuth, setActiveView, previousView, libraryTracks, likedTrackIds } = useStorePick('account', 'playTrack', 'playCollection', 'playNext', 'addToQueue', 'toggleLike', 'setShowUserAuth', 'setActiveView', 'previousView', 'libraryTracks', 'likedTrackIds')
   const canEdit = useCanEdit()
   const [apiTracks, setApiTracks] = useState<Track[]>([])
   const [loading, setLoading] = useState(true)
@@ -178,6 +178,7 @@ export default function LikedSongsView(): JSX.Element {
         onInfo={() => ctxMenu.songId != null && openSongInfo(ctxMenu.songId)}
         onPlay={() => playTrack(ctxMenu.track, visible)}
         onPlayNext={() => playNext(ctxMenu.track)}
+        onAddToQueue={() => addToQueue(ctxMenu.track)}
         removeAction={{ label: 'Unlike', onClick: () => removeLiked(ctxMenu.track) }}
       />
     )}

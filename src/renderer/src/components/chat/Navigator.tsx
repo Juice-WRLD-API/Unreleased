@@ -5,6 +5,7 @@ import * as api from '../../lib/chatApi'
 import type { ChatChannel, ChatServer, Conversation } from '../../lib/chatApi'
 import { splitForwardRef } from '../../lib/chatForwardRef'
 import { splitReplyRef } from '../../lib/chatReplyRef'
+import { shareSummaryText } from '../../lib/chatShare'
 import { conversationTitle, displayName, roomKey, useChatStore, useNowPlayingByIds } from '../../store/chatStore'
 import { shortcodesToGlyphs } from './emoji'
 import { useStorePick } from '../../store/useStore'
@@ -780,7 +781,11 @@ function DmRow({ conv, pinned, muted, onPicked, onContextMenu, draggable, isDrag
     if (!last) return null
     if (last.deleted_at) return 'Message deleted'
     const p = s.plain[last.id]
-    if (p && 'text' in p && p.text) return shortcodesToGlyphs(splitForwardRef(splitReplyRef(p.text).body).body || p.text)
+    if (p && 'text' in p && p.text) {
+      // Song/playlist/theme shares are encoded payloads; show what they are.
+      const body = splitForwardRef(splitReplyRef(p.text).body).body
+      return shareSummaryText(body) ?? shortcodesToGlyphs(body || p.text)
+    }
     if (last.attachments.length) return `Sent ${last.attachments.length === 1 ? 'an attachment' : `${last.attachments.length} attachments`}`
     return p && 'error' in p ? 'Encrypted message' : '…'
   })

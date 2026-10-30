@@ -66,7 +66,9 @@ export function cancelCompUpload(id: string): void {
 }
 
 export function cancelAllCompUploads(): void {
-  const ids = useStore.getState().downloads.filter((d) => d.type === 'upload' && d.state === 'downloading').map((d) => d.id)
+  // Comp rows only: marking a donor or chat upload cancelled here would hide it
+  // from their own cancel-all without aborting the request.
+  const ids = useStore.getState().downloads.filter((d) => isCompUploadId(d.id) && d.state === 'downloading').map((d) => d.id)
   for (const id of ids) cancelCompUpload(id)
 }
 

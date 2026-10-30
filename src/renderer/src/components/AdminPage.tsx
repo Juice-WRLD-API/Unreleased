@@ -911,19 +911,20 @@ function ApplicationsTab({ applications, onChanged, onReviewed }: { applications
   const [notes,    setNotes]    = useState<Record<number, string>>({})
   const [selected, setSelected] = useState<EditorApplication | null>(null)
 
-  useEffect(() => { setSelected(applications[0] ?? null) }, [applications])
+  // Keep the open application (as its updated row) across a review or a
+  // refresh instead of jumping back to the first one.
+  useEffect(() => {
+    setSelected(prev => (prev && applications.find(a => a.id === prev.id)) ?? applications[0] ?? null)
+  }, [applications])
 
   const doReview = async (id: number, action: 'approve' | 'reject') => {
     setActionId(id)
     try {
       const updated = await userApi.adminReviewApplication(id, { action, review_notes: notes[id] || '' })
-      // Apply the returned row immediately - same reasoning as ProposalsTab's
-      // doReview - instead of leaving it looking pending until onChanged()'s
-      // refetch lands.
+      // Applied in place, same as ProposalsTab's doReview - no full refetch.
       onReviewed(updated)
-      onChanged()
     }
-    catch { showAppToast(`Couldn't ${action} the application`) } finally { setActionId(null) }
+    catch (e) { showAppToast(errorMessage(e, `Couldn't ${action} the application`)) } finally { setActionId(null) }
   }
 
   const pending  = applications.filter(a => a.status === 'pending')

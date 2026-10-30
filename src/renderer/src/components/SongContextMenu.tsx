@@ -165,24 +165,30 @@ export default function SongContextMenu({
   const entry = songId != null && songId > 0 ? { song_id: songId } : songId == null ? trackToPlaylistEntry(track) : null
   const entryIsPrivate = !!entry && isPrivateEntry(entry)
 
+  // Which playlists already hold this track. Fetched once "Add to playlist"
+  // opens rather than on every right-click: it's one request per playlist.
+  const [membershipWanted, setMembershipWanted] = useState(false)
   useEffect(() => {
-    if (!account || !entry || playlists.length === 0) return
+    if (!membershipWanted || !account || !entry || playlists.length === 0) return
+    const holds = (d: userApi.PlaylistDetail): boolean => songId != null
+      ? (d.items ?? []).some(it => it.song?.id === songId)
+      : playlistTrackIds(d.items ?? []).has(track.id)
+    // Merged rather than replaced, so a playlist ticked optimistically while
+    // this was in flight doesn't get unticked by the older answer.
+    const merge = (ids: number[]): void => { if (ids.length) setContained(prev => new Set([...prev, ...ids])) }
+    // Details already cached tick at once; the fetch below confirms the rest.
+    merge(playlists.flatMap(p => { const d = userApi.peekPlaylistDetail(p.id); return d && holds(d) ? [p.id] : [] }))
+    let cancelled = false
     Promise.all(
       playlists.map(p =>
         userApi.getPlaylist(p.id)
-          .then(d => ({
-            id: p.id,
-            has: songId != null
-              ? (d.items ?? []).some(it => it.song?.id === songId)
-              : playlistTrackIds(d.items ?? []).has(track.id),
-          }))
+          .then(d => ({ id: p.id, has: holds(d) }))
           .catch(() => ({ id: p.id, has: false }))
       )
-    // Merged rather than replaced, so a playlist ticked optimistically while
-    // this was in flight doesn't get unticked by the older answer.
-    ).then(results => setContained(prev => new Set([...prev, ...results.filter(r => r.has).map(r => r.id)])))
+    ).then(results => { if (!cancelled) merge(results.filter(r => r.has).map(r => r.id)) })
+    return () => { cancelled = true }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [playlists, songId, track.id, account])
+  }, [membershipWanted, playlists, songId, track.id, account])
 
   // Optimistic: tick the row now, send the request in the background, and
   // untick it (with a toast) if the server says no.
@@ -399,6 +405,7 @@ export default function SongContextMenu({
         canAddToPlaylist && {
           icon: Plus,
           label: 'Add to playlist',
+          onOpen: () => setMembershipWanted(true),
           children: playlistRows,
           childrenEmpty: !isLocalOnly && !account ? 'Log in to save to playlists.' : 'No playlists yet.',
           childrenFooter: playlistFooter,
@@ -460,14 +467,18 @@ export default function SongContextMenu({
             if (addingToLib || addedToLib) return
             setAddingToLib(true)
             try {
-              const url = 'https://juicewrldapi.com/juicewrld/files/download/?path=' + encodeURIComponent(track.path)
+              // The track's own stream URL carries the API server setting and
+              // the channel (a session edit can live in another comp).
+              const url = track.streamUrl?.startsWith('http') ? track.streamUrl : buildStreamUrl(track.path)
               const result = await el.downloadToLibrary({
                 url, songName: track.title, artist: track.artist, songPath: track.path,
               })
-              if (!result.error) {
-                if (result.track) addLibraryTrack(result.track)
+              if (!result?.error) {
+                if (result?.track) addLibraryTrack(result.track)
                 setAddedToLib(true)
-              }
+              } else showAppToast(`Couldn't add to library: ${result.error}`)
+            } catch (e) {
+              showAppToast(`Couldn't add to library: ${(e as Error).message}`)
             } finally { setAddingToLib(false) }
           },
         },

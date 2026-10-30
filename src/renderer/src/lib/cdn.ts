@@ -10,14 +10,14 @@
 // tryDownload() below returns null immediately. That's expected, not a bug -
 // this module activates on its own the moment nodes come online, with no
 // further wiring needed at the call sites.
-import { JWAPI_BASE } from './juicewrldApi'
+import { routeUrl } from './juicewrldApi'
 import { getToken } from './userApi'
 import { downloadViaNode, CdnNodeError, NO_ICE_CANDIDATES, type CdnDownloadProgress, type CdnNodeDownloadResult } from './cdnWebrtc'
 import { downloadViaTunnel } from './cdnTunnel'
 import { blake2bHexFromBlob } from './cdnBlake2b'
 import { embedForDownload, embedSafe } from './downloadEmbed'
 
-const CDN_BASE = `${JWAPI_BASE}/cdn`
+const CDN_BASE = routeUrl('/cdn')
 const ENABLED_KEY = 'cdnEnabled'
 
 // Same anchor-click trick app's own file-download call sites use (see

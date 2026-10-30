@@ -25,7 +25,11 @@ const LS_COLLAPSED = 'sidebar:collapsed'
 const LS_PLAYLISTS_EXPANDED = 'sidebar:playlistsExpanded'
 
 export default function Sidebar(): JSX.Element {
-  const { activeView, setActiveView, openProfile, openOwnPublicProfile, openSettings, setShowDiagnostics, developerMode, account, setShowUserAuth, playlists, setPendingPlaylistId, sidebarPosition, navStyle, navOrder, setNavOrder, navVisibility, setNavItemVisible, navControlOrder, navControlVisibility, setNavControlVisible, downloads, showDownloadManager, setShowDownloadManager, appMenuPosition, offlinePlaylists } = useStorePick('activeView', 'setActiveView', 'openProfile', 'openOwnPublicProfile', 'openSettings', 'setShowDiagnostics', 'developerMode', 'account', 'setShowUserAuth', 'playlists', 'setPendingPlaylistId', 'sidebarPosition', 'navStyle', 'navOrder', 'setNavOrder', 'navVisibility', 'setNavItemVisible', 'navControlOrder', 'navControlVisibility', 'setNavControlVisible', 'downloads', 'showDownloadManager', 'setShowDownloadManager', 'appMenuPosition', 'offlinePlaylists')
+  const { activeView, setActiveView, openProfile, openOwnPublicProfile, openSettings, setShowDiagnostics, developerMode, account, setShowUserAuth, playlists, setPendingPlaylistId, sidebarPosition, navStyle, navOrder, setNavOrder, navVisibility, setNavItemVisible, navControlOrder, navControlVisibility, setNavControlVisible, showDownloadManager, setShowDownloadManager, appMenuPosition, offlinePlaylists } = useStorePick('activeView', 'setActiveView', 'openProfile', 'openOwnPublicProfile', 'openSettings', 'setShowDiagnostics', 'developerMode', 'account', 'setShowUserAuth', 'playlists', 'setPendingPlaylistId', 'sidebarPosition', 'navStyle', 'navOrder', 'setNavOrder', 'navVisibility', 'setNavItemVisible', 'navControlOrder', 'navControlVisibility', 'setNavControlVisible', 'showDownloadManager', 'setShowDownloadManager', 'appMenuPosition', 'offlinePlaylists')
+  // Counts, not the list: every progress tick replaces `downloads`, and the
+  // whole menu re-rendered with it.
+  const hasDownloads = useStore((s) => s.downloads.length > 0)
+  const activeUploadCount = useStore((s) => s.downloads.reduce((n, d) => (d.state === 'downloading' ? n + 1 : n), 0))
   const { showNotifications, setShowNotifications } = useStorePick('showNotifications', 'setShowNotifications')
   const unreadNotifications = useUnreadNotificationCount()
   const isElectron = navigator.userAgent.includes('Electron')
@@ -164,7 +168,7 @@ export default function Sidebar(): JSX.Element {
   // Foot-of-menu controls (Profile, Log out, Diagnostics, Settings) -
   // ordered and filtered to what's both available and toggled on in Settings.
   // Log in and the collapse toggle are rendered separately (never hideable).
-  const controlCtx = { account: !!account, isElectron, developerMode, hasUploads: downloads.length > 0 }
+  const controlCtx = { account: !!account, isElectron, developerMode, hasUploads: hasDownloads }
   const controls = orderedNavControls(navControlOrder).filter((c) => isNavControlVisible(c, navControlVisibility, controlCtx))
 
   const rowCls = 'flex items-center w-full py-2 rounded text-sm font-medium text-text-secondary hover:text-text-primary hover:bg-surface-raised transition-colors gap-3 px-3'
@@ -174,7 +178,6 @@ export default function Sidebar(): JSX.Element {
   // Full-width control row for the vertical (left/right) side menu.
   // The panel itself (DownloadManager) pops out of this button, found by its
   // data-transfers-anchor attribute.
-  const activeUploadCount = downloads.filter((u) => u.state === 'downloading').length
 
   const renderControl = (id: NavControlId): JSX.Element | null => {
     switch (id) {

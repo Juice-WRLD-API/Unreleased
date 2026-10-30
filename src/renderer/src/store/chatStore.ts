@@ -300,6 +300,8 @@ const primedRooms = new Set<string>()
 // check (reconcileKeys -> resolveKey) share one limit=1 fetch per room.
 const primesInFlight = new Map<string, Promise<void>>()
 let initPromise: Promise<void> | null = null
+// Bumped by every teardown, so an init still awaiting can tell it's been replaced.
+let initGen = 0
 const rerunResolve = new Set<number>()
 // (user, list_version) pairs already handled - devices.updated fans out once
 // per shared conversation.
@@ -334,9 +336,11 @@ export const useChatStore = create<ChatState>((set, get) => {
     }
   }
 
+  // `active` outlives the chat view (it's where you land on coming back), so a
+  // room only counts as seen while the chat view itself is showing.
   const isViewing = (key: string): boolean => {
     const a = get().active
-    return !!a && roomKey(a) === key && document.visibilityState === 'visible'
+    return !!a && roomKey(a) === key && document.visibilityState === 'visible' && useStore.getState().activeView === 'chat'
   }
 
   const isMuted = (key: string): boolean => {
@@ -746,8 +750,11 @@ export const useChatStore = create<ChatState>((set, get) => {
       // Another of my devices read the room: mirror its authoritative count.
       case 'unread.changed': {
         const key = `${ev.kind === 'conversation' ? 'd' : 'c'}:${ev.id}`
-        if (s.active && roomKey(s.active) === key) return
-        set((st) => ({ unread: { ...st.unread, [key]: ev.unread } }))
+        if (isViewing(key)) return
+        // Muted rooms don't collect unread (see bumpUnread); a read elsewhere
+        // can still clear what's there.
+        const muted = isMuted(key)
+        set((st) => ({ unread: { ...st.unread, [key]: muted ? Math.min(st.unread[key] ?? 0, ev.unread) : ev.unread } }))
         return
       }
       case 'server.updated':
@@ -945,7 +952,7 @@ export const useChatStore = create<ChatState>((set, get) => {
     const pending = primesInFlight.get(key)
     if (pending) return pending
     if (primedRooms.has(key)) return Promise.resolve()
-    const p = fetchPrime(key).finally(() => primesInFlight.delete(key))
+    const p = fetchPrime(key).finally(() => { if (primesInFlight.get(key) === p) primesInFlight.delete(key) })
     primesInFlight.set(key, p)
     return p
   }
@@ -953,13 +960,19 @@ export const useChatStore = create<ChatState>((set, get) => {
   const fetchPrime = async (key: string): Promise<void> => {
     const ref = parseRoomKey(key)
     const meId = get().meId
+    const gen = initGen
     const page = ref.kind === 'channel'
       ? await api.listChannelMessages(ref.id, { limit: 1 })
       : await api.listDmMessages(ref.id, { limit: 1 })
+    if (gen !== initGen) return
     primedRooms.add(key)
     const latest = page.results.slice(-1)[0]
     if (!latest) return
-    set((s) => ({ lastMessage: { ...s.lastMessage, [key]: latest } }))
+    // A socket message can land while this was in flight; keep the newer one.
+    set((s) => {
+      const prev = s.lastMessage[key]
+      return !prev || prev.id <= latest.id ? { lastMessage: { ...s.lastMessage, [key]: latest } } : {}
+    })
     if (latest.is_encrypted) void decryptOne(latest)
     const read = get().lastRead[key]
     if (read == null) {
@@ -974,7 +987,12 @@ export const useChatStore = create<ChatState>((set, get) => {
     const after = ref.kind === 'channel'
       ? await api.listChannelMessages(ref.id, { after: read, limit: 100 })
       : await api.listDmMessages(ref.id, { after: read, limit: 100 })
-    const fresh = after.results.filter((m) => m.author.id !== meId && !m.parent && !m.deleted_at)
+    // The room may have been opened (and marked read) meanwhile, and muted
+    // rooms never collect unread (see bumpUnread).
+    const st = get()
+    if (gen !== initGen || (st.active && roomKey(st.active) === key) || isMuted(key)) return
+    const readNow = Math.max(read, st.lastRead[key] ?? 0)
+    const fresh = after.results.filter((m) => m.id > readNow && m.author.id !== meId && !m.parent && !m.deleted_at)
     set((s) => ({
       unread: { ...s.unread, [key]: fresh.length },
       mentions: { ...s.mentions, [key]: fresh.filter((m) => meId && m.mentions.includes(meId)).length },
@@ -1113,9 +1131,13 @@ export const useChatStore = create<ChatState>((set, get) => {
         }
         if (changed) set({ typing: next })
       }, 1500)
+      // Torn down (signed out, switched account, retried) while still loading.
+      const gen = initGen
+      const stale = (): boolean => gen !== initGen
       initPromise = (async () => {
         try {
           await get().refreshLists()
+          if (stale()) return
           set({ initialized: true, loadError: null })
           const keys = [
             ...get().servers.flatMap((sv) => sv.channels.map((c) => `c:${c.id}`)),
@@ -1124,8 +1146,11 @@ export const useChatStore = create<ChatState>((set, get) => {
           void pool(keys, 6, primeRoom)
           void e2e().then(async (m) => {
             await m.ensureDevice(account.id)
-            set({ identity: await m.identityStatus(account.id) })
+            const identity = await m.identityStatus(account.id)
+            if (stale()) return
+            set({ identity })
             const td = await import('../lib/chatToDevice')
+            if (stale()) return
             stopToDevice?.()
             stopToDevice = td.onToDeviceEvent((ev) => {
               if (get().meId !== account.id) return
@@ -1155,6 +1180,7 @@ export const useChatStore = create<ChatState>((set, get) => {
           }).catch((err) => console.warn('[chat] device setup failed', err))
           void reconcileKeys().catch(() => undefined)
         } catch (err) {
+          if (stale()) return
           set({ initialized: true, loadError: (err as Error).message || 'Could not load chat' })
           initPromise = null
         }
@@ -1163,10 +1189,13 @@ export const useChatStore = create<ChatState>((set, get) => {
     },
 
     teardown: () => {
+      initGen++
       if (socket) {
         socket.dispose()
         socket = null
         void e2e().then((m) => m.resetDevice())
+        // Search keeps decrypted DM text of its own; don't leave it behind.
+        void import('../lib/chatSearchIndex').then((m) => m.clearSearchCache()).catch(() => undefined)
       }
       stopToDevice?.()
       stopToDevice = null
@@ -1177,6 +1206,7 @@ export const useChatStore = create<ChatState>((set, get) => {
       typingTimer = null
       seenNew.clear()
       primedRooms.clear()
+      primesInFlight.clear()
       initPromise = null
       rerunResolve.clear()
       lastRoomBySpace.clear()
@@ -1480,6 +1510,7 @@ export const useChatStore = create<ChatState>((set, get) => {
           // sent in quick succession, whichever request's response lands first
           // must not jump ahead of one sent earlier but still in flight.
           place((items) => items.map((m) => m.id === tempId ? { ...created, localId } : m))
+          dropPlain(tempId)
           if (!created.parent) {
             set((s) => ({ lastMessage: { ...s.lastMessage, [key]: created } }))
             get().markRead(room)
@@ -1580,6 +1611,7 @@ export const useChatStore = create<ChatState>((set, get) => {
           }
           return { rooms, threads }
         })
+        dropPlain(message.id)
         return
       }
       await api.deleteMessage(message.id, !!opts?.purge)

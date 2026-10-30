@@ -6,6 +6,7 @@
 import { copyText } from '../lib/clipboard'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useStore, useStorePick } from '../store/useStore'
+import { hasEscapeLayer } from './useEscapeToClose'
 import { getSongById, songToTrack } from '../lib/juicewrldApi'
 import type { JWApiSong } from '../lib/juicewrldApi'
 import { loadEraFullNames } from '../lib/eras'
@@ -386,11 +387,10 @@ export function useWordlePhysicalKeyboard({ answer, finished, showSettings, show
     if (e.metaKey || e.ctrlKey || e.altKey) return
     // App-level overlays sit over this view without unmounting it - read them
     // at event time so a keypress meant for one of them isn't swallowed by a
-    // board nobody can see. Settings used to be one of these too, but it's a
-    // real page now (see App.tsx) - navigating to it unmounts this component
-    // entirely, so there's nothing left here to guard against.
+    // board nobody can see. Settings is one of them (an overlay in App.tsx);
+    // recording a shortcut there used to type the key onto the board too.
     const app = useStore.getState()
-    if (app.showUserAuth || app.showDiagnostics) return
+    if (app.showUserAuth || app.showDiagnostics || app.showSettings || hasEscapeLayer()) return
     const el = e.target as HTMLElement | null
     const tag = el?.tagName
     // Typing into the search box (or anywhere else that takes text) is not

@@ -49,8 +49,8 @@ export default function SkinEditorModal({
   // caller so the open/edit state stays local to its window.
   onEditSkin: (id: string) => void
 }): JSX.Element | null {
-  const { customSkins, saveCustomSkin, deleteCustomSkin, setTheme } = useStorePick(
-    'customSkins', 'saveCustomSkin', 'deleteCustomSkin', 'setTheme',
+  const { customSkins, saveCustomSkin, deleteCustomSkin, setTheme, theme, setAccentColor } = useStorePick(
+    'customSkins', 'saveCustomSkin', 'deleteCustomSkin', 'setTheme', 'theme', 'setAccentColor',
   )
   const skin = customSkins.find((s) => s.id === skinId) ?? null
 
@@ -58,6 +58,13 @@ export default function SkinEditorModal({
   if (!skin) return null
 
   const patch = (updates: Partial<Skin>): void => saveCustomSkin({ ...skin, ...updates })
+  // The accent isn't a palette var: picking a skin copies it into the app accent
+  // (setAccentColor). Mirror edits while this skin is on screen so the live
+  // preview covers the accent too. Half-typed hex values wait until they parse.
+  const setAccent = (accent: string | undefined): void => {
+    patch({ accent })
+    if (accent && theme === skin.id && /^#([0-9a-f]{3}|[0-9a-f]{6})$/i.test(accent)) setAccentColor(accent)
+  }
   const setVar = (key: keyof SkinVars, value: string): void =>
     patch({ vars: { ...skin.vars, [key]: value } })
   // Optional vars: an empty value removes the key so it inherits again.
@@ -150,13 +157,13 @@ export default function SkinEditorModal({
             </div>
             <ThemedColorPicker
               value={toColorInputValue(skin.accent ?? '#1db954')}
-              onChange={(hex) => patch({ accent: hex })}
+              onChange={(hex) => setAccent(hex)}
               className="w-8 h-8 rounded-md"
               title="Accent color"
             />
             <input
               value={skin.accent ?? ''}
-              onChange={(e) => patch({ accent: e.target.value || undefined })}
+              onChange={(e) => setAccent(e.target.value || undefined)}
               placeholder="inherit"
               className="w-28 bg-[var(--surface-overlay)] rounded-md px-2 py-1.5 text-text-primary text-xs font-mono outline-none focus:ring-1 focus:ring-accent"
             />

@@ -14,6 +14,7 @@ import { GameSwitcher, GameBackdrop, Field, Segmented, numberInput } from './gam
 import { formatCountdown, lastUsedBucket } from '../lib/heardleViewShared'
 import { tileTone, Row, useWordleSettingsForm, statsSummary } from '../lib/wordleViewShared'
 import { useWordleGame, useWordlePhysicalKeyboard, MODES, KEY_ROWS } from '../hooks/useWordleGame'
+import { useEscapeToClose } from '../hooks/useEscapeToClose'
 
 // ─── Board ────────────────────────────────────────────────────────────────────
 
@@ -95,6 +96,7 @@ function SettingsPanel({ settings, onChange, eras, mode, onClose }: {
   onClose: () => void
 }): JSX.Element {
   const { set, toggleEra, toggleCategory } = useWordleSettingsForm(settings, onChange)
+  useEscapeToClose(onClose)
 
   return (
     <MotionOverlay className="fixed inset-0 z-[200] flex items-center justify-center bg-black/60 p-4" onClick={onClose}>
@@ -206,6 +208,7 @@ function SettingsPanel({ settings, onChange, eras, mode, onClose }: {
 function StatsPanel({ onClose }: { onClose: () => void }): JSX.Element {
   const stats: Stats = loadStats()
   const { max, winRate } = statsSummary(stats)
+  useEscapeToClose(onClose)
   return (
     <MotionOverlay className="fixed inset-0 z-[200] flex items-center justify-center bg-black/60 p-4" onClick={onClose}>
       <div

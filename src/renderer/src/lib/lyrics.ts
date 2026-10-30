@@ -84,20 +84,19 @@ export function isLrcFormat(text: string): boolean {
 }
 
 /**
- * Find current lyric line index for given time
+ * Find current lyric line index for given time. `lines` are sorted by time
+ * (parseLrc sorts them), so this is a binary search: the lyric views call it
+ * every frame.
  */
 export function getCurrentLineIndex(lines: SyncedLyricLine[], currentTime: number): number {
-  if (lines.length === 0) return -1
-
-  let idx = -1
-  for (let i = 0; i < lines.length; i++) {
-    if (lines[i].time <= currentTime) {
-      idx = i
-    } else {
-      break
-    }
+  let low = 0
+  let high = lines.length
+  while (low < high) {
+    const mid = (low + high) >> 1
+    if (lines[mid].time <= currentTime) low = mid + 1
+    else high = mid
   }
-  return idx
+  return low - 1
 }
 
 /** Ad-libs render at the same size as the line around them, just dimmer.

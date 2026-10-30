@@ -18,6 +18,10 @@ import type { Album } from '../lib/albumsApi'
 import type { PlaylistSummary } from '../lib/userApi'
 import type { Track, ViewType } from '../types'
 
+/** TEMP: the Albums tile is hidden on Home. Also skips its /albums/ fetch,
+ *  which otherwise ran on every visit for nothing. */
+export const HOME_ALBUMS_SHOWN: boolean = false
+
 export interface HomeAlbumCard {
   key: string
   title: string
@@ -118,6 +122,7 @@ export function useHomeData() {
   const [albums, setAlbums] = useState<Album[]>([])
   const [albumSongIndex, setAlbumSongIndex] = useState<Map<string, JWApiSong>>(new Map())
   useEffect(() => {
+    if (!HOME_ALBUMS_SHOWN) return
     albumsApi.fetchAlbums()
       .then((list) => {
         setAlbums([...list].sort((a, b) => (b.release_date ?? '').localeCompare(a.release_date ?? '')))

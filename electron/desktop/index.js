@@ -317,6 +317,9 @@ function createDesktop(options) {
     dispose() {
       if (disposed) return
       disposed = true
+      // A lingering light's timer would run updateLight after this and start the screen watch again.
+      clearTimeout(lingering)
+      screenWatch.off('front', sendHidden)
       for (const channel of Object.keys(handlers)) ipcMain.removeAllListeners(channel)
       for (const channel of Object.keys(invokers)) ipcMain.removeHandler(channel)
       screen.removeListener('display-added', onDisplays)
