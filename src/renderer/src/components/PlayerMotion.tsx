@@ -69,10 +69,11 @@ export function CoverFade({ src, alt = '', onError }: { src: string; alt?: strin
     const loaded = [...(box.current?.querySelectorAll('img') ?? [])]
       .filter((img) => img.complete && img.naturalWidth > 0)
       .map((img) => img.getAttribute('src'))
-    if (layers.some((l) => !l.ready && loaded.includes(l.src))) {
-      setLayers((ls) => ls.map((x) => (!x.ready && loaded.includes(x.src) ? { ...x, ready: true } : x)))
-    }
-  }, [layers])
+    setLayers((ls) => ls.some((l) => !l.ready && loaded.includes(l.src))
+      ? ls.map((x) => (!x.ready && loaded.includes(x.src) ? { ...x, ready: true } : x))
+      : ls)
+    // Run when the source changes, not again because this effect marked it ready.
+  }, [src])
   return (
     <div ref={box} className="relative w-full h-full">
       {layers.map((l, i) => {
@@ -86,8 +87,11 @@ export function CoverFade({ src, alt = '', onError }: { src: string; alt?: strin
             // Fades itself (below) - kept out of lib/imageFade's load fade.
             data-no-fade
             style={{ opacity: isTop && l.ready ? 1 : 0 }}
-            onLoad={() => setLayers(ls => ls.map(x => (x.src === l.src ? { ...x, ready: true } : x)))}
-            onTransitionEnd={() => setLayers(ls => (ls[ls.length - 1].src === l.src ? ls : ls.filter(x => x.src !== l.src)))}
+            onLoad={() => setLayers(ls => ls.some(x => x.src === l.src && !x.ready)
+              ? ls.map(x => (x.src === l.src ? { ...x, ready: true } : x))
+              : ls)}
+            onTransitionEnd={() => setLayers(ls => (ls[ls.length - 1].src === l.src || !ls.some(x => x.src === l.src)
+              ? ls : ls.filter(x => x.src !== l.src)))}
             onError={isTop ? onError : undefined}
           />
         )
