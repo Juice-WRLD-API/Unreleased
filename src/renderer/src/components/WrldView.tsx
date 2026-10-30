@@ -94,7 +94,6 @@ export default function WrldView(): JSX.Element {
     playTrack,
     isPlaying, setIsPlaying, volume, setVolume,
     shuffle, repeat, toggleShuffle, toggleRepeat,
-    prevTrack,
     showQueue, setShowQueue,
     audioOutput, setAudioOutput,
     wrldThemeBackground,
@@ -126,7 +125,6 @@ export default function WrldView(): JSX.Element {
     repeat: s.repeat,
     toggleShuffle: s.toggleShuffle,
     toggleRepeat: s.toggleRepeat,
-    prevTrack: s.prevTrack,
     showQueue: s.showQueue,
     setShowQueue: s.setShowQueue,
     audioOutput: s.audioOutput,
@@ -1020,7 +1018,7 @@ export default function WrldView(): JSX.Element {
                       <Shuffle size={16} />
                     </button>
                     <button
-                      onClick={() => prevTrack()}
+                      onClick={() => runHotkeyAction('previous')}
                       disabled={noTrack}
                       className="p-2 rounded-full transition-opacity hover:opacity-70"
                       style={{ color: txtPri }}
@@ -1232,7 +1230,7 @@ export default function WrldView(): JSX.Element {
 
                   {/* Prev */}
                   <button
-                    onClick={() => prevTrack()}
+                    onClick={() => runHotkeyAction('previous')}
                     disabled={noTrack}
                     className="p-2 rounded-full transition-opacity hover:opacity-70"
                     style={{ color: txtPri }}

@@ -337,6 +337,7 @@ export default function Player(): JSX.Element {
     setCurrentTrackFull,
     toggleShuffle,
     toggleRepeat,
+    setRepeat,
     nextTrack,
     prevTrack,
     setShowNowPlaying,
@@ -359,7 +360,7 @@ export default function Player(): JSX.Element {
     toggleLike,
     setActiveView,
     activeView,
-    playNext, account, updateLibraryTrack, popoutWindows } = useStorePick('currentTrack', 'currentTrackFull', 'isPlaying', 'volume', 'shuffle', 'repeat', 'setIsPlaying', 'setVolume', 'setProgress', 'setCurrentTime', 'setCurrentTrackFull', 'toggleShuffle', 'toggleRepeat', 'nextTrack', 'prevTrack', 'setShowNowPlaying', 'showNowPlaying', 'showQueue', 'setShowQueue', 'playerCollapsed', 'setPlayerCollapsed', 'queue', 'queueIndex', 'crossfadeEnabled', 'crossfadeDuration', 'sleepTimerEnd', 'setSleepTimer', 'audioOutput', 'setAudioOutput', 'playbackSpeed', 'setPlaybackSpeed', 'likedTrackIds', 'toggleLike', 'setActiveView', 'activeView', 'playNext', 'account', 'updateLibraryTrack', 'popoutWindows')
+    playNext, account, updateLibraryTrack, popoutWindows } = useStorePick('currentTrack', 'currentTrackFull', 'isPlaying', 'volume', 'shuffle', 'repeat', 'setIsPlaying', 'setVolume', 'setProgress', 'setCurrentTime', 'setCurrentTrackFull', 'toggleShuffle', 'toggleRepeat', 'setRepeat', 'nextTrack', 'prevTrack', 'setShowNowPlaying', 'showNowPlaying', 'showQueue', 'setShowQueue', 'playerCollapsed', 'setPlayerCollapsed', 'queue', 'queueIndex', 'crossfadeEnabled', 'crossfadeDuration', 'sleepTimerEnd', 'setSleepTimer', 'audioOutput', 'setAudioOutput', 'playbackSpeed', 'setPlaybackSpeed', 'likedTrackIds', 'toggleLike', 'setActiveView', 'activeView', 'playNext', 'account', 'updateLibraryTrack', 'popoutWindows')
   const canEditSong = useCanEdit()
 
   const [showContextMenu, setShowContextMenu] = useState(false)
@@ -1867,13 +1868,9 @@ export default function Player(): JSX.Element {
 
   const handlePrev = (): void => {
     const audio = getActive()
-    // When on repeat-one, skip back = restart the same song (mirrors handleNext).
-    // Radio keeps its played songs in `queue` as history, so it falls through
-    // to the normal "restart if >3s in, otherwise previous song" logic below.
-    if (repeat === 'one' && !radioMode) {
-      restartCurrentTrack()
-      return
-    }
+    // Restart if more than 3s in, otherwise go back a song, looped or not.
+    // Restarting lands back under 3s, so a second press (or one just after a
+    // loop comes round) is what reaches the song before.
     if (audio && getAudioCurrentTime() > 3) {
       restartCurrentTrack()
       return
@@ -1884,6 +1881,8 @@ export default function Player(): JSX.Element {
       restartCurrentTrack()
       return
     }
+    // The loop belonged to the song being left, as in handleNext.
+    if (repeat === 'one' && !radioMode) setRepeat('all')
     cancelCF()
     const previousId = currentTrack?.id
     const previous = prevTrack()
@@ -1895,12 +1894,12 @@ export default function Player(): JSX.Element {
 
   const handleNext = (): void => {
     cancelCF()
-    // Radio owns its own generated-next-track flow, even if repeat-one was
-    // persisted from a normal queue session.
-    if (repeat === 'one' && !radioMode) {
-      restartCurrentTrack()
-      return
-    }
+    // Skipping off a looped song moves on to the next one, like Spotify: the
+    // loop belonged to that song, so repeat-one drops to repeat-all (nextTrack
+    // would otherwise pick the same index again). Radio owns its own
+    // generated-next-track flow, even if repeat-one was persisted from a
+    // normal queue session.
+    if (repeat === 'one' && !radioMode) setRepeat('all')
     const previousId = currentTrack?.id
     const next = nextTrack()
     // Nothing left to skip to (radio returns null too, but only while its

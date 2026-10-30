@@ -210,7 +210,8 @@ export const PLAYER_COMMANDS: TermCommand[] = [
     run: (args, ctx) => {
       const want = args.trim().toLowerCase()
       if (want && !['none', 'all', 'one'].includes(want)) fail('usage: repeat [none|all|one]')
-      for (let i = 0; i < 3 && (want ? st().repeat !== want : i === 0); i++) st().toggleRepeat()
+      if (want) st().setRepeat(want as 'none' | 'all' | 'one')
+      else st().toggleRepeat()
       ctx.print(`repeat ${st().repeat}`, 'ok')
     },
   },

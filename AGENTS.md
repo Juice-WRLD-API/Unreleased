@@ -1,6 +1,6 @@
 # Agent guide: Juice WRLD API and Unreleased
 
-**Version 1.41** · updated 2026-10-30. Bump the version and date whenever you
+**Version 1.42** · updated 2026-10-30. Bump the version and date whenever you
 change this file (minor for fixes and additions, major for rewrites).
 
 **Keep this file current.** If you find something in the docs or this file that
@@ -107,8 +107,12 @@ docs and the server disagree, the backend code in `backend/` wins.
 - **`/versions/?all=true`** returns every version row as a flat array.
   `/versions/` ignores filter params; filter on the client. `/versions/{song_id}/`
   is paginated and empty (`count: 0`) for songs with no version group.
-- **`/albums/` and `/albums/{id}/` return `songs: []` and `cover_url: ""`** for
-  every album. Don't build album track lists on them.
+- **`/albums/` holds every official album and EP** (24 rows as of 2026-10-30,
+  filled from Spotify, Apple Music and SoundCloud), each with `type` (Album, EP,
+  Mixtape), `cover_url` (a site asset or a storage path, so go through
+  `buildImageUrl`) and an ordered `songs` list of catalogue song `path`s.
+  Editions are rows of their own that repeat the base album's paths. The public
+  list is cached for 15 minutes, so admin edits show there late.
 - **`/files/download/?path=` supports Range** (206 with `Content-Range`, CORS
   exposes the range headers). An `<audio>` element handles seeking by itself.
 - **`/files/image-thumbnail/` 404s for real images** (nginx's HTML 404 page,
@@ -137,7 +141,9 @@ public track links. Mixing them up fails silently.
 
 ### Auth and roles
 
-- Header: `Authorization: Token <token>`. Discord OAuth is the main login
+- Header: `Authorization: Token <token>`. API keys (`jwapi_…`, with read/write/admin
+  scopes) go in `X-API-Key: <key>` or `Authorization: ApiKey <key>` instead;
+  admin endpoints need the `admin` scope. Discord OAuth is the main login
   (`/accounts/auth/discord/url/` then `/accounts/auth/discord/exchange/`); there
   are also username/password, access-code, admin login, 2FA (OTP), login
   approval from another device and passkeys (`/accounts/auth/passkey/…`). Passkeys

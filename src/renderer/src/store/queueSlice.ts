@@ -187,6 +187,7 @@ export interface QueueSlice {
   toggleShuffle: () => void
   reshuffleQueue: () => void
   toggleRepeat: () => void
+  setRepeat: (mode: 'none' | 'all' | 'one') => void
 
   setIsPlaying: (playing: boolean) => void
   setProgress: (progress: number) => void
@@ -795,9 +796,12 @@ export const createQueueSlice: StateCreator<any, [], [], QueueSlice> = (set, get
   // ── toggleRepeat ───────────────────────────────────────────────────────────
   toggleRepeat: () => {
     const order: Array<'none' | 'all' | 'one'> = ['none', 'all', 'one']
-    const next = order[(order.indexOf(get().repeat) + 1) % 3]
-    ls.set('repeat', next)
-    set({ repeat: next })
+    get().setRepeat(order[(order.indexOf(get().repeat) + 1) % 3])
+  },
+
+  setRepeat: (mode) => {
+    ls.set('repeat', mode)
+    set({ repeat: mode })
   },
 
   // ── Queue editing ──────────────────────────────────────────────────────────
