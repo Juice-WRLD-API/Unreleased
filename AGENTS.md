@@ -1,6 +1,6 @@
 # Agent guide: Juice WRLD API and Unreleased
 
-**Version 1.47** · updated 2026-10-30. Bump the version and date whenever you
+**Version 1.48** · updated 2026-10-30. Bump the version and date whenever you
 change this file (minor for fixes and additions, major for rewrites).
 
 **Keep this file current.** If you find something in the docs or this file that
@@ -405,6 +405,11 @@ Node 22.
 
 Newest first. One entry each: date, what went wrong, what to do instead. Delete
 entries that stop being true.
+
+- 2026-10-30: WRLD's Artwork colors toggle only changed the visualizer palette,
+  leaving the blurred cover visible when off. Background and text/queue contrast
+  must use the theme when artwork colors are off, even if Theme background in
+  WRLD is disabled. The theme-background preference still overrides artwork on.
 
 - 2026-10-30: Q_scal's v2.6.14 React #185 stack maps to `CoverFade`'s cached-image
   layout effect (`Hh` in the published Windows bundle). Check cached images on

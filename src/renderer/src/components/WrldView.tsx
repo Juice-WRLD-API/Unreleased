@@ -140,6 +140,8 @@ export default function WrldView(): JSX.Element {
   // Skins beyond the classic pair mean `theme === 'dark'` no longer covers
   // "is this a dark look" - Ocean, Mocha, etc. need the dark treatment too.
   const isDarkSkin = getSkin(theme).dark
+  const vizUseArtwork = useVizStore(s => s.vizUseArtwork)
+  const useThemeBackground = wrldThemeBackground || !vizUseArtwork
 
   const [showShareLyrics, setShowShareLyrics] = useState(false)
   const openShareLyrics = useCallback(() => setShowShareLyrics(true), [])
@@ -316,7 +318,7 @@ export default function WrldView(): JSX.Element {
   const { myVote, setMyVote, localSecondsLeft } = useRadioVoteCountdown(
     radioFmVote?.active, radioFmVote?.seconds_left, () => setVoteError(false),
   )
-  const textIsDark = useArtTextContrast(artSrc, artError, isDarkSkin, radioFmActive, wrldThemeBackground ? !isDarkSkin : null)
+  const textIsDark = useArtTextContrast(artSrc, artError, isDarkSkin, radioFmActive, useThemeBackground ? !isDarkSkin : null)
 
   // ── Albums state ─────────────────────────────────────────────────────────────
   // Album objects carry track paths, not full song metadata, so a
@@ -487,9 +489,9 @@ export default function WrldView(): JSX.Element {
   // of the fixed black/white pair the art treatment picks between. The two
   // faintest steps stay alpha-based - there's no theme var that dim, and
   // fading the primary color keeps them right on any skin.
-  const txtPri   = wrldThemeBackground ? 'var(--text-primary)'   : textIsDark ? 'rgba(0,0,0,0.85)' : 'rgba(255,255,255,1)'
-  const txtSec   = wrldThemeBackground ? 'var(--text-secondary)' : textIsDark ? 'rgba(0,0,0,0.5)'  : 'rgba(255,255,255,0.5)'
-  const txtTer   = wrldThemeBackground ? 'var(--text-muted)'     : textIsDark ? 'rgba(0,0,0,0.35)' : 'rgba(255,255,255,0.3)'
+  const txtPri   = useThemeBackground ? 'var(--text-primary)'   : textIsDark ? 'rgba(0,0,0,0.85)' : 'rgba(255,255,255,1)'
+  const txtSec   = useThemeBackground ? 'var(--text-secondary)' : textIsDark ? 'rgba(0,0,0,0.5)'  : 'rgba(255,255,255,0.5)'
+  const txtTer   = useThemeBackground ? 'var(--text-muted)'     : textIsDark ? 'rgba(0,0,0,0.35)' : 'rgba(255,255,255,0.3)'
   const txtFaint = textIsDark ? 'rgba(0,0,0,0.22)'  : 'rgba(255,255,255,0.2)'
   // Unplayed part of the progress/volume troughs. It used to be a hardcoded
   // white wash, which is invisible on a light surface - now it follows the
@@ -865,7 +867,7 @@ export default function WrldView(): JSX.Element {
       )}
 
       <>
-          {/* Background - the cover's blurred art, or (Settings ▸ Appearance)
+          {/* Background - the cover's blurred art, or (artwork colors off / Settings ▸ Appearance)
               the app's own surface color, which also skips the darkening wash
               on top of it since there's no art there to pull text off of. Gets
               the same accent radials as `html.gradients .app-shell` (index.css)
@@ -882,7 +884,7 @@ export default function WrldView(): JSX.Element {
               page renders over a still-mounted bgView (App.tsx), so the page
               you came from bled through those corners. */}
           <div className="absolute inset-0 overflow-hidden bg-black">
-            {wrldThemeBackground ? (
+            {useThemeBackground ? (
               <div
                 className="absolute inset-0 bg-surface"
                 style={gradientsEnabled ? {
@@ -901,7 +903,7 @@ export default function WrldView(): JSX.Element {
             ) : (
               <div className={`absolute inset-0 ${radioFmActive ? 'bg-gradient-to-br from-red-950/60 to-black dark:from-red-950/60 dark:to-black' : 'bg-gradient-to-br from-gray-200 to-gray-100 dark:from-gray-900 dark:to-black'}`} />
             )}
-            {!wrldThemeBackground && (
+            {!useThemeBackground && (
               <div className="absolute inset-0 bg-gradient-to-b from-black/10 via-transparent to-black/20 dark:from-black/40 dark:via-transparent dark:to-black/70" />
             )}
           </div>
@@ -1824,7 +1826,7 @@ const WrldQueuePanel = memo(function WrldQueuePanel({ onClose, variant }: {
   // 'panel' fills the desktop right column in place of the lyrics view.
   variant: 'inline' | 'sheet' | 'panel'
 }): JSX.Element {
-  const { queue, queueIndex, currentTrack, isPlaying, shuffle, radioMode, playHistory, playFromHistory, playTrack, jumpToTrack, removeFromQueue, clearQueue, reorderQueue, reshuffleQueue, onLightBackdrop } = useStore(useShallow(s => ({
+  const { queue, queueIndex, currentTrack, isPlaying, shuffle, radioMode, playHistory, playFromHistory, playTrack, jumpToTrack, removeFromQueue, clearQueue, reorderQueue, reshuffleQueue, lightSkin } = useStore(useShallow(s => ({
     queue: s.queue,
     queueIndex: s.queueIndex,
     currentTrack: s.currentTrack,
@@ -1844,8 +1846,11 @@ const WrldQueuePanel = memo(function WrldQueuePanel({ onClose, variant }: {
     // but the theme background is whatever the skin's surface is - so on a
     // light skin the glass has to darken instead of brighten, leaving a dark
     // card on a light page, the same way the notch drawer already looks.
-    onLightBackdrop: s.wrldThemeBackground && !getSkin(s.theme).dark,
+    lightSkin: !getSkin(s.theme).dark,
   })))
+  const wrldThemeBackground = useStore(s => s.wrldThemeBackground)
+  const vizUseArtwork = useVizStore(s => s.vizUseArtwork)
+  const onLightBackdrop = lightSkin && (wrldThemeBackground || !vizUseArtwork)
 
   const history = playHistory // what was actually played, newest first - see QueuePanel
   const upcoming = queue.slice(queueIndex + 1)
