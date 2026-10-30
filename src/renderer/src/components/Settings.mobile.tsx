@@ -136,9 +136,10 @@ const SETTINGS_SEARCH_INDEX: { tab: Tab; label: string; sub?: string; devOnly?: 
   // Appearance
   { tab: 'appearance', label: 'Skin', sub: 'Custom skin colors and presets' },
   { tab: 'appearance', label: 'Accent color' },
-  { tab: 'appearance', label: 'Gradient surfaces', sub: 'Accent-tinted gradients behind the app, sidebar, and player' },
-  { tab: 'appearance', label: 'Surface gradients', sub: 'Accent-tinted gradients on toggle groups, search bars, badges, and menus' },
+  { tab: 'appearance', label: 'App gradients', sub: 'Accent-tinted gradients behind the app and nav' },
+  { tab: 'appearance', label: 'Control gradients', sub: 'Accent-tinted gradients on the player bar, toggle groups, search bars, badges, and menus' },
   { tab: 'appearance', label: 'Theme background in WRLD', sub: "Use the app's theme behind the WRLD tab instead of the playing song's cover" },
+  { tab: 'appearance', label: 'Playlist header art', sub: "Blurred cover art behind a playlist's header" },
   { tab: 'appearance', label: 'App font' },
   { tab: 'appearance', label: 'Lyrics font' },
   { tab: 'appearance', label: 'App text size' },
@@ -148,6 +149,7 @@ const SETTINGS_SEARCH_INDEX: { tab: Tab; label: string; sub?: string; devOnly?: 
   { tab: 'appearance', label: 'Lyric colors', sub: 'Current line and other lines' },
   // Preferences
   { tab: 'preferences', label: 'Full era names', sub: 'Show eras spelled out instead of abbreviated' },
+  { tab: 'preferences', label: 'Add song info to downloads', sub: "Write the song's name, artist, cover and lyrics into downloaded MP3s" },
   { tab: 'preferences', label: 'Navigation position', sub: 'Where the nav menu sits' },
   { tab: 'preferences', label: 'Menu items', sub: 'Reorder or hide nav tabs' },
   { tab: 'preferences', label: 'Menu controls', sub: 'Reorder or hide the buttons at the foot of the menu' },
@@ -177,6 +179,7 @@ const SETTINGS_SEARCH_INDEX: { tab: Tab; label: string; sub?: string; devOnly?: 
   { tab: 'about', label: 'Record debug log', sub: 'Record console messages and network requests to a file you can send us' },
   { tab: 'about', label: 'Open debug log', sub: 'View a saved debug log file - requests, errors and console messages' },
   { tab: 'about', label: 'About', sub: 'Version, GitHub, Discord, API links' },
+  { tab: 'account', label: "Share what you're listening to", sub: "Shows the track you're currently playing on your profile" },
   { tab: 'account', label: 'My cover art', sub: 'Cover art you sent in for songs' },
   { tab: 'account', label: 'My CDN nodes', sub: 'Nodes linked to your account' },
   { tab: 'account', label: 'Two-factor authentication', sub: 'Whether sign-ins ask for an authenticator code' },

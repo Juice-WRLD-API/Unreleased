@@ -103,6 +103,29 @@ export const useVizStore = create<VizState>((set) => ({
   coverViz: (on) => set((s) => ({ vizCovered: Math.max(0, s.vizCovered + (on ? 1 : -1)) })),
 }))
 
+// Settings usually runs in a pop-out window with its own copy of this store. What it saves arrives here as a storage
+// event, so WRLD follows at once instead of after a restart. Straight into the state: the setters would save again.
+if (typeof window !== 'undefined') {
+  window.addEventListener('storage', (e) => {
+    if (e.storageArea !== localStorage || !e.key?.startsWith('unreleased:')) return
+    let value: unknown = null
+    try { value = e.newValue ? JSON.parse(e.newValue) : null } catch { return }
+    switch (e.key.slice('unreleased:'.length)) {
+      case 'vizMode': {
+        const mode = normalizeMode(typeof value === 'string' ? value : 'aurora')
+        useVizStore.setState({ vizMode: mode, activeMode: mode })
+        break
+      }
+      case 'vizQuality': useVizStore.setState({ vizQuality: pick(value, QUALITIES, 'medium') }); break
+      case 'vizUseArtwork': useVizStore.setState({ vizUseArtwork: value !== false }); break
+      case 'vizBoost': useVizStore.setState({ vizBoost: pick(value, BOOSTS, 'off') }); break
+      case 'vizCycle': useVizStore.setState({ vizCycle: pick(value, CYCLES, 'off') }); break
+      case 'wrldWidgets': useVizStore.setState({ wrldWidgets: value !== false }); break
+      case 'vizEdgeOverlay': useVizStore.setState({ vizEdgeOverlay: edgeLook(value) }); break
+    }
+  })
+}
+
 // WRLD's Edge light draws the screen light's look; vizEdgeOverlay only says whether it's on. Read through these, not
 // vizEdgeOverlay itself, which can hold an older pick (or one made in a popped-out Settings window, where the look
 // changed but this window's vizEdgeOverlay didn't).

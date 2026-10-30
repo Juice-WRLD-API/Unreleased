@@ -112,49 +112,58 @@ export default function CompProposalList({ proposals, loading, onSelect, onWithd
           </>
         )
 
+        const pending = p.status === 'pending'
+        const showLeak = !!onToggleNewLeak && pending && (p.change_type === 'upload' || p.change_type === 'replace')
+        const showReview = !!onReview && pending
+        const showWithdraw = !!onWithdraw && pending
+        // Same gate as the admin queue: folder deletions need a different
+        // administrator, so your own can only be denied.
+        const blocked = showReview ? compApproveBlockedReason(p, account) : null
+        const busy = reviewingId === p.id
+
+        // The hover highlight belongs to the whole card, so the action buttons
+        // sit inside it rather than beside a separately highlighted box.
         return (
-          <div key={p.id} className="rounded-xl border border-[var(--border)] bg-surface-raised/40 flex items-start">
+          <div key={p.id} className={`rounded-xl border border-[var(--border)] bg-surface-raised/40 flex items-start overflow-hidden transition-colors ${onSelect ? 'hover:bg-surface-raised' : ''}`}>
             {onSelect ? (
-              <button onClick={() => onSelect(p)} className="flex-1 min-w-0 text-left px-4 py-3 hover:bg-surface-raised transition-colors rounded-xl">
+              <button onClick={() => onSelect(p)} className="flex-1 min-w-0 text-left px-4 py-3">
                 {body}
               </button>
             ) : (
               <div className="flex-1 min-w-0 px-4 py-3">{body}</div>
             )}
-            {onToggleNewLeak && p.status === 'pending' && (p.change_type === 'upload' || p.change_type === 'replace') && (
-              <button onClick={() => onToggleNewLeak(p)} disabled={togglingLeakId === p.id}
-                title={p.is_new_leak ? 'Unmark as new leak' : 'Mark as new leak'}
-                aria-pressed={!!p.is_new_leak}
-                className={`p-2 my-2 rounded-lg transition-colors shrink-0 ${p.is_new_leak ? 'text-accent bg-accent/10 hover:bg-accent/15' : 'text-text-muted hover:text-accent hover:bg-accent/10'}`}>
-                {togglingLeakId === p.id ? <Loader2 size={14} className="animate-spin" /> : <Sparkles size={14} />}
-              </button>
-            )}
-            {onReview && p.status === 'pending' && (() => {
-              // Same gate as the admin queue: folder deletions need a
-              // different administrator, so your own can only be denied.
-              const blocked = compApproveBlockedReason(p, account)
-              const busy = reviewingId === p.id
-              return (
-                <div className="flex items-center gap-0.5 my-2 shrink-0">
-                  <button onClick={() => onReview(p, 'approve')} disabled={busy || !!blocked}
-                    title={blocked ?? 'Approve proposal'}
-                    className="p-2 rounded-lg text-text-muted hover:text-emerald-400 hover:bg-emerald-500/10 disabled:opacity-40 disabled:hover:text-text-muted disabled:hover:bg-transparent transition-colors">
-                    {busy ? <Loader2 size={14} className="animate-spin" /> : <Check size={14} />}
+            {(showLeak || showReview || showWithdraw) && (
+              <div className="flex items-center gap-0.5 pt-2 pr-2 shrink-0">
+                {showLeak && (
+                  <button onClick={() => onToggleNewLeak!(p)} disabled={togglingLeakId === p.id}
+                    title={p.is_new_leak ? 'Unmark as new leak' : 'Mark as new leak'}
+                    aria-pressed={!!p.is_new_leak}
+                    className={`p-2 rounded-lg transition-colors ${p.is_new_leak ? 'text-accent bg-accent/10 hover:bg-accent/15' : 'text-text-muted hover:text-accent hover:bg-accent/10'}`}>
+                    {togglingLeakId === p.id ? <Loader2 size={14} className="animate-spin" /> : <Sparkles size={14} />}
                   </button>
-                  <button onClick={() => onReview(p, 'reject')} disabled={busy}
-                    title="Deny proposal"
-                    className="p-2 rounded-lg text-text-muted hover:text-red-400 hover:bg-red-500/10 disabled:opacity-40 transition-colors">
-                    <Ban size={14} />
+                )}
+                {showReview && (
+                  <>
+                    <button onClick={() => onReview!(p, 'approve')} disabled={busy || !!blocked}
+                      title={blocked ?? 'Approve proposal'}
+                      className="p-2 rounded-lg text-text-muted hover:text-emerald-400 hover:bg-emerald-500/10 disabled:opacity-40 disabled:hover:text-text-muted disabled:hover:bg-transparent transition-colors">
+                      {busy ? <Loader2 size={14} className="animate-spin" /> : <Check size={14} />}
+                    </button>
+                    <button onClick={() => onReview!(p, 'reject')} disabled={busy}
+                      title="Deny proposal"
+                      className="p-2 rounded-lg text-text-muted hover:text-red-400 hover:bg-red-500/10 disabled:opacity-40 transition-colors">
+                      <Ban size={14} />
+                    </button>
+                  </>
+                )}
+                {showWithdraw && (
+                  <button onClick={() => onWithdraw!(p.id)} disabled={withdrawingId === p.id}
+                    title="Withdraw this proposal"
+                    className="p-2 rounded-lg text-text-muted hover:text-red-400 hover:bg-red-500/10 transition-colors">
+                    {withdrawingId === p.id ? <Loader2 size={14} className="animate-spin" /> : <X size={14} />}
                   </button>
-                </div>
-              )
-            })()}
-            {onWithdraw && p.status === 'pending' && (
-              <button onClick={() => onWithdraw(p.id)} disabled={withdrawingId === p.id}
-                title="Withdraw this proposal"
-                className="p-2 m-2 rounded-lg text-text-muted hover:text-red-400 hover:bg-red-500/10 transition-colors shrink-0">
-                {withdrawingId === p.id ? <Loader2 size={14} className="animate-spin" /> : <X size={14} />}
-              </button>
+                )}
+              </div>
             )}
           </div>
         )

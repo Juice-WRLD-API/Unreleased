@@ -5,7 +5,7 @@ import * as userApi from '../lib/userApi'
 import { AlbumArtThumbnail } from './AlbumArtThumbnail'
 import { ProgressiveCover } from './ProgressiveCover'
 import { useMobileNavSplit } from '../hooks/useMobileNavTabs'
-import { useHomeData } from '../hooks/useHomeData'
+import { useHomeData, HOME_ALBUMS_SHOWN } from '../hooks/useHomeData'
 import { useUnreadNotificationCount } from '../hooks/useNotificationHistory'
 import { hasChatAccess } from '../lib/chatAccess'
 import OnThisDayTile from './OnThisDayTile'
@@ -241,8 +241,7 @@ export default function HomeViewMobile(): JSX.Element {
             </Section>
           )}
 
-          {/* TEMP: albums hidden on the home page */}
-          {false && showSection('albums') && albumRow.length > 0 && (
+          {HOME_ALBUMS_SHOWN && showSection('albums') && albumRow.length > 0 && (
             <Section title="Albums" onMore={() => setActiveView('wrld')}>
               <Rail>
                 {albumRow.map((a) => (

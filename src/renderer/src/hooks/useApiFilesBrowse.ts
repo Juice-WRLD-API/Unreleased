@@ -237,7 +237,13 @@ export function useApiFilesBrowse(opts: {
     window.history.pushState({ view: 'api-files', folderPath: '' }, '', pathToUrl(''))
   }
 
+  // Channel switches only. On mount the effect above has already navigated to
+  // the deep link / last folder, and a second navigation here would win the
+  // request race and drop the view back at the root.
+  const navigatedChannelRef = useRef(activeChannel)
   useEffect(() => {
+    if (navigatedChannelRef.current === activeChannel) return
+    navigatedChannelRef.current = activeChannel
     navigateRef.current('', false)
   }, [activeChannel]) // eslint-disable-line react-hooks/exhaustive-deps
 

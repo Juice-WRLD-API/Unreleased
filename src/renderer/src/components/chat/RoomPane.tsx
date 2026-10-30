@@ -8,6 +8,7 @@ import { useRoomPeople } from './people'
 import { TrustBanners } from './ChatTrust'
 import { ChatAvatar } from './ui'
 import { useOpenUserCard } from './UserCard'
+import { hasEscapeLayer } from '../../hooks/useEscapeToClose'
 
 function TypingIndicator({ room }: { room: RoomRef }): JSX.Element {
   const typing = useChatStore((s) => s.typing[roomKey(room)])
@@ -232,6 +233,8 @@ export default function RoomPane({ room, header, enterSends = true }: {
       if (e.key !== 'ArrowUp' || e.metaKey || e.ctrlKey || e.altKey || editingId !== null) return
       const target = e.target as HTMLElement | null
       if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable)) return
+      // A dialog or menu over the room (or focus inside one) has the arrow keys.
+      if (hasEscapeLayer() || target?.closest?.('[role="dialog"], [role="menu"], [role="listbox"]')) return
       e.preventDefault()
       editLast()
       composer.current?.focus()

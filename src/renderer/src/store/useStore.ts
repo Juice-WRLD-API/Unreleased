@@ -1151,6 +1151,15 @@ setActiveChannelCache(ls.get<string>('activeChannel') || '')
 // Pop-outs are an Electron feature; the web build never has one.
 export const IS_FLOAT_WINDOW = false
 
+// The speed lands on every <audio> as playbackRate. A synced profile value of
+// null (JSON's NaN) would set it to 0 - every song sits at 0:00 until the
+// stall check gives up and skips it - and anything else out of Chromium's
+// range throws where the rate is applied. Anything unusable plays at 1x.
+function safeSpeed(raw: unknown): number {
+  const n = typeof raw === 'number' ? raw : Number(raw)
+  return Number.isFinite(n) && n >= 0.25 && n <= 4 ? n : 1
+}
+
 export const useStore = create<AppStore>((set, get, store) => ({
   // ── Queue slice (all queue + playback logic) ───────────────────────────────
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -1162,7 +1171,7 @@ export const useStore = create<AppStore>((set, get, store) => ({
   // ── Playback extras ───────────────────────────────────────────────────────
   currentTrackFull: null,
   volume: ls.get<number>('volume') ?? 0.8,
-  playbackSpeed: ls.get<number>('playbackSpeed') ?? 1,
+  playbackSpeed: safeSpeed(ls.get<number>('playbackSpeed')),
   lyricsOffset: ls.get<number>('lyricsOffset') ?? 0,
 
   setCurrentTrackFull: (full) => {
@@ -1173,7 +1182,7 @@ export const useStore = create<AppStore>((set, get, store) => ({
     }
   },
   setVolume: (volume) => { set({ volume }); ls.set('volume', volume) },
-  setPlaybackSpeed: (speed) => { set({ playbackSpeed: speed }); ls.set('playbackSpeed', speed); get()._scheduleProfilePush(['userSettings']) },
+  setPlaybackSpeed: (raw) => { const speed = safeSpeed(raw); set({ playbackSpeed: speed }); ls.set('playbackSpeed', speed); get()._scheduleProfilePush(['userSettings']) },
   setLyricsOffset: (offset) => { set({ lyricsOffset: offset }); ls.set('lyricsOffset', offset) },
 
   // ── Equalizer / audio effects ─────────────────────────────────────────────
@@ -1792,8 +1801,9 @@ export const useStore = create<AppStore>((set, get, store) => ({
         const op = wasLiked ? userApi.removeFavorite(songId) : userApi.addFavorite(songId)
         op.catch(() => {
           const current = get().likedTrackIds
+          // A second click may already have put it back - don't list it twice.
           const reverted = wasLiked
-            ? [...current, trackId]
+            ? (current.includes(trackId) ? current : [...current, trackId])
             : current.filter((id) => id !== trackId)
           set({ likedTrackIds: reverted })
           ls.set('likedTrackIds', reverted)

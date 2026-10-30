@@ -196,7 +196,8 @@ export default function SharedPlaylistView(): JSX.Element {
             </div>
             <span className="text-text-primary text-body md:text-sm md:tracking-normal flex-1 truncate" title={t.title}>{t.title}</span>
             <a
-              href={buildStreamUrl(t.path)}
+              // The track's own URL carries the channel of a comp file.
+              href={t.streamUrl ?? buildStreamUrl(t.path)}
               download={`${t.title}.mp3`}
               target="_blank"
               rel="noopener noreferrer"

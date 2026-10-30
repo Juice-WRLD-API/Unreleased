@@ -14,6 +14,7 @@ import { useTrackChannel } from '../hooks/useTrackChannel'
 import {
   apiFetch,
   buildStreamUrl,
+  fetchFileText,
   buildCoverArtUrl,
   smallCoverUrl,
   apiFileTrackId,
@@ -105,6 +106,10 @@ function ApiCoverThumb({ path, size = 36 }: { path: string; size?: number }): JS
     <img
       src={buildCoverArtUrl(path, true, activeChannel)}
       alt=""
+      // The listing isn't windowed, so a big folder would otherwise request
+      // every row's cover at once.
+      loading="lazy"
+      decoding="async"
       className="rounded object-cover"
       style={{ width: size, height: size }}
       onError={() => setErrored(true)}
@@ -129,6 +134,8 @@ function ApiImageThumb({ path, size = 36 }: { path: string; size?: number }): JS
       // degraded copy. The lightbox still opens the original.
       src={smallCoverUrl(buildStreamUrl(path, activeChannel))}
       alt=""
+      loading="lazy"
+      decoding="async"
       className="rounded object-cover"
       style={{ width: size, height: size }}
       onError={() => setErrored(true)}
@@ -251,10 +258,11 @@ export default function ApiFilesView(): JSX.Element {
   }
 
   const openSongInfo = async (entry: JWApiFileEntry): Promise<void> => {
-    const match = await findSongByFilename(entry.name)
+    // The menu only offers this once the match is resolved; same lookup.
+    const id = trackerMatches.get(entry.path) ?? (await findSongByFilename(entry.name))?.id
     // Global infoSongId (not local state) so the info panel survives
     // switching to another tab, which unmounts this view.
-    if (match) useStore.getState().setInfoSongId(match.id)
+    if (id != null) useStore.getState().setInfoSongId(id)
   }
 
   const openContextMenu = (entry: JWApiFileEntry, x: number, y: number): void => {
@@ -300,13 +308,10 @@ export default function ApiFilesView(): JSX.Element {
       name: entry.name,
       onDownload: () => handleDownload(entry),
       load: async () => {
-        const res = await fetch(buildStreamUrl(entry.path, activeChannel))
-        if (!res.ok) throw new Error(`Couldn't load this file (HTTP ${res.status})`)
-        const buf = await res.arrayBuffer()
-        const truncated = buf.byteLength > TEXT_VIEW_MAX
-        const bytes = new Uint8Array(truncated ? buf.slice(0, TEXT_VIEW_MAX) : buf)
-        if (bytes.subarray(0, 8000).includes(0)) throw new Error('This looks like a binary file')
-        return { text: new TextDecoder('utf-8').decode(bytes), truncated }
+        const file = await fetchFileText(entry.path, activeChannel, TEXT_VIEW_MAX)
+        if (!file.ok) throw new Error(`Couldn't load this file (HTTP ${file.status})`)
+        if (file.binary) throw new Error('This looks like a binary file')
+        return { text: file.text, truncated: file.truncated }
       },
     })
   }
@@ -995,7 +1000,7 @@ export default function ApiFilesView(): JSX.Element {
                         <Folder size={40} className={`transition-colors ${isSelected ? 'text-accent' : 'text-text-secondary group-hover:text-accent'}`} />
                       ) : mt === 'audio' ? (
                         <>
-                          <ProgressiveCover src={buildCoverArtUrl(entry.path, false, activeChannel)} className="w-full h-full object-cover"
+                          <ProgressiveCover lazy src={buildCoverArtUrl(entry.path, false, activeChannel)} className="w-full h-full object-cover"
                             onError={(e) => { (e.target as HTMLImageElement).style.display = 'none' }} />
                           {!selectMode && (
                             <div className="absolute inset-0 flex items-center justify-center bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none">
@@ -1007,7 +1012,7 @@ export default function ApiFilesView(): JSX.Element {
                         </>
                       ) : mt === 'image' ? (
                         <>
-                          <ProgressiveCover src={buildStreamUrl(entry.path, activeChannel)} alt={entry.name} className="w-full h-full object-cover"
+                          <ProgressiveCover lazy src={buildStreamUrl(entry.path, activeChannel)} alt={entry.name} className="w-full h-full object-cover"
                             onError={(e) => { (e.target as HTMLImageElement).style.display = 'none' }} />
                           {!selectMode && (
                             <div className="absolute inset-0 bg-black/30 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">

@@ -27,14 +27,20 @@ export function useStatisticsData() {
   const { playTrack, playNext } = useStorePick('playTrack', 'playNext')
   const canEdit = useCanEdit()
 
+  // Which of the two requests below failed - with nothing cached and both
+  // down, the page says so instead of showing its skeleton forever. Flags, not
+  // a count: StrictMode runs each effect twice, so one request can fail twice.
+  const [statsFailed, setStatsFailed] = useState(false)
+  const [playStatsFailed, setPlayStatsFailed] = useState(false)
+
   const [stats, setStats] = useState<JWApiStats | null>(() => apiPeek<JWApiStats>('/stats/') ?? null)
   useEffect(() => {
-    apiFetch<JWApiStats>('/stats/').then(setStats).catch(() => undefined)
+    apiFetch<JWApiStats>('/stats/').then(setStats).catch(() => setStatsFailed(true))
   }, [])
 
   const [playStats, setPlayStats] = useState<JWApiPlaysStats | null>(() => apiPeek<JWApiPlaysStats>('/plays/stats/') ?? null)
   useEffect(() => {
-    apiFetch<JWApiPlaysStats>('/plays/stats/').then(setPlayStats).catch(() => undefined)
+    apiFetch<JWApiPlaysStats>('/plays/stats/').then(setPlayStats).catch(() => setPlayStatsFailed(true))
   }, [])
 
   // Cover art (and everything else needed to play) for the songs named in
@@ -132,7 +138,8 @@ export function useStatisticsData() {
 
   const maxTopSongPlays = playStats?.top_songs[0]?.play_count ?? 0
 
-  const loading = !stats && !playStats
+  const loadFailed = !stats && !playStats && statsFailed && playStatsFailed
+  const loading = !stats && !playStats && !loadFailed
 
   return {
     canEdit, playTrack, playNext,
@@ -141,6 +148,6 @@ export function useStatisticsData() {
     eraRows, maxEraCount,
     timelineRows, timelineStart, timelineEnd,
     topEraRows, maxTopEraPlays, maxTopSongPlays,
-    loading,
+    loading, loadFailed,
   }
 }

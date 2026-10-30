@@ -12,6 +12,7 @@ import {
 import { DebugAnonymousToggle, DebugLogOpenButton, DebugRecordButton } from './DebugRecorder'
 import { ADDRESSES as DONATION_ADDRESSES, AddressRow as DonationAddressRow } from './DonationNotice'
 import VizControls, { Pills, Toggle } from './VizControls'
+import { useVizStore } from '../store/vizStore'
 import DesktopSettings from './DesktopSettings'
 import Passkeys from './Passkeys'
 import { useStore, useStorePick, type SidebarPosition } from '../store/useStore'
@@ -94,6 +95,7 @@ const SETTINGS_SEARCH_INDEX: { tab: Tab; label: string; sub?: string; devOnly?: 
   { tab: 'account', label: 'Bio' },
   { tab: 'account', label: 'Show listening history', sub: 'Visible to anyone with your profile link' },
   { tab: 'account', label: 'Show public playlists', sub: 'Lists playlists already marked public' },
+  { tab: 'account', label: "Share what you're listening to", sub: "Shows the track you're currently playing on your profile" },
   { tab: 'account', label: 'My cover art', sub: 'Cover art you sent in for songs' },
   { tab: 'account', label: 'My CDN nodes', sub: 'Nodes linked to your account' },
   { tab: 'account', label: 'Two-factor authentication', sub: 'Whether sign-ins ask for an authenticator code' },
@@ -104,9 +106,11 @@ const SETTINGS_SEARCH_INDEX: { tab: Tab; label: string; sub?: string; devOnly?: 
   // Appearance
   { tab: 'appearance', label: 'Skin', sub: 'Custom skin colors and presets' },
   { tab: 'appearance', label: 'Accent color' },
-  { tab: 'appearance', label: 'Gradient surfaces', sub: 'Accent-tinted gradients behind the app, sidebar, and player' },
-  { tab: 'appearance', label: 'Surface gradients', sub: 'Accent-tinted gradients on toggle groups, search bars, badges, and menus' },
+  { tab: 'appearance', label: 'App gradients', sub: 'Accent-tinted gradients behind the app and sidebar' },
+  { tab: 'appearance', label: 'Control gradients', sub: 'Accent-tinted gradients on the player bar, toggle groups, search bars, badges, and menus' },
   { tab: 'appearance', label: 'Theme background in WRLD', sub: "Use the app's theme behind the WRLD tab instead of the playing song's cover" },
+  { tab: 'appearance', label: 'Old WRLD style', sub: "WRLD's own player and lyrics instead of the widgets" },
+  { tab: 'appearance', label: 'Playlist header art', sub: "Blurred cover art behind a playlist's header" },
   { tab: 'appearance', label: 'App font' },
   { tab: 'appearance', label: 'Lyrics font' },
   { tab: 'appearance', label: 'Custom fonts' },
@@ -115,11 +119,13 @@ const SETTINGS_SEARCH_INDEX: { tab: Tab; label: string; sub?: string; devOnly?: 
   { tab: 'appearance', label: 'Lyrics alignment' },
   { tab: 'appearance', label: 'Blur inactive lyrics', sub: 'Soften every synced line except the one playing' },
   { tab: 'appearance', label: 'Lyric colors', sub: 'Current line and other lines' },
-  { tab: 'appearance', label: 'WRLD visualizer', sub: 'Visualizer, Edge light, quality, input boost, auto-switch, visualizer-only or widgets layout, artwork colors' },
+  { tab: 'appearance', label: 'WRLD visualizer', sub: 'Visualizer, Edge light, quality, input boost, auto-switch, artwork colors' },
   // Preferences
   { tab: 'preferences', label: 'Full era names', sub: 'Show eras spelled out instead of abbreviated' },
+  { tab: 'preferences', label: 'Add song info to downloads', sub: "Write the song's name, artist, cover and lyrics into downloaded MP3s" },
   { tab: 'preferences', label: 'Sandbox', sub: 'Dock modals into a collapsible pill instead of a centered popup' },
   { tab: 'preferences', label: 'Navigation position', sub: 'Where the nav menu sits - left, right, top, bottom' },
+  { tab: 'preferences', label: 'Navigation style', sub: 'Classic or a floating pill' },
   { tab: 'preferences', label: 'Menu items', sub: 'Reorder or hide sidebar tabs' },
   { tab: 'preferences', label: 'Menu controls', sub: 'Reorder or hide the buttons at the foot of the menu' },
   { tab: 'preferences', label: 'Home screen', sub: 'Choose which sections show on the Home tab' },
@@ -491,6 +497,8 @@ export default function Settings(): JSX.Element {
     embedSongInfoOnDownload, setEmbedSongInfoOnDownload,
     uploads,
   } = useStorePick('navStyle', 'setNavStyle', 'setShowSettings', 'setActiveView', 'account', 'logoutAccount', 'setShowUserAuth', 'theme', 'setTheme', 'customSkins', 'saveCustomSkin', 'deleteCustomSkin', 'accentColor', 'setAccentColor', 'settingsTab', 'setSettingsTab', 'sidebarPosition', 'setSidebarPosition', 'autoHideNav', 'setAutoHideNav', 'autoHideNavZone', 'setAutoHideNavZone', 'navOrder', 'setNavOrder', 'navVisibility', 'setNavItemVisible', 'navControlOrder', 'setNavControlOrder', 'navControlVisibility', 'setNavControlVisible', 'homeSectionVisibility', 'setHomeSectionVisible', 'audioOutput', 'setAudioOutput', 'crossfadeEnabled', 'crossfadeDuration', 'setCrossfade', 'pauseFadeEnabled', 'setPauseFade', 'rememberQueue', 'setRememberQueue', 'preferOgVersion', 'setPreferOgVersion', 'rotateSuggestedCovers', 'setRotateSuggestedCovers', 'mediaOverlayEnabled', 'setMediaOverlayEnabled', 'lyricsOffset', 'setLyricsOffset', 'sleepTimerEnd', 'setSleepTimer', 'hotkeyBindings', 'setHotkeyBinding', 'resetHotkeyBindings', 'hotkeySeekSeconds', 'setHotkeySeekSeconds', 'developerMode', 'setDeveloperMode', 'lastfmUser', 'setLastfmUser', 'lastfmEnabled', 'setLastfmEnabled', 'appTextScale', 'setAppTextScale', 'lyricsScale', 'setLyricsScale', 'lyricsAlign', 'setLyricsAlign', 'lyricsBlur', 'setLyricsBlur', 'lyricsBlurAmount', 'setLyricsBlurAmount', 'lyricsColorActive', 'setLyricsColorActive', 'lyricsColorInactive', 'setLyricsColorInactive', 'appFont', 'setAppFont', 'lyricsFont', 'setLyricsFont', 'gradientsEnabled', 'setGradientsEnabled', 'surfaceGradientsEnabled', 'setSurfaceGradientsEnabled', 'wrldThemeBackground', 'setWrldThemeBackground', 'playlistHeroEnabledDark', 'playlistHeroEnabledLight', 'setPlaylistHeroEnabled', 'refreshPlaylists', 'fullEraNames', 'setFullEraNames', 'autoReportErrors', 'setAutoReportErrors', 'embedSongInfoOnDownload', 'setEmbedSongInfoOnDownload', 'uploads')
+  const wrldWidgets = useVizStore(s => s.wrldWidgets)
+  const setWrldWidgets = useVizStore(s => s.setWrldWidgets)
 
   function startEditName(): void {
     setNameInput(accountDisplayName(account))
@@ -1174,6 +1182,14 @@ export default function Settings(): JSX.Element {
                   sub="Use the app's theme behind the WRLD tab instead of the playing song's cover"
                 >
                   <Toggle on={wrldThemeBackground} onClick={() => setWrldThemeBackground(!wrldThemeBackground)} />
+                </Row>
+                <Row
+                  icon={Disc}
+                  iconColor="#8b5cf6"
+                  label="Old WRLD style"
+                  sub="WRLD's own player and lyrics instead of the widgets"
+                >
+                  <Toggle on={!wrldWidgets} onClick={() => setWrldWidgets(!wrldWidgets)} />
                 </Row>
                 <Row
                   icon={Images}

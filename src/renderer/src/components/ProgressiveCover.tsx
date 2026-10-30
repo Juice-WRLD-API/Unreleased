@@ -7,6 +7,9 @@ interface Props {
   alt?: string
   className?: string
   onError?: ReactEventHandler<HTMLImageElement>
+  /** For long unwindowed grids: the <img> loads lazily, and the full copy
+   *  waits until the placeholder has shown rather than preloading at once. */
+  lazy?: boolean
 }
 
 // A cover drawn large enough to need the full-size image, but loaded in two
@@ -34,15 +37,16 @@ export function ProgressiveCover(props: Props): JSX.Element | null {
   return <Progressive key={props.src ?? ''} {...props} />
 }
 
-function Progressive({ src: rawSrc, alt = '', className = '', onError }: Props): JSX.Element | null {
+function Progressive({ src: rawSrc, alt = '', className = '', onError, lazy = false }: Props): JSX.Element | null {
   // The full step goes through the size cap; the placeholder is derived from
   // the raw URL since `small` is a /files/download/ param.
   const src = fullCoverUrl(rawSrc)
   const placeholder = hasSmallCoverVariant(rawSrc) ? smallCoverUrl(rawSrc) : undefined
   const [fullLoaded, setFullLoaded] = useState(!!src && fullyLoadedSrcs.has(src))
+  const [shown, setShown] = useState(!lazy)
 
   useEffect(() => {
-    if (!src || !placeholder || fullyLoadedSrcs.has(src)) return
+    if (!src || !placeholder || fullyLoadedSrcs.has(src) || !shown) return
     // Preloading in an off-DOM Image (rather than swapping the <img> src and
     // waiting) keeps the placeholder painted until the full copy is decoded -
     // swapping src directly blanks the element while the new one loads.
@@ -57,7 +61,7 @@ function Progressive({ src: rawSrc, alt = '', className = '', onError }: Props):
     // good cover, so leave it up and let the caller's onError stay unfired.
     img.src = src
     return () => { cancelled = true; img.onload = null }
-  }, [src, placeholder])
+  }, [src, placeholder, shown])
 
   if (!src) return null
   // The API's resize endpoints fail intermittently on covers that are fine, so
@@ -68,6 +72,8 @@ function Progressive({ src: rawSrc, alt = '', className = '', onError }: Props):
       alt={alt}
       className={className}
       onError={onError}
+      lazy={lazy}
+      onLoad={lazy ? () => setShown(true) : undefined}
     />
   )
 }
@@ -80,12 +86,14 @@ function Progressive({ src: rawSrc, alt = '', className = '', onError }: Props):
  *  1024px cap (fullCoverUrl) like every other full-size cover, since a custom
  *  cover's original can be a 20MB+ PNG - falling back to that whenever
  *  `small=1` flaked turned a ~5KB request into the whole file. */
-export function FallbackImg({ sources, alt = '', className, style, onError }: {
+export function FallbackImg({ sources, alt = '', className, style, onError, lazy = false, onLoad }: {
   sources: (string | null | undefined)[]
   alt?: string
   className?: string
   style?: CSSProperties
   onError?: ReactEventHandler<HTMLImageElement>
+  lazy?: boolean
+  onLoad?: () => void
 }): JSX.Element | null {
   const [failed, setFailed] = useState<string[]>([])
   const remaining = [...new Set(sources.map(fullCoverUrl).filter((s): s is string => !!s && !failed.includes(s)))]
@@ -97,8 +105,8 @@ export function FallbackImg({ sources, alt = '', className, style, onError }: {
       alt={alt}
       className={className}
       style={style}
-      decoding={imageLoadAttrs(showing, false).decoding}
-      onLoad={() => markImageLoaded(showing)}
+      {...(lazy ? imageLoadAttrs(showing, true) : { decoding: imageLoadAttrs(showing, false).decoding })}
+      onLoad={() => { markImageLoaded(showing); onLoad?.() }}
       onError={(e: SyntheticEvent<HTMLImageElement>) => {
         if (remaining.length <= 1) onError?.(e)
         setFailed((f) => [...f, showing])

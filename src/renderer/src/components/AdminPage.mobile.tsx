@@ -8,7 +8,7 @@ import {
 } from 'lucide-react'
 import { useStore, useStorePick } from '../store/useStore'
 import { displayName } from '../store/chatStore'
-import { discordHandle } from '../lib/format'
+import { discordHandle, errorMessage } from '../lib/format'
 import * as userApi from '../lib/userApi'
 import type { EditorApplication, SongEditProposal, AdminUser, ProposalStatus } from '../lib/userApi'
 import { apiFetch, songToTrack } from '../lib/juicewrldApi'
@@ -213,7 +213,17 @@ export default function AdminPage({ embedded = false, initialTab, onExit }: {
         )}
         {visited.has('proposals') && (
           <div className={tab === 'proposals' ? 'h-full' : 'hidden'}>
-            <ProposalsTab proposals={proposals} status={propStatus} setStatus={setPropStatus} onChanged={() => refresh()} channel={activeChannel} />
+            <ProposalsTab
+              proposals={proposals}
+              status={propStatus}
+              setStatus={setPropStatus}
+              onChanged={() => refresh()}
+              onReviewed={(updated) => setProposals(prev => {
+                const next = prev.map(p => p.id === updated.id ? updated : p)
+                return propStatus && updated.status !== propStatus ? next.filter(p => p.id !== updated.id) : next
+              })}
+              channel={activeChannel}
+            />
           </div>
         )}
         {visited.has('cover-art') && canReviewCoverArt && (
@@ -228,7 +238,10 @@ export default function AdminPage({ embedded = false, initialTab, onExit }: {
         )}
         {visited.has('applications') && (
           <div className={tab === 'applications' ? 'h-full' : 'hidden'}>
-            <ApplicationsTab applications={applications} onChanged={() => refresh()} />
+            <ApplicationsTab
+              applications={applications}
+              onReviewed={(updated) => setApplications(prev => prev.map(a => a.id === updated.id ? updated : a))}
+            />
           </div>
         )}
         {visited.has('reports') && (
@@ -243,7 +256,7 @@ export default function AdminPage({ embedded = false, initialTab, onExit }: {
         )}
         {visited.has('users') && (
           <div className={tab === 'users' ? 'h-full' : 'hidden'}>
-            <UsersTab users={users} onChanged={() => refresh()} currentUserId={account?.id} />
+            <UsersTab users={users} setUsers={setUsers} currentUserId={account?.id} />
           </div>
         )}
         {visited.has('stats') && (
@@ -468,11 +481,12 @@ const ProposalRow = memo(function ProposalRow({ item, showUserHeader, pendingCou
   )
 })
 
-function ProposalsTab({ proposals, status, setStatus, onChanged, channel }: {
+function ProposalsTab({ proposals, status, setStatus, onChanged, onReviewed, channel }: {
   proposals: SongEditProposal[]
   status: ProposalStatus | ''
   setStatus: (s: ProposalStatus | '') => void
   onChanged: () => void
+  onReviewed: (updated: SongEditProposal) => void
   channel?: string
 }): JSX.Element {
   const [actionId,    setActionId]    = useState<number | null>(null)
@@ -491,15 +505,26 @@ function ProposalsTab({ proposals, status, setStatus, onChanged, channel }: {
 
   const doReview = async (id: number, action: 'approve' | 'reject') => {
     setActionId(id)
-    try { await userApi.adminReviewProposal(id, { action, review_notes: notes[id] || '', channel }); dropCache(id); setArchive(null); onChanged(); setSelected(null) }
-    catch { showAppToast(`Couldn't ${action} the proposal`) } finally { setActionId(null) }
+    try {
+      const updated = await userApi.adminReviewProposal(id, { action, review_notes: notes[id] || '', channel })
+      dropCache(id); setArchive(null)
+      // The endpoint hands back the updated row, so apply it in place instead
+      // of refetching the whole queue (which also covered the list with the
+      // loading overlay and collapsed "Show more").
+      onReviewed(updated); setSelected(null)
+    }
+    catch (e) { showAppToast(errorMessage(e, `Couldn't ${action} the proposal`)) } finally { setActionId(null) }
   }
 
   const doReverse = async (id: number) => {
     if (!confirm('Reverse this approval?')) return
     setActionId(id)
-    try { await userApi.adminReverseProposal(id, channel); dropCache(id); setArchive(null); onChanged(); setSelected(null) }
-    catch { showAppToast("Couldn't reverse the proposal") } finally { setActionId(null) }
+    try {
+      const updated = await userApi.adminReverseProposal(id, channel)
+      dropCache(id); setArchive(null)
+      onReviewed(updated); setSelected(null)
+    }
+    catch (e) { showAppToast(errorMessage(e, "Couldn't reverse the proposal")) } finally { setActionId(null) }
   }
 
   // Keyed off the full list so the group header's count and "Accept all"
@@ -791,15 +816,19 @@ function ProposalsTab({ proposals, status, setStatus, onChanged, channel }: {
 
 // ── Applications (master-detail) ──────────────────────────────────────────────
 
-function ApplicationsTab({ applications, onChanged }: { applications: EditorApplication[]; onChanged: () => void }): JSX.Element {
+function ApplicationsTab({ applications, onReviewed }: { applications: EditorApplication[]; onReviewed: (updated: EditorApplication) => void }): JSX.Element {
   const [actionId, setActionId] = useState<number | null>(null)
   const [notes,    setNotes]    = useState<Record<number, string>>({})
   const [selected, setSelected] = useState<EditorApplication | null>(null)
 
   const doReview = async (id: number, action: 'approve' | 'reject') => {
     setActionId(id)
-    try { await userApi.adminReviewApplication(id, { action, review_notes: notes[id] || '' }); onChanged(); setSelected(null) }
-    catch { showAppToast(`Couldn't ${action} the application`) } finally { setActionId(null) }
+    try {
+      const updated = await userApi.adminReviewApplication(id, { action, review_notes: notes[id] || '' })
+      // Applied in place, same as ProposalsTab's doReview - no full refetch.
+      onReviewed(updated); setSelected(null)
+    }
+    catch (e) { showAppToast(errorMessage(e, `Couldn't ${action} the application`)) } finally { setActionId(null) }
   }
 
   const pending  = applications.filter(a => a.status === 'pending')
@@ -917,8 +946,8 @@ function ApplicationsTab({ applications, onChanged }: { applications: EditorAppl
 
 // ── Users ─────────────────────────────────────────────────────────────────────
 
-function UsersTab({ users, onChanged, currentUserId }: { users: AdminUser[]; onChanged: () => void; currentUserId?: number }): JSX.Element {
-  const { actionId, filter, setFilter, search, setSearch, filters: FILTERS, visible, doUpdate, canAct } = useAdminUsersList(users, currentUserId, onChanged)
+function UsersTab({ users, setUsers, currentUserId }: { users: AdminUser[]; setUsers: React.Dispatch<React.SetStateAction<AdminUser[]>>; currentUserId?: number }): JSX.Element {
+  const { filter, setFilter, search, setSearch, filters: FILTERS, visible, doUpdate, canAct } = useAdminUsersList(users, setUsers, currentUserId)
   // Collapsed-by-default accordion instead of always-expanded cards - one
   // row open at a time, mirroring the desktop master/detail split adapted to
   // a single column.
@@ -988,9 +1017,7 @@ function UsersTab({ users, onChanged, currentUserId }: { users: AdminUser[]; onC
                     </div>
                   )}
 
-                  {actionId === u.user_id ? (
-                    <div className="flex justify-center py-1"><Loader2 size={14} className="animate-spin text-text-muted" /></div>
-                  ) : canAct(u) ? (
+                  {canAct(u) ? (
                     <>
                       {(u.role === 'editor' || u.contributor_enabled) && (
                         <div className="space-y-1.5">

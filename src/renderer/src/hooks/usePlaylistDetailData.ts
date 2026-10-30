@@ -48,6 +48,8 @@ export function usePlaylistDetailData(selectedId: number | null, isSharedView: b
       setDetail(cachedDetail)
       setLoadingDetail(false)
     } else {
+      // Not the last playlist's name and tracks under this one's header.
+      setDetail(prev => (prev?.id === id ? prev : null))
       setLoadingDetail(true)
     }
     try {

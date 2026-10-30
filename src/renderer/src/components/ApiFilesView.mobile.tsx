@@ -516,6 +516,7 @@ export default function ApiFilesView(): JSX.Element {
         <div className="relative w-full aspect-square bg-surface-overlay flex items-center justify-center overflow-hidden">
           {hasArt ? (
             <ProgressiveCover
+              lazy
               src={mt === 'audio' ? buildCoverArtUrl(entry.path, false, activeChannel) : buildStreamUrl(entry.path, activeChannel)}
               alt={entry.name}
               className="w-full h-full object-cover"

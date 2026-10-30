@@ -139,8 +139,6 @@ export default function WrldView(): JSX.Element {
   // "is this a dark look" - Ocean, Mocha, etc. need the dark treatment too.
   const isDarkSkin = getSkin(theme).dark
 
-  const containerRef = useRef<HTMLDivElement>(null)
-  const activeRef    = useRef<HTMLDivElement>(null)
   const [showShareLyrics, setShowShareLyrics] = useState(false)
   const openShareLyrics = useCallback(() => setShowShareLyrics(true), [])
   // The Widgets layout hides the song menu this is normally opened from; its own menus send the same ask.
@@ -885,16 +883,12 @@ export default function WrldView(): JSX.Element {
               rootRef={pageRef}
               fullscreen={fullscreen}
               artUrl={artSrc && !artError ? artSrc : null}
-              title={displayTitle ?? ''}
-              artist={displayArtist ?? ''}
               trackKey={radioFmActive ? (radioFmNowPlaying?.title ?? null) : (currentTrack?.id ?? null)}
               albumKey={displayAlbum ?? null}
               // The held value, not !!rawLyrics: the toolbar derives its own
               // panel state from this, so the raw one flashed its icon/OSD
               // to "Lyrics" on every track change while lyrics were off.
               hasLyrics={lyricsVisible !== lyricsOverride}
-              txtPri={txtPri}
-              txtSec={txtSec}
               fm={{ active: radioFmActive, live: radioFmIsLive === true, label: fmLabel, disabled: fmDisabled, toggle: toggleFm, tab: fmTab, setTab: setFmTab }}
               onEnter={enterFullscreen}
               onExit={exitFullscreen}
@@ -1082,9 +1076,12 @@ export default function WrldView(): JSX.Element {
                     const onEnd = () => {
                       document.removeEventListener('touchmove', onMove)
                       document.removeEventListener('touchend', onEnd)
+                      document.removeEventListener('touchcancel', onEnd)
                     }
                     document.addEventListener('touchmove', onMove)
                     document.addEventListener('touchend', onEnd)
+                    // A system gesture cancels the touch and never sends touchend.
+                    document.addEventListener('touchcancel', onEnd)
                   }}
                 >
                   <div className="h-full rounded-full" style={{ width: `${volume * 100}%`, background: txtTer }} />
@@ -1608,9 +1605,6 @@ export default function WrldView(): JSX.Element {
 
 // ── ProgressBar - module-level so currentTime ticks don't re-render WrldView ──
 
-import { memo as _memo2, useRef as _useRef2, useCallback as _cb2 } from 'react'
-// (re-exports already imported above; using same imports)
-
 // One-click "like" for the 999 FM now-playing track. FM is server-driven and
 // only hands us title/artist, so the likeable target is the resolved song id
 // (stream metadata's song_id, or RadioFmPlayer's title-search fallback match).
@@ -2130,16 +2124,23 @@ const ProgressBar = memo(function ProgressBar({ txtPri, txtTer, trackBg }: { txt
             const p = pctFromClientX(ev.touches[0].clientX)
             if (p !== null) setDragPct(p)
           }
+          const detach = (): void => {
+            document.removeEventListener('touchmove', onMove)
+            document.removeEventListener('touchend', onEnd)
+            document.removeEventListener('touchcancel', onCancel)
+          }
           const onEnd = (ev: TouchEvent): void => {
             const p = pctFromClientX(ev.changedTouches[0]?.clientX ?? 0)
             const dur = getAudioDuration()
             if (p !== null && dur > 0) seekAudio(p * dur)
             setDragPct(null)
-            document.removeEventListener('touchmove', onMove)
-            document.removeEventListener('touchend', onEnd)
+            detach()
           }
+          // A cancelled touch (a system gesture) never sends touchend: let go without seeking.
+          const onCancel = (): void => { setDragPct(null); detach() }
           document.addEventListener('touchmove', onMove, { passive: true })
           document.addEventListener('touchend', onEnd)
+          document.addEventListener('touchcancel', onCancel)
         }}
       >
         <div className="h-full rounded-full" style={{ width: `${pct}%`, background: txtPri }} />
@@ -2150,7 +2151,7 @@ const ProgressBar = memo(function ProgressBar({ txtPri, txtTer, trackBg }: { txt
       </div>
       <div className="flex justify-between">
         <span className="text-[10px] tabular-nums" style={{ color: txtTer }}>{formatDuration(displayTime)}</span>
-        <span className="text-[10px] tabular-nums" style={{ color: txtTer }}>{duration > 0 ? `-${formatDuration(remaining)}` : '-∞'}</span>
+        <span className="text-[10px] tabular-nums" style={{ color: txtTer }}>{duration > 0 ? `-${formatDuration(remaining)}` : '--:--'}</span>
       </div>
     </div>
   )
@@ -2206,6 +2207,12 @@ const LyricsPanel = memo(function LyricsPanel({
       : -1
   )
   const lineIdxRef = useRef(currentLineIdx)
+  // Half the list's height, measured below. 0 while the list isn't on screen: an iJWA style is
+  // drawing instead, or WRLD's layout is hidden (the Widgets layout, or the phone layout on a
+  // wide window), and then nothing follows the song here.
+  const [vpHalf, setVpHalf] = useState(0)
+  const inSight = vpHalf > 0
+  const classicList = !!rawLyrics && isSynced && syncedLines.length > 0 && (lyricLook === 'classic' || !currentTrack)
 
   useEffect(() => {
     if (!isSynced || syncedLines.length === 0) {
@@ -2213,6 +2220,7 @@ const LyricsPanel = memo(function LyricsPanel({
       lineIdxRef.current = -1
       return
     }
+    if (!inSight) return
     let raf = 0
     const tick = (): void => {
       const idx = getCurrentLineIndex(syncedLines, getAudioCurrentTime() - lyricsOffset)
@@ -2224,7 +2232,7 @@ const LyricsPanel = memo(function LyricsPanel({
     }
     raf = requestAnimationFrame(tick)
     return () => cancelAnimationFrame(raf)
-  }, [isSynced, syncedLines, lyricsOffset])
+  }, [isSynced, syncedLines, lyricsOffset, inSight])
 
   // Center the active line by translating the whole lyric column rather than
   // using native `scrollIntoView({behavior:'smooth'})`. Native smooth-scroll
@@ -2232,7 +2240,6 @@ const LyricsPanel = memo(function LyricsPanel({
   // reflow, which read as a choppy, low-fps animation. A GPU-composited
   // transform with a CSS transition glides at the display's full refresh rate.
   const [translateY, setTranslateY] = useState(0)
-  const [vpHalf, setVpHalf] = useState(0)
 
   // Manual-scroll override - the lyric column isn't a native scroll container
   // (its position is driven by a `transform`, not `scrollTop`), so a plain
@@ -2275,13 +2282,13 @@ const LyricsPanel = memo(function LyricsPanel({
 
   useLayoutEffect(() => {
     const vp = viewportRef.current
-    if (!vp) return
+    if (!vp) { setVpHalf(0); return }
     const measure = (): void => setVpHalf(vp.clientHeight / 2)
     measure()
     const ro = new ResizeObserver(measure)
     ro.observe(vp)
     return () => ro.disconnect()
-  }, [isSynced, syncedLines.length])
+  }, [classicList, syncedLines.length])
 
   useLayoutEffect(() => {
     if (currentLineIdx < 0) { setTranslateY(0); return }

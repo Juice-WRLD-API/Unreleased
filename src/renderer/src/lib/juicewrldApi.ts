@@ -376,6 +376,11 @@ export function getSongById(id: number, signal?: AbortSignal): Promise<JWApiSong
   const now = Date.now()
   const cached = songByIdCache.get(id)
   if (cached && now - cached.ts < SONG_BY_ID_TTL_MS) return cached.promise
+  // Expired entries hold whole songs (lyrics too); drop them now and then
+  // rather than keeping every song played this session.
+  if (songByIdCache.size >= 200) {
+    for (const [k, v] of songByIdCache) if (now - v.ts >= SONG_BY_ID_TTL_MS) songByIdCache.delete(k)
+  }
   const entry = { promise: apiFetch<JWApiSong>(`/songs/${id}/`), ts: now }
   songByIdCache.set(id, entry)
   entry.promise.catch(() => { if (songByIdCache.get(id) === entry) songByIdCache.delete(id) })
@@ -423,6 +428,23 @@ export function apiPeek<T>(
 export function buildStreamUrl(path: string, channel?: string): string {
   const c = channel ? `&channel=${encodeURIComponent(channel)}` : ''
   return `${routeUrl('/files/download/')}?path=${encodeURIComponent(path)}${c}`
+}
+
+export type FileText =
+  | { ok: false; status: number }
+  | { ok: true; text: string; bytes: number; truncated: boolean; binary: boolean }
+
+/** A comp file as text, for the Files tab's viewer and the terminal's editor:
+ *  decoded up to `maxBytes` (`bytes` is the whole size), and `binary` when
+ *  its start holds a NUL. */
+export async function fetchFileText(path: string, channel: string | undefined, maxBytes: number): Promise<FileText> {
+  const res = await fetch(buildStreamUrl(path, channel))
+  if (!res.ok) return { ok: false, status: res.status }
+  const buf = await res.arrayBuffer()
+  const truncated = buf.byteLength > maxBytes
+  const bytes = new Uint8Array(truncated ? buf.slice(0, maxBytes) : buf)
+  const binary = bytes.subarray(0, 8000).includes(0)
+  return { ok: true, text: binary ? '' : new TextDecoder('utf-8').decode(bytes), bytes: buf.byteLength, truncated, binary }
 }
 
 export interface JWApiChannel {
@@ -890,7 +912,8 @@ export async function searchSongs(title: string, limit = 8): Promise<JWApiSong[]
 /** Picks the best cover URL from a playlist summary or detail object.
  *  cover_image may contain a base64 data URI; cover_image_url may be a relative path. */
 export function playlistCoverUrl(p: { cover_image_url?: string | null; cover_image?: string | null }): string | undefined {
-  return buildImageUrl(p.cover_image_url ?? p.cover_image ?? undefined)
+  // `||`: a removed cover comes back as "" rather than null.
+  return buildImageUrl(p.cover_image_url || p.cover_image || undefined)
 }
 
 // ─── Duration parse ───────────────────────────────────────────────────────────

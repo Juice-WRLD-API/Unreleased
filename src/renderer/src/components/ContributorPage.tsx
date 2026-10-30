@@ -334,12 +334,14 @@ export default function ContributorPage(): JSX.Element {
     }
 
     const failed: string[] = []
+    const failedPaths: string[] = []
     setBatchProgress(jobs.length > 1 ? { done: 0, total: jobs.length } : null)
     for (const [i, job] of jobs.entries()) {
       try {
         await userApi.createCompProposal(buildForm(job.path, job.file))
       } catch {
         failed.push(basename(job.path))
+        failedPaths.push(job.path)
       }
       if (jobs.length > 1) setBatchProgress({ done: i + 1, total: jobs.length })
     }
@@ -356,6 +358,9 @@ export default function ContributorPage(): JSX.Element {
       return
     }
     if (failed.length > 0) {
+      // Only delete batches have several bodiless jobs. Leave just the failed
+      // paths picked, so submitting again doesn't file the landed ones twice.
+      if (isDelete) setDeletePaths(failedPaths)
       setSubmitState('error')
       setSubmitError(`${jobs.length - failed.length} of ${jobs.length} submitted. Failed: ${failed.join(', ')}`)
       setTimeout(() => { setSubmitState('idle'); submitLatch.current = false }, 6000)

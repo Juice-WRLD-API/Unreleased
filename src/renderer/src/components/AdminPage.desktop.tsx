@@ -10,7 +10,7 @@ import { apiFetch, songToTrack } from '../lib/juicewrldApi'
 import type { JWApiSong } from '../lib/juicewrldApi'
 import { useStore, useStorePick } from '../store/useStore'
 import { displayName } from '../store/chatStore'
-import { discordHandle } from '../lib/format'
+import { discordHandle, errorMessage } from '../lib/format'
 import * as userApi from '../lib/userApi'
 import type { EditorApplication, SongEditProposal, AdminUser, ProposalStatus } from '../lib/userApi'
 import { relativeTime, shortDate, STATUS_STYLE, StatusChip, Avatar, Empty, AppSection, QueueSearch, ProposalDiff } from './adminShared'
@@ -245,7 +245,6 @@ export default function AdminPage({ embedded = false, initialTab, onExit }: {
           <div className={tab === 'applications' ? 'h-full' : 'hidden'}>
             <ApplicationsTab
               applications={applications}
-              onChanged={() => refresh()}
               onReviewed={(updated) => setApplications(prev => prev.map(a => a.id === updated.id ? updated : a))}
             />
           </div>
@@ -262,7 +261,7 @@ export default function AdminPage({ embedded = false, initialTab, onExit }: {
         )}
         {visited.has('users') && (
           <div className={tab === 'users' ? 'h-full' : 'hidden'}>
-            <UsersTab users={users} onChanged={() => refresh()} currentUserId={account?.id} />
+            <UsersTab users={users} setUsers={setUsers} currentUserId={account?.id} />
           </div>
         )}
         {visited.has('stats') && (
@@ -540,12 +539,11 @@ function ProposalsTab({ proposals, status, setStatus, onChanged, onReviewed, cha
 
   // Auto-select first item, and keep the selection inside the visible list -
   // searching can otherwise filter out the proposal the detail pane's
-  // Approve/Reject buttons are pointed at.
+  // Approve/Reject buttons are pointed at. Takes the row from the list rather
+  // than keeping `prev`, so a reviewed row that stays listed (the "All"
+  // filter) shows its new status instead of live Approve/Reject buttons.
   useEffect(() => {
-    setSelected(prev => {
-      if (prev && sortedProposals.some(p => p.id === prev.id)) return prev
-      return sortedProposals[0] ?? null
-    })
+    setSelected(prev => (prev && sortedProposals.find(p => p.id === prev.id)) ?? sortedProposals[0] ?? null)
   }, [sortedProposals])
 
   // A refetch replaces the rows wholesale, so a half-written revision no
@@ -558,14 +556,12 @@ function ProposalsTab({ proposals, status, setStatus, onChanged, onReviewed, cha
     try {
       const updated = await userApi.adminReviewProposal(id, { action, review_notes: notes[id] || '', channel })
       dropCache(id); setArchive(null)
-      // The endpoint hands back the updated row - apply it immediately rather
-      // than waiting on onChanged()'s full refetch, so the row leaves the
-      // pending list (or updates its status badge) right away instead of
-      // sitting there looking unactioned until the round-trip finishes.
+      // The endpoint hands back the updated row, so apply it in place instead
+      // of refetching the whole queue (which also covered the list with the
+      // loading overlay and collapsed "Show more"). Refresh is still there.
       onReviewed(updated)
-      onChanged()
     }
-    catch { showAppToast(`Couldn't ${action} the proposal`) } finally { setActionId(null) }
+    catch (e) { showAppToast(errorMessage(e, `Couldn't ${action} the proposal`)) } finally { setActionId(null) }
   }
 
   const doReverse = async (id: number) => {
@@ -575,9 +571,8 @@ function ProposalsTab({ proposals, status, setStatus, onChanged, onReviewed, cha
       const updated = await userApi.adminReverseProposal(id, channel)
       dropCache(id); setArchive(null)
       onReviewed(updated)
-      onChanged()
     }
-    catch { showAppToast("Couldn't reverse the proposal") } finally { setActionId(null) }
+    catch (e) { showAppToast(errorMessage(e, "Couldn't reverse the proposal")) } finally { setActionId(null) }
   }
 
   // Keyed off the full (unfiltered-by-search) list so the group header's
@@ -868,24 +863,25 @@ function ProposalsTab({ proposals, status, setStatus, onChanged, onReviewed, cha
 
 // ── Applications (master-detail) ──────────────────────────────────────────────
 
-function ApplicationsTab({ applications, onChanged, onReviewed }: { applications: EditorApplication[]; onChanged: () => void; onReviewed: (updated: EditorApplication) => void }): JSX.Element {
+function ApplicationsTab({ applications, onReviewed }: { applications: EditorApplication[]; onReviewed: (updated: EditorApplication) => void }): JSX.Element {
   const [actionId, setActionId] = useState<number | null>(null)
   const [notes,    setNotes]    = useState<Record<number, string>>({})
   const [selected, setSelected] = useState<EditorApplication | null>(null)
 
-  useEffect(() => { setSelected(applications[0] ?? null) }, [applications])
+  // Keep the open application (as its updated row) across a review or a
+  // refresh instead of jumping back to the first one.
+  useEffect(() => {
+    setSelected(prev => (prev && applications.find(a => a.id === prev.id)) ?? applications[0] ?? null)
+  }, [applications])
 
   const doReview = async (id: number, action: 'approve' | 'reject') => {
     setActionId(id)
     try {
       const updated = await userApi.adminReviewApplication(id, { action, review_notes: notes[id] || '' })
-      // Apply the returned row immediately - same reasoning as ProposalsTab's
-      // doReview - instead of leaving it looking pending until onChanged()'s
-      // refetch lands.
+      // Applied in place, same as ProposalsTab's doReview - no full refetch.
       onReviewed(updated)
-      onChanged()
     }
-    catch { showAppToast(`Couldn't ${action} the application`) } finally { setActionId(null) }
+    catch (e) { showAppToast(errorMessage(e, `Couldn't ${action} the application`)) } finally { setActionId(null) }
   }
 
   const pending  = applications.filter(a => a.status === 'pending')
@@ -1005,8 +1001,8 @@ function ApplicationsTab({ applications, onChanged, onReviewed }: { applications
 
 // ── Users ─────────────────────────────────────────────────────────────────────
 
-function UsersTab({ users, onChanged, currentUserId }: { users: AdminUser[]; onChanged: () => void; currentUserId?: number }): JSX.Element {
-  const { actionId, filter, setFilter, search, setSearch, filters: FILTERS, visible, doUpdate, canAct } = useAdminUsersList(users, currentUserId, onChanged)
+function UsersTab({ users, setUsers, currentUserId }: { users: AdminUser[]; setUsers: React.Dispatch<React.SetStateAction<AdminUser[]>>; currentUserId?: number }): JSX.Element {
+  const { filter, setFilter, search, setSearch, filters: FILTERS, visible, doUpdate, canAct } = useAdminUsersList(users, setUsers, currentUserId)
   // Master/detail instead of one wide row per user - a click on the roster
   // rail (left) drives which user's full stat/badge/action surface shows on
   // the right, rather than every user's actions competing for space in a
@@ -1114,9 +1110,7 @@ function UsersTab({ users, onChanged, currentUserId }: { users: AdminUser[]; onC
               </div>
             )}
 
-            {actionId === selected.user_id ? (
-              <div className="flex items-center gap-2 text-text-muted text-sm"><Loader2 size={14} className="animate-spin" /> Updating…</div>
-            ) : canAct(selected) ? (
+            {canAct(selected) ? (
               <div className="space-y-4">
                 {(selected.role === 'editor' || selected.contributor_enabled) && (
                   <div className="space-y-1.5">

@@ -1,9 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useShallow } from 'zustand/react/shallow'
-import { Disc3, Monitor, Minimize2, Maximize2, Radio, Settings2, PictureInPicture2 } from 'lucide-react'
+import { Monitor, Minimize2, Maximize2, Radio, Settings2, PictureInPicture2 } from 'lucide-react'
 import { Visualizer, VISUALIZERS, needsWebGL, type VizLayout } from '../lib/viz'
 import { getAnalysisTap, resumeEffectsContext } from '../lib/audioEffects'
-import { smallCoverUrl, JWAPI_HOST } from '../lib/juicewrldApi'
+import { smallCoverUrl } from '../lib/juicewrldApi'
 import { ERA_PALETTES } from '../lib/eraPalettes'
 import { eventToCombo } from '../lib/hotkeys'
 import { hasEscapeLayer, useEscapeToClose } from '../hooks/useEscapeToClose'
@@ -15,14 +15,14 @@ import LyricsControls from './LyricsControls'
 import DesktopSettings from './DesktopSettings'
 import { ls } from '../lib/persist'
 import { desktopWindowsSupported } from '../desktop/api'
+import { eraAssetPath } from '../desktop/artColors'
 
 const DESKTOP_WIDGETS = ['player', 'playlist', 'clock'] as const
 type DesktopWidget = (typeof DESKTOP_WIDGETS)[number]
 import { NAV_PILL_EVENT } from './AutoHideNav'
 
-// Audio-reactive backdrop for the WRLD tab, plus its toolbar, keys and (in
-// fullscreen) the visualizer-only caption. WRLD only mounts while its tab is
-// open, so the engine never renders off-screen.
+// Audio-reactive backdrop for the WRLD tab, plus its toolbar and keys. WRLD
+// only mounts while its tab is open, so the engine never renders off-screen.
 
 const IDLE_MS = 2600
 // Settings > Desktop is desktop-app only, so its tab in the settings popup is too.
@@ -49,21 +49,6 @@ function visibleRect(root: ParentNode, selector: string): DOMRect | null {
 
 const toRect = (r: DOMRect, strength: number): VizLayout['protect'][number] =>
   ({ x: r.left, y: r.top, w: r.width, h: r.height, strength })
-
-// The /assets/ path when `url` is one of the API site's era images - the cover
-// of every tracker song without art of its own. Those are served with no CORS
-// header, so sampling one in the browser can only fail (loudly: a blocked-
-// request error on every fullscreen entry, see coverImage.ts). Their palettes
-// are baked ahead of time instead, in eraPalettes.ts.
-function eraAssetPath(url: string): string | null {
-  try {
-    const { hostname, pathname } = new URL(url)
-    const apiHost = hostname === JWAPI_HOST || hostname.endsWith(`.${JWAPI_HOST}`)
-    return apiHost && pathname.startsWith('/assets/') ? pathname : null
-  } catch {
-    return null
-  }
-}
 
 // Polled by the engine ~10x/s. Circular modes orbit the cover, and every mode
 // backs off around text, hardest on the lyric being sung. Elements opt in with
@@ -101,16 +86,11 @@ interface Props {
   /** Cursor hiding, the chrome fade, the hotkeys and exit exist only in fullscreen. */
   fullscreen: boolean
   artUrl: string | null
-  title: string
-  artist: string
   /** Changes once per track; drives auto-switch. */
   trackKey: string | null
   albumKey: string | null
   /** Whether the current track has lyrics at all - words the lyrics-toggle label. */
   hasLyrics: boolean
-  /** The page's own art-derived text colours, so the caption matches it. */
-  txtPri: string
-  txtSec: string
   /** 999 FM toggle, shown in the toolbar. */
   fm: { active: boolean; live: boolean; label: string; disabled: boolean; toggle: () => void
     /** Which panel the FM column shows. */
@@ -120,19 +100,18 @@ interface Props {
 }
 
 export default function WrldVisualizer({
-  rootRef, fullscreen, artUrl, title, artist, trackKey, albumKey, hasLyrics, txtPri, txtSec, fm, onEnter, onExit,
+  rootRef, fullscreen, artUrl, trackKey, albumKey, hasLyrics, fm, onEnter, onExit,
 }: Props): JSX.Element {
   // 999 FM plays with isPlaying off; the visualizer stops listening when this is false.
   const isPlaying = useStore((s) => s.isPlaying || s.radioFmActive)
   const lyricsOverride = useStore((s) => s.lyricsOverride)
   // The screen light's look, while WRLD's Edge light is on.
   const vizEdgeOverlay = useWrldEdgeLook()
-  const { activeMode, vizQuality, vizUseArtwork, vizBoost, wrldWidgets, covered } = useVizStore(useShallow((s) => ({
+  const { activeMode, vizQuality, vizUseArtwork, vizBoost, covered } = useVizStore(useShallow((s) => ({
     activeMode: s.activeMode,
     vizQuality: s.vizQuality,
     vizUseArtwork: s.vizUseArtwork,
     vizBoost: s.vizBoost,
-    wrldWidgets: s.wrldWidgets,
     covered: s.vizCovered > 0,
   })))
 
@@ -195,6 +174,9 @@ export default function WrldVisualizer({
   useEffect(() => {
     const viz = vizRef.current
     if (!viz) return
+    // The API site's era images (every tracker song without art of its own) are
+    // served with no CORS header, so sampling one can only fail; their palettes
+    // are baked ahead of time instead, in eraPalettes.ts.
     const era = artUrl ? eraAssetPath(artUrl) : null
     // An era image the bake hasn't seen yet gets the accent colours.
     if (era) viz.setArtworkPalette(ERA_PALETTES[era] ?? null)
@@ -319,12 +301,6 @@ export default function WrldVisualizer({
     announce(vizName(next))
   }, [announce])
 
-  const toggleWidgets = (): void => {
-    const { wrldWidgets: cur, setWrldWidgets } = useVizStore.getState()
-    setWrldWidgets(!cur)
-    announce(cur ? 'Old style on' : 'Old style off')
-  }
-
   // The real widgets out on the desktop (Windows). Off puts away whichever are out and remembers them; on brings
   // that same set back, or all three the first time.
   const desktopWidgetsSupported = desktopWindowsSupported()
@@ -439,15 +415,6 @@ export default function WrldVisualizer({
           <span>{fm.label}</span>
         </button>
         <span className="w-px h-5 mx-1 bg-white/10" />
-        <button
-          className={`${tool} ${wrldWidgets ? toolIdle : toolOn}`}
-          onClick={toggleWidgets}
-          title={wrldWidgets ? 'Old style is off: click for the original player' : 'Old style is on: click for the widgets'}
-          aria-label={wrldWidgets ? 'Old style is off' : 'Old style is on'}
-          aria-pressed={!wrldWidgets}
-        >
-          <Disc3 size={17} />
-        </button>
         {desktopWidgetsSupported && (
           <button
             className={`${tool} ${desktopWidgetsOn ? toolOn : toolIdle}`}

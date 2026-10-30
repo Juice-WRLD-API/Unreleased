@@ -2,6 +2,7 @@
 // /files/* browser's path/sort/track-building logic, identical on both.
 import { apiFetch, apiFilePathToTrack, buildStreamUrl, JWApiFileEntry, JWApiPaginatedResponse, JWApiSong } from './juicewrldApi'
 import { getFileExt } from './fileTypes'
+import { shareOrigin } from './platform'
 import { Track } from '../types'
 
 export type ViewMode = 'list' | 'grid'
@@ -60,7 +61,13 @@ export function urlToPath(pathname: string): string {
 export function fileEntryLinkUrl(entry: JWApiFileEntry, channel: string | undefined): string {
   return entry.type === 'file'
     ? buildStreamUrl(entry.path, channel)
-    : window.location.origin + pathToUrl(entry.path)
+    : folderLinkUrl(entry.path)
+}
+
+/** Shareable deep link to a folder. The desktop app's own origin is file://,
+ *  so it links to the website instead. */
+export function folderLinkUrl(folderPath: string): string {
+  return shareOrigin() + pathToUrl(folderPath)
 }
 
 /** Best-guess Tracker song for a file, by stripping its extension and
