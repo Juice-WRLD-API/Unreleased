@@ -75,6 +75,16 @@ location ~ ^/((track|shared|news|u)/|(home|playlists|statistics|download|wrld)/?
     try_files $uri /index.html;
 }
 
+# Chat deep links (/chat, /chat/dm/:id, /chat/c/:id) are SPA pages. If the
+# server also proxies a `/chat/` prefix to the API (the staff chat REST
+# endpoints live under that name), a reload on a room lands on the backend's
+# "Not Found" page. Serve the SPA for the page URLs and leave the API paths
+# (`/chat/dms/`, `/chat/servers/`, ...) to the proxy. Must come before any
+# `location /chat/` proxy block.
+location ~ ^/chat(/(dm|c)/\d+)?/?$ {
+    try_files $uri /index.html;
+}
+
 location @social_preview {
     proxy_pass http://127.0.0.1:8788;
     proxy_set_header Host $host;
