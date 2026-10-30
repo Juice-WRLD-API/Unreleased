@@ -63,7 +63,7 @@ export function CompFilterBar({ filter, setFilter, counts, size = 'sm' }: {
   )
 }
 
-export default function CompProposalList({ proposals, loading, onSelect, onWithdraw, withdrawingId, onToggleNewLeak, togglingLeakId, onReview, reviewingId, empty = 'No comp proposals yet.' }: {
+export default function CompProposalList({ proposals, loading, onSelect, onWithdraw, withdrawingId, onToggleNewLeak, togglingLeakId, onReview, reviewingId, empty = 'No comp proposals yet.', fill }: {
   proposals: CompFileProposal[]
   loading?: boolean
   /** Clicking a row - omit to render the rows as plain, unclickable cards. */
@@ -78,15 +78,17 @@ export default function CompProposalList({ proposals, loading, onSelect, onWithd
   togglingLeakId?: number | null
   /** Staff approving/denying a pending proposal in place - omit to hide. */
   onReview?: (proposal: CompFileProposal, action: 'approve' | 'reject') => void
-  reviewingId?: number | null
+  reviewingId?: ReadonlySet<number>
   empty?: string
+  /** Use the full width of the container instead of the page-sized cap (tiles). */
+  fill?: boolean
 }): JSX.Element {
   const account = useStore((s) => s.account)
   if (loading) return <div className="flex justify-center py-12"><Loader2 className="animate-spin text-text-muted" /></div>
   if (proposals.length === 0) return <p className="text-sm text-text-muted text-center py-12">{empty}</p>
 
   return (
-    <div className="space-y-2 max-w-2xl">
+    <div className={`space-y-2 ${fill ? '' : 'max-w-2xl'}`}>
       {proposals.map((p) => {
         const affectedFiles = Array.isArray(p.original_snapshot?.files)
           ? (p.original_snapshot.files as string[])
@@ -98,6 +100,9 @@ export default function CompProposalList({ proposals, loading, onSelect, onWithd
               <StatusChip status={p.status} />
               <span className="text-[10px] uppercase font-bold text-text-muted bg-surface-overlay px-1.5 py-0.5 rounded">{compChangeTypeLabel(p.change_type)}</span>
               {p.is_new_leak && <span className="text-[10px] uppercase font-bold text-accent bg-accent/10 px-1.5 py-0.5 rounded">new leak</span>}
+              <span className="text-[11px] text-text-muted">
+                {relativeTime(p.created_at)}{p.edit_count ? ` · ${p.edit_count} edit(s)` : ''}
+              </span>
             </div>
             <p className="text-sm font-mono text-text-primary truncate">{p.file_path}</p>
             {(p.change_type === 'move' || p.change_type === 'rename_folder' || p.change_type === 'move_folder') && p.destination_path && (
@@ -106,9 +111,6 @@ export default function CompProposalList({ proposals, loading, onSelect, onWithd
             {affectedFiles && (
               <p className="text-[11px] text-text-muted mt-0.5">({affectedFiles.length} file{affectedFiles.length === 1 ? '' : 's'})</p>
             )}
-            <p className="text-[11px] text-text-muted mt-1">
-              {relativeTime(p.created_at)}{p.edit_count ? ` · ${p.edit_count} edit(s)` : ''}
-            </p>
           </>
         )
 
@@ -119,7 +121,7 @@ export default function CompProposalList({ proposals, loading, onSelect, onWithd
         // Same gate as the admin queue: folder deletions need a different
         // administrator, so your own can only be denied.
         const blocked = showReview ? compApproveBlockedReason(p, account) : null
-        const busy = reviewingId === p.id
+        const busy = !!reviewingId?.has(p.id)
 
         // The hover highlight belongs to the whole card, so the action buttons
         // sit inside it rather than beside a separately highlighted box.

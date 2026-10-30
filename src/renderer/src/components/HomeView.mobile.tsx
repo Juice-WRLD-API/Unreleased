@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { ChevronRight, MoreHorizontal, Play, Flame, Heart, User, Newspaper, Radio, Music, Search, MicVocal, AudioLines, Bell, BarChart3 } from 'lucide-react'
+import { ChevronRight, MoreHorizontal, Play, Flame, Heart, User, Newspaper, Radio, Music, Search, MicVocal, AudioLines, Bell, BarChart3, ImagePlus } from 'lucide-react'
 import { useStore } from '../store/useStore'
 import * as userApi from '../lib/userApi'
 import { AlbumArtThumbnail } from './AlbumArtThumbnail'
@@ -359,6 +359,13 @@ export default function HomeViewMobile(): JSX.Element {
                   label="Identify Song"
                   sub="Name a song from the mic or a file"
                   onClick={() => useStore.getState().setShowRecognition(true)}
+                />
+                <GroupedRow
+                  icon={ImagePlus}
+                  iconColor={PURPLE}
+                  label="Submit cover art"
+                  sub="Send in better art for any song"
+                  onClick={() => useStore.getState().openCoverArtSubmit()}
                 />
                 </>
               )}

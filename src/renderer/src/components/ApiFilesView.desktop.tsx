@@ -5,7 +5,7 @@ import {
   Download, ArrowUpDown, ArrowUp, ArrowDown, Link, Check, Info, ListPlus, Heart,
   X, Pencil, PackageOpen, CheckSquare2, Square, Search,
   Filter, MoreHorizontal, Clipboard, Plus, ListMusic, Replace, Trash2,
-  FileText, FolderInput, CornerLeftUp, RefreshCw, FolderPlus, Upload, Sparkles, FolderSearch,
+  FileText, FolderInput, CornerLeftUp, RefreshCw, FolderPlus, FilePlus, Upload, Sparkles, FolderSearch,
 } from 'lucide-react'
 import { useStore, useStorePick } from '../store/useStore'
 import * as userApi from '../lib/userApi'
@@ -1354,19 +1354,26 @@ export default function ApiFilesView(): JSX.Element {
           items={[
             { icon: RefreshCw, label: 'Refresh', onSelect: () => navigate(currentPath, false) },
             canPropose && 'divider',
-            canPropose && { icon: Upload, label: 'Upload files', onSelect: () => openUploadPicker(currentPath, 'files') },
-            canPropose && { icon: FolderInput, label: 'Upload folder', onSelect: () => openUploadPicker(currentPath, 'folder') },
-            // The Contributor page is still where an upload gets notes or a
-            // rename before it's proposed.
             canPropose && {
-              icon: FileText,
-              label: 'Upload with notes…',
-              onSelect: () => {
-                setPendingCompProposal({ paths: [currentPath], changeType: 'upload' })
-                setActiveView('contributor')
-              },
+              icon: FilePlus,
+              label: 'New',
+              children: [
+                { icon: FolderPlus, label: 'Folder', onSelect: () => setNewFolderPrompt('') },
+                'divider' as const,
+                { icon: Upload, label: 'Upload files', onSelect: () => openUploadPicker(currentPath, 'files') },
+                { icon: FolderInput, label: 'Upload folder', onSelect: () => openUploadPicker(currentPath, 'folder') },
+                // The Contributor page is still where an upload gets notes or a
+                // rename before it's proposed.
+                {
+                  icon: FileText,
+                  label: 'Upload with notes…',
+                  onSelect: () => {
+                    setPendingCompProposal({ paths: [currentPath], changeType: 'upload' })
+                    setActiveView('contributor')
+                  },
+                },
+              ],
             },
-            canPropose && { icon: FolderPlus, label: 'New folder', onSelect: () => setNewFolderPrompt('') },
           ]}
         />
       )}

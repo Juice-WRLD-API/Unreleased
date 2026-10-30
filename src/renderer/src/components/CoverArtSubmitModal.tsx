@@ -1,8 +1,8 @@
 import { useEffect, useRef, useState } from 'react'
-import { X, ImagePlus, Loader2, AlertCircle, Send, ImageOff } from 'lucide-react'
+import { X, ImagePlus, Loader2, AlertCircle, Send, ImageOff, Search } from 'lucide-react'
 import { ModalOverlay, LockToggle } from './Modal'
 import { useStore } from '../store/useStore'
-import { buildImageUrl } from '../lib/juicewrldApi'
+import { buildImageUrl, searchSongs, type JWApiSong } from '../lib/juicewrldApi'
 import {
   checkCoverArtFile, submitCoverArt, COVER_ART_MAX_NOTES, COVER_ART_TYPES, type CoverArtTarget,
 } from '../lib/coverArtApi'
@@ -17,10 +17,65 @@ export default function CoverArtSubmitModal(): JSX.Element | null {
   const close = useStore((s) => s.closeCoverArtSubmit)
   if (!target) return null
   // Keyed so opening it on another song starts from a clean form.
-  return <CoverArtSubmitDialog key={target.songId} target={target} onClose={close} />
+  return <CoverArtSubmitDialog key={target.songId ?? 'pick'} initial={target} onClose={close} />
 }
 
-function CoverArtSubmitDialog({ target, onClose }: { target: CoverArtTarget; onClose: () => void }): JSX.Element {
+// The search step for a dialog opened without a song (Home → Tools).
+function SongSearch({ onPick }: { onPick: (target: CoverArtTarget) => void }): JSX.Element {
+  const [query, setQuery] = useState('')
+  const [results, setResults] = useState<JWApiSong[]>([])
+  const [loading, setLoading] = useState(false)
+
+  useEffect(() => {
+    const q = query.trim()
+    if (!q) { setResults([]); setLoading(false); return }
+    setLoading(true)
+    let stale = false
+    const t = setTimeout(() => {
+      void searchSongs(q, 12).then((songs) => { if (!stale) { setResults(songs); setLoading(false) } })
+    }, 250)
+    return () => { stale = true; clearTimeout(t) }
+  }, [query])
+
+  return (
+    <div className="px-5 py-4 space-y-3">
+      <div className="relative">
+        <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-text-muted" />
+        <input
+          autoFocus
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          placeholder="Search for the song"
+          className="w-full bg-surface border border-[var(--border)] rounded-lg pl-9 pr-3 py-2.5 text-xs text-text-primary placeholder:text-text-muted/60 focus:outline-none focus:border-accent/50"
+        />
+      </div>
+      <div className="min-h-[200px] space-y-1">
+        {loading && <Loader2 size={16} className="animate-spin text-text-muted mx-auto mt-6" />}
+        {!loading && query.trim() && results.length === 0 && (
+          <p className="text-xs text-text-muted text-center mt-6">No songs found</p>
+        )}
+        {!loading && results.map((s) => {
+          const cover = buildImageUrl(s.image_url)
+          return (
+            <button
+              key={s.id}
+              onClick={() => onPick({ songId: s.id, songName: s.name, currentCover: s.image_url })}
+              className="w-full flex items-center gap-3 rounded-lg px-2 py-1.5 text-left hover:bg-surface-overlay transition-colors"
+            >
+              <span className="w-9 h-9 rounded-md overflow-hidden bg-surface-raised flex items-center justify-center shrink-0">
+                {cover ? <img src={cover} alt="" className="w-full h-full object-cover" /> : <ImageOff size={14} className="text-text-muted" />}
+              </span>
+              <span className="flex-1 min-w-0 text-xs text-text-primary truncate">{s.name}</span>
+            </button>
+          )
+        })}
+      </div>
+    </div>
+  )
+}
+
+function CoverArtSubmitDialog({ initial, onClose }: { initial: CoverArtTarget; onClose: () => void }): JSX.Element {
+  const [target, setTarget] = useState(initial)
   const account = useStore((s) => s.account)
   const setShowUserAuth = useStore((s) => s.setShowUserAuth)
   const inputRef = useRef<HTMLInputElement>(null)
@@ -49,7 +104,7 @@ function CoverArtSubmitDialog({ target, onClose }: { target: CoverArtTarget; onC
   }
 
   const submit = async (): Promise<void> => {
-    if (!picked || sending) return
+    if (!picked || sending || target.songId == null) return
     setSending(true)
     setError(null)
     try {
@@ -95,10 +150,16 @@ function CoverArtSubmitDialog({ target, onClose }: { target: CoverArtTarget; onC
               Log in
             </button>
           </div>
+        ) : target.songId == null ? (
+          <SongSearch onPick={setTarget} />
         ) : (
         <div className="px-5 py-4 space-y-3.5">
           <p className="text-xs text-text-muted">
             For <span className="text-text-secondary font-medium">{target.songName}</span>
+            {initial.songId == null && (
+              <button onClick={() => { setTarget(initial); setPicked(null); setError(null) }}
+                className="ml-2 text-accent hover:underline">Change</button>
+            )}
           </p>
 
           <div className="grid grid-cols-2 gap-3">

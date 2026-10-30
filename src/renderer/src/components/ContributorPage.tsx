@@ -146,7 +146,7 @@ export default function ContributorPage(): JSX.Element {
   const [submitError, setSubmitError] = useState<string | null>(null)
   const [withdrawingId, setWithdrawingId] = useState<number | null>(null)
   const [togglingLeakId, setTogglingLeakId] = useState<number | null>(null)
-  const [reviewingId, setReviewingId] = useState<number | null>(null)
+  const [reviewingId, setReviewingId] = useState<ReadonlySet<number>>(new Set())
   const [picker, setPicker] = useState<PickerTarget | null>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
   // React state lags a render behind, so `submitState` alone can't stop a
@@ -401,7 +401,7 @@ export default function ContributorPage(): JSX.Element {
   // Staff approving/denying their own proposal in place - same endpoint as
   // the admin Comp queue.
   const review = async (p: CompFileProposal, action: 'approve' | 'reject'): Promise<void> => {
-    setReviewingId(p.id)
+    setReviewingId(s => new Set(s).add(p.id))
     setSubmitError(null)
     try {
       const updated = await userApi.adminReviewCompProposal(p.id, { action, channel: activeChannel })
@@ -409,7 +409,7 @@ export default function ContributorPage(): JSX.Element {
     } catch (e) {
       setSubmitError(errorMessage(e, `Could not ${action} that proposal`))
     } finally {
-      setReviewingId(null)
+      setReviewingId(s => { const n = new Set(s); n.delete(p.id); return n })
     }
   }
 

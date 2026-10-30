@@ -1306,6 +1306,42 @@ export async function getMyProposals(
   return [first.page, ...rest].flat().filter((p) => !seen.has(p.id) && !!seen.add(p.id))
 }
 
+export interface ProposalStatusCounts {
+  total: number
+  pending: number
+  approved: number
+  rejected: number
+  reversed: number
+}
+
+export interface MyProposalsPage {
+  results: SongEditProposal[]
+  /** Rows matching the status/search filter, across every page. */
+  count: number
+  /** The whole list per status, whatever the filter. Null from a server that predates it. */
+  counts: ProposalStatusCounts | null
+}
+
+export const MY_PROPOSALS_PAGE_SIZE = 50
+
+// One page of your proposals, optionally narrowed by status or a search, for
+// lists that load more as the user scrolls instead of walking every page.
+export async function getMyProposalsPage(
+  channel: string | undefined,
+  opts: { offset?: number; status?: ProposalStatus; q?: string } = {},
+): Promise<MyProposalsPage> {
+  const url = new URL(myProposalsUrl(channel, opts.offset ?? 0))
+  url.searchParams.set('limit', String(MY_PROPOSALS_PAGE_SIZE))
+  if (opts.status) url.searchParams.set('status', opts.status)
+  if (opts.q) url.searchParams.set('q', opts.q)
+  const data = await request<SongEditProposal[] | { count?: number; counts?: ProposalStatusCounts; results?: SongEditProposal[] }>(
+    url.toString(), { method: 'GET' }, true, url.toString(),
+  )
+  if (Array.isArray(data)) return { results: data, count: data.length, counts: null }
+  const results = Array.isArray(data?.results) ? data.results : []
+  return { results, count: data?.count ?? results.length, counts: data?.counts ?? null }
+}
+
 /** One of your proposals in full, with proposed_data and original_snapshot. */
 export async function getProposal(id: number): Promise<SongEditProposal> {
   return request(`${ACCOUNT_BASE}/editor/proposals/${id}/`, { method: 'GET' })

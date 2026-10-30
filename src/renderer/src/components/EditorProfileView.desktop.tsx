@@ -12,6 +12,7 @@ import CompProposalList, { CompFilterBar } from './CompProposalList'
 import RoleBadges from './RoleBadges'
 import { Tile } from './Tile'
 import ProposalListItem from './ProposalListItem'
+import { LoadMoreSentinel } from './LoadMoreSentinel'
 import BroadcastModal from './BroadcastModal'
 import AddSongModal from './AddSongModal.desktop'
 import { useLeaderboard } from '../hooks/useLeaderboard'
@@ -112,7 +113,8 @@ export default function EditorProfileView(): JSX.Element {
     proposalsView, setProposalsView, expandedProposalId, setExpandedProposalId, compSearch, setCompSearch,
     isContributor, isAdmin, isManager, canReviewReports, canReviewStaff, canReviewCoverArt,
     loadingProposals, refreshing, filter, setFilter, search, setSearch, deletingId, resubmittingId,
-    filteredProposals, handleDelete, handleResubmit, handleReview, reviewingId, canReviewProposals, tabCount, proposals,
+    filteredProposals, handleDelete, handleResubmit, handleReview, reviewingId, canReviewProposals, tabCount, totalProposals,
+    loadingMoreProposals, hasMoreProposals, loadMoreProposals,
     leaderboard, loadingLeaderboard, myEntry,
     loadingComp, compFilter, setCompFilter, withdrawingCompId, handleWithdrawComp,
     reviewingCompId, handleReviewComp,
@@ -260,7 +262,7 @@ export default function EditorProfileView(): JSX.Element {
                           {myEntry ? `Rank #${myEntry.rank}` : 'Unranked'}
                         </p>
                         <p className="text-[10px] font-bold uppercase tracking-widest opacity-70">
-                          {myEntry ? `${myEntry.approved_count} approved` : '0 approved'} · {!loadingProposals ? `${proposals.length} proposal${proposals.length !== 1 ? 's' : ''} total` : '…'}
+                          {myEntry ? `${myEntry.approved_count} approved` : '0 approved'} · {!loadingProposals ? `${totalProposals} proposal${totalProposals !== 1 ? 's' : ''} total` : '…'}
                         </p>
                       </div>
                     </div>
@@ -419,6 +421,7 @@ export default function EditorProfileView(): JSX.Element {
                             onToggleExpand={() => setExpandedProposalId(id => id === p.id ? null : p.id)}
                           />
                         ))}
+                        <LoadMoreSentinel hasMore={hasMoreProposals} loading={loadingMoreProposals} onVisible={loadMoreProposals} />
                       </div>
                     )}
                   </div>
@@ -468,6 +471,7 @@ export default function EditorProfileView(): JSX.Element {
                   <div className="flex-1 overflow-y-auto min-h-0 pr-1">
                     <CompProposalList
                       proposals={filteredCompProposals}
+                      fill
                       loading={loadingComp}
                       onSelect={() => go('contributor')}
                       onWithdraw={handleWithdrawComp}
