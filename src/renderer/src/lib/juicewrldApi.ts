@@ -452,6 +452,23 @@ export function buildStreamUrl(path: string, channel?: string): string {
   return `${routeUrl('/files/download/')}?path=${encodeURIComponent(path)}${c}`
 }
 
+export type FileText =
+  | { ok: false; status: number }
+  | { ok: true; text: string; bytes: number; truncated: boolean; binary: boolean }
+
+/** A comp file as text, for the Files tab's viewer and the terminal's editor:
+ *  decoded up to `maxBytes` (`bytes` is the whole size), and `binary` when
+ *  its start holds a NUL. */
+export async function fetchFileText(path: string, channel: string | undefined, maxBytes: number): Promise<FileText> {
+  const res = await fetch(buildStreamUrl(path, channel))
+  if (!res.ok) return { ok: false, status: res.status }
+  const buf = await res.arrayBuffer()
+  const truncated = buf.byteLength > maxBytes
+  const bytes = new Uint8Array(truncated ? buf.slice(0, maxBytes) : buf)
+  const binary = bytes.subarray(0, 8000).includes(0)
+  return { ok: true, text: binary ? '' : new TextDecoder('utf-8').decode(bytes), bytes: buf.byteLength, truncated, binary }
+}
+
 function triggerBlobDownload(url: string, filename: string, onBeforeNavigate?: () => void): void {
   onBeforeNavigate?.()
   if (IS_IOS) {

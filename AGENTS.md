@@ -1,6 +1,6 @@
 # Agent guide: Juice WRLD API and Unreleased
 
-**Version 1.40** · updated 2026-10-30. Bump the version and date whenever you
+**Version 1.41** · updated 2026-10-30. Bump the version and date whenever you
 change this file (minor for fixes and additions, major for rewrites).
 
 **Keep this file current.** If you find something in the docs or this file that
@@ -391,6 +391,26 @@ Node 22.
 
 Newest first. One entry each: date, what went wrong, what to do instead. Delete
 entries that stop being true.
+
+- 2026-10-30: WRLD's visualizer settings and the new "Old WRLD style" toggle
+  did nothing until a restart. Settings opens as a pop-out window by default,
+  and `store/vizStore.ts` is per window with no sync, so only the pop-out's copy
+  changed. vizStore now follows `storage` events. A per-window store whose
+  settings live in Settings needs the same, or window-sync.
+- 2026-10-30: The mini player showed 0:00 for the length and couldn't seek on
+  songs with no listed duration (most sessions): it used `track.duration`. A
+  window without the audio element should take the length from the synced
+  position (`currentTime / progress`), with the listed one only as a fallback.
+- 2026-10-30: Testing the app over CDP. `electron . --smoke-test` and plain
+  `electron .` exit 0 without a word while the installed app runs (the
+  single-instance lock), so always pass `--user-data-dir=<scratch>`; signed out
+  is enough for the public views, so nothing needs copying. Settings, Song info
+  and the mini player open as `?float=` pages: pick the CDP target by URL.
+  Synthetic `KeyboardEvent`s don't reach the hotkeys; use `Input.dispatchKeyEvent`.
+- 2026-10-30: `resubmitProposal` withdrew the proposal before creating its
+  copy, so a failed create lost it, and it dropped the comp channel. It now
+  creates first (with `channel_slug`) and withdraws the copy if the withdrawal
+  fails. Replace server objects create-then-delete.
 
 - 2026-10-30: The player bar's cover sometimes stayed blank for a whole song.
   `CoverFade` (`components/PlayerMotion.tsx`) showed a layer only from its

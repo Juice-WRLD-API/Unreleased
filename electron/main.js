@@ -2900,6 +2900,7 @@ ipcMain.handle('write-track-metadata', async (_, filePath, metadata) => {
     if (metadata.albumArtist !== undefined) tags.performerInfo = metadata.albumArtist
     if (metadata.year !== undefined) tags.year = metadata.year != null ? String(metadata.year) : ''
     if (metadata.trackNumber !== undefined) tags.trackNumber = metadata.trackNumber != null ? String(metadata.trackNumber) : ''
+    if (metadata.discNumber !== undefined) tags.partOfSet = metadata.discNumber != null ? String(metadata.discNumber) : ''
     if (metadata.composer !== undefined) tags.composer = metadata.composer
     if (metadata.genre !== undefined) tags.genre = metadata.genre
     // Additional editable text frames. Empty strings clear the frame; comment

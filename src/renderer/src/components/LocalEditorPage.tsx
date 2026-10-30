@@ -228,6 +228,8 @@ export default function LocalEditorPage(): JSX.Element {
         albumArtist: fields.albumArtist,
         year: fields.year ? parseInt(fields.year) : null,
         trackNumber: fields.trackNumber ? parseInt(fields.trackNumber) : null,
+        // Only when edited: the file's own "1/2" would otherwise be rewritten as "1".
+        ...(fields.discNumber !== original.discNumber ? { discNumber: fields.discNumber ? parseInt(fields.discNumber) : null } : {}),
         composer: fields.composer, genre: fields.genre,
         bpm: fields.bpm,
         conductor: fields.conductor, publisher: fields.publisher,

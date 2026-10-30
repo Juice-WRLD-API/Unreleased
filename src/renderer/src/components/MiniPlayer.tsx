@@ -1,5 +1,5 @@
 import { SwapIcon } from './PlayerMotion'
-import { useCallback, useEffect, useRef, useState, CSSProperties, ReactNode } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, CSSProperties, ReactNode } from 'react'
 import {
   Play,
   Pause,
@@ -230,6 +230,12 @@ function MiniQueue(): JSX.Element {
   )
 }
 
+// The audio's own length, from the synced position: many songs (sessions especially) list none in the catalogue,
+// and without it the bar showed 0:00 and couldn't seek. `listed` covers the moment before playback starts.
+function playedDuration(progress: number, currentTime: number, listed: number): number {
+  return progress > 0 && currentTime > 0 ? currentTime / progress : listed
+}
+
 // The seek bar and its times. Playback position syncs over IPC ~4x/sec;
 // reading it in MiniPlayer re-rendered the open lyrics or queue panel on every
 // tick, so only this row subscribes to it.
@@ -245,13 +251,14 @@ function MiniProgress({ fm, fmElapsedMs, fmDurationMs, fmProgress, duration, see
   disabled: boolean
 }): JSX.Element {
   const { progress, currentTime } = useStorePick('progress', 'currentTime')
+  const total = playedDuration(progress, currentTime, duration)
   const shownProgress = fm ? fmProgress : (seekDrag !== null ? seekDrag : progress)
   return (
     <div className="flex items-center gap-2" style={noDrag}>
       <span className="text-text-muted text-[10px] w-9 text-right tabular-nums">
         {fm
           ? formatDuration(Math.floor(fmElapsedMs / 1000))
-          : formatDuration(seekDrag !== null ? seekDrag * duration : currentTime)}
+          : formatDuration(seekDrag !== null ? seekDrag * total : currentTime)}
       </span>
       <div className="flex-1 progress-track">
         <input
@@ -269,7 +276,7 @@ function MiniProgress({ fm, fmElapsedMs, fmDurationMs, fmProgress, duration, see
         />
       </div>
       <span className="text-text-muted text-[10px] w-9 tabular-nums">
-        {fm ? formatDuration(Math.floor(fmDurationMs / 1000)) : formatDuration(duration)}
+        {fm ? formatDuration(Math.floor(fmDurationMs / 1000)) : formatDuration(total)}
       </span>
     </div>
   )
@@ -367,8 +374,10 @@ export default function MiniPlayer(): JSX.Element {
   const seekCommittedRef = useRef(false)
   const commitSeek = (): void => {
     if (seekDrag === null) return
-    if (duration > 0 && currentTrack && !fm) {
-      sendPlayerCommand('seek', seekDrag * duration)
+    const { progress, currentTime } = useStore.getState()
+    const total = playedDuration(progress, currentTime, duration)
+    if (total > 0 && currentTrack && !fm) {
+      sendPlayerCommand('seek', seekDrag * total)
       seekCommittedRef.current = true
       window.setTimeout(() => {
         if (seekCommittedRef.current) { seekCommittedRef.current = false; setSeekDrag(null) }
@@ -420,9 +429,14 @@ export default function MiniPlayer(): JSX.Element {
   const liked = !!currentTrack && likedTrackIds.includes(currentTrack.id)
   const controlsDisabled = !currentTrack || fm
 
-  const lyricsOverride = fm
-    ? { lyrics: radioFmMatchedSong?.lyrics ?? null, syncedLyrics: radioFmMatchedSong?.syncedLyrics ?? null }
-    : null
+  // Stable props, so the memoized LyricsDisplay skips this window's other re-renders (FM's clock ticks twice a second).
+  const fmLyrics = radioFmMatchedSong?.lyrics ?? null
+  const fmSyncedLyrics = radioFmMatchedSong?.syncedLyrics ?? null
+  const lyricsOverride = useMemo(
+    () => (fm ? { lyrics: fmLyrics, syncedLyrics: fmSyncedLyrics } : null),
+    [fm, fmLyrics, fmSyncedLyrics],
+  )
+  const seekLyrics = useCallback((t: number) => { if (!fm) sendPlayerCommand('seek', t) }, [fm])
 
   const chipCls = (active: boolean): string =>
     `flex items-center gap-1 px-2 py-1 rounded-full text-[9px] font-semibold uppercase tracking-wider border transition-colors ${
@@ -587,7 +601,7 @@ export default function MiniPlayer(): JSX.Element {
           <LyricsDisplay
             compact
             getTime={fm ? getFmTime : getTime}
-            onSeek={fm ? () => {} : (t) => sendPlayerCommand('seek', t)}
+            onSeek={seekLyrics}
             override={lyricsOverride}
           />
         </div>

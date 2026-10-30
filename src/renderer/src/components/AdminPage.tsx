@@ -287,7 +287,6 @@ export default function AdminPage({ embedded = false, initialTab, onExit }: {
           <div className={tab === 'applications' ? 'h-full' : 'hidden'}>
             <ApplicationsTab
               applications={applications}
-              onChanged={() => refresh()}
               onReviewed={(updated) => setApplications(prev => prev.map(a => a.id === updated.id ? updated : a))}
             />
           </div>
@@ -304,7 +303,7 @@ export default function AdminPage({ embedded = false, initialTab, onExit }: {
         )}
         {visited.has('users') && (
           <div className={tab === 'users' ? 'h-full' : 'hidden'}>
-            <UsersTab users={users} onChanged={() => refresh()} currentUserId={account?.id} />
+            <UsersTab users={users} setUsers={setUsers} currentUserId={account?.id} />
           </div>
         )}
         {visited.has('stats') && (
@@ -906,7 +905,7 @@ function ProposalsTab({ proposals, status, setStatus, onChanged, onReviewed, cha
 
 // ── Applications (master-detail) ──────────────────────────────────────────────
 
-function ApplicationsTab({ applications, onChanged, onReviewed }: { applications: EditorApplication[]; onChanged: () => void; onReviewed: (updated: EditorApplication) => void }): JSX.Element {
+function ApplicationsTab({ applications, onReviewed }: { applications: EditorApplication[]; onReviewed: (updated: EditorApplication) => void }): JSX.Element {
   const [actionId, setActionId] = useState<number | null>(null)
   const [notes,    setNotes]    = useState<Record<number, string>>({})
   const [selected, setSelected] = useState<EditorApplication | null>(null)
@@ -1044,8 +1043,8 @@ function ApplicationsTab({ applications, onChanged, onReviewed }: { applications
 
 // ── Users ─────────────────────────────────────────────────────────────────────
 
-function UsersTab({ users, onChanged, currentUserId }: { users: AdminUser[]; onChanged: () => void; currentUserId?: number }): JSX.Element {
-  const { actionId, filter, setFilter, search, setSearch, filters: FILTERS, visible, doUpdate, canAct } = useAdminUsersList(users, currentUserId, onChanged)
+function UsersTab({ users, setUsers, currentUserId }: { users: AdminUser[]; setUsers: React.Dispatch<React.SetStateAction<AdminUser[]>>; currentUserId?: number }): JSX.Element {
+  const { filter, setFilter, search, setSearch, filters: FILTERS, visible, doUpdate, canAct } = useAdminUsersList(users, setUsers, currentUserId)
   // Master/detail instead of one wide row per user - a click on the roster
   // rail (left) drives which user's full stat/badge/action surface shows on
   // the right, rather than every user's actions competing for space in a
@@ -1153,9 +1152,7 @@ function UsersTab({ users, onChanged, currentUserId }: { users: AdminUser[]; onC
               </div>
             )}
 
-            {actionId === selected.user_id ? (
-              <div className="flex items-center gap-2 text-text-muted text-sm"><Loader2 size={14} className="animate-spin" /> Updating…</div>
-            ) : canAct(selected) ? (
+            {canAct(selected) ? (
               <div className="space-y-4">
                 {(selected.role === 'editor' || selected.contributor_enabled) && (
                   <div className="space-y-1.5">

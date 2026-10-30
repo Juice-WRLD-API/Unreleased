@@ -1138,6 +1138,8 @@ export interface SongEditProposal {
   id: number
   editor_username: string
   editor_id: number
+  /** The comp channel it was filed for; null on the primary one. */
+  channel_slug?: string | null
   song: number | null
   song_public_id: number | null
   change_type: ProposalChangeType
@@ -1349,18 +1351,28 @@ export async function withdrawProposal(id: number): Promise<void> {
 
 // Withdraws a proposal and immediately re-creates it with the same data -
 // useful when a pending proposal is stuck/stale and needs a fresh review cycle.
-// Reads the full proposal before withdrawing: a list row is a summary, and
-// resubmitting it as-is would send an empty proposed_data.
+// Reads the full proposal first: a list row is a summary, and resubmitting it
+// as-is would send an empty proposed_data. The copy is made before the
+// withdrawal (the other way round, a failed create lost the proposal), and
+// filed for the same channel.
 export async function resubmitProposal(p: SongEditProposal): Promise<SongEditProposal> {
   const full = await withProposalData(p)
-  await withdrawProposal(p.id)
-  return createProposal({
+  const made = await createProposal({
     song: full.song,
     change_type: full.change_type,
     title: full.title,
     proposed_data: full.proposed_data,
     editor_notes: full.editor_notes,
+    channel: full.channel_slug ?? undefined,
   })
+  try {
+    await withdrawProposal(p.id)
+  } catch (e) {
+    // Not two copies under review: take the new one back too.
+    await withdrawProposal(made.id).catch(() => undefined)
+    throw e
+  }
+  return made
 }
 
 export async function getLeaderboard(): Promise<Array<{

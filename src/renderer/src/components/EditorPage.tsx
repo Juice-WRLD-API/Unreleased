@@ -414,7 +414,7 @@ export default function EditorPage({ initialSongId = null }: {
     versionNum, setVersionNum, versionTitle, setVersionTitle,
     loadedTitle, linkedCount, versionSaveStatus, linkError, saveVersionInfo,
     titleSuggestions, showTitleSuggestions, setShowTitleSuggestions, handlePickTitleSuggestion,
-    base, current, patch, changedCount, alreadySubmitted,
+    base, current, patch, changedCount, alreadySubmitted, confirmDiscard,
   } = useEditorPageState(initialSongId)
   // 'full' = the card/left-rail layout, 'basic' = one flat stacked form with
   // every field on screen. Remembered across sessions (and shared with the
@@ -481,7 +481,7 @@ export default function EditorPage({ initialSongId = null }: {
         {/* Back - only in the in-app editor; the pop-out window has nowhere to go back to */}
         {!IS_FLOAT_WINDOW && (
           <button
-            onClick={() => setActiveView(backView)}
+            onClick={() => { if (confirmDiscard()) setActiveView(backView) }}
             title="Back"
             style={NO_DRAG}
             className="p-1.5 -ml-1.5 rounded-lg text-text-muted hover:text-text-primary hover:bg-surface-overlay transition-colors shrink-0"
@@ -496,7 +496,8 @@ export default function EditorPage({ initialSongId = null }: {
         {!IS_FLOAT_WINDOW && (window as any).electron?.openFloatWindow && song?.id != null && (
           <button
             onClick={() => {
-              if (!song) return
+              // The pop-out opens the saved song, not this form's edits.
+              if (!song || !confirmDiscard()) return
               const el = (window as any).electron
               el.openFloatWindow('editor', { songId: song.id })
               // Clear the in-app editor so the song isn't open in two places.
@@ -775,7 +776,7 @@ export default function EditorPage({ initialSongId = null }: {
                     </button>
                   )}
                   <button
-                    onClick={closeSong}
+                    onClick={() => { if (confirmDiscard()) closeSong() }}
                     className="px-2.5 py-1.5 text-[11px] font-bold text-text-muted opacity-65 hover:opacity-100 transition-opacity">
                     Close
                   </button>
@@ -813,7 +814,7 @@ export default function EditorPage({ initialSongId = null }: {
                         {album && <p className="text-text-muted opacity-75 text-[11px] truncate mt-1">{album}</p>}
                       </div>
                       <button
-                        onClick={closeSong}
+                        onClick={() => { if (confirmDiscard()) closeSong() }}
                         className="flex items-center gap-1.5 text-[11px] text-text-muted opacity-60 hover:opacity-100 transition-colors">
                         <X size={11} /> Close
                       </button>
@@ -1074,7 +1075,7 @@ export default function EditorPage({ initialSongId = null }: {
                         const active = lyricsTab === tab
                         const dirty = tab === 'lyrics'
                           ? lyrics !== String(base.lyrics || '')
-                          : !!synced
+                          : synced !== String(base.synced_lyrics || '')
                         return (
                           <button key={tab} onClick={() => setLyricsTab(tab)}
                             className={`flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[11px] font-semibold transition-all ${
@@ -1119,7 +1120,7 @@ export default function EditorPage({ initialSongId = null }: {
                       rows={15} value={synced} onChange={e => setSynced(e.target.value)}
                       placeholder={"[00:00.00] Line one\n[00:05.20] Line two\n…"}
                       className={`w-full bg-surface-overlay/70 rounded-xl px-3.5 py-3 text-sm font-mono text-text-primary focus:outline-none resize-none placeholder:text-text-muted placeholder:opacity-25 border transition-colors ${
-                        synced ? 'border-accent/40' : 'border-[var(--border)] focus:border-accent/40'
+                        synced !== String(base.synced_lyrics || '') ? 'border-accent/40' : 'border-[var(--border)] focus:border-accent/40'
                       }`}
                     />
                   )}

@@ -32,6 +32,7 @@ import {
   searchFiles,
   apiPeek,
   buildStreamUrl,
+  fetchFileText,
   buildCoverArtUrl,
   smallCoverUrl,
   apiFileTrackId,
@@ -491,13 +492,10 @@ export default function ApiFilesBrowser(): JSX.Element {
       name: entry.name,
       onDownload: () => handleDownload(entry),
       load: async () => {
-        const res = await fetch(buildStreamUrl(entry.path, activeChannel))
-        if (!res.ok) throw new Error(`Couldn't load this file (HTTP ${res.status})`)
-        const buf = await res.arrayBuffer()
-        const truncated = buf.byteLength > TEXT_VIEW_MAX
-        const bytes = new Uint8Array(truncated ? buf.slice(0, TEXT_VIEW_MAX) : buf)
-        if (bytes.subarray(0, 8000).includes(0)) throw new Error('This looks like a binary file')
-        return { text: new TextDecoder('utf-8').decode(bytes), truncated }
+        const file = await fetchFileText(entry.path, activeChannel, TEXT_VIEW_MAX)
+        if (!file.ok) throw new Error(`Couldn't load this file (HTTP ${file.status})`)
+        if (file.binary) throw new Error('This looks like a binary file')
+        return { text: file.text, truncated: file.truncated }
       },
     })
   }

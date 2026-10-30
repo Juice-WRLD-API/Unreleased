@@ -624,9 +624,19 @@ export function initDesktopBridge(): void {
     lastSettings = d
     api.setSettings(d)
   }
+  // What's playing goes out only while a window that shows it is on (Desktop is off by default): otherwise every
+  // track change sampled the cover's colors and fetched the song's versions for nobody. A restarted watch sends
+  // everything again, so the windows never start from an old state.
+  let stopState: (() => void) | null = null
+  const followState = (): void => {
+    const d = useStore.getState().desktop
+    const wanted = d.light.isOn || d.player.isOn || d.playlist.isOn || d.clock.isOn
+    if (wanted && !stopState) stopState = watchDesktopState((patch) => api.setState(patch))
+    else if (!wanted && stopState) { stopState(); stopState = null }
+  }
   sendSettings()
-  watchDesktopState((patch) => api.setState(patch))
-  useStore.subscribe((s, p) => { if (s.desktop !== p.desktop) sendSettings() })
+  followState()
+  useStore.subscribe((s, p) => { if (s.desktop !== p.desktop) { sendSettings(); followState() } })
 
   // The light and the player's glow hear the music: passed on only while one of them is there to.
   let stopMeter: (() => void) | null = null

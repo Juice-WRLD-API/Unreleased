@@ -907,13 +907,15 @@ export const useChatStore = create<ChatState>((set, get) => {
     const meId = s.meId
     if (!meId) return
     const m = await e2e()
-    for (const conv of s.conversations) {
+    // A few conversations at a time: each is a request or more, all at launch,
+    // and the API slows sharply under parallel load.
+    await pool(s.conversations, 4, async (conv) => {
       for (const p of conv.participants) {
         if (p.user.id === meId || !s.online[p.user.id]) continue
-        void m.shareKeyWithUser(meId, conv, p.user.id).catch(() => undefined)
+        await m.shareKeyWithUser(meId, conv, p.user.id).catch(() => undefined)
       }
-      if (s.keyState[conv.id] !== 'ready') void get().resolveKey(conv.id)
-    }
+      if (s.keyState[conv.id] !== 'ready') await get().resolveKey(conv.id)
+    })
   }
 
   // A device still missing keys asks again each tick: nothing is pushed to it
