@@ -12,10 +12,11 @@ import {
   FolderInput, CornerLeftUp, Sparkles, FolderSearch,
 } from 'lucide-react'
 import { FolderJumpBox } from './FolderJumpBox'
+import { LocalPathBox } from './LocalPathBox'
 import { SearchHelpButton } from './SearchHelpPopover'
 import { useStore, useStorePick } from '../store/useStore'
 import {
-  breadcrumbs, parentFolder, fileToTrack, sortEntries, folderLinkUrl, fileEntryLinkUrl, findSongByFilename, triggerDownload,
+  breadcrumbs, localCrumbs, localParent, parentFolder, fileToTrack, sortEntries, folderLinkUrl, fileEntryLinkUrl, findSongByFilename, triggerDownload,
   type ViewMode, type SortBy, type SortDir,
 } from '../lib/apiFilesShared'
 import { useApiFilesBrowse } from '../hooks/useApiFilesBrowse'
@@ -70,7 +71,7 @@ interface LocalEntry { name: string; path: string; type: 'file' | 'directory'; s
 
 /** Inline name prompt — renaming an existing entry, or naming a new one. */
 type NameEditor =
-  | { mode: 'rename'; entry: LocalEntry }
+  | { mode: 'rename'; entry: { name: string; path: string } }
   | { mode: 'create'; kind: 'file' | 'directory' }
 
 // Mirrors the main process's read-text-file cap, so an API file and a local
@@ -90,7 +91,7 @@ const MEDIA_FILTERS: { key: MediaFilter; label: string; icon: typeof Filter }[] 
   { key: 'text', label: 'Text', icon: FileText },
 ]
 
-function localFileToTrack(entry: { name: string; path: string; size: number | null }): Track {
+function localFileToTrack(entry: { name: string; path: string }): Track {
   const title = entry.name.replace(/\.[^.]+$/, '')
   const fileUrl = toFileUrl(entry.path)
   return {
@@ -135,8 +136,10 @@ function ApiCoverThumb({ path, size = 36 }: { path: string; size?: number }): JS
   )
 }
 
-function ApiImageThumb({ path, size = 36 }: { path: string; size?: number }): JSX.Element {
-  const activeChannel = useStore((s) => s.activeChannel)
+// Image entries are served whole by /files/download/ — a browse folder of
+// cover art is hundreds of KB per row at full size, so API thumbnails take the
+// degraded copy (smallCoverUrl). The lightbox still opens the original.
+function ImageThumb({ src, size = 36 }: { src: string | undefined; size?: number }): JSX.Element {
   const [errored, setErrored] = useState(false)
   if (errored) {
     return (
@@ -147,10 +150,7 @@ function ApiImageThumb({ path, size = 36 }: { path: string; size?: number }): JS
   }
   return (
     <img
-      // Image entries are served whole by /files/download/ — a browse folder of
-      // cover art is hundreds of KB per row at full size, so thumbnails take the
-      // degraded copy. The lightbox still opens the original.
-      src={smallCoverUrl(buildStreamUrl(path, activeChannel))}
+      src={src}
       alt=""
       loading="lazy"
       decoding="async"
@@ -158,6 +158,41 @@ function ApiImageThumb({ path, size = 36 }: { path: string; size?: number }): JS
       style={{ width: size, height: size }}
       onError={() => setErrored(true)}
     />
+  )
+}
+
+// A local audio file's embedded cover, read through main (which caches it)
+// once the entry scrolls near view: the listing isn't windowed, and a big
+// folder would otherwise parse every file's tags at once. `fill` covers a grid
+// tile; otherwise it's a list row's square.
+function LocalCoverThumb({ path, size = 36, fill = false }: { path: string; size?: number; fill?: boolean }): JSX.Element {
+  const ref = useRef<HTMLDivElement>(null)
+  const [art, setArt] = useState<string | null>(null)
+  useEffect(() => {
+    const node = ref.current
+    const el = (window as any).electron
+    if (!node || !el?.readAlbumArt) return
+    let cancelled = false
+    const io = new IntersectionObserver((seen) => {
+      if (!seen.some((s) => s.isIntersecting)) return
+      io.disconnect()
+      el.readAlbumArt(path, fill ? 256 : 96)
+        .then((a: string | null) => { if (!cancelled) setArt(a) })
+        .catch(() => {})
+    }, { rootMargin: '200px' })
+    io.observe(node)
+    return () => { cancelled = true; io.disconnect() }
+  }, [path, fill])
+  return (
+    <div
+      ref={ref}
+      className={fill ? 'absolute inset-0 flex items-center justify-center' : 'flex items-center justify-center bg-surface-overlay rounded overflow-hidden'}
+      style={fill ? undefined : { width: size, height: size }}
+    >
+      {art
+        ? <img src={art} alt="" className="w-full h-full object-cover" />
+        : <Music2 size={fill ? 36 : size * 0.5} className={`text-text-muted ${fill ? 'opacity-30' : 'opacity-40'}`} />}
+    </div>
   )
 }
 
@@ -192,7 +227,7 @@ export default function ApiFilesBrowser(): JSX.Element {
   // Resting the mouse on a folder for a moment fetches its listing ahead of
   // the click (prefetchFolder skips it once the file index has it anyway).
   const folderHoverTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
-  const folderHoverProps = (entry: JWApiFileEntry): React.HTMLAttributes<HTMLDivElement> => entry.type !== 'directory' ? {} : {
+  const folderHoverProps = (entry: JWApiFileEntry): React.HTMLAttributes<HTMLDivElement> => entry.type !== 'directory' || localMode ? {} : {
     onPointerEnter: (e) => {
       if (e.pointerType !== 'mouse') return
       if (folderHoverTimer.current) clearTimeout(folderHoverTimer.current)
@@ -206,7 +241,7 @@ export default function ApiFilesBrowser(): JSX.Element {
   const [textFile, setTextFile] = useState<TextFileSource | null>(null)
   const { lightboxItems, setLightboxItems, lightboxIndex, setLightboxIndex, openLightbox } = useFileLightbox({ entries, searchResults, isSearching, activeChannel })
   const [copiedPath, setCopiedPath] = useState<string | null>(null)
-  const [copiedKind, setCopiedKind] = useState<'link' | 'path'>('link')
+  const [copiedKind, setCopiedKind] = useState<'link' | 'path' | 'paths'>('link')
   const { playlistDoneId, addToPlaylist, resetPlaylistDone } = useAddFileToPlaylist()
   const [ctxMenu, setCtxMenu] = useState<{ entry: JWApiFileEntry; x: number; y: number } | null>(null)
   // Whether a right-clicked audio file actually has a matching song in the
@@ -240,9 +275,9 @@ export default function ApiFilesBrowser(): JSX.Element {
   const [localEntries, setLocalEntries] = useState<LocalEntry[]>([])
   const [localLoading, setLocalLoading] = useState(false)
   const [localError, setLocalError] = useState<string | null>(null)
-  // Local file management: right-click menu, plus the inline name editor that
-  // doubles as "rename this entry" and "create a new file/folder here".
-  const [localCtxMenu, setLocalCtxMenu] = useState<{ entry: LocalEntry; x: number; y: number } | null>(null)
+  const [localHistory, setLocalHistory] = useState<string[]>([])
+  // Local file management: the inline name editor that doubles as "rename
+  // this entry" and "create a new file/folder here".
   // Right-clicking the empty space around the entries — the folder's own menu
   // (new / view / sort / refresh), the way Explorer and Finder behave.
   const [bgCtxMenu, setBgCtxMenu] = useState<{ x: number; y: number } | null>(null)
@@ -252,15 +287,15 @@ export default function ApiFilesBrowser(): JSX.Element {
   const [nameError, setNameError] = useState<string | null>(null)
   const [nameBusy, setNameBusy] = useState(false)
 
-  // Ctrl+L opens the jump box, as it focuses the address bar in Explorer.
+  // Ctrl+L opens the jump box (the path box in local mode), as it focuses the
+  // address bar in Explorer.
   useEffect(() => {
-    if (localMode) return
     const onKey = (e: KeyboardEvent): void => {
       if (!(e.ctrlKey || e.metaKey) || e.key.toLowerCase() !== 'l' || e.altKey || e.shiftKey) return
       const el = e.target as HTMLElement | null
       if (el && (el.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName))) return
       e.preventDefault()
-      setSearch(''); setDebouncedSearch('')
+      if (!localMode) { setSearch(''); setDebouncedSearch('') }
       setJumpOpen(true)
     }
     window.addEventListener('keydown', onKey)
@@ -268,20 +303,41 @@ export default function ApiFilesBrowser(): JSX.Element {
   }, [localMode, setSearch, setDebouncedSearch])
   useEffect(() => { if (isSearching) setJumpOpen(false) }, [isSearching])
 
-  const browseLocal = async (dirPath: string): Promise<void> => {
+  // `typed` is a path from the path box: main resolves it, and a failure
+  // comes back for the box to show instead of replacing the listing. `back`
+  // is a step back through the history, so it isn't recorded again.
+  const browseLocal = async (dirPath: string, opts: { typed?: boolean; back?: boolean } = {}): Promise<string | null> => {
     const el = (window as any).electron
-    if (!el) return
-    setLocalLoading(true)
-    setLocalError(null)
+    if (!el) return null
+    if (!opts.typed) { setLocalLoading(true); setLocalError(null) }
     try {
-      const result = await el.browseLocal(dirPath)
-      if (result.error) { setLocalError(result.error); return }
+      const result = await el.browseLocal(dirPath, opts.typed ? { typed: true, from: localPath } : undefined)
+      if (result.error) {
+        if (!opts.typed) setLocalError(result.error)
+        return result.error
+      }
+      if (!opts.back && localPath && result.path !== localPath) setLocalHistory((h) => [...h.slice(-49), localPath])
       setLocalPath(result.path)
       setLocalEntries(result.entries)
+      setLocalError(null)
+      return null
     } catch (err) {
-      setLocalError(err instanceof Error ? err.message : 'Failed to browse')
+      const message = err instanceof Error ? err.message : 'Failed to browse'
+      if (!opts.typed) setLocalError(message)
+      return message
     } finally {
-      setLocalLoading(false)
+      if (!opts.typed) setLocalLoading(false)
+    }
+  }
+
+  // Back through the folders visited, or up a level once there are none.
+  const goBackLocal = (): void => {
+    const prev = localHistory[localHistory.length - 1]
+    if (prev) {
+      setLocalHistory((h) => h.slice(0, -1))
+      browseLocal(prev, { back: true })
+    } else if (localParent(localPath)) {
+      browseLocal(localParent(localPath))
     }
   }
 
@@ -302,11 +358,11 @@ export default function ApiFilesBrowser(): JSX.Element {
   // Main owns validation, collision handling and the delete confirm; the
   // renderer just collects the name and re-reads the folder afterwards.
 
-  const startRename = (entry: LocalEntry): void => {
+  const startRename = (entry: { name: string; path: string }): void => {
     setNameEditor({ mode: 'rename', entry })
     setNameDraft(entry.name)
     setNameError(null)
-    setLocalCtxMenu(null)
+    setCtxMenu(null)
   }
 
   const startCreate = (kind: 'file' | 'directory'): void => {
@@ -315,7 +371,7 @@ export default function ApiFilesBrowser(): JSX.Element {
     setNameError(null)
     // Reachable from the entry menu, the background menu and the nav bar —
     // close both menus regardless of which one opened it.
-    setLocalCtxMenu(null)
+    setCtxMenu(null)
     setBgCtxMenu(null)
   }
 
@@ -346,17 +402,19 @@ export default function ApiFilesBrowser(): JSX.Element {
     }
   }
 
-  const deleteLocalEntry = async (entry: LocalEntry): Promise<void> => {
+  const deleteLocal = async (paths: string[]): Promise<void> => {
     const el = (window as any).electron
-    if (!el) return
-    setLocalCtxMenu(null)
-    // Main shows the confirm and moves the item to the OS trash; a cancel
+    if (!el || paths.length === 0) return
+    setCtxMenu(null)
+    // Main shows one confirm and moves the items to the OS trash; a cancel
     // comes back as { canceled } and must leave the listing untouched.
-    const result = await el.localDelete(entry.path)
-    if (result?.ok) await browseLocal(localPath)
+    const result = await el.localDelete(paths)
+    if (!result?.ok) return
+    if (selectMode) exitSelectMode()
+    await browseLocal(localPath)
   }
 
-  const handleLocalPlay = (entry: { name: string; path: string; type: string; size: number | null }): void => {
+  const handleLocalPlay = (entry: { name: string; path: string }): void => {
     const track = localFileToTrack(entry)
     const queue = localEntries
       .filter(e => e.type === 'file' && getMediaType(e.name) === 'audio')
@@ -364,7 +422,7 @@ export default function ApiFilesBrowser(): JSX.Element {
     playTrack(track, queue.length > 0 ? queue : [track])
   }
 
-  const openLocalLightbox = (entry: { name: string; path: string; type: string; size: number | null }): void => {
+  const openLocalLightbox = (entry: { path: string }): void => {
     const mediaEntries = localEntries.filter(e => {
       const mt = getMediaType(e.name)
       return e.type === 'file' && (mt === 'image' || mt === 'video')
@@ -436,11 +494,11 @@ export default function ApiFilesBrowser(): JSX.Element {
 
   const openContextMenu = (entry: JWApiFileEntry, x: number, y: number): void => {
     setCtxMenu({ entry, x, y })
-    resolveTrackerMatch(entry)
+    if (!localMode) resolveTrackerMatch(entry)
   }
 
   // `marker` only drives the confirmation toast — any non-empty string will do.
-  const copyTextToClipboard = (text: string, what: 'link' | 'path', marker = text): void => {
+  const copyTextToClipboard = (text: string, what: 'link' | 'path' | 'paths', marker = text): void => {
     const showConfirmed = (): void => {
       setCopiedPath(marker)
       setCopiedKind(what)
@@ -500,7 +558,7 @@ export default function ApiFilesBrowser(): JSX.Element {
     })
   }
 
-  const openLocalText = (entry: LocalEntry): void => {
+  const openLocalText = (entry: { name: string; path: string }): void => {
     setTextFile({
       name: entry.name,
       load: async () => {
@@ -527,11 +585,23 @@ export default function ApiFilesBrowser(): JSX.Element {
     if (longPressTimer.current) { clearTimeout(longPressTimer.current); longPressTimer.current = null }
   }
 
-  // ── Sorted entries ─────────────────────────────────────────────────────────
+  // ── One listing, two sources ───────────────────────────────────────────────
+  // API and local files share the listing, sorting, selection and menus below;
+  // these pick the source's own way to open, play and read an entry. The API
+  // search box is hidden in local mode, so its search must not leak in.
+
+  const searching = !localMode && isSearching
+  const openFolder = (entry: JWApiFileEntry): void => { if (localMode) browseLocal(entry.path); else navigate(entry.path) }
+  const playEntry = (entry: JWApiFileEntry): void => { if (localMode) handleLocalPlay(entry); else handlePlay(entry) }
+  const openMedia = (entry: JWApiFileEntry): void => { if (localMode) openLocalLightbox(entry); else openLightbox(entry) }
+  const openText = (entry: JWApiFileEntry): void => { if (localMode) openLocalText(entry); else openApiText(entry) }
+  const parentRowAction = localMode
+    ? (localParent(localPath) ? () => { browseLocal(localParent(localPath)) } : null)
+    : (currentPath && !isSearching ? goBack : null)
 
   const sortedEntries = useMemo(
-    () => sortEntries(isSearching ? searchResults : entries, sortBy, sortDir),
-    [isSearching, searchResults, entries, sortBy, sortDir]
+    () => sortEntries(localMode ? localEntries : isSearching ? searchResults : entries, sortBy, sortDir),
+    [localMode, localEntries, isSearching, searchResults, entries, sortBy, sortDir]
   )
 
   // Type filter — folders stay visible regardless of filter so navigation
@@ -547,8 +617,9 @@ export default function ApiFilesBrowser(): JSX.Element {
   // land in - same type filter as the real entries.
   const { ghosts, pendingFor } = usePendingCompGhosts({ enabled: canPropose, activeChannel, currentPath, entries, isSearching })
   const visibleGhosts = useMemo(
-    () => typeFilter === 'all' ? ghosts : ghosts.filter((g) => g.type === 'directory' || getMediaType(g.name) === typeFilter),
-    [ghosts, typeFilter]
+    () => localMode ? []
+      : typeFilter === 'all' ? ghosts : ghosts.filter((g) => g.type === 'directory' || getMediaType(g.name) === typeFilter),
+    [localMode, ghosts, typeFilter]
   )
 
   // Multi-select — select mode, the selected-paths Map, Escape-to-exit, and
@@ -579,6 +650,22 @@ export default function ApiFilesBrowser(): JSX.Element {
     setCtxMenu(null)
   }
   const toggleSelect = (path: string): void => toggle(path, path)
+
+  // A selection belongs to one source; switching sources drops it.
+  const selectionSource = useRef(localMode)
+  useEffect(() => {
+    if (selectionSource.current === localMode) return
+    selectionSource.current = localMode
+    exitSelectMode()
+  }, [localMode, exitSelectMode])
+
+  // Local selection actions. Folders are left out of Play.
+  const selectedLocalAudio = (): JWApiFileEntry[] =>
+    filteredEntries.filter((e) => selectedPaths.has(e.path) && e.type === 'file' && getMediaType(e.name) === 'audio')
+  const playSelectedLocal = (): void => {
+    const tracks = selectedLocalAudio().map(localFileToTrack)
+    if (tracks.length > 0) playTrack(tracks[0], tracks)
+  }
 
   // ── Drag-and-drop moves (API mode) ─────────────────────────────────────────
   // Contributors can drag entries onto a folder to move them in, or onto a
@@ -624,7 +711,7 @@ export default function ApiFilesBrowser(): JSX.Element {
     onDragStart: (e: React.DragEvent) => void
     onDragEnd: () => void
   } => ({
-    draggable: canPropose,
+    draggable: canPropose && !localMode,
     onDragStart: e => {
       e.dataTransfer.effectAllowed = 'move'
       const byPath = new Map(filteredEntries.map(x => [x.path, x]))
@@ -695,7 +782,7 @@ export default function ApiFilesBrowser(): JSX.Element {
 
   /** An OS file drag, as opposed to dragging rows around inside the listing. */
   const isExternalDrag = (e: React.DragEvent): boolean =>
-    canPropose && draggedItems.length === 0 && isFileDrag(e.dataTransfer)
+    !localMode && canPropose && draggedItems.length === 0 && isFileDrag(e.dataTransfer)
 
   const dropTargetProps = (entry: JWApiFileEntry): {
     onDragOver: (e: React.DragEvent) => void
@@ -768,13 +855,6 @@ export default function ApiFilesBrowser(): JSX.Element {
     setNewFolderPrompt(null)
   }
 
-  const filteredLocalEntries = useMemo(
-    () => typeFilter === 'all'
-      ? localEntries
-      : localEntries.filter((e) => e.type === 'directory' || getMediaType(e.name) === typeFilter),
-    [localEntries, typeFilter]
-  )
-
   const crumbs = breadcrumbs(currentPath)
   const channelDescription = channels.find((c) => c.slug === activeChannel)?.description?.trim() || ''
 
@@ -792,12 +872,13 @@ export default function ApiFilesBrowser(): JSX.Element {
             <div className="flex items-center gap-2 min-w-0 flex-1">
               <HardDrive size={18} className="text-text-muted shrink-0" />
               <h1 className="text-text-primary text-xl font-bold shrink-0">API Files</h1>
-              {channelDescription && (
+              {channelDescription && !localMode && (
                 <p className="text-text-muted text-sm truncate">{channelDescription}</p>
               )}
             </div>
             <div className="flex items-center gap-3 shrink-0">
-              {channels.length > 0 && (
+              {/* Comps are API sources; local files don't belong to one. */}
+              {channels.length > 0 && !localMode && (
                 <div className="flex items-center bg-surface-overlay rounded-lg p-1 gap-0.5">
                   {channels.map((ch) => (
                     <button
@@ -973,230 +1054,57 @@ export default function ApiFilesBrowser(): JSX.Element {
               </div>
             )
           )}
+
+          {/* Nav bar — local mode, the same bar with this computer's path */}
+          {localMode && (() => {
+            const localTrail = localCrumbs(localPath)
+            return (
+              <div className="flex items-center gap-1.5">
+                <button onClick={goBackLocal} disabled={localHistory.length === 0 && !localParent(localPath)}
+                  className="p-1.5 rounded-lg hover:bg-surface-overlay disabled:opacity-30 disabled:pointer-events-none transition-colors" title="Back">
+                  <ArrowLeft size={15} className="text-text-muted" />
+                </button>
+                <button onClick={() => browseLocal('')} className="p-1.5 rounded-lg hover:bg-surface-overlay transition-colors" title="Home folder">
+                  <Home size={15} className="text-text-muted" />
+                </button>
+                {jumpOpen ? (
+                  <LocalPathBox current={localPath} onGo={(p) => browseLocal(p, { typed: true })} onClose={() => setJumpOpen(false)} />
+                ) : (
+                <div
+                  className="flex items-center gap-0.5 overflow-hidden ml-1 flex-1 min-w-0 self-stretch cursor-text"
+                  onClick={(e) => { if (e.target === e.currentTarget) setJumpOpen(true) }}
+                  title="Click to paste or type a path (Ctrl+L)"
+                >
+                  {localTrail.map((crumb, i) => {
+                    const last = i === localTrail.length - 1
+                    return (
+                      // Earlier folders shrink to make room; the open one keeps its name.
+                      <div key={crumb.path} className={`flex items-center gap-0.5 ${last ? 'shrink-0' : 'min-w-0'}`}>
+                        {i > 0 && <ChevronRight size={12} className="text-text-muted shrink-0" />}
+                        <button
+                          onClick={() => browseLocal(crumb.path)}
+                          className={`text-xs px-1.5 py-0.5 rounded transition-colors truncate ${last ? 'max-w-[220px]' : 'min-w-0'} ${
+                            last ? 'text-text-primary font-medium' : 'text-text-muted hover:text-text-primary hover:bg-surface-overlay'
+                          }`}
+                          title={crumb.path}
+                        >{crumb.label}</button>
+                      </div>
+                    )
+                  })}
+                </div>
+                )}
+                {!jumpOpen && (
+                  <button onClick={() => setJumpOpen(true)} className="p-1.5 rounded-lg hover:bg-surface-overlay transition-colors shrink-0" title="Go to a path (Ctrl+L)">
+                    <FolderSearch size={15} className="text-text-muted" />
+                  </button>
+                )}
+              </div>
+            )
+          })()}
         </div>
 
-        {/* Local files browser */}
-        {localMode && (
-          <div
-            ref={listingRef}
-            className="flex-1 overflow-y-auto px-5 pb-4"
-            // Entry rows stop propagation and open their own menu, so anything
-            // reaching here is genuinely the background. Needs a folder open —
-            // "New file" has nowhere to go otherwise.
-            onContextMenu={(e) => {
-              if (!localPath) return
-              e.preventDefault()
-              setBgCtxMenu({ x: e.clientX, y: e.clientY })
-            }}
-          >
-            {/* Local nav bar */}
-            <div className="flex items-center gap-1.5 mb-3">
-              <button
-                onClick={pickLocalFolder}
-                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-surface-overlay hover:bg-surface-raised border border-[var(--border)] text-text-secondary text-xs font-medium transition-colors"
-              ><FolderOpen size={13} /> Change folder</button>
-              {localPath && (
-                <>
-                  <button
-                    onClick={() => startCreate('directory')}
-                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-surface-overlay hover:bg-surface-raised border border-[var(--border)] text-text-secondary text-xs font-medium transition-colors"
-                  ><FolderPlus size={13} /> New folder</button>
-                  <button
-                    onClick={() => startCreate('file')}
-                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-surface-overlay hover:bg-surface-raised border border-[var(--border)] text-text-secondary text-xs font-medium transition-colors"
-                  ><FilePlus size={13} /> New file</button>
-                  <span className="text-text-muted text-xs truncate flex-1 min-w-0" title={localPath}>{localPath}</span>
-                </>
-              )}
-            </div>
-
-            {/* Inline name prompt — used for both "new file/folder" and
-                rename, so there's one place that validates and reports. */}
-            {nameEditor && (
-              <div className="mb-3 flex flex-col gap-1">
-                <div className="flex items-center gap-2">
-                  <span className="text-xs text-text-muted shrink-0">
-                    {nameEditor.mode === 'rename'
-                      ? 'Rename to'
-                      : nameEditor.kind === 'directory' ? 'New folder' : 'New file'}
-                  </span>
-                  <input
-                    autoFocus
-                    value={nameDraft}
-                    onChange={(e) => { setNameDraft(e.target.value); setNameError(null) }}
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter') submitNameEditor()
-                      else if (e.key === 'Escape') cancelNameEditor()
-                    }}
-                    placeholder="Name"
-                    className="flex-1 min-w-0 bg-surface-overlay border border-[var(--border)] rounded-lg px-2.5 py-1.5 text-sm text-text-primary placeholder:text-text-muted focus:outline-none focus:border-accent/40"
-                  />
-                  <button
-                    onClick={submitNameEditor}
-                    disabled={nameBusy || !nameDraft.trim()}
-                    className="flex items-center gap-1.5 px-3 py-1.5 bg-accent text-white rounded-lg text-xs font-medium disabled:opacity-50 transition-opacity hover:opacity-90"
-                  >
-                    {nameBusy ? <Loader2 size={13} className="animate-spin" /> : <Check size={13} />}
-                    {nameEditor.mode === 'rename' ? 'Rename' : 'Create'}
-                  </button>
-                  <button
-                    onClick={cancelNameEditor}
-                    className="p-1.5 rounded-lg hover:bg-surface-overlay transition-colors"
-                    title="Cancel"
-                  ><X size={15} className="text-text-muted" /></button>
-                </div>
-                {nameError && <p className="text-xs text-red-400 pl-1">{nameError}</p>}
-              </div>
-            )}
-            {localLoading ? (
-              <div className="flex items-center justify-center h-40 gap-2 text-text-muted">
-                <Loader2 size={18} className="animate-spin" /><span className="text-sm">Loading…</span>
-              </div>
-            ) : localError ? (
-              <div className="flex flex-col items-center justify-center h-40 gap-2">
-                <p className="text-text-muted text-sm">{localError}</p>
-                <button onClick={() => browseLocal(localPath)} className="text-accent text-sm underline">Retry</button>
-              </div>
-            ) : localEntries.length === 0 ? (
-              <div className="flex flex-col items-center justify-center h-40 gap-2">
-                <MonitorSmartphone size={32} className="text-text-muted opacity-30" />
-                <p className="text-text-muted text-sm">No files found</p>
-                <button onClick={pickLocalFolder} className="text-accent text-sm underline">Pick a folder</button>
-              </div>
-            ) : filteredLocalEntries.length === 0 ? (
-              <div className="flex flex-col items-center justify-center h-40 gap-2">
-                <Filter size={32} className="text-text-muted opacity-30" />
-                <p className="text-text-muted text-sm">No {typeFilter} files here</p>
-              </div>
-            ) : viewMode === 'list' ? (
-              <div className="space-y-0.5">
-                {localPath && (
-                  <button
-                    onClick={() => {
-                      const parent = localPath.replace(/[/\\][^/\\]+$/, '')
-                      if (parent && parent !== localPath) browseLocal(parent)
-                    }}
-                    className="flex items-center gap-3 w-full px-3 py-2 rounded-lg hover:bg-surface-overlay transition-colors text-left"
-                  >
-                    <div className="w-9 h-9 flex items-center justify-center shrink-0"><FolderOpen size={18} className="text-text-muted" /></div>
-                    <span className="text-text-muted text-sm">..</span>
-                  </button>
-                )}
-                {filteredLocalEntries.map((entry) => {
-                  const isDir = entry.type === 'directory'
-                  const mt = isDir ? 'folder' : getMediaType(entry.name)
-                  const ext = getFileExt(entry.name).slice(1).toUpperCase()
-                  return (
-                    <div
-                      key={entry.path}
-                      className="group flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-surface-overlay transition-colors cursor-default"
-                      onClick={() => {
-                        if (isDir) browseLocal(entry.path)
-                        else if (mt === 'audio') handleLocalPlay(entry)
-                        else if (mt === 'image' || mt === 'video') openLocalLightbox(entry)
-                        else if (mt === 'text') openLocalText(entry)
-                      }}
-                      onContextMenu={(e) => { e.preventDefault(); e.stopPropagation(); setLocalCtxMenu({ entry, x: e.clientX, y: e.clientY }) }}
-                    >
-                      <div className="w-9 h-9 flex items-center justify-center shrink-0">
-                        {isDir
-                          ? <FolderOpen size={18} className="text-text-muted" />
-                          : mt === 'audio' ? <Music2 size={18} className="text-text-muted opacity-40" /> : mt === 'video' ? <Video size={18} className="text-text-muted" /> : mt === 'image' ? <ImageIcon size={18} className="text-text-muted" /> : mt === 'text' ? <FileText size={18} className="text-text-muted" /> : <Music2 size={18} className="text-text-muted opacity-20" />}
-                      </div>
-                      <div className="flex-1 min-w-0">
-                        <p className="text-text-primary text-sm truncate">{entry.name}</p>
-                        {entry.size != null && !isDir && (
-                          <p className="text-text-muted text-xs">{(entry.size / 1_048_576).toFixed(1)} MB</p>
-                        )}
-                      </div>
-                      {mt === 'audio' && (
-                        <button
-                          onClick={(e) => { e.stopPropagation(); handleLocalPlay(entry) }}
-                          className="opacity-0 group-hover:opacity-100 p-1.5 rounded-full hover:bg-accent/15 text-accent transition-all"
-                          title="Play"
-                        ><Play size={14} /></button>
-                      )}
-                      {/* Same rationale as the API rows: right-click isn't
-                          reachable on touch, so the menu needs a real button. */}
-                      <button
-                        onClick={(e) => { e.stopPropagation(); setLocalCtxMenu({ entry, x: e.clientX, y: e.clientY }) }}
-                        className="shrink-0 p-2 -my-1.5 text-text-muted md:opacity-0 md:group-hover:opacity-100 hover:text-text-primary active:text-accent transition-all"
-                        title="More options"
-                      ><MoreHorizontal size={16} /></button>
-                    </div>
-                  )
-                })}
-              </div>
-            ) : (
-              <div className="grid gap-3 pt-1" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(140px, 1fr))' }}>
-                {localPath && (
-                  <button
-                    onClick={() => {
-                      const parent = localPath.replace(/[/\\][^/\\]+$/, '')
-                      if (parent && parent !== localPath) browseLocal(parent)
-                    }}
-                    className="flex flex-col items-center gap-2 p-3 rounded-xl bg-surface-overlay hover:bg-surface-raised transition-colors"
-                  >
-                    <div className="w-full aspect-square flex items-center justify-center"><FolderOpen size={40} className="text-text-muted" /></div>
-                    <span className="text-text-muted text-xs">..</span>
-                  </button>
-                )}
-                {filteredLocalEntries.map((entry) => {
-                  const isDir = entry.type === 'directory'
-                  const mt = isDir ? 'folder' : getMediaType(entry.name)
-                  const ext = getFileExt(entry.name).slice(1).toUpperCase()
-                  return (
-                    <div
-                      key={entry.path}
-                      className="group flex flex-col rounded-xl overflow-hidden transition-colors cursor-default bg-surface-overlay hover:bg-surface-raised"
-                      onClick={() => {
-                        if (isDir) browseLocal(entry.path)
-                        else if (mt === 'audio') handleLocalPlay(entry)
-                        else if (mt === 'image' || mt === 'video') openLocalLightbox(entry)
-                        else if (mt === 'text') openLocalText(entry)
-                      }}
-                      onContextMenu={(e) => { e.preventDefault(); e.stopPropagation(); setLocalCtxMenu({ entry, x: e.clientX, y: e.clientY }) }}
-                    >
-                      <div className="relative w-full aspect-square bg-surface-raised flex items-center justify-center overflow-hidden">
-                        {isDir
-                          ? <Folder size={40} className="text-text-secondary group-hover:text-accent transition-colors" />
-                          : mt === 'audio' ? (
-                            <>
-                              <Music2 size={36} className="text-text-muted opacity-30" />
-                              <div className="absolute inset-0 flex items-center justify-center bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity">
-                                <Play size={24} fill="white" className="text-white ml-0.5" />
-                              </div>
-                            </>
-                          ) : mt === 'image' ? (
-                            <ImageIcon size={36} className="text-text-muted" />
-                          ) : mt === 'video' ? (
-                            <Video size={36} className="text-text-muted" />
-                          ) : mt === 'text' ? (
-                            <FileText size={36} className="text-text-muted" />
-                          ) : (
-                            <span className="text-xs uppercase text-text-muted">{ext}</span>
-                          )}
-                      </div>
-                      <div className="px-2 py-2 flex items-center gap-1">
-                        <div className="flex-1 min-w-0">
-                          <p className="text-text-primary text-xs font-medium truncate">{entry.name}</p>
-                          {!isDir && <p className="text-text-muted text-[10px] uppercase tracking-wide mt-0.5">{ext}</p>}
-                        </div>
-                        <button
-                          onClick={(e) => { e.stopPropagation(); setLocalCtxMenu({ entry, x: e.clientX, y: e.clientY }) }}
-                          className="shrink-0 p-1.5 -m-1 text-text-muted md:opacity-0 md:group-hover:opacity-100 hover:text-text-primary active:text-accent transition-all"
-                          title="More options"
-                        ><MoreHorizontal size={15} /></button>
-                      </div>
-                    </div>
-                  )
-                })}
-              </div>
-            )}
-          </div>
-        )}
         {/* Content */}
-        {!localMode && <div
+        <div
           ref={listingRef}
           className={`flex-1 overflow-y-auto px-5 pb-4 transition-colors ${fileDragOver ? 'bg-accent/[0.04] ring-2 ring-inset ring-accent/40' : ''}`}
           // Dropping OS files/folders on empty space uploads into the folder
@@ -1217,22 +1125,89 @@ export default function ApiFilesBrowser(): JSX.Element {
             collectDroppedFiles(e.dataTransfer).then(files => uploadDroppedFiles(folder, files)).catch(() => showAppToast("Couldn't read the dropped files"))
           }}
           // Entry rows stop propagation and open their own menu, so anything
-          // reaching here is genuinely the background.
-          onContextMenu={(e) => { e.preventDefault(); setBgCtxMenu({ x: e.clientX, y: e.clientY }) }}
+          // reaching here is genuinely the background. Local needs a folder
+          // open: "New file" has nowhere to go otherwise.
+          onContextMenu={(e) => {
+            if (localMode && !localPath) return
+            e.preventDefault()
+            setBgCtxMenu({ x: e.clientX, y: e.clientY })
+          }}
         >
-          {(isSearching ? searchLoading : loading) ? (
+          {localMode && (
+            <>
+              {/* Local folder actions */}
+              <div className="flex items-center gap-1.5 mb-3">
+                <button
+                  onClick={pickLocalFolder}
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-surface-overlay hover:bg-surface-raised border border-[var(--border)] text-text-secondary text-xs font-medium transition-colors"
+                ><FolderOpen size={13} /> Change folder</button>
+                {localPath && (
+                  <>
+                    <button
+                      onClick={() => startCreate('directory')}
+                      className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-surface-overlay hover:bg-surface-raised border border-[var(--border)] text-text-secondary text-xs font-medium transition-colors"
+                    ><FolderPlus size={13} /> New folder</button>
+                    <button
+                      onClick={() => startCreate('file')}
+                      className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-surface-overlay hover:bg-surface-raised border border-[var(--border)] text-text-secondary text-xs font-medium transition-colors"
+                    ><FilePlus size={13} /> New file</button>
+                  </>
+                )}
+              </div>
+
+              {/* Inline name prompt — used for both "new file/folder" and
+                  rename, so there's one place that validates and reports. */}
+              {nameEditor && (
+                <div className="mb-3 flex flex-col gap-1">
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs text-text-muted shrink-0">
+                      {nameEditor.mode === 'rename'
+                        ? 'Rename to'
+                        : nameEditor.kind === 'directory' ? 'New folder' : 'New file'}
+                    </span>
+                    <input
+                      autoFocus
+                      value={nameDraft}
+                      onChange={(e) => { setNameDraft(e.target.value); setNameError(null) }}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') submitNameEditor()
+                        else if (e.key === 'Escape') cancelNameEditor()
+                      }}
+                      placeholder="Name"
+                      className="flex-1 min-w-0 bg-surface-overlay border border-[var(--border)] rounded-lg px-2.5 py-1.5 text-sm text-text-primary placeholder:text-text-muted focus:outline-none focus:border-accent/40"
+                    />
+                    <button
+                      onClick={submitNameEditor}
+                      disabled={nameBusy || !nameDraft.trim()}
+                      className="flex items-center gap-1.5 px-3 py-1.5 bg-accent text-white rounded-lg text-xs font-medium disabled:opacity-50 transition-opacity hover:opacity-90"
+                    >
+                      {nameBusy ? <Loader2 size={13} className="animate-spin" /> : <Check size={13} />}
+                      {nameEditor.mode === 'rename' ? 'Rename' : 'Create'}
+                    </button>
+                    <button
+                      onClick={cancelNameEditor}
+                      className="p-1.5 rounded-lg hover:bg-surface-overlay transition-colors"
+                      title="Cancel"
+                    ><X size={15} className="text-text-muted" /></button>
+                  </div>
+                  {nameError && <p className="text-xs text-red-400 pl-1">{nameError}</p>}
+                </div>
+              )}
+            </>
+          )}
+          {(localMode ? localLoading : isSearching ? searchLoading : loading) ? (
             <div className="flex items-center justify-center h-40 gap-2 text-text-muted">
-              <Loader2 size={18} className="animate-spin" /><span className="text-sm">{isSearching ? 'Searching…' : 'Loading…'}</span>
+              <Loader2 size={18} className="animate-spin" /><span className="text-sm">{searching ? 'Searching…' : 'Loading…'}</span>
             </div>
-          ) : error ? (
+          ) : (localMode ? localError : error) ? (
             <div className="flex flex-col items-center justify-center h-40 gap-2">
-              <p className="text-text-muted text-sm">{error}</p>
-              <button onClick={() => navigate(currentPath, false)} className="text-accent text-sm underline">Retry</button>
+              <p className="text-text-muted text-sm">{localMode ? localError : error}</p>
+              <button onClick={() => { if (localMode) browseLocal(localPath); else navigate(currentPath, false) }} className="text-accent text-sm underline">Retry</button>
             </div>
           ) : sortedEntries.length === 0 && visibleGhosts.length === 0 ? (
             <div className="flex flex-col items-center justify-center h-40 gap-2">
               <Music2 size={32} className="text-text-muted opacity-30" />
-              <p className="text-text-muted text-sm">{isSearching ? `No files match "${debouncedSearch.trim()}"` : 'Nothing here'}</p>
+              <p className="text-text-muted text-sm">{searching ? `No files match "${debouncedSearch.trim()}"` : 'Nothing here'}</p>
             </div>
           ) : filteredEntries.length === 0 && visibleGhosts.length === 0 ? (
             <div className="flex flex-col items-center justify-center h-40 gap-2">
@@ -1242,8 +1217,8 @@ export default function ApiFilesBrowser(): JSX.Element {
           ) : viewMode === 'list' ? (
             /* ── List view ────────────────────────────────────────────────────── */
             <div className="space-y-0.5">
-              {currentPath && !isSearching && (
-                <button onClick={goBack} {...parentDropProps} className={`flex items-center gap-3 w-full px-3 py-2 rounded-lg transition-colors text-left ${
+              {parentRowAction && (
+                <button onClick={parentRowAction} {...(localMode ? {} : parentDropProps)} className={`flex items-center gap-3 w-full px-3 py-2 rounded-lg transition-colors text-left ${
                   dropTarget === '..' ? 'bg-accent/15 ring-2 ring-accent/50' : 'hover:bg-surface-overlay'
                 }`}>
                   <div className="w-9 h-9 flex items-center justify-center shrink-0">
@@ -1262,8 +1237,9 @@ export default function ApiFilesBrowser(): JSX.Element {
                 const ext = getFileExt(entry.name).slice(1).toUpperCase()
                 const isMedia = mt === 'image' || mt === 'video'
                 const isSelected = selectedPaths.has(entry.path)
-                const isLiked = mt === 'audio' && likedSet.has(apiFileTrackId(entry.path, trackChannel))
+                const isLiked = !localMode && mt === 'audio' && likedSet.has(apiFileTrackId(entry.path, trackChannel))
                 const isDropTarget = dropTarget === entry.path
+                const pending = localMode ? undefined : pendingFor(entry.path)
                 return (
                   <div key={entry.path}
                     {...dragSourceProps(entry)}
@@ -1280,11 +1256,11 @@ export default function ApiFilesBrowser(): JSX.Element {
                         return
                       }
                       if (selectMode) { toggleSelect(entry.path); return }
-                      if (isDir) navigate(entry.path)
-                      else if (isMedia) openLightbox(entry)
-                      else if (mt === 'text') openApiText(entry)
+                      if (isDir) openFolder(entry)
+                      else if (isMedia) openMedia(entry)
+                      else if (mt === 'text') openText(entry)
                     }}
-                    onDoubleClick={() => { if (!selectMode && mt === 'audio') handlePlay(entry) }}
+                    onDoubleClick={() => { if (!selectMode && mt === 'audio') playEntry(entry) }}
                     onContextMenu={e => { e.preventDefault(); e.stopPropagation(); openContextMenu(entry, e.clientX, e.clientY) }}
                     onTouchStart={() => handleLongPressStart(entry)}
                     onTouchEnd={handleLongPressEnd}
@@ -1306,10 +1282,10 @@ export default function ApiFilesBrowser(): JSX.Element {
                       ) : mt === 'audio' ? (
                         <button
                           className="relative w-9 h-9 rounded overflow-hidden"
-                          onClick={(e) => { e.stopPropagation(); if (!selectMode) handlePlay(entry) }}
+                          onClick={(e) => { e.stopPropagation(); if (!selectMode) playEntry(entry) }}
                           title="Play"
                         >
-                          <ApiCoverThumb path={entry.path} size={36} />
+                          {localMode ? <LocalCoverThumb path={entry.path} size={36} /> : <ApiCoverThumb path={entry.path} size={36} />}
                           {!selectMode && (
                             <div className="absolute inset-0 flex items-center justify-center bg-black/60 opacity-0 group-hover:opacity-100 transition-opacity rounded">
                               {playing === entry.path ? <Loader2 size={14} className="text-white animate-spin" /> : <Play size={14} fill="white" className="text-white ml-0.5" />}
@@ -1317,7 +1293,7 @@ export default function ApiFilesBrowser(): JSX.Element {
                           )}
                         </button>
                       ) : mt === 'image' ? (
-                        <div className="w-9 h-9"><ApiImageThumb path={entry.path} size={36} /></div>
+                        <div className="w-9 h-9"><ImageThumb src={localMode ? toFileUrl(entry.path) : smallCoverUrl(buildStreamUrl(entry.path, activeChannel))} size={36} /></div>
                       ) : mt === 'video' ? (
                         <div className="w-9 h-9 flex items-center justify-center"><Video size={18} className="text-text-muted" /></div>
                       ) : mt === 'text' ? (
@@ -1328,11 +1304,11 @@ export default function ApiFilesBrowser(): JSX.Element {
                     </div>
                     <span className="flex-1 min-w-0">
                       <span className={`block text-sm truncate ${isDir ? 'text-text-primary font-medium cursor-pointer' : 'text-text-secondary'}`}>{entry.name}</span>
-                      {isSearching && parentFolder(entry.path) && (
+                      {searching && parentFolder(entry.path) && (
                         <span className="block text-text-muted text-[10px] truncate">{parentFolder(entry.path)}</span>
                       )}
                     </span>
-                    {pendingFor(entry.path) && <PendingMarker proposal={pendingFor(entry.path)!} />}
+                    {pending && <PendingMarker proposal={pending} />}
                     {isLiked && (
                       <button
                         className="shrink-0 p-1 text-accent"
@@ -1368,8 +1344,8 @@ export default function ApiFilesBrowser(): JSX.Element {
           ) : (
             /* ── Grid view ────────────────────────────────────────────────────── */
             <div className="grid gap-3 pt-1" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(140px, 1fr))' }}>
-              {currentPath && !isSearching && (
-                <button onClick={goBack} {...parentDropProps} className={`flex flex-col items-center gap-2 p-3 rounded-xl transition-colors ${
+              {parentRowAction && (
+                <button onClick={parentRowAction} {...(localMode ? {} : parentDropProps)} className={`flex flex-col items-center gap-2 p-3 rounded-xl transition-colors ${
                   dropTarget === '..' ? 'bg-accent/15 ring-2 ring-accent/50' : 'bg-surface-overlay hover:bg-surface-raised'
                 }`}>
                   <div className="w-full aspect-square flex items-center justify-center">
@@ -1388,8 +1364,9 @@ export default function ApiFilesBrowser(): JSX.Element {
                 const ext = getFileExt(entry.name).slice(1).toUpperCase()
                 const isMedia = mt === 'image' || mt === 'video'
                 const isSelected = selectedPaths.has(entry.path)
-                const isLiked = mt === 'audio' && likedSet.has(apiFileTrackId(entry.path, trackChannel))
+                const isLiked = !localMode && mt === 'audio' && likedSet.has(apiFileTrackId(entry.path, trackChannel))
                 const isDropTarget = dropTarget === entry.path
+                const pending = localMode ? undefined : pendingFor(entry.path)
                 return (
                   <div key={entry.path}
                     {...dragSourceProps(entry)}
@@ -1406,10 +1383,10 @@ export default function ApiFilesBrowser(): JSX.Element {
                         return
                       }
                       if (selectMode) { toggleSelect(entry.path); return }
-                      if (isDir) navigate(entry.path)
-                      else if (isMedia) openLightbox(entry)
-                      else if (mt === 'audio') handlePlay(entry)
-                      else if (mt === 'text') openApiText(entry)
+                      if (isDir) openFolder(entry)
+                      else if (isMedia) openMedia(entry)
+                      else if (mt === 'audio') playEntry(entry)
+                      else if (mt === 'text') openText(entry)
                     }}
                     onContextMenu={e => { e.preventDefault(); e.stopPropagation(); openContextMenu(entry, e.clientX, e.clientY) }}
                     onTouchStart={() => handleLongPressStart(entry)}
@@ -1421,8 +1398,10 @@ export default function ApiFilesBrowser(): JSX.Element {
                         <Folder size={40} className={`transition-colors ${isSelected ? 'text-accent' : 'text-text-secondary group-hover:text-accent'}`} />
                       ) : mt === 'audio' ? (
                         <>
-                          <ProgressiveCover lazy src={buildCoverArtUrl(entry.path, false, activeChannel)} className="w-full h-full object-cover"
-                            onError={(e) => { (e.target as HTMLImageElement).style.display = 'none' }} />
+                          {localMode
+                            ? <LocalCoverThumb path={entry.path} fill />
+                            : <ProgressiveCover lazy src={buildCoverArtUrl(entry.path, false, activeChannel)} className="w-full h-full object-cover"
+                                onError={(e) => { (e.target as HTMLImageElement).style.display = 'none' }} />}
                           {!selectMode && (
                             <div className="absolute inset-0 flex items-center justify-center bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none">
                               {playing === entry.path
@@ -1433,8 +1412,11 @@ export default function ApiFilesBrowser(): JSX.Element {
                         </>
                       ) : mt === 'image' ? (
                         <>
-                          <ProgressiveCover lazy src={buildStreamUrl(entry.path, activeChannel)} alt={entry.name} className="w-full h-full object-cover"
-                            onError={(e) => { (e.target as HTMLImageElement).style.display = 'none' }} />
+                          {localMode
+                            ? <img src={toFileUrl(entry.path)} alt={entry.name} loading="lazy" decoding="async" className="w-full h-full object-cover"
+                                onError={(e) => { (e.target as HTMLImageElement).style.display = 'none' }} />
+                            : <ProgressiveCover lazy src={buildStreamUrl(entry.path, activeChannel)} alt={entry.name} className="w-full h-full object-cover"
+                                onError={(e) => { (e.target as HTMLImageElement).style.display = 'none' }} />}
                           {!selectMode && (
                             <div className="absolute inset-0 bg-black/30 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
                               <div className="w-9 h-9 rounded-full bg-white/20 backdrop-blur-sm flex items-center justify-center">
@@ -1494,7 +1476,7 @@ export default function ApiFilesBrowser(): JSX.Element {
                         <p className="text-text-primary text-xs font-medium truncate">{entry.name}</p>
                         {!isDir && <p className="text-text-muted text-[10px] uppercase tracking-wide mt-0.5">{ext}</p>}
                       </div>
-                      {pendingFor(entry.path) && <PendingMarker proposal={pendingFor(entry.path)!} />}
+                      {pending && <PendingMarker proposal={pending} />}
                       {/* Same visible context-menu trigger as the list rows —
                           right-click/long-press aren't discoverable on touch. */}
                       {!selectMode && (
@@ -1513,7 +1495,7 @@ export default function ApiFilesBrowser(): JSX.Element {
               {visibleGhosts.map((g) => <PendingGhostItem key={`ghost:${g.path}`} ghost={g} variant="tile" />)}
             </div>
           )}
-        </div>}
+        </div>
 
         {/* Selection action bar */}
         {selectMode && (
@@ -1533,10 +1515,35 @@ export default function ApiFilesBrowser(): JSX.Element {
             >
               Clear
             </button>
+            {localMode && (
+              <>
+                <button
+                  onClick={playSelectedLocal}
+                  disabled={selectedLocalAudio().length === 0}
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium border border-[var(--border)] text-text-secondary hover:text-text-primary hover:border-accent/40 disabled:opacity-50 transition-colors"
+                >
+                  <Play size={13} /> Play
+                </button>
+                <button
+                  onClick={() => copyTextToClipboard(filteredEntries.filter((e) => selectedPaths.has(e.path)).map((e) => e.path).join('\n'), 'paths')}
+                  disabled={selectedPaths.size === 0}
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium border border-[var(--border)] text-text-secondary hover:text-text-primary hover:border-accent/40 disabled:opacity-50 transition-colors"
+                >
+                  <Clipboard size={13} /> Copy paths
+                </button>
+                <button
+                  onClick={() => void deleteLocal([...selectedPaths.keys()])}
+                  disabled={selectedPaths.size === 0}
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium border border-red-400/40 text-red-400 hover:bg-red-400/10 disabled:opacity-50 transition-colors"
+                >
+                  <Trash2 size={13} /> Delete
+                </button>
+              </>
+            )}
             {/* Deletion only: a replace swaps one file's body for another,
                 which has no meaning across a selection. Directories are
                 dropped — proposals target files. */}
-            {canPropose && (
+            {!localMode && canPropose && (
               <button
                 onClick={() => {
                   const paths = filteredEntries
@@ -1553,7 +1560,7 @@ export default function ApiFilesBrowser(): JSX.Element {
                 <Trash2 size={13} /> Propose deletion
               </button>
             )}
-            <button
+            {!localMode && <button
               onClick={downloadZip}
               disabled={selectedPaths.size === 0 || zipStatus === 'starting' || zipStatus === 'zipping'}
               className="flex items-center gap-1.5 px-3 py-1.5 bg-accent text-white rounded-lg text-xs font-medium disabled:opacity-50 transition-opacity hover:opacity-90"
@@ -1567,7 +1574,7 @@ export default function ApiFilesBrowser(): JSX.Element {
               ) : (
                 <><PackageOpen size={13} /> Download ZIP</>
               )}
-            </button>
+            </button>}
             <button
               onClick={exitSelectMode}
               className="p-1.5 rounded-lg hover:bg-surface-overlay transition-colors"
@@ -1581,7 +1588,7 @@ export default function ApiFilesBrowser(): JSX.Element {
 
       {copiedPath && (
         <PopLayer className="fixed bottom-5 left-1/2 -translate-x-1/2 z-50 flex items-center gap-2 bg-surface border border-[var(--border)] rounded-lg shadow-2xl px-3.5 py-2.5 text-xs text-text-primary animate-menu-pop">
-          <Check size={13} className="text-accent" /> {copiedKind === 'path' ? 'Path copied' : 'Link copied'}
+          <Check size={13} className="text-accent" /> {copiedKind === 'paths' ? 'Paths copied' : copiedKind === 'path' ? 'Path copied' : 'Link copied'}
         </PopLayer>
       )}
 
@@ -1617,7 +1624,7 @@ export default function ApiFilesBrowser(): JSX.Element {
           <div className="w-full max-w-sm rounded-2xl border border-[var(--border)] bg-surface p-4 shadow-2xl" onClick={e => e.stopPropagation()}>
             <h3 className="text-text-primary text-sm font-semibold mb-1">New folder</h3>
             <p className="text-text-muted text-xs mb-3">
-              Queues a new folder holding {bundlePrompt.items.filter(d => d.path !== bundlePrompt.target.path).length + 1} items, in {parentFolder(bundlePrompt.target.path) || 'the root folder'}.
+              Proposes a new folder holding {bundlePrompt.items.filter(d => d.path !== bundlePrompt.target.path).length + 1} items, in {parentFolder(bundlePrompt.target.path) || 'the root folder'}.
             </p>
             <input
               autoFocus
@@ -1636,7 +1643,7 @@ export default function ApiFilesBrowser(): JSX.Element {
                 onClick={confirmBundle}
                 disabled={!bundlePrompt.name.trim()}
                 className="px-3 py-1.5 rounded-lg bg-accent text-white text-xs font-medium disabled:opacity-50 hover:opacity-90 transition-opacity"
-              >Queue folder</button>
+              >Propose folder</button>
             </div>
           </div>
         </MotionOverlay>
@@ -1647,7 +1654,7 @@ export default function ApiFilesBrowser(): JSX.Element {
           <div className="w-full max-w-sm rounded-2xl border border-[var(--border)] bg-surface p-4 shadow-2xl" onClick={e => e.stopPropagation()}>
             <h3 className="text-text-primary text-sm font-semibold mb-1">New folder</h3>
             <p className="text-text-muted text-xs mb-3">
-              Queues a new folder in {currentPath || 'the root folder'}.
+              Proposes a new folder in {currentPath || 'the root folder'}.
             </p>
             <input
               autoFocus
@@ -1665,7 +1672,7 @@ export default function ApiFilesBrowser(): JSX.Element {
                 onClick={confirmNewApiFolder}
                 disabled={!newFolderPrompt.trim()}
                 className="px-3 py-1.5 rounded-lg bg-accent text-white text-xs font-medium disabled:opacity-50 hover:opacity-90 transition-opacity"
-              >Queue folder</button>
+              >Propose folder</button>
             </div>
           </div>
         </MotionOverlay>
@@ -1797,33 +1804,32 @@ export default function ApiFilesBrowser(): JSX.Element {
         )
       })()}
 
-      {/* Local-mode context menu — open / play, rename, delete. Deletion and
-          renaming are handled in the main process (confirm + OS trash there),
-          so nothing here touches the filesystem directly. */}
-      {localMode && localCtxMenu && (() => {
-        const entry = localCtxMenu.entry
+      {/* Local-mode entry menu. Deletion and renaming are handled in the main
+          process (confirm + OS trash there), so nothing here touches the
+          filesystem directly. */}
+      {localMode && ctxMenu && (() => {
+        const entry = ctxMenu.entry
         const media = getMediaType(entry.name)
         return (
           <ContextMenu
-            x={localCtxMenu.x}
-            y={localCtxMenu.y}
-            onClose={() => setLocalCtxMenu(null)}
+            x={ctxMenu.x}
+            y={ctxMenu.y}
+            onClose={() => setCtxMenu(null)}
             className="min-w-[190px]"
             items={[
-              entry.type === 'directory'
-                ? { icon: FolderOpen, label: 'Open', onSelect: () => browseLocal(entry.path) }
-                : media === 'audio'
-                  ? { icon: Play, label: 'Play', onSelect: () => handleLocalPlay(entry) }
-                  : media === 'text'
-                    ? { icon: FileText, label: 'View', onSelect: () => openLocalText(entry) }
-                    : null,
+              entry.type === 'directory' && { icon: FolderOpen, label: 'Open', onSelect: () => browseLocal(entry.path) },
+              media === 'audio' && { icon: Play, label: 'Play', onSelect: () => handleLocalPlay(entry) },
+              media === 'audio' && { icon: ListPlus, label: 'Add to queue', onSelect: () => addToQueue(localFileToTrack(entry)) },
+              media === 'text' && { icon: FileText, label: 'View', onSelect: () => openLocalText(entry) },
               { icon: ExternalLink, label: 'Open with system app', onSelect: () => openLocalFile(entry.path) },
+              { icon: CheckSquare2, label: 'Select', onSelect: () => enterSelectMode(entry) },
+              { icon: Clipboard, label: 'Copy path', onSelect: () => copyPath(entry) },
               { icon: Pencil, label: 'Rename', onSelect: () => startRename(entry) },
               'divider',
               { icon: FolderPlus, label: 'New folder', onSelect: () => startCreate('directory') },
               { icon: FilePlus, label: 'New file', onSelect: () => startCreate('file') },
               'divider',
-              { icon: Trash2, label: 'Delete', danger: true, onSelect: () => deleteLocalEntry(entry) },
+              { icon: Trash2, label: 'Delete', danger: true, onSelect: () => void deleteLocal([entry.path]) },
             ]}
           />
         )

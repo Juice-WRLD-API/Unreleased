@@ -86,7 +86,7 @@ contextBridge.exposeInMainWorld('electron', {
   },
 
   // Local filesystem
-  browseLocal: (dirPath) => ipcRenderer.invoke('browse-local', dirPath),
+  browseLocal: (dirPath, opts) => ipcRenderer.invoke('browse-local', dirPath, opts),
   pickFolder:  ()        => ipcRenderer.invoke('pick-folder'),
   openPath:    (p)       => ipcRenderer.invoke('open-path', p),
   // Reveals a file/folder in Explorer/Finder without ever launching it —
@@ -96,13 +96,14 @@ contextBridge.exposeInMainWorld('electron', {
   // Local file management, used by Files > Local. The name is validated and
   // resolved against its parent in main, so it can't escape the folder.
   // localCreate/localRename resolve { ok, path } | { error }; localDelete
-  // prompts and trashes, resolving { ok } | { canceled } | { error }.
+  // takes one path or a list, prompts once and trashes, resolving
+  // { ok, failed? } | { canceled } | { error }.
   // Reads a text file for the in-app viewer, capped at 2 MB. Resolves
   // { ok, text, truncated, size } | { error }.
   readTextFile: (filePath)           => ipcRenderer.invoke('read-text-file', filePath),
   localCreate: (dirPath, name, kind) => ipcRenderer.invoke('local-create', dirPath, name, kind),
   localRename: (filePath, name)      => ipcRenderer.invoke('local-rename', filePath, name),
-  localDelete: (filePath)            => ipcRenderer.invoke('local-delete', filePath),
+  localDelete: (paths)               => ipcRenderer.invoke('local-delete', paths),
   // Opens an OS file picker and copies the chosen file(s) into dirPath.
   // Resolves { ok, paths } | { canceled }.
   localUpload: (dirPath)             => ipcRenderer.invoke('local-upload', dirPath),

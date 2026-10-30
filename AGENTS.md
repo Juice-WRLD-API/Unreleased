@@ -1,6 +1,6 @@
 # Agent guide: Juice WRLD API and Unreleased
 
-**Version 1.42** · updated 2026-10-30. Bump the version and date whenever you
+**Version 1.43** · updated 2026-10-30. Bump the version and date whenever you
 change this file (minor for fixes and additions, major for rewrites).
 
 **Keep this file current.** If you find something in the docs or this file that
@@ -66,6 +66,8 @@ version number (desktop 2.5.x, web 2.3.x, Android/iOS 3.2.x, beta 3.0.x-beta as 
   The file has the recipe for the version columns.
 - The shorthand **port-c**: on `web`, port the change to `app`; on `app`, port it
   to `web`. Then commit and push both.
+- The shorthand **port-b**: commit and push the current branch only, with no
+  porting, authored as the user and with no AI attribution lines.
 
 ### Finishing the job
 
@@ -111,8 +113,11 @@ docs and the server disagree, the backend code in `backend/` wins.
   filled from Spotify, Apple Music and SoundCloud), each with `type` (Album, EP,
   Mixtape), `cover_url` (a site asset or a storage path, so go through
   `buildImageUrl`) and an ordered `songs` list of catalogue song `path`s.
-  Editions are rows of their own that repeat the base album's paths. The public
-  list is cached for 15 minutes, so admin edits show there late.
+  Reads add a read-only `song` to each track (`id`, `public_id`, `name`,
+  `category`, `length`, `image_url`, or null) once the backend change from
+  2026-10-30 is deployed; writes still take `{order, path}` only. Editions are
+  rows of their own that repeat the base album's paths. The public list is
+  cached for 15 minutes, so admin edits show there late.
 - **`/files/download/?path=` supports Range** (206 with `Content-Range`, CORS
   exposes the range headers). An `<audio>` element handles seeking by itself.
 - **`/files/image-thumbnail/` 404s for real images** (nginx's HTML 404 page,

@@ -16,6 +16,28 @@ export function breadcrumbs(path: string): { label: string; path: string }[] {
   return parts.map((label, i) => ({ label, path: parts.slice(0, i + 1).join('/') }))
 }
 
+// Breadcrumbs for a folder on this computer: the root (C:\, \\server\share\
+// or /) and then one crumb per folder, each with its full path.
+export function localCrumbs(path: string): { label: string; path: string }[] {
+  if (!path) return []
+  const root = path.match(/^(?:[a-zA-Z]:[\\/]?|\\\\[^\\/]+[\\/][^\\/]+[\\/]?|\/)/)?.[0] ?? ''
+  const sep = path.includes('\\') ? '\\' : '/'
+  const rootPath = root && !/[\\/]$/.test(root) ? root + sep : root
+  const crumbs = rootPath ? [{ label: rootPath === '/' ? '/' : rootPath.slice(0, -1), path: rootPath }] : []
+  let acc = rootPath
+  for (const part of path.slice(root.length).split(/[\\/]/).filter(Boolean)) {
+    acc = !acc || /[\\/]$/.test(acc) ? acc + part : acc + sep + part
+    crumbs.push({ label: part, path: acc })
+  }
+  return crumbs
+}
+
+// The folder above a local one, or '' at a drive or filesystem root.
+export function localParent(path: string): string {
+  const crumbs = localCrumbs(path)
+  return crumbs.length > 1 ? crumbs[crumbs.length - 2].path : ''
+}
+
 export function parentFolder(path: string): string {
   const i = path.lastIndexOf('/')
   return i > 0 ? path.slice(0, i) : ''

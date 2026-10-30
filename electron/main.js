@@ -12,6 +12,7 @@ const { configureRuntime } = require('./platform')
 const { registerPasskeyIpc } = require('./passkey')
 const { canRequestMicrophone, canCaptureSystemAudio, canUseFileSystem } = require('./microphonePermission')
 const { createLaunchGate } = require('./launchUpdate')
+const { resolveTypedPath } = require('./localPaths')
 
 // Response() only accepts web ReadableStreams, not Node streams
 const webStreamFromNode = (stream) => Readable.toWeb(stream)
@@ -1566,11 +1567,22 @@ ipcMain.on('window-sync', (event, msg) => {
 })
 
 // ── IPC: local file browsing ──────────────────────────────────────────────────
-ipcMain.handle('browse-local', async (_, dirPath) => {
+// opts.typed: dirPath is what someone typed or pasted into the path box, so
+// resolve it (quotes, ~, variables, relative to opts.from) and open a file's
+// folder rather than refusing it.
+ipcMain.handle('browse-local', async (_, dirPath, opts) => {
+  const home = app.getPath('home')
+  let target = dirPath || home
   try {
+    if (opts && opts.typed && typeof dirPath === 'string') {
+      target = resolveTypedPath(dirPath, { home, from: typeof opts.from === 'string' ? opts.from : '' }) || home
+    }
     // Async: a big folder, or one on a slow network drive, held every window up.
-    const target = dirPath || app.getPath('home')
-    const st = await fs.promises.stat(target)
+    let st = await fs.promises.stat(target)
+    if (!st.isDirectory() && opts && opts.typed) {
+      target = path.dirname(target)
+      st = await fs.promises.stat(target)
+    }
     if (!st.isDirectory()) return { error: 'Not a directory', path: target, entries: [] }
     const names = (await fs.promises.readdir(target)).filter((name) => !name.startsWith('.'))
     const entries = (await Promise.all(names.map(async (name) => {
@@ -1591,7 +1603,11 @@ ipcMain.handle('browse-local', async (_, dirPath) => {
     })
     return { path: target, entries }
   } catch (err) {
-    return { error: err.message, path: dirPath || '', entries: [] }
+    const code = err && err.code
+    const error = code === 'ENOENT' || code === 'ENOTDIR' ? `Can't find ${target}`
+      : code === 'EACCES' || code === 'EPERM' ? `No permission to open ${target}`
+      : err.message
+    return { error, path: dirPath || '', entries: [] }
   }
 })
 
@@ -1704,12 +1720,15 @@ ipcMain.handle('local-rename', async (event, filePath, name) => {
 
 // Same treatment as delete-library-file: OS trash (recoverable), never without
 // a modal confirm, and Cancel is both the default and the escape action.
-ipcMain.handle('local-delete', async (event, filePath) => {
-  if (typeof filePath !== 'string' || !filePath) return { error: 'No path' }
-  const name = path.basename(filePath)
+// Takes one path or a list (a selection), with one confirm for all of them.
+ipcMain.handle('local-delete', async (event, target) => {
+  const paths = (Array.isArray(target) ? target : [target]).filter((p) => typeof p === 'string' && p)
+  if (paths.length === 0) return { error: 'No path' }
+  const one = paths.length === 1
+  const name = path.basename(paths[0])
   const win = BrowserWindow.fromWebContents(event.sender) ?? mainWindow
   let isDir = false
-  try { isDir = fs.statSync(filePath).isDirectory() } catch {}
+  if (one) try { isDir = fs.statSync(paths[0]).isDirectory() } catch {}
   const binName = process.platform === 'darwin' ? 'Trash'
     : process.platform === 'win32' ? 'Recycle Bin' : 'trash'
   const { response } = await dialog.showMessageBox(win, {
@@ -1717,20 +1736,22 @@ ipcMain.handle('local-delete', async (event, filePath) => {
     buttons: ['Delete', 'Cancel'],
     defaultId: 1,
     cancelId: 1,
-    title: isDir ? 'Delete folder' : 'Delete file',
-    message: `Delete "${name}"?`,
-    detail: isDir
-      ? `The folder and everything inside it is moved to the ${binName}.`
+    title: !one ? 'Delete items' : isDir ? 'Delete folder' : 'Delete file',
+    message: one ? `Delete "${name}"?` : `Delete ${paths.length} items?`,
+    detail: !one ? `They're moved to the ${binName}, folders with everything inside them.`
+      : isDir ? `The folder and everything inside it is moved to the ${binName}.`
       : `The file is moved to the ${binName}.`,
   })
   if (response !== 0) return { canceled: true }
-  try {
-    await shell.trashItem(filePath)
-    return { ok: true }
-  } catch (e) {
-    fileOpError(event, 'Delete', name, e.message)
-    return { error: e.message }
+  const failed = []
+  let lastError = ''
+  for (const p of paths) {
+    try { await shell.trashItem(p) } catch (e) { failed.push(p); lastError = e.message }
   }
+  if (failed.length === 0) return { ok: true }
+  fileOpError(event, 'Delete', path.basename(failed[0]),
+    failed.length > 1 ? `${lastError}\n\n${failed.length - 1} more couldn't be deleted either.` : lastError)
+  return failed.length === paths.length ? { error: lastError } : { ok: true, failed: failed.length }
 })
 
 // Copies one or more OS-picked files into a Local Files folder. Reuses the
