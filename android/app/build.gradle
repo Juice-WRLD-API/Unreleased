@@ -9,8 +9,8 @@ android {
         targetSdkVersion rootProject.ext.targetSdkVersion
         // Keep versionName in step with package.json's version when releasing;
         // bump versionCode by 1 each APK (Android compares the integer, not the name).
-        versionCode 44
-        versionName "3.2.5"
+        versionCode 45
+        versionName "3.2.6"
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         aaptOptions {
              // Files and dirs to omit from the packaged assets dir, modified to accommodate modern web apps.
@@ -33,6 +33,7 @@ repositories {
 }
 
 dependencies {
+    implementation 'com.mpatric:mp3agic:0.9.1'
     implementation fileTree(include: ['*.jar'], dir: 'libs')
     implementation "androidx.appcompat:appcompat:$androidxAppCompatVersion"
     implementation "androidx.coordinatorlayout:coordinatorlayout:$androidxCoordinatorLayoutVersion"

@@ -31,6 +31,7 @@ import java.io.FileInputStream;
 import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
+import java.io.OutputStream;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
@@ -89,11 +90,12 @@ public class LocalLibraryPlugin extends Plugin {
 
     // ── Source picking ───────────────────────────────────────────────────────
 
-    /** Opens the system folder picker and persists read access to the choice. */
+    /** Requests read/write access and persists whichever permissions the provider grants. */
     @PluginMethod
     public void pickFolder(PluginCall call) {
         Intent intent = new Intent(Intent.ACTION_OPEN_DOCUMENT_TREE);
         intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION
+                | Intent.FLAG_GRANT_WRITE_URI_PERMISSION
                 | Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION);
         startActivityForResult(call, intent, "folderPicked");
     }
@@ -111,7 +113,7 @@ public class LocalLibraryPlugin extends Plugin {
         Uri tree = data.getData();
         try {
             getContext().getContentResolver().takePersistableUriPermission(
-                    tree, Intent.FLAG_GRANT_READ_URI_PERMISSION);
+                    tree, data.getFlags() & (Intent.FLAG_GRANT_READ_URI_PERMISSION | Intent.FLAG_GRANT_WRITE_URI_PERMISSION));
         } catch (SecurityException e) {
             // Some providers hand back a non-persistable grant. The folder still
             // works this session; it just won't survive a restart.
@@ -130,6 +132,7 @@ public class LocalLibraryPlugin extends Plugin {
         intent.putExtra(Intent.EXTRA_MIME_TYPES, new String[] { "audio/*", "application/ogg" });
         intent.putExtra(Intent.EXTRA_ALLOW_MULTIPLE, true);
         intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION
+                | Intent.FLAG_GRANT_WRITE_URI_PERMISSION
                 | Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION);
         startActivityForResult(call, intent, "filesPicked");
     }
@@ -158,7 +161,7 @@ public class LocalLibraryPlugin extends Plugin {
         for (Uri uri : picked) {
             try {
                 getContext().getContentResolver().takePersistableUriPermission(
-                        uri, Intent.FLAG_GRANT_READ_URI_PERMISSION);
+                        uri, data.getFlags() & (Intent.FLAG_GRANT_READ_URI_PERMISSION | Intent.FLAG_GRANT_WRITE_URI_PERMISSION));
             } catch (SecurityException ignored) { }
             uris.put(uri.toString());
         }
@@ -241,7 +244,7 @@ public class LocalLibraryPlugin extends Plugin {
         if (uri != null) {
             try {
                 getContext().getContentResolver().releasePersistableUriPermission(
-                        Uri.parse(uri), Intent.FLAG_GRANT_READ_URI_PERMISSION);
+                        Uri.parse(uri), Intent.FLAG_GRANT_READ_URI_PERMISSION | Intent.FLAG_GRANT_WRITE_URI_PERMISSION);
             } catch (SecurityException ignored) { }
         }
         call.resolve();
@@ -682,6 +685,108 @@ public class LocalLibraryPlugin extends Plugin {
             for (Object o : arr.toList()) if (o != null) out.add(o.toString());
         } catch (JSONException ignored) { }
         return out;
+    }
+
+    private final Object tagWriteLock = new Object();
+
+    @PluginMethod
+    public void writeTags(PluginCall call) {
+        String value = call.getString("uri");
+        JSObject patch = call.getObject("changes");
+        if (value == null || !value.startsWith("content://") || patch == null || patch.length() == 0) {
+            call.reject("Choose a local file and change at least one tag.");
+            return;
+        }
+        new Thread(() -> {
+            synchronized (tagWriteLock) {
+                File backup = null;
+                File edited = null;
+                boolean retainBackup = false;
+                try {
+                    Uri uri = Uri.parse(value);
+                    ContentResolver resolver = getContext().getContentResolver();
+                    if (getContext().checkUriPermission(uri, android.os.Process.myPid(), android.os.Process.myUid(),
+                            Intent.FLAG_GRANT_WRITE_URI_PERMISSION) != android.content.pm.PackageManager.PERMISSION_GRANTED)
+                        throw new IOException("Write access is needed. In Library settings, add this folder or file again and allow access, then retry.");
+                    String[] info = queryDocumentMeta(uri);
+                    if (info == null || !"mp3".equals(extOf(info[0])))
+                        throw new IOException("Tag editing currently supports MP3 files only.");
+                    backup = File.createTempFile("tag-backup-", ".mp3", getContext().getFilesDir());
+                    try (InputStream in = resolver.openInputStream(uri); OutputStream out = new FileOutputStream(backup)) {
+                        copyTagFile(in, out);
+                    }
+                    edited = File.createTempFile("tag-edited-", ".mp3", getContext().getCacheDir());
+                    Map<String, String> changes = new HashMap<>();
+                    java.util.Iterator<String> keys = patch.keys();
+                    while (keys.hasNext()) {
+                        String key = keys.next();
+                        changes.put(key, patch.getString(key));
+                    }
+                    LocalMp3Tags.write(backup, edited, changes);
+                    JSONObject track = readTags(Uri.fromFile(edited), info[0], edited.length(), 0);
+                    if (track == null) throw new IOException("The edited copy could not be read. Original file was not changed.");
+                    try {
+                        replaceTagFile(resolver, uri, edited);
+                        verifyTagFile(resolver, uri, edited);
+                    } catch (Exception writeError) {
+                        try {
+                            replaceTagFile(resolver, uri, backup);
+                            verifyTagFile(resolver, uri, backup);
+                        } catch (Exception restoreError) {
+                            retainBackup = true;
+                            throw new IOException("Saving and restoring failed. Original backup retained at " + backup.getAbsolutePath(), writeError);
+                        }
+                        throw new IOException("Could not save tags; the original was restored. " + writeError.getMessage(), writeError);
+                    }
+                    String[] saved = queryDocumentMeta(uri);
+                    track.put("id", "local-" + value);
+                    track.put("filePath", value);
+                    track.put("fileSize", saved == null ? edited.length() : Long.parseLong(saved[1]));
+                    track.put("lastModified", saved == null ? 0 : Long.parseLong(saved[2]));
+                    JSObject result = new JSObject();
+                    result.put("track", track);
+                    call.resolve(result);
+                } catch (Exception e) {
+                    call.reject(e.getMessage() == null ? "Could not save tags." : e.getMessage(), e);
+                } finally {
+                    if (backup != null && !retainBackup) backup.delete();
+                    if (edited != null) edited.delete();
+                }
+            }
+        }, "local-tag-write").start();
+    }
+
+    private static void copyTagFile(InputStream in, OutputStream out) throws IOException {
+        if (in == null || out == null) throw new IOException("Cannot open this file.");
+        byte[] buffer = new byte[65536];
+        int n;
+        while ((n = in.read(buffer)) != -1) out.write(buffer, 0, n);
+        out.flush();
+    }
+
+    private static void replaceTagFile(ContentResolver resolver, Uri uri, File source) throws IOException {
+        try (InputStream in = new FileInputStream(source); OutputStream out = resolver.openOutputStream(uri, "rwt")) {
+            copyTagFile(in, out);
+        }
+    }
+
+    private static void verifyTagFile(ContentResolver resolver, Uri uri, File source) throws IOException {
+        try (InputStream actual = resolver.openInputStream(uri); InputStream expected = new FileInputStream(source)) {
+            if (actual == null) throw new IOException("Cannot verify saved file.");
+            byte[] a = new byte[65536];
+            byte[] b = new byte[65536];
+            int n;
+            while ((n = expected.read(a)) != -1) {
+                int offset = 0;
+                while (offset < n) {
+                    int count = actual.read(b, offset, n - offset);
+                    if (count < 0) throw new IOException("Saved file was truncated.");
+                    offset += count;
+                }
+                for (int j = 0; j < n; j++) if (a[j] != b[j]) throw new IOException("Saved file did not match.");
+            }
+            if (actual.read() != -1) throw new IOException("Provider did not replace the complete file.");
+        }
     }
 
     private String meta(MediaMetadataRetriever mmr, int key) {

@@ -18,6 +18,7 @@ export interface ScanProgress {
 }
 
 interface LocalLibraryPlugin {
+  writeTags(opts: { uri: string; changes: LocalTagChanges }): Promise<{ track: LibraryTrack }>
   pickFolder(): Promise<{ uri?: string; name?: string; canceled?: boolean }>
   pickFiles(): Promise<{ uris?: string[]; canceled?: boolean }>
   releaseSource(opts: { uri: string }): Promise<void>
@@ -29,6 +30,14 @@ interface LocalLibraryPlugin {
   savePlaylists(opts: { json: string }): Promise<void>
   loadPlaylists(): Promise<{ json: string | null }>
   addListener(event: 'scanProgress', fn: (p: ScanProgress) => void): Promise<{ remove: () => void }>
+}
+
+export type LocalTagChanges = Partial<Record<'title' | 'artist' | 'album' | 'albumArtist' | 'composer' | 'genre' | 'year' | 'trackNumber' | 'discNumber', string>>
+
+export async function writeLocalTags(uri: string, changes: LocalTagChanges): Promise<LibraryTrack> {
+  const p = plugin()
+  if (!p) throw new Error('Local tag editing requires the Android app.')
+  return (await p.writeTags({ uri, changes })).track
 }
 
 interface CapacitorGlobal {
