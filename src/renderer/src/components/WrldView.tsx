@@ -10,7 +10,7 @@ import { useShallow } from 'zustand/react/shallow'
 import { getCurrentLineIndex, downloadSyncedLyrics, splitAdLibs, splitColorWords, ADLIB_OPACITY, useLyricsVisible, lyricsLoading } from '../lib/lyrics'
 import { formatDuration } from '../lib/format'
 import { setEqAnchor } from '../lib/eqAnchor'
-import { seekAudio, getAudioDuration, getAudioCurrentTime } from './Player'
+import { seekAudio, getAudioDuration, getAudioCurrentTime, usePlayerLoading } from './Player'
 import { getSongById, songToTrack, playlistCoverUrl, smallCoverUrl, fullCoverUrl, loadAllSongs } from '../lib/juicewrldApi'
 import type { JWApiSong } from '../lib/juicewrldApi'
 import * as albumsApi from '../lib/albumsApi'
@@ -2153,6 +2153,7 @@ const FmProgressBar = memo(function FmProgressBar({ txtPri, txtTer, trackBg }: {
 
 const ProgressBar = memo(function ProgressBar({ txtPri, txtTer, trackBg }: { txtPri: string; txtTer: string; trackBg: string }) {
   const { progress, currentTime } = useStore(useShallow(s => ({ progress: s.progress, currentTime: s.currentTime })))
+  const loading = usePlayerLoading(s => s.on)
   const barRef = useRef<HTMLDivElement>(null)
   // Buffer the scrub position visually while dragging - only call seekAudio
   // on release, since seeking on every mousemove makes playback glitch/stutter.
@@ -2224,6 +2225,11 @@ const ProgressBar = memo(function ProgressBar({ txtPri, txtTer, trackBg }: { txt
         }}
       >
         <div className="h-full rounded-full" style={{ width: `${pct}%`, background: txtPri }} />
+        {/* Same sweep as the player bars, in this screen's text color. */}
+        <span
+          className={`player-loading rounded-full ${loading ? 'on' : ''}`}
+          style={{ '--sweep': `color-mix(in srgb, ${txtPri} 70%, transparent)` } as React.CSSProperties}
+        />
         <div
           className="absolute top-1/2 w-3 h-3 rounded-full shadow-lg opacity-0 group-hover/bar:opacity-100 transition-opacity pointer-events-none"
           style={{ left: `${pct}%`, transform: 'translate(-50%, -50%)', background: txtPri }}

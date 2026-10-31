@@ -1,6 +1,7 @@
 import { useEffect, useLayoutEffect, useRef, useState, useCallback } from 'react'
 import * as desktopActions from '../desktop/actions'
 import { createPortal } from 'react-dom'
+import { create } from 'zustand'
 import {
   Play,
   Pause,
@@ -200,6 +201,10 @@ let _getAudioDuration: (() => number) | null = null
 let _getAudioCurrentTime: (() => number) | null = null
 export function seekAudio(t: number): void { _seek?.(t) }
 export function getAudioDuration(): number { return _getAudioDuration?.() ?? 0 }
+// "Loading" = the app wants to play but the active slot isn't producing sound
+// yet (fetching, buffering or seeking). Lives outside the Player so WRLD's
+// scrubber can show the same sweep as the bars here.
+export const usePlayerLoading = create<{ on: boolean }>(() => ({ on: false }))
 // Live audio.currentTime, not the Zustand-stored value (which only updates on
 // the native 'timeupdate' event, ~4x/sec) — used to drive smooth per-frame
 // synced-lyrics highlighting instead of choppy ~250ms jumps.
@@ -490,6 +495,34 @@ export default function Player(): JSX.Element {
     activeSlot.current === 'A' ? slotA.current : slotB.current
   const getNext = (): HTMLAudioElement | null =>
     activeSlot.current === 'A' ? slotB.current : slotA.current
+
+  // Shown only after a short delay so cached and offline songs that start at
+  // once never flash it.
+  const audioLoading = usePlayerLoading((s) => s.on)
+  const loadingTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const isAudioLoading = (): boolean => {
+    const s = useStore.getState()
+    const a = getActive()
+    if (!a || !s.isPlaying || !s.currentTrack || s.radioFmActive) return false
+    return a.paused || a.seeking || a.readyState < HTMLMediaElement.HAVE_FUTURE_DATA
+  }
+  const syncAudioLoading = (): void => {
+    if (!isAudioLoading()) {
+      if (loadingTimer.current) { clearTimeout(loadingTimer.current); loadingTimer.current = null }
+      usePlayerLoading.setState({ on: false })
+      return
+    }
+    if (loadingTimer.current) return
+    loadingTimer.current = setTimeout(() => {
+      loadingTimer.current = null
+      usePlayerLoading.setState({ on: isAudioLoading() })
+    }, 300)
+  }
+  const onSlotLoadingEvent = (e: React.SyntheticEvent<HTMLAudioElement>): void => {
+    if (e.currentTarget === getActive()) syncAudioLoading()
+  }
+  useEffect(() => { syncAudioLoading() }, [isPlaying, currentTrack?.id, radioFmActive])
+  useEffect(() => () => { if (loadingTimer.current) clearTimeout(loadingTimer.current) }, [])
 
   // Tracks each slot's in-flight play() promise. With preload="none" the
   // element only starts fetching once play() is called, so pausing right
@@ -2306,10 +2339,16 @@ export default function Player(): JSX.Element {
         onLoadedMetadata={handleLoadedMetadata}
         onTimeUpdate={handleTimeUpdate}
         onEnded={handleEnded}
-        onPause={(e) => handleAudioPause(e.currentTarget)}
-        onPlaying={(e) => handleAudioPlaying(e.currentTarget)}
+        onPause={(e) => { handleAudioPause(e.currentTarget); onSlotLoadingEvent(e) }}
+        onPlaying={(e) => { handleAudioPlaying(e.currentTarget); onSlotLoadingEvent(e) }}
         onProgress={(e) => handleAudioProgress(e.currentTarget)}
-        onError={(e) => handleAudioError(e.currentTarget, 'slotA')}
+        onError={(e) => { handleAudioError(e.currentTarget, 'slotA'); onSlotLoadingEvent(e) }}
+        onPlay={onSlotLoadingEvent}
+        onWaiting={onSlotLoadingEvent}
+        onSeeking={onSlotLoadingEvent}
+        onSeeked={onSlotLoadingEvent}
+        onCanPlay={onSlotLoadingEvent}
+        onEmptied={onSlotLoadingEvent}
       />
       <audio
         ref={slotB}
@@ -2318,10 +2357,16 @@ export default function Player(): JSX.Element {
         onLoadedMetadata={handleLoadedMetadata}
         onTimeUpdate={handleTimeUpdate}
         onEnded={handleEnded}
-        onPause={(e) => handleAudioPause(e.currentTarget)}
-        onPlaying={(e) => handleAudioPlaying(e.currentTarget)}
+        onPause={(e) => { handleAudioPause(e.currentTarget); onSlotLoadingEvent(e) }}
+        onPlaying={(e) => { handleAudioPlaying(e.currentTarget); onSlotLoadingEvent(e) }}
         onProgress={(e) => handleAudioProgress(e.currentTarget)}
-        onError={(e) => handleAudioError(e.currentTarget, 'slotB')}
+        onError={(e) => { handleAudioError(e.currentTarget, 'slotB'); onSlotLoadingEvent(e) }}
+        onPlay={onSlotLoadingEvent}
+        onWaiting={onSlotLoadingEvent}
+        onSeeking={onSlotLoadingEvent}
+        onSeeked={onSlotLoadingEvent}
+        onCanPlay={onSlotLoadingEvent}
+        onEmptied={onSlotLoadingEvent}
       />
 
       {/* Equalizer popover — outside the WRLD-page conditional below so the
@@ -2407,6 +2452,7 @@ export default function Player(): JSX.Element {
         >
           <div className="h-[2px] bg-surface-overlay relative">
             <ProgressFill seekDrag={seekDrag} className="h-full bg-accent absolute left-0 top-0 transition-none" />
+            <span className={`player-loading ${audioLoading ? 'on' : ''}`} />
           </div>
         </div>
         )}
@@ -2492,6 +2538,7 @@ export default function Player(): JSX.Element {
           ) : (
             <div className="absolute top-0 left-0 right-0 h-[2px] bg-surface-overlay">
               <ProgressFill seekDrag={seekDrag} className="h-full bg-accent" />
+              <span className={`player-loading ${audioLoading ? 'on' : ''}`} />
             </div>
           )}
           <button
@@ -2680,7 +2727,7 @@ export default function Player(): JSX.Element {
                 ? <FmElapsedTime />
                 : <ElapsedTime />}
             </span>
-            <div className="flex-1 progress-track">
+            <div className="flex-1 progress-track relative">
               <SeekRange
                 seekDrag={seekDrag} radioFmActive={radioFmActive}
                 onMouseDown={radioFmActive ? undefined : handleSeekMouseDown}
@@ -2691,6 +2738,7 @@ export default function Player(): JSX.Element {
                 onKeyUp={radioFmActive ? undefined : handleSeekCommit}
                 disabled={!currentTrack}
               />
+              <span className={`player-loading player-loading--range ${audioLoading ? 'on' : ''}`} />
             </div>
             <span className="text-text-muted text-xs w-10 tabular-nums">
               {radioFmActive ? formatDuration(Math.floor(fmDurationMs / 1000)) : formatDuration(duration)}

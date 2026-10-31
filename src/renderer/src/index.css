@@ -393,6 +393,53 @@ input[type='range']:active::-moz-range-thumb {
   background: linear-gradient(to right, var(--accent) var(--val, 0%), var(--surface-overlay) var(--val, 0%));
 }
 
+/* Song still loading: a soft highlight sweeps along the player's progress
+   line. Sits over the line, so the bar itself keeps its position. --sweep is
+   the highlight's color: the accent by default, the line's own color on
+   WRLD's scrubber (set inline there). */
+.player-loading {
+  --sweep: rgb(var(--accent-rgb) / 0.75);
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.35s cubic-bezier(0.4, 0, 0.2, 1);
+}
+.player-loading--range {
+  top: 50%;
+  bottom: auto;
+  height: 4px;
+  margin-top: -2px;
+  border-radius: 2px;
+}
+.player-loading.on { opacity: 1; }
+.player-loading::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  width: 40%;
+  background: linear-gradient(to right, transparent, var(--sweep), transparent);
+  transform: translateX(-100%);
+  animation: player-loading-sweep 1.3s cubic-bezier(0.4, 0, 0.2, 1) infinite;
+  animation-play-state: paused;
+}
+.player-loading.on::after { animation-play-state: running; }
+@keyframes player-loading-sweep {
+  to { transform: translateX(250%); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .player-loading::after {
+    animation: none;
+    transform: none;
+    width: 100%;
+    background: var(--sweep);
+    opacity: 0.45;
+  }
+}
+
 /* Equalizer band sliders. Unlike seek/volume, a band's setting has to be
    readable at a glance without hovering each one - so the thumb stays
    visible, and the track fills from the 0 dB center out to the current
