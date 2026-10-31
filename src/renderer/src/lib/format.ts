@@ -14,8 +14,10 @@ export function formatDuration(seconds: number, empty = '0:00'): string {
 
 /** Seconds → "3 hr 12 min" / "45 min", for playlist/library totals. */
 export function formatTotalDuration(seconds: number): string {
-  const h = Math.floor(seconds / 3600)
-  const m = Math.round((seconds % 3600) / 60)
+  // Rounded to minutes first, so 1 hr 59.5 min reads "2 hr 0 min", not "1 hr 60 min".
+  const total = Math.round(seconds / 60)
+  const h = Math.floor(total / 60)
+  const m = total % 60
   if (h > 0) return `${h} hr ${m} min`
   return `${m} min`
 }

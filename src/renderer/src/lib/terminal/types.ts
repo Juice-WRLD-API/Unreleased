@@ -154,6 +154,14 @@ export function confirmAction(ctx: TermCtx, message: string, yes: boolean): bool
   return true
 }
 
+/** Pulls a `-y` out of free-text arguments (a name with spaces or quotes that
+ *  parseArgs would re-split), for confirmAction. */
+export function takeYes(args: string): { text: string; yes: boolean } {
+  const re = /(^|\s)-y(?=\s|$)/gi
+  const yes = /(^|\s)-y(?=\s|$)/i.test(args)
+  return { text: yes ? args.replace(re, '$1').trim() : args.trim(), yes }
+}
+
 /** Prints data as JSON when `--json` was given. Returns true when it did, so a
  *  command can `if (asJson(...)) return` ahead of its own formatting. */
 export function asJson(ctx: TermCtx, on: boolean, data: unknown): boolean {

@@ -18,6 +18,7 @@ const ACCOUNT_BASE = routeUrl('/accounts')
 const LIBRARY_BASE = routeUrl('/library')
 const ME_URL = `${ACCOUNT_BASE}/account/me/`
 const PLAYLISTS_URL = `${LIBRARY_BASE}/playlists/?omit_cover_image=true&include_items=true`
+const FAVORITES_URL = `${LIBRARY_BASE}/favorites/`
 const TOKEN_KEY = 'unreleased:authToken'
 
 export interface AccountUser {
@@ -339,10 +340,16 @@ export function clearToken(): void {
   try {
     localStorage.removeItem(TOKEN_KEY)
   } catch {}
-  // The cached profile and playlists belong to that token: drop them so the
-  // next boot can't paint them for a different account (see peekCachedAccount).
+  // The cached profile, playlists, favorites and own proposals belong to that
+  // token: drop them so the next account can't be shown them (see
+  // peekCachedAccount, peekFavorites).
   cacheDelete(ME_URL)
   cacheDelete(PLAYLISTS_URL)
+  cacheDelete(FAVORITES_URL)
+  cacheDelete(myProposalsUrl())
+  cacheDelete(myCompProposalsUrl())
+  playlistDetailCache.clear()
+  playlistCoverCache.clear()
 }
 
 // `cacheKey` opts a GET call into the offline fallback cache - pass it only
@@ -642,16 +649,16 @@ export async function getNowPlaying(userId: number): Promise<NowPlayingResponse>
 // getNowPlaying/NowPlayingState from here).
 
 export async function getFavorites(): Promise<FavoriteEntry[]> {
-  const url = `${LIBRARY_BASE}/favorites/`
-  return request<FavoriteEntry[]>(withoutLyricsParam(url), {
+  return request<FavoriteEntry[]>(withoutLyricsParam(FAVORITES_URL), {
     method: 'GET',
     transform: (rows) => rows.map((f) => (f.song ? { ...f, song: songWithoutLyrics(f.song) } : f)),
-  }, true, url)
+  }, true, FAVORITES_URL)
 }
 
 /** The last favorites response getFavorites cached, for an instant first paint. */
 export function peekFavorites(): FavoriteEntry[] | undefined {
-  return cacheGet<FavoriteEntry[]>(`${LIBRARY_BASE}/favorites/`)
+  if (!getToken()) return undefined
+  return cacheGet<FavoriteEntry[]>(FAVORITES_URL)
 }
 
 export async function addFavorite(songId: number): Promise<FavoriteEntry> {
@@ -908,7 +915,12 @@ export async function getPublicPlaylistCover(id: number): Promise<PlaylistCoverE
   if (cached) return cached
   const d = await request<PlaylistDetail>(withoutLyricsParam(`${LIBRARY_BASE}/playlists/public/${id}/`))
   const trackImages = playlistTrackImages(d.items ?? [])
-  const entry: PlaylistCoverEntry = { cover_image_url: d.cover_image_url, cover_image: d.cover_image, trackImages }
+  // Site-relative covers resolved like getPlaylistCover's.
+  const entry: PlaylistCoverEntry = {
+    cover_image_url: buildImageUrl(d.cover_image_url) ?? null,
+    cover_image: buildImageUrl(d.cover_image) ?? null,
+    trackImages,
+  }
   playlistCoverCache.set(id, entry)
   return entry
 }
@@ -928,8 +940,8 @@ export async function uploadPlaylistCover(id: number, file: File): Promise<Playl
     body: JSON.stringify({ cover_image: base64 }),
   })
   playlistCoverCache.set(id, {
-    cover_image_url: result.cover_image_url,
-    cover_image: result.cover_image,
+    cover_image_url: buildImageUrl(result.cover_image_url) ?? null,
+    cover_image: buildImageUrl(result.cover_image) ?? null,
     trackImages: playlistCoverCache.get(id)?.trackImages ?? [],
   })
   const cachedDetail = playlistDetailCache.get(id)
@@ -1126,6 +1138,8 @@ export interface SongEditProposal {
   id: number
   editor_username: string
   editor_id: number
+  /** The comp channel it was filed for; null on the primary one. */
+  channel_slug?: string | null
   song: number | null
   song_public_id: number | null
   change_type: ProposalChangeType
@@ -1292,6 +1306,42 @@ export async function getMyProposals(
   return [first.page, ...rest].flat().filter((p) => !seen.has(p.id) && !!seen.add(p.id))
 }
 
+export interface ProposalStatusCounts {
+  total: number
+  pending: number
+  approved: number
+  rejected: number
+  reversed: number
+}
+
+export interface MyProposalsPage {
+  results: SongEditProposal[]
+  /** Rows matching the status/search filter, across every page. */
+  count: number
+  /** The whole list per status, whatever the filter. Null from a server that predates it. */
+  counts: ProposalStatusCounts | null
+}
+
+export const MY_PROPOSALS_PAGE_SIZE = 50
+
+// One page of your proposals, optionally narrowed by status or a search, for
+// lists that load more as the user scrolls instead of walking every page.
+export async function getMyProposalsPage(
+  channel: string | undefined,
+  opts: { offset?: number; status?: ProposalStatus; q?: string } = {},
+): Promise<MyProposalsPage> {
+  const url = new URL(myProposalsUrl(channel, opts.offset ?? 0))
+  url.searchParams.set('limit', String(MY_PROPOSALS_PAGE_SIZE))
+  if (opts.status) url.searchParams.set('status', opts.status)
+  if (opts.q) url.searchParams.set('q', opts.q)
+  const data = await request<SongEditProposal[] | { count?: number; counts?: ProposalStatusCounts; results?: SongEditProposal[] }>(
+    url.toString(), { method: 'GET' }, true, url.toString(),
+  )
+  if (Array.isArray(data)) return { results: data, count: data.length, counts: null }
+  const results = Array.isArray(data?.results) ? data.results : []
+  return { results, count: data?.count ?? results.length, counts: data?.counts ?? null }
+}
+
 /** One of your proposals in full, with proposed_data and original_snapshot. */
 export async function getProposal(id: number): Promise<SongEditProposal> {
   return request(`${ACCOUNT_BASE}/editor/proposals/${id}/`, { method: 'GET' })
@@ -1337,18 +1387,28 @@ export async function withdrawProposal(id: number): Promise<void> {
 
 // Withdraws a proposal and immediately re-creates it with the same data -
 // useful when a pending proposal is stuck/stale and needs a fresh review cycle.
-// Reads the full proposal before withdrawing: a list row is a summary, and
-// resubmitting it as-is would send an empty proposed_data.
+// Reads the full proposal first: a list row is a summary, and resubmitting it
+// as-is would send an empty proposed_data. The copy is made before the
+// withdrawal (the other way round, a failed create lost the proposal), and
+// filed for the same channel.
 export async function resubmitProposal(p: SongEditProposal): Promise<SongEditProposal> {
   const full = await withProposalData(p)
-  await withdrawProposal(p.id)
-  return createProposal({
+  const made = await createProposal({
     song: full.song,
     change_type: full.change_type,
     title: full.title,
     proposed_data: full.proposed_data,
     editor_notes: full.editor_notes,
+    channel: full.channel_slug ?? undefined,
   })
+  try {
+    await withdrawProposal(p.id)
+  } catch (e) {
+    // Not two copies under review: take the new one back too.
+    await withdrawProposal(made.id).catch(() => undefined)
+    throw e
+  }
+  return made
 }
 
 export async function getLeaderboard(): Promise<Array<{
@@ -1398,34 +1458,23 @@ export async function adminReviewProposal(id: number, payload: {
   })
 }
 
-// Reviews a batch of proposals with the same action. Proposals targeting the
-// same song stay sequential (oldest first - a later edit can build on fields
-// an earlier one touched); different songs run in parallel, capped so a big
-// batch doesn't flood the API. A per-item failure is swallowed so one bad row
-// doesn't stop the rest; onEach fires as each success lands.
+export interface ProposalBatchReview<T> {
+  batch_id: string | null
+  action: 'approve' | 'reject'
+  summary: Partial<Record<'approved' | 'rejected' | 'skipped' | 'failed' | 'not_run', number>>
+  results: { id: number; result: 'approved' | 'rejected' | 'skipped' | 'failed' | 'not_run'; proposal?: T; detail?: string; status_code?: number }[]
+}
+
+// Song batch responses omit revision details; merge them into existing rows.
 export async function adminReviewProposalsBatch(
-  proposals: SongEditProposal[],
+  ids: number[],
   action: 'approve' | 'reject',
-  channel: string | undefined,
-  onEach?: (updated: SongEditProposal) => void,
-  concurrency = 6,
-): Promise<void> {
-  const lanes = new Map<string, SongEditProposal[]>()
-  for (const p of [...proposals].sort((a, b) => a.id - b.id)) {
-    // New-song proposals have no target yet, so each gets its own lane.
-    const key = p.song != null ? `s${p.song}` : `p${p.id}`
-    const lane = lanes.get(key)
-    if (lane) lane.push(p); else lanes.set(key, [p])
-  }
-  const queue = [...lanes.values()]
-  const worker = async (): Promise<void> => {
-    for (let lane = queue.shift(); lane; lane = queue.shift()) {
-      for (const p of lane) {
-        try { onEach?.(await adminReviewProposal(p.id, { action, channel })) } catch {}
-      }
-    }
-  }
-  await Promise.all(Array.from({ length: Math.min(concurrency, queue.length) }, worker))
+  channel?: string,
+): Promise<ProposalBatchReview<Omit<SongEditProposal, 'original_proposed_data' | 'applied_data'>>> {
+  return request(`${ACCOUNT_BASE}/admin/proposals/batch/review/`, {
+    method: 'POST',
+    body: JSON.stringify({ ids, action, channel, stop_on_error: false }),
+  })
 }
 
 export async function adminReverseProposal(id: number, channel?: string): Promise<SongEditProposal> {
@@ -1543,9 +1592,6 @@ export async function deleteApiKey(id: string): Promise<void> {
   await request(`${ACCOUNT_BASE}/account/api-keys/${id}/`, { method: 'DELETE' })
 }
 
-// Same path as request(), minus the JSON Content-Type - the browser has to set
-// its own multipart boundary. Everything else (error parsing, offline cache
-// fallback) comes from apiClient like every other call in this module.
 // Comp-file contributions (proposals, the admin review queue, file history)
 // hang off routes that are newer than the rest of this module. Everything the
 // feature touches is gated on this one flag the way lib/newsApi gates `/news/`
@@ -1604,6 +1650,9 @@ function assertContributorApi(): void {
   if (!CONTRIBUTOR_ENABLED) throw new Error('Comp file contributions are not available yet')
 }
 
+// Same path as request(), minus the JSON Content-Type - the browser has to set
+// its own multipart boundary. Everything else (error parsing, offline cache
+// fallback) comes from apiClient like every other call in this module.
 async function multipartRequest<T>(url: string, form: FormData, method = 'POST'): Promise<T> {
   const headers: Record<string, string> = {}
   const token = getToken()
@@ -1704,6 +1753,18 @@ export async function adminReviewCompProposal(id: number, payload: {
   return request(`${ACCOUNT_BASE}/admin/comp-proposals/${id}/review/`, {
     method: 'POST',
     body: JSON.stringify(payload),
+  })
+}
+
+export async function adminReviewCompProposalsBatch(
+  ids: number[],
+  action: 'approve' | 'reject',
+  channel?: string,
+): Promise<ProposalBatchReview<CompFileProposal>> {
+  assertContributorApi()
+  return request(`${ACCOUNT_BASE}/admin/comp-proposals/batch/review/`, {
+    method: 'POST',
+    body: JSON.stringify({ ids, action, channel, stop_on_error: false }),
   })
 }
 

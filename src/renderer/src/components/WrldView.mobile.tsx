@@ -1610,16 +1610,23 @@ const ProgressBar = memo(function ProgressBar({ txtPri, txtSec, trackBg }: { txt
             const p = pctFromClientX(ev.touches[0].clientX)
             if (p !== null) setDragPct(p)
           }
+          const detach = (): void => {
+            document.removeEventListener('touchmove', onMove)
+            document.removeEventListener('touchend', onEnd)
+            document.removeEventListener('touchcancel', onCancel)
+          }
           const onEnd = (ev: TouchEvent): void => {
             const p = pctFromClientX(ev.changedTouches[0]?.clientX ?? 0)
             const dur = getAudioDuration()
             if (p !== null && dur > 0) seekAudio(p * dur)
             setDragPct(null)
-            document.removeEventListener('touchmove', onMove)
-            document.removeEventListener('touchend', onEnd)
+            detach()
           }
+          // A cancelled touch (a system gesture) never sends touchend: let go without seeking.
+          const onCancel = (): void => { setDragPct(null); detach() }
           document.addEventListener('touchmove', onMove, { passive: true })
           document.addEventListener('touchend', onEnd)
+          document.addEventListener('touchcancel', onCancel)
         }}
       >
         {/* Apple Music's scrubber: no thumb at rest, just a thin line that
@@ -1637,7 +1644,7 @@ const ProgressBar = memo(function ProgressBar({ txtPri, txtSec, trackBg }: { txt
       </div>
       <div className="flex justify-between">
         <span className="text-caption2 font-medium tabular-nums" style={{ color: txtSec }}>{formatDuration(displayTime)}</span>
-        <span className="text-caption2 font-medium tabular-nums" style={{ color: txtSec }}>{duration > 0 ? `-${formatDuration(remaining)}` : '-∞'}</span>
+        <span className="text-caption2 font-medium tabular-nums" style={{ color: txtSec }}>{duration > 0 ? `-${formatDuration(remaining)}` : '--:--'}</span>
       </div>
     </div>
   )

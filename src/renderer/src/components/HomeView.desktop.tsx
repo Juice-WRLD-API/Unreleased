@@ -1,9 +1,9 @@
 import { useRef, useState } from 'react'
-import { ChevronRight, Play, ListMusic, Gamepad2, Flame, Music2, Disc3, User, Newspaper, Radio, Heart, Search, MoreHorizontal, Album, Music, Wrench, MicVocal, AudioLines } from 'lucide-react'
+import { ChevronRight, Play, ListMusic, Gamepad2, Flame, Music2, Disc3, User, Newspaper, Radio, Heart, Search, MoreHorizontal, Album, Music, Wrench, MicVocal, AudioLines, ImagePlus } from 'lucide-react'
 import { AlbumArtThumbnail } from './AlbumArtThumbnail'
 import { ProgressiveCover } from './ProgressiveCover'
 import { Tile } from './Tile'
-import { useHomeData, type GameCard, type HomePlaylistCard, type HomeAlbumCard } from '../hooks/useHomeData'
+import { useHomeData, HOME_ALBUMS_SHOWN, type GameCard, type HomePlaylistCard, type HomeAlbumCard } from '../hooks/useHomeData'
 import { useElementSize } from '../hooks/useElementSize'
 import { useStore, useStorePick } from '../store/useStore'
 import { useCanEdit } from '../hooks/useChannelRoles'
@@ -386,8 +386,7 @@ export default function HomeViewDesktop(): JSX.Element {
   const showOnThisDay = showSection('onthisday')
   const showNews = showSection('news') && newsItems.length > 0
   const showPlaylists = showSection('playlists')
-  // TEMP: albums hidden on the home page
-  const showAlbums = false && showSection('albums') && albumRow.length > 0
+  const showAlbums = HOME_ALBUMS_SHOWN && showSection('albums') && albumRow.length > 0
   const showRadio = showSection('radio')
   const showLiked = showSection('liked') && likedTrackIds.length > 0
   const showGames = showSection('games')
@@ -405,6 +404,12 @@ export default function HomeViewDesktop(): JSX.Element {
     title: 'Identify song',
     subtitle: 'Name a song from the mic, this device or a file',
     onClick: () => useStore.getState().setShowRecognition(true),
+  }, {
+    id: 'cover-art',
+    icon: <ImagePlus size={18} className="text-accent" />,
+    title: 'Submit cover art',
+    subtitle: 'Send in better art for any song',
+    onClick: () => useStore.getState().openCoverArtSubmit(),
   }]
   const showTools = showSection('tools')
 

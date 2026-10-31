@@ -39,6 +39,7 @@ import { useHeardleStats } from '../hooks/useHeardleStats'
 import { useHeardleLeaderboard } from '../hooks/useHeardleLeaderboard'
 import { useHeardleSettingsPanel } from '../hooks/useHeardleSettingsPanel'
 import { Segmented as IosSegmented } from './mobile/Segmented'
+import { useEscapeToClose } from '../hooks/useEscapeToClose'
 
 // ─── Settings panel ───────────────────────────────────────────────────────────
 
@@ -53,6 +54,7 @@ function SettingsPanel({ settings, onChange, eras, mode, onClose }: {
   onClose: () => void
 }) {
   const { ladder, set, toggleEra, toggleCategory } = useHeardleSettingsPanel(settings, onChange)
+  useEscapeToClose(onClose)
 
   return (
     <Sheet
@@ -203,6 +205,7 @@ function SettingsPanel({ settings, onChange, eras, mode, onClose }: {
  *  on open rather than mirroring the round's state. */
 function StatsPanel({ initialMode, onClose }: { initialMode: DailyMode; onClose: () => void }) {
   const { tab, setTab, stats, max, winRate } = useHeardleStats(initialMode)
+  useEscapeToClose(onClose)
   return (
     <Sheet onClose={onClose} title="Statistics">
       <div className="px-5 pb-2">
@@ -262,6 +265,7 @@ function LeaderboardPanel({ initialMode, signedIn, onClose }: {
   const {
     board, setBoard, mode, setMode, entries, me, loading, error, pending, needsSignIn, score, emptyMessage,
   } = useHeardleLeaderboard(initialMode, signedIn)
+  useEscapeToClose(onClose)
 
   const openUserCard = useOpenUserCard()
   const row = (e: LeaderboardEntry, isMe: boolean): JSX.Element => (
@@ -733,7 +737,9 @@ export default function HeardleView(): JSX.Element {
             <IosSegmented
               value={mode}
               options={MODES.map((m) => ({ value: m.id, label: m.label }))}
-              onChange={setMode}
+              // A switch that keeps the same answer (Unlimited to 1v1) would
+              // otherwise leave the clip playing under the new tab.
+              onChange={(m) => { if (m !== mode) stopPlayback(); setMode(m) }}
             />
           </div>
 

@@ -7,7 +7,6 @@ import { useShallow } from 'zustand/react/shallow'
 import * as userApi from '../lib/userApi'
 import { setPlaylistPublic, addPlaylistInBackground, PRIVATE_PLAYLIST_REASON } from '../lib/optimisticPlaylist'
 import type { PlaylistSummary } from '../lib/userApi'
-import { buildStreamUrl, JWAPI_BASE } from '../lib/juicewrldApi'
 import { resolveTrackFile } from '../lib/sessionEditsApi'
 import { shareOrigin } from '../lib/platform'
 import { openZipTarget, saveItems } from '../lib/clientZip'
@@ -17,7 +16,7 @@ import { lazyOverlay } from '../lib/lazyView'
 import ContextMenu from './ContextMenu'
 import { showAppToast } from '../lib/appToast'
 import { isServerFileTrack, playlistItemsToTracks, playlistSongIds } from '../lib/playlistItems'
-import { playlistJsonPayload, playlistM3uContent } from '../lib/playlistExport'
+import { downloadBlob, playlistJsonPayload, playlistM3uContent } from '../lib/playlistExport'
 
 // Staff-only (it pulls in the chat store) - fetched when opened.
 const SharePlaylistModal = lazyOverlay(() => import('./chat/SharePlaylistModal'))
@@ -61,6 +60,11 @@ export default function PlaylistContextMenu({ state, onClose }: {
 
   const open = (): void => { setPendingPlaylistId(playlist.id); setActiveView('playlists') }
 
+  // The menu has closed by the time these settle, so a failure says so here.
+  const withToast = (fn: () => Promise<void>, what: string) => (): void => {
+    fn().catch(() => showAppToast(`Couldn't ${what}`))
+  }
+
   const playAll = async (): Promise<void> => {
     const d = await userApi.getPlaylist(playlist.id)
     const tracks = playlistItemsToTracks(d.items).filter(t => t.path)
@@ -95,13 +99,6 @@ export default function PlaylistContextMenu({ state, onClose }: {
     setTimeout(() => setZipState('idle'), 2500)
   }
 
-  const downloadBlob = (content: string, mime: string, filename: string): void => {
-    const blob = new Blob([content], { type: mime })
-    const url = URL.createObjectURL(blob)
-    const a = document.createElement('a'); a.href = url; a.download = filename; a.click()
-    URL.revokeObjectURL(url)
-  }
-
   const exportJson = async (): Promise<void> => {
     const d = await userApi.getPlaylist(playlist.id)
     downloadBlob(JSON.stringify(playlistJsonPayload(d), null, 2), 'application/json', `${playlist.name}.json`)
@@ -109,7 +106,11 @@ export default function PlaylistContextMenu({ state, onClose }: {
 
   const exportM3u = async (): Promise<void> => {
     const d = await userApi.getPlaylist(playlist.id)
-    downloadBlob(playlistM3uContent(playlistItemsToTracks(d.items).filter(isServerFileTrack)), 'audio/x-mpegurl', `${playlist.name}.m3u`)
+    // A session not yet looked up only has its marker, which no player can
+    // open - same as PlaylistsView's export.
+    const resolved = await Promise.all(playlistItemsToTracks(d.items).filter(isServerFileTrack).map(t =>
+      resolveTrackFile(t).then((f): Track => ({ ...t, path: f.path, streamUrl: f.url }), () => null)))
+    downloadBlob(playlistM3uContent(resolved.filter((t): t is Track => t != null)), 'audio/x-mpegurl', `${playlist.name}.m3u`)
   }
 
   const copyShare = async (): Promise<void> => {
@@ -154,9 +155,11 @@ export default function PlaylistContextMenu({ state, onClose }: {
 
   const commitRename = async (): Promise<void> => {
     const val = renameVal.trim() || playlist.name
-    await userApi.renamePlaylist(playlist.id, val)
-    await refreshPlaylists()
-    onClose()
+    try {
+      await userApi.renamePlaylist(playlist.id, val)
+      await refreshPlaylists()
+      onClose()
+    } catch { showAppToast("Couldn't rename the playlist") }
   }
 
   const del = async (): Promise<void> => {
@@ -190,8 +193,8 @@ export default function PlaylistContextMenu({ state, onClose }: {
       body={renaming ? renameBody : undefined}
       items={[
         { icon: Play, label: 'Open', onSelect: open },
-        { icon: Shuffle, label: 'Play all', onSelect: playAll },
-        { icon: ListEnd, label: 'Add all to queue', onSelect: queueAll },
+        { icon: Shuffle, label: 'Play all', onSelect: withToast(playAll, 'load the playlist') },
+        { icon: ListEnd, label: 'Add all to queue', onSelect: withToast(queueAll, 'load the playlist') },
         {
           icon: Archive,
           label: zipState === 'error' ? 'Download failed' : zipState === 'done' ? 'Download started' : 'Download all',
@@ -204,8 +207,8 @@ export default function PlaylistContextMenu({ state, onClose }: {
           icon: Download,
           label: 'Export playlist',
           children: [
-            { label: 'As JSON', onSelect: exportJson },
-            { label: 'As M3U', onSelect: exportM3u },
+            { label: 'As JSON', onSelect: withToast(exportJson, 'export the playlist') },
+            { label: 'As M3U', onSelect: withToast(exportM3u, 'export the playlist') },
           ],
         },
         'divider',
@@ -220,7 +223,7 @@ export default function PlaylistContextMenu({ state, onClose }: {
           children: otherPlaylists.map(p => ({ label: p.name, onSelect: () => addAllTo(p.id) })),
         },
         'divider',
-        { icon: Trash2, label: 'Delete playlist', danger: true, onSelect: del },
+        { icon: Trash2, label: 'Delete playlist', danger: true, onSelect: withToast(del, 'delete the playlist') },
       ]}
     />
   )

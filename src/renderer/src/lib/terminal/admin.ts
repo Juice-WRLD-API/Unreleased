@@ -4,10 +4,10 @@ import { listSiteModeration } from '../chatApi'
 import {
   adminCompProposalCounts, adminListApplications, adminListCompProposals, adminListProposals, adminListUsers, adminUserCounts,
   adminProposalCounts, adminReverseCompProposal, adminReverseProposal, adminReviewApplication, adminReviewCompProposal,
-  adminReviewProposal, type ApplicationStatus, type ProposalStatus,
+  adminReviewProposal, adminReviewProposalsBatch, adminReviewCompProposalsBatch, type ApplicationStatus, type ProposalStatus,
 } from '../userApi'
 import { adminCoverArtCounts } from '../coverArtApi'
-import { fail, type TermCommand } from './types'
+import { confirmAction, fail, takeYes, type TermCommand } from './types'
 import { pageRows } from './more'
 
 // The Admin page's review queues, user list and site moderation list, as
@@ -156,12 +156,36 @@ export const ADMIN_COMMANDS: TermCommand[] = [
     run: async (args, ctx) => { const r = parseReviewArgs(args, 'reject [song|comp|app] <id> [note]'); ctx.print(await review(r.kind, r.id, 'reject', r.notes), 'ok') },
   },
   {
-    name: 'reverse', group: 'Admin', usage: 'reverse [song|comp] <id>', description: 'Undo an approved proposal',
+    name: 'review-batch', group: 'Admin', usage: 'review-batch <approve|reject> <song|comp> <id,id,...> [--channel slug] [-y]',
+    description: 'Approve or deny multiple proposals in one request',
+    covers: ['userApi.adminReviewProposalsBatch', 'userApi.adminReviewCompProposalsBatch'],
+    run: async (args, ctx) => {
+      const { text, yes } = takeYes(args)
+      const [action, kind, idList, ...options] = text.trim().split(/\s+/)
+      if ((action !== 'approve' && action !== 'reject') || (kind !== 'song' && kind !== 'comp') || !idList ||
+          (options.length !== 0 && (options.length !== 2 || options[0] !== '--channel'))) {
+        return fail('usage: review-batch <approve|reject> <song|comp> <id,id,...> [--channel slug] [-y]')
+      }
+      const ids = [...new Set(idList.split(',').map(Number))]
+      if (ids.length > 5000 || ids.some(id => !Number.isSafeInteger(id) || id < 1)) fail('provide 1 to 5000 positive proposal ids, separated by commas')
+      if (!confirmAction(ctx, `${action === 'approve' ? 'Approve' : 'Deny'} ${ids.length} ${kind} proposals?`, yes)) return
+      const result = kind === 'song'
+        ? await adminReviewProposalsBatch(ids, action, options[1])
+        : await adminReviewCompProposalsBatch(ids, action, options[1])
+      ctx.print(Object.entries(result.summary).map(([key, count]) => `${key}: ${count}`).join(' · '))
+      for (const row of result.results) {
+        if (row.result === 'failed' || row.result === 'not_run') ctx.print(`#${row.id} ${row.result}: ${row.detail ?? 'not reviewed'}`, 'error')
+      }
+    },
+  },
+  {
+    name: 'reverse', group: 'Admin', usage: 'reverse [song|comp] <id> [-y]', description: 'Undo an approved proposal',
     complete: (before, partial) => (before.length === 0 ? ['song', 'comp'].filter((s) => s.startsWith(partial.toLowerCase())) : []),
     run: async (args, ctx) => {
-      const { kind, id } = parseReviewArgs(args, 'reverse [song|comp] <id>')
+      const { text, yes } = takeYes(args)
+      const { kind, id } = parseReviewArgs(text, 'reverse [song|comp] <id> [-y]')
       if (kind === 'app') fail('applications canâ€™t be reversed')
-      if (!window.confirm(`Reverse ${kind} proposal #${id}? This undoes the change it made.`)) { ctx.print('cancelled', 'dim'); return }
+      if (!confirmAction(ctx, `Reverse ${kind} proposal #${id}? This undoes the change it made.`, yes)) return
       if (kind === 'song') await adminReverseProposal(id)
       else await adminReverseCompProposal(id)
       ctx.print(`${kind} proposal #${id} reversed`, 'ok')

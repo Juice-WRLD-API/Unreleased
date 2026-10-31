@@ -200,8 +200,16 @@ export default function MessageList({ room, people, canModerate, editingId, onSt
     }
   }
 
+  // The room stays open (and this list mounted, under the terminal) while
+  // another view is showing, and messages arriving then stay unread (see
+  // chatStore's isViewing) - so coming back to the chat view reads them.
+  const shown = useStore((s) => s.activeView === 'chat')
   useEffect(() => {
-    const onFocus = (): void => { if (atBottom.current) markRead(room) }
+    if (shown && atBottom.current) markRead(room)
+  }, [shown, markRead, room])
+
+  useEffect(() => {
+    const onFocus = (): void => { if (atBottom.current && useStore.getState().activeView === 'chat') markRead(room) }
     document.addEventListener('visibilitychange', onFocus)
     return () => document.removeEventListener('visibilitychange', onFocus)
   }, [markRead, room])

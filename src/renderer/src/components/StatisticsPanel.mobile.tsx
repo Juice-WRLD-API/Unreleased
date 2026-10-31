@@ -18,7 +18,7 @@ export default function StatisticsPanelMobile({ onOpenEra }: { onOpenEra: (eraNa
     canEdit, playTrack, playNext,
     stats, playStats, songMap, playById, ctxMenu, setCtxMenu, openContextMenu,
     eraRows, maxEraCount, timelineRows, timelineStart, timelineEnd,
-    topEraRows, maxTopEraPlays, maxTopSongPlays, loading,
+    topEraRows, maxTopEraPlays, maxTopSongPlays, loading, loadFailed,
   } = useStatisticsData()
 
   return (
@@ -30,6 +30,8 @@ export default function StatisticsPanelMobile({ onOpenEra }: { onOpenEra: (eraNa
             <div className="h-28 bg-[var(--grouped)] animate-pulse rounded-[20px]" />
             <div className="h-56 bg-[var(--grouped)] animate-pulse rounded-[20px]" />
           </div>
+        ) : loadFailed ? (
+          <p className="py-16 px-4 text-center text-subhead text-text-muted">Couldn&apos;t load statistics. Check your connection and open the tab again.</p>
         ) : (
           <>
             {/* Hero */}

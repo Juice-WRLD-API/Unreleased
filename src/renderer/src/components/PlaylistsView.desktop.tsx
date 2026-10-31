@@ -53,6 +53,7 @@ import { getSkin } from '../lib/skins'
 import { downloadBlob, playlistJsonPayload, playlistM3uContent } from '../lib/playlistExport'
 import { clickable } from '../lib/a11y'
 import { resolveTrackFile } from '../lib/sessionEditsApi'
+import { fetchImageBlob } from '../lib/coverImage'
 
 // One parsed line of an .m3u: a file path, plus the #EXTINF title/duration
 // when the exporter wrote them. Import can either match the path to a local
@@ -820,6 +821,11 @@ export default function PlaylistsView(): JSX.Element {
       if (cancelled) return
       setSongUnits(units)
       setLoadingCompact(false)
+    }, () => {
+      // Rows fall back to one per track rather than "Loading…" for good.
+      if (cancelled) return
+      setSongUnits([])
+      setLoadingCompact(false)
     })
     return () => { cancelled = true }
   }, [compactView, tracks, compactReloadToken])
@@ -928,8 +934,10 @@ export default function PlaylistsView(): JSX.Element {
   useEffect(() => {
     if (!trackMenu) return
     const h = () => { setTrackMenu(null) }
-    setTimeout(() => window.addEventListener('click', h), 0)
-    return () => window.removeEventListener('click', h)
+    // Cleared too, or a menu reopened within the tick would leave this
+    // listener attached to close the next one.
+    const t = setTimeout(() => window.addEventListener('click', h), 0)
+    return () => { clearTimeout(t); window.removeEventListener('click', h) }
   }, [trackMenu])
 
 
@@ -1071,7 +1079,7 @@ export default function PlaylistsView(): JSX.Element {
     try {
       await Promise.all(items.map(it => userApi.removePlaylistEntry(selectedId, it.id)))
       await refreshPlaylists()
-    } catch { await loadDetail(selectedId) }
+    } catch { showAppToast("Couldn't remove every track"); await loadDetail(selectedId) }
     setBulkRemoving(false)
     exitSelectMode()
   }, [selectedId, selectedTrackList, itemByTrackId, refreshPlaylists, loadDetail, exitSelectMode])
@@ -1208,8 +1216,8 @@ export default function PlaylistsView(): JSX.Element {
         await userApi.setPlaylistCoverBase64(newPl.id, b64)
       } else if (url) {
         try {
-          const res = await fetch(url)
-          const blob = await res.blob()
+          // Checks the status too, so an error page never becomes the cover.
+          const blob = await fetchImageBlob(url)
           const file = new File([blob], 'cover.jpg', { type: blob.type || 'image/jpeg' })
           await userApi.uploadPlaylistCover(newPl.id, file)
         } catch { /* skip cover on CORS/network failure */ }
@@ -1265,8 +1273,10 @@ export default function PlaylistsView(): JSX.Element {
       if (cardMenu.kind === 'local') {
         renameLocalPlaylist(cardMenu.playlist.id, val)
       } else {
-        await userApi.renamePlaylist(cardMenu.playlist.id, val)
-        await refreshPlaylists()
+        try {
+          await userApi.renamePlaylist(cardMenu.playlist.id, val)
+          await refreshPlaylists()
+        } catch { showAppToast("Couldn't rename the playlist"); return }
       }
       close()
     }
@@ -1289,6 +1299,11 @@ export default function PlaylistsView(): JSX.Element {
 
     const local = cardMenu.kind === 'local'
     const localPl = cardMenu.playlist as LocalPlaylist
+    // A map, not a find() per track: a big playlist against a big library stalled.
+    const localTracksOf = (pl: LocalPlaylist): LibraryTrack[] => {
+      const byId = new Map(libraryTracks.map(t => [t.id, t]))
+      return pl.trackIds.map(id => byId.get(id)).filter((t): t is LibraryTrack => !!t)
+    }
     const apiPl = cardMenu.playlist as PlaylistSummary
 
     const items: ContextMenuEntry[] = local
@@ -1299,8 +1314,7 @@ export default function PlaylistsView(): JSX.Element {
           icon: Shuffle,
           label: 'Play all',
           onSelect: () => {
-            const tracks = localPl.trackIds.map(id => libraryTracks.find(t => t.id === id)).filter(Boolean) as LibraryTrack[]
-            const q = tracks.map(libTrackToTrack)
+            const q = localTracksOf(localPl).map(libTrackToTrack)
             if (q.length) playCollection(q)
           },
         },
@@ -1308,7 +1322,7 @@ export default function PlaylistsView(): JSX.Element {
           icon: ListEnd,
           label: 'Add all to queue',
           onSelect: () => {
-            localPl.trackIds.map(id => libraryTracks.find(t => t.id === id)).filter(Boolean).map(t => libTrackToTrack(t as LibraryTrack)).forEach(t => addToQueue(t))
+            localTracksOf(localPl).map(libTrackToTrack).forEach(t => addToQueue(t))
           },
         },
         'divider',
@@ -1319,7 +1333,7 @@ export default function PlaylistsView(): JSX.Element {
           childrenEmpty: 'No other playlists',
           children: localPlaylists.filter(p => p.id !== localPl.id).map(p => ({
             label: p.name,
-            onSelect: () => { localPl.trackIds.filter(id => !p.trackIds.includes(id)).forEach(id => addToLocalPlaylist(p.id, id)) },
+            onSelect: () => { const have = new Set(p.trackIds); localPl.trackIds.filter(id => !have.has(id)).forEach(id => addToLocalPlaylist(p.id, id)) },
           })),
         },
         { icon: Folder, label: 'Move to folder', children: folderChildren([`local:${localPl.id}`]) },
@@ -1341,17 +1355,21 @@ export default function PlaylistsView(): JSX.Element {
           icon: Shuffle,
           label: 'Play all',
           onSelect: async () => {
-            const d = await userApi.getPlaylist(apiPl.id)
-            const tracks = playlistItemsToTracks(d.items).filter(t => t.path)
-            if (tracks.length) playCollection(tracks)
+            try {
+              const d = await userApi.getPlaylist(apiPl.id)
+              const tracks = playlistItemsToTracks(d.items).filter(t => t.path)
+              if (tracks.length) playCollection(tracks)
+            } catch { showAppToast("Couldn't load the playlist") }
           },
         },
         {
           icon: ListEnd,
           label: 'Add all to queue',
           onSelect: async () => {
-            const d = await userApi.getPlaylist(apiPl.id)
-            playlistItemsToTracks(d.items).filter(t => t.path).forEach(t => addToQueue(t))
+            try {
+              const d = await userApi.getPlaylist(apiPl.id)
+              playlistItemsToTracks(d.items).filter(t => t.path).forEach(t => addToQueue(t))
+            } catch { showAppToast("Couldn't load the playlist") }
           },
         },
         {
@@ -1593,7 +1611,8 @@ export default function PlaylistsView(): JSX.Element {
           }}
           onMenuButton={e => setCardMenu({ kind: 'local', playlist: lp, x: e.clientX, y: e.clientY })}
           onPlay={() => {
-            const qt = lp.trackIds.map(id => libraryTracks.find(t => t.id === id)).filter((t): t is LibraryTrack => !!t).map(libTrackToTrack)
+            const byId = new Map(libraryTracks.map(t => [t.id, t]))
+            const qt = lp.trackIds.map(id => byId.get(id)).filter((t): t is LibraryTrack => !!t).map(libTrackToTrack)
             if (qt.length) playCollection(qt)
           }}
           {...dragSourceProps(plKey)}
@@ -1873,7 +1892,8 @@ export default function PlaylistsView(): JSX.Element {
     if (localSelectedId !== null) {
       const localPl = localPlaylists.find(p => p.id === localSelectedId)
       if (!localPl) { setLocalSelectedId(null); return <div /> }
-      const localTracks = localPl.trackIds.map(id => libraryTracks.find(t => t.id === id)).filter(Boolean) as LibraryTrack[]
+      const libById = new Map(libraryTracks.map(t => [t.id, t]))
+      const localTracks = localPl.trackIds.map(id => libById.get(id)).filter((t): t is LibraryTrack => !!t)
       const localQTracks: Track[] = localTracks.map(libTrackToTrack)
       const heroSrc = localPl.coverImage ?? localTracks.map(t => libraryArt[t.id]).find(a => !!a) ?? null
       // Only actually dark (and so worth white text) with a backdrop AND a
@@ -2641,7 +2661,8 @@ export default function PlaylistsView(): JSX.Element {
                         <PlaylistCard
                           name={track.title}
                           subtitle={track.artist}
-                          cover={<AlbumArtThumbnail track={track} fill res={512} className="w-full h-full" shimmer={false} eager />}
+                          // Lazy: this grid isn't windowed, so eager would fetch every card's cover at once.
+                          cover={<AlbumArtThumbnail track={track} fill res={512} className="w-full h-full" shimmer={false} />}
                           selected={isSelected}
                           selectMode={selectMode}
                           onClick={e => { if (e.ctrlKey || e.metaKey || selectMode) toggleTrackSelect(track) }}
@@ -2779,7 +2800,8 @@ export default function PlaylistsView(): JSX.Element {
   if (localSelectedId !== null) {
     const localPl = localPlaylists.find(p => p.id === localSelectedId)
     if (!localPl) { setLocalSelectedId(null); return <div /> }
-    const localTracks = localPl.trackIds.map(id => libraryTracks.find(t => t.id === id)).filter(Boolean) as LibraryTrack[]
+    const libById = new Map(libraryTracks.map(t => [t.id, t]))
+    const localTracks = localPl.trackIds.map(id => libById.get(id)).filter((t): t is LibraryTrack => !!t)
     const localQTracks: Track[] = localTracks.map(libTrackToTrack)
     const localDurLabel = totalDurationLabel(localQTracks)
     const heroSrc = localPl.coverImage ?? localTracks.map(t => libraryArt[t.id]).find(a => !!a) ?? null

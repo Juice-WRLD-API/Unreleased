@@ -71,9 +71,12 @@ export function useArtTextContrast(
       setTextIsDark(!isDarkSkin && !radioFmActive)
       return
     }
+    // A quick skip leaves the last cover loading: its answer is dropped.
+    let live = true
     const img = new Image()
     img.crossOrigin = 'anonymous'
     img.onload = () => {
+      if (!live) return
       try {
         const canvas = document.createElement('canvas')
         canvas.width = 50; canvas.height = 50
@@ -89,9 +92,10 @@ export function useArtTextContrast(
         setTextIsDark(avg * factor > 90)
       } catch { setTextIsDark(false) }
     }
-    img.onerror = () => setTextIsDark(false)
+    img.onerror = () => { if (live) setTextIsDark(false) }
     // Averaged over 50x50, so the degraded copy reads the same as the original.
     img.src = smallCoverUrl(artSrc) ?? artSrc
+    return () => { live = false }
   }, [artSrc, artError, isDarkSkin, radioFmActive, override])
   return textIsDark
 }
@@ -198,15 +202,19 @@ export function useRadioSuggest(notConnectedMessage: string): {
     if (suggestTimer.current) clearTimeout(suggestTimer.current)
     if (!suggestQuery.trim()) { setSuggestResults([]); setSuggestLoading(false); return }
     setSuggestLoading(true)
+    // A search still out when the query changes (or is cleared by a proposal)
+    // is dropped, so it can't put old results back.
+    let live = true
     suggestTimer.current = setTimeout(async () => {
       // Search the DJ's published library, not /songs/ - only these ids can be
       // resolved back to a playable file by propose_queue.
-      try {
-        setSuggestResults(await searchRadioLibrary(suggestQuery))
-      } catch { setSuggestResults([]) }
+      let results: RadioLibraryTrack[] = []
+      try { results = await searchRadioLibrary(suggestQuery) } catch { /* none */ }
+      if (!live) return
+      setSuggestResults(results)
       setSuggestLoading(false)
     }, 400)
-    return () => { if (suggestTimer.current) clearTimeout(suggestTimer.current) }
+    return () => { live = false; if (suggestTimer.current) clearTimeout(suggestTimer.current) }
   }, [suggestQuery])
 
   const handlePropose = (track: RadioLibraryTrack): void => {

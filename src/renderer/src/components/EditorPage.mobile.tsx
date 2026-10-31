@@ -371,7 +371,7 @@ export default function EditorPage({ initialSongId = null }: {
     versionNum, setVersionNum, versionTitle, setVersionTitle,
     loadedTitle, linkedCount, versionSaveStatus, linkError, saveVersionInfo,
     titleSuggestions, showTitleSuggestions, setShowTitleSuggestions, handlePickTitleSuggestion,
-    base, current, patch, changedCount, alreadySubmitted,
+    base, current, patch, changedCount, alreadySubmitted, confirmDiscard,
   } = useEditorPageState(initialSongId)
 
   // Sync: the Synced lyrics dialog (Home → Tools) on this song, starting from
@@ -431,7 +431,7 @@ export default function EditorPage({ initialSongId = null }: {
 
       {/* iOS nav bar: back, the centered title, a text action on the right */}
       <div className="shrink-0 flex items-center gap-2 px-2 pt-1 pb-1">
-        <BackButton onClick={() => setActiveView(backView)} />
+        <BackButton onClick={() => { if (confirmDiscard()) setActiveView(backView) }} />
         <div className="flex-1 min-w-0 text-center">
           <h1 className="text-headline text-text-primary truncate">Song editor</h1>
           <p className="text-caption1 text-text-secondary truncate">
@@ -514,7 +514,7 @@ export default function EditorPage({ initialSongId = null }: {
                     <span className="text-text-muted opacity-40 text-[11px]">{song ? `#${song.id}` : 'new song'}</span>
                   </div>
                 </div>
-                <button onClick={closeSong} title="Close" aria-label="Close"
+                <button onClick={() => { if (confirmDiscard()) closeSong() }} title="Close" aria-label="Close"
                   className="shrink-0 w-9 h-9 rounded-full flex items-center justify-center text-text-muted opacity-65 active:opacity-100 active:bg-[var(--fill)] transition-colors">
                   <X size={16} />
                 </button>
@@ -523,7 +523,7 @@ export default function EditorPage({ initialSongId = null }: {
 
             <Card title="Identity" overflowVisible>
               <FieldRow label="Title" value={name} original={String(base.name || '')} onChange={setName} />
-              <FieldRow label="Album" value={album} original={String(base.album || '')} onChange={setAlbum} suggest="album" />
+              <TextareaRow rows={2} label="Album" value={album} original={String(base.album || '')} onChange={setAlbum} suggest="album" />
               <TextareaRow
                 label="Alt titles (one per line)" value={altNames}
                 original={Array.isArray(base.track_titles) ? (base.track_titles as string[]).join('\n') : ''}
@@ -553,10 +553,10 @@ export default function EditorPage({ initialSongId = null }: {
             </Card>
 
             <Card title="Credits" overflowVisible>
-              <FieldRow label="Credited artists" value={artists} original={String(base.credited_artists || '')} onChange={setArtists} suggest="credited_artists" />
+              <TextareaRow rows={2} label="Credited artists" value={artists} original={String(base.credited_artists || '')} onChange={setArtists} suggest="credited_artists" />
               <FieldGrid>
-                <FieldRow label="Producers" value={prod} original={String(base.producers || '')} onChange={setProd} suggest="producers" />
-                <FieldRow label="Engineers" value={eng}  original={String(base.engineers || '')} onChange={setEng} suggest="engineers" />
+                <TextareaRow rows={2} label="Producers" value={prod} original={String(base.producers || '')} onChange={setProd} suggest="producers" />
+                <TextareaRow rows={2} label="Engineers" value={eng}  original={String(base.engineers || '')} onChange={setEng} suggest="engineers" />
               </FieldGrid>
             </Card>
 
@@ -643,14 +643,14 @@ export default function EditorPage({ initialSongId = null }: {
                 <TextareaRow label="Bitrate" value={bitrate} original={String(base.bitrate || '')}  onChange={setBitrate}    rows={2} placeholder="320 kbps" mono />
                 <FieldGrid>
                   <TextareaRow label="Leak type" value={leak} original={String(base.leak_type || '')} onChange={setLeak} rows={2} placeholder="HQ, LQ…" suggest="leak_type" />
-                  <FieldRow label="File names"        value={fileNames}        original={String(base.file_names || '')}            onChange={setFileNames} />
-                  <FieldRow label="Instrumentals"     value={instrumentals}    original={String(base.instrumentals || '')}         onChange={setInstrumentals} placeholder="Versions available" />
-                  <FieldRow label="Inst. names"       value={instrumentalNames} original={String(base.instrumental_names || '')}   onChange={setInstrumentalNames} />
+                  <TextareaRow rows={2} label="File names"        value={fileNames}        original={String(base.file_names || '')}            onChange={setFileNames} />
+                  <TextareaRow rows={2} label="Instrumentals"     value={instrumentals}    original={String(base.instrumentals || '')}         onChange={setInstrumentals} placeholder="Versions available" />
+                  <TextareaRow rows={2} label="Inst. names"       value={instrumentalNames} original={String(base.instrumental_names || '')}   onChange={setInstrumentalNames} />
                   <FieldRow label="Cover URL"         value={imageUrl}         original={String(base.image_url || '')}             onChange={setImageUrl} mono onBrowse={() => setPickingImage(true)} />
                   {cat === 'recording_session' && (
                     <>
-                      <FieldRow label="Session titles" value={sessionTitles} original={String(base.session_titles || '')} onChange={setSessionTitles} />
-                      <FieldRow label="Session tracking" value={sessionTracking} original={String(base.session_tracking || '')} onChange={setSessionTracking} />
+                      <TextareaRow rows={2} label="Session titles" value={sessionTitles} original={String(base.session_titles || '')} onChange={setSessionTitles} />
+                      <TextareaRow rows={2} label="Session tracking" value={sessionTracking} original={String(base.session_tracking || '')} onChange={setSessionTracking} />
                     </>
                   )}
                 </FieldGrid>
@@ -687,7 +687,7 @@ export default function EditorPage({ initialSongId = null }: {
                     const active = lyricsTab === tab
                     const dirty = tab === 'lyrics'
                       ? lyrics !== String(base.lyrics || '')
-                      : !!synced
+                      : synced !== String(base.synced_lyrics || '')
                     return (
                       <button key={tab} onClick={() => setLyricsTab(tab)}
                         className={`flex items-center gap-1 px-2 py-1 rounded-lg text-[10px] font-semibold transition-all ${
@@ -732,7 +732,7 @@ export default function EditorPage({ initialSongId = null }: {
                   rows={12} value={synced} onChange={e => setSynced(e.target.value)}
                   placeholder={"[00:00.00] Line one\n[00:05.20] Line two\n…"}
                   className={`w-full bg-surface-raised/70 rounded-xl px-3 py-2.5 text-sm font-mono text-text-primary focus:outline-none resize-none placeholder:text-text-muted placeholder:opacity-25 border transition-colors ${
-                    synced ? 'border-accent/40' : 'border-[var(--separator)] focus:border-accent/40'
+                    synced !== String(base.synced_lyrics || '') ? 'border-accent/40' : 'border-[var(--separator)] focus:border-accent/40'
                   }`}
                 />
               )}

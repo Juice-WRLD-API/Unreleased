@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useMemo, useState } from 'react'
+import React, { memo, useEffect, useRef, useMemo, useState } from 'react'
 import { Download, Sparkles } from 'lucide-react'
 import { useShallow } from 'zustand/react/shallow'
 import { parseLrc, getCurrentLineIndex, isLrcFormat, downloadSyncedLyrics, splitAdLibs, splitColorWords, ADLIB_OPACITY } from '../lib/lyrics'
@@ -23,7 +23,9 @@ interface LyricsDisplayProps {
   override?: { lyrics: string | null; syncedLyrics: string | null } | null
 }
 
-export default function LyricsDisplay({ getTime, onSeek, compact, override }: LyricsDisplayProps = {}): JSX.Element {
+// Memoized: the panels around it re-render on every play/pause and queue change, and it reads
+// what it shows from the store itself.
+export default memo(function LyricsDisplay({ getTime, onSeek, compact, override }: LyricsDisplayProps = {}): JSX.Element {
   const { currentTrackFull, account, lyricsOffset, lyricsScale, lyricsAlign, lyricsBlur, lyricsBlurAmount, lyricsColorActive, lyricsColorInactive } = useStore(useShallow(s => ({
     currentTrackFull: s.currentTrackFull,
     account: s.account,
@@ -142,10 +144,11 @@ export default function LyricsDisplay({ getTime, onSeek, compact, override }: Ly
       <div
         ref={containerRef}
         onContextMenu={handleContextMenu}
-        className={`h-full overflow-y-auto ${compact ? 'py-10 px-5 space-y-3' : 'py-16 px-8 space-y-4'}`}
-        style={{ scrollbarWidth: 'none', WebkitTapHighlightColor: 'transparent' } as React.CSSProperties}
+        // no-scrollbar, not a <style> rule: an unscoped ::-webkit-scrollbar
+        // rule hid every scrollbar in the app while synced lyrics were up.
+        className={`h-full overflow-y-auto no-scrollbar ${compact ? 'py-10 px-5 space-y-3' : 'py-16 px-8 space-y-4'}`}
+        style={{ WebkitTapHighlightColor: 'transparent' } as React.CSSProperties}
       >
-        <style>{`::-webkit-scrollbar { display: none; }`}</style>
         {syncedLines.map((line, i) => {
           const isActive = i === currentLineIdx
           const isPast = i < currentLineIdx
@@ -224,4 +227,4 @@ export default function LyricsDisplay({ getTime, onSeek, compact, override }: Ly
       </pre>
     </div>
   )
-}
+})

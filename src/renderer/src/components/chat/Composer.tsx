@@ -97,9 +97,16 @@ const Composer = forwardRef<ComposerHandle, {
   const fileInput = useRef<HTMLInputElement>(null)
   const typingSentAt = useRef(0)
   const typingStop = useRef<number | null>(null)
+  // Current files and room for the cleanups below, which would otherwise see
+  // only the first render's (empty) list and leak every pending preview URL.
+  const filesRef = useRef(files)
+  filesRef.current = files
+  const roomRef = useRef(room)
+  roomRef.current = room
 
   useEffect(() => {
     setText(drafts.get(draftKey) ?? '')
+    filesRef.current.forEach((f) => f.preview && URL.revokeObjectURL(f.preview))
     setFiles([])
     setMention(null)
   }, [draftKey])
@@ -117,7 +124,9 @@ const Composer = forwardRef<ComposerHandle, {
 
   useEffect(() => () => {
     if (typingStop.current !== null) window.clearTimeout(typingStop.current)
-    files.forEach((f) => f.preview && URL.revokeObjectURL(f.preview))
+    // Leaving mid-sentence: don't leave "typing…" up for the others.
+    if (typingSentAt.current) sendTyping(roomRef.current, false)
+    filesRef.current.forEach((f) => f.preview && URL.revokeObjectURL(f.preview))
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 

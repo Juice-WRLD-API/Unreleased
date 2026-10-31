@@ -230,6 +230,15 @@ class Bar {
       if (!this.hovered) { this.timeLeft.classList.remove('shown'); this.progress.classList.remove('thick') }
       this.paintTime()
     })
+    // A drag the window lost (a cancelled pointer) leaves the song where it was; without this the line stayed
+    // stuck on the scrub.
+    this.progress.addEventListener('lostpointercapture', () => {
+      if (this.scrub == null) return
+      this.scrub = null
+      if (!this.hovered) { this.timeLeft.classList.remove('shown'); this.progress.classList.remove('thick') }
+      this.restartLine()
+      this.paintTime()
+    })
     window.setInterval(() => { if (this.hovered || this.scrub != null) this.paintTime() }, 1000)
   }
 

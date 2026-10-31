@@ -5,6 +5,8 @@ import type { ChatUserBrief } from '../../lib/chatApi'
 import type { UserTrust } from '../../lib/chatIdentity'
 import type { LinkCandidate } from '../../lib/chatLinking'
 import { displayName, useChatStore } from '../../store/chatStore'
+import { showAppToast } from '../../lib/appToast'
+import { errorMessage } from '../../lib/format'
 
 const identity = () => import('../../lib/chatIdentity')
 
@@ -53,6 +55,8 @@ export function TrustBanners({ participants }: { participants: ChatUserBrief[] }
     try {
       await (await identity()).acceptKeyChange(meId, userId)
       bump()
+    } catch (err) {
+      showAppToast(errorMessage(err, "Couldn't accept the new key"), { tone: 'error' })
     } finally {
       setBusy(null)
     }
@@ -217,7 +221,12 @@ export function SafetyNumber({ user }: { user: ChatUserBrief }): JSX.Element | n
 
   const toggleVerified = async (): Promise<void> => {
     if (!data) return
-    await (await identity()).setVerified(meId, user.id, !data.verified)
+    try {
+      await (await identity()).setVerified(meId, user.id, !data.verified)
+    } catch (err) {
+      showAppToast(errorMessage(err, "Couldn't change verification"), { tone: 'error' })
+      return
+    }
     setData({ ...data, verified: !data.verified })
     bump()
   }

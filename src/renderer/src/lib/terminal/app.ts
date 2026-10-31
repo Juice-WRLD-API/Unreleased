@@ -11,7 +11,7 @@ import { getToken } from '../userApi'
 import { relativeTime } from '../../components/adminShared'
 import { termAccess } from './access'
 import { completeSongs } from './player'
-import { asJson, fail, oneLine, parseArgs, pickByName, table, type TermCommand } from './types'
+import { asJson, confirmAction, fail, oneLine, parseArgs, pickByName, table, type TermCommand } from './types'
 
 const st = (): ReturnType<typeof useStore.getState> => useStore.getState()
 
@@ -229,9 +229,9 @@ token show prints it in full · token copy puts it on the clipboard`)
     run: (_a, ctx) => { const n = useChatStore.getState().totalUnread(); ctx.print(n ? `${n} unread message${n === 1 ? '' : 's'}` : 'all caught up', n ? 'plain' : 'dim') },
   },
   {
-    name: 'logout', aliases: ['kms'], group: 'App', usage: 'logout', description: 'Sign out of your account',
-    run: async (_a, ctx) => {
-      if (!window.confirm('Sign out of your account?')) { ctx.print('cancelled', 'dim'); return }
+    name: 'logout', aliases: ['kms'], group: 'App', usage: 'logout [-y]', description: 'Sign out of your account',
+    run: async (args, ctx) => {
+      if (!confirmAction(ctx, 'Sign out of your account?', parseArgs(args).bool.has('y'))) return
       await st().logoutAccount()
       ctx.print('signed out', 'ok')
     },

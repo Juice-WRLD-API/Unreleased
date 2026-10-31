@@ -18,7 +18,8 @@ function recovery(verdict, elapsed = 1000) {
     useStore: { getState: () => state }, getActive: () => audio, cfActive: ref(false),
     recoveryTimer: ref(null), recoveryProbe: ref(null), recoveryAttempts: ref(4),
     recoveryStartedAt: ref(400000 - elapsed), recoveryGeneration: ref(0), recoveryLoading: ref(null),
-    resolvePlaybackUrl: track => track.streamUrl, probeSource: async () => verdict,
+    resolvePlaybackUrl: track => track.streamUrl, probeSource: async () => ({ verdict, reason: 'why', detail: 'detail' }),
+    runLog() {}, describeMediaError: () => '', describeSource: () => '', lastProgressTime: ref(0),
     MAX_RECOVERY_ATTEMPTS: 4, SLOW_RETRY_MS: 10000, RECOVERY_WINDOW_MS: 300000,
     scheduleReload: (...args) => timers.push(args), skipUnplayableTrack: () => calls.push('skip'),
     showAppToast: text => calls.push(text), setIsPlaying: value => calls.push(value),
@@ -49,16 +50,42 @@ test('offline playback does not spend the recovery budget', () => {
   const r = recovery('down'); r.env.navigator.onLine = false; r.env.recover('error')
   assert.equal(r.env.recoveryAttempts.current, 4); assert.equal(r.env.recoveryProbe.current, null)
 })
+function probeEnv(status, type = 'audio/mpeg') {
+  const seen = { cleared: false, cancelled: false }
+  const env = { AbortController, URL, window: { setTimeout: () => 1 }, clearTimeout: () => { seen.cleared = true },
+    fetch: async () => ({ status, ok: status < 400, headers: { get: () => type }, body: { cancel: async () => { seen.cancelled = true } } }),
+    document: { createElement: () => ({ canPlayType: (t) => (t.startsWith('audio/') ? 'probably' : '') }) },
+  }
+  vm.createContext(env)
+  vm.runInContext(compile(block('type SourceVerdict', '// How long the pause-fade')), env)
+  return { env, seen }
+}
 test('source probing distinguishes HTTP outages, missing files and playable audio', async () => {
   for (const [status, expected] of [[503, 'down'], [429, 'down'], [404, 'broken'], [206, 'playable']]) {
-    let cleared = false, cancelled = false
-    const env = { AbortController, window: { setTimeout: () => 1 }, clearTimeout: () => { cleared = true },
-      fetch: async () => ({ status, ok: status < 400, headers: { get: () => 'audio/mpeg' }, body: { cancel: async () => { cancelled = true } } }),
-      document: { createElement: () => ({ canPlayType: () => 'probably' }) },
-    }
-    vm.createContext(env)
-    vm.runInContext(compile(block('type SourceVerdict', '// How long the pause-fade') || ''), env)
-    assert.equal(await env.probeSource('https://audio.test/song'), expected)
-    assert.ok(cleared && cancelled)
+    const { env, seen } = probeEnv(status)
+    assert.equal((await env.probeSource('https://audio.test/song')).verdict, expected)
+    assert.ok(seen.cleared && seen.cancelled)
   }
+  const refused = await probeEnv(403).env.probeSource('https://audio.test/song')
+  assert.equal(refused.reason, 'the server refused them: HTTP 403')
+  const page = await probeEnv(200, 'text/html').env.probeSource('https://audio.test/song')
+  assert.deepEqual([page.verdict, page.reason], ['broken', "the server didn't send audio: text/html"])
+})
+test('a source that is not http cannot be probed and counts as broken', async () => {
+  const { env } = probeEnv(206)
+  assert.equal((await env.probeSource('blob:https://audio.test/abc')).verdict, 'broken')
+  env.fetch = async () => { throw new TypeError('Failed to fetch') }
+  assert.equal((await env.probeSource('https://audio.test/song')).verdict, 'down')
+})
+test('the stop toast says why the songs could not be played', () => {
+  const calls = []
+  const env = { useStore: { getState: () => ({ currentTrack: { id: 'jw-1', title: 'Song' } }) }, consecutiveSkips: ref(3),
+    MAX_CONSECUTIVE_SKIPS: 3, runLog: (...a) => calls.push(['log', ...a]), showAppToast: (t) => calls.push(t),
+    setIsPlaying: (v) => calls.push(v), nextTrack: () => true }
+  vm.createContext(env)
+  vm.runInContext(compile(block('  const skipUnplayableTrack =', '  // Data still arriving') + '\nglobalThis.skip = skipUnplayableTrack'), env)
+  env.skip('the server refused them: HTTP 403', 'MediaError 4')
+  assert.ok(calls.includes("Stopped: 4 songs in a row couldn't be played (the server refused them: HTTP 403)"))
+  assert.equal(calls.at(-1), false)
+  assert.ok(calls.some((c) => Array.isArray(c) && c[0] === 'log' && /MediaError 4/.test(c[2])))
 })

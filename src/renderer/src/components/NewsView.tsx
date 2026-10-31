@@ -10,6 +10,7 @@ import {
 } from 'lucide-react'
 import { useStorePick } from '../store/useStore'
 import { newsShareUrl } from '../lib/platform'
+import { showAppToast } from '../lib/appToast'
 import {
   fetchNews, peekNews, fetchChannels, fetchNewsItem, deleteNewsItem, isImageAttachment, isAudioAttachment,
   buildNewsAttachmentStreamUrl, ensureHttpsMediaUrl,
@@ -410,7 +411,11 @@ export default function NewsView(): JSX.Element {
     }
   }, [])
 
+  // Switching channels quickly can leave an older request landing last; only
+  // the newest one may write the list.
+  const loadSeq = useRef(0)
   const load = useCallback(async () => {
+    const seq = ++loadSeq.current
     // Stale-while-revalidate: show the last cached page for this exact
     // channel+sort instantly (no spinner flash on every channel switch),
     // then let the network response below replace it once it lands.
@@ -424,11 +429,11 @@ export default function NewsView(): JSX.Element {
     setError(null)
     try {
       const res = await fetchNews({ channel, sort })
-      setItems(res.results)
+      if (seq === loadSeq.current) setItems(res.results)
     } catch (err) {
-      if (!cached) setError(errorMessage(err, 'Failed to load news'))
+      if (seq === loadSeq.current && !cached) setError(errorMessage(err, 'Failed to load news'))
     } finally {
-      setLoading(false)
+      if (seq === loadSeq.current) setLoading(false)
     }
   }, [channel, sort])
 
@@ -525,7 +530,8 @@ export default function NewsView(): JSX.Element {
       setItems((prev) => prev.filter((i) => i.id !== item.id))
       if (selected?.id === item.id) closeArticle()
     } catch (err) {
-      setError(errorMessage(err, 'Failed to delete'))
+      // A toast: setError swaps the whole list for an error screen.
+      showAppToast(errorMessage(err, 'Failed to delete'), { tone: 'error' })
     }
   }
 

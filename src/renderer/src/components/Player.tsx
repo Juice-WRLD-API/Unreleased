@@ -52,6 +52,7 @@ import { showQueueEndedToast } from '../lib/queueEndedToast'
 import PlaybackNotice from './PlaybackNotice'
 import { ensureDonorCover } from '../lib/donorCoverArt'
 import { showAppToast } from '../lib/appToast'
+import { runLog } from '../lib/runLog'
 import { CoverFade, LikePop, SwapIcon, TrackSwap } from './PlayerMotion'
 import { PopLayer } from './PopLayer'
 
@@ -91,27 +92,54 @@ function fillSessionArtist(trackId: string, streamUrl: string | undefined): void
 // the server, which comes back. 'playable': the file downloads fine now in a
 // type this browser plays. 'broken': a 4xx, or a type it can't play - that
 // won't come back.
+// `reason` finishes the stop toast ("couldn't be played (reason)"); `detail`
+// goes to the run log.
 type SourceVerdict = 'down' | 'playable' | 'broken'
+interface SourceProbe { verdict: SourceVerdict; reason: string; detail: string }
 // A probe that hasn't answered by now counts as no answer: a request on a
 // dropped connection can hang for minutes instead of failing.
 const PROBE_TIMEOUT_MS = 10000
-async function probeSource(url: string): Promise<SourceVerdict> {
-  if (!/^https?:/.test(url)) return 'broken'
+async function probeSource(url: string): Promise<SourceProbe> {
+  if (!/^https?:/.test(url)) {
+    return { verdict: 'broken', reason: "the player couldn't open them", detail: `no way to check a ${url.split(':')[0] || 'blank'} source` }
+  }
   const ctrl = new AbortController()
   const timer = window.setTimeout(() => ctrl.abort(), PROBE_TIMEOUT_MS)
   try {
     const res = await fetch(url, { headers: { Range: 'bytes=0-1' }, cache: 'no-store', signal: ctrl.signal })
     void res.body?.cancel().catch(() => {})
-    if (res.status >= 500 || res.status === 429) return 'down'
-    if (!res.ok) return 'broken'
+    if (res.status >= 500 || res.status === 429) return { verdict: 'down', reason: `the server is having trouble: HTTP ${res.status}`, detail: `HTTP ${res.status}` }
+    if (!res.ok) return { verdict: 'broken', reason: `the server refused them: HTTP ${res.status}`, detail: `HTTP ${res.status}` }
     const type = res.headers.get('Content-Type')?.split(';')[0].trim() ?? ''
-    return !!type && document.createElement('audio').canPlayType(type) !== '' ? 'playable' : 'broken'
-  } catch {
-    return 'down'
+    if (!type || document.createElement('audio').canPlayType(type) === '') {
+      return {
+        verdict: 'broken',
+        reason: `the server didn't send audio: ${type || 'no type'}`,
+        detail: `HTTP ${res.status} ${type || 'no Content-Type'}`,
+      }
+    }
+    return { verdict: 'playable', reason: "they couldn't be decoded", detail: `HTTP ${res.status} ${type}` }
+  } catch (e) {
+    const detail = ctrl.signal.aborted ? `no answer in ${PROBE_TIMEOUT_MS / 1000}s` : String(e)
+    return { verdict: 'down', reason: "the server couldn't be reached", detail }
   } finally {
     clearTimeout(timer)
   }
 }
+
+// For the run log: what a media element failed on, in words.
+function describeMediaError(err: MediaError | null): string {
+  if (!err) return 'no media error'
+  const kind = ['', 'aborted', 'network', 'decode', 'unsupported source'][err.code] ?? 'unknown'
+  return `MediaError ${err.code} (${kind})${err.message ? `: ${err.message}` : ''}`
+}
+
+function describeSource(url: string): string {
+  return url.startsWith('blob:') ? 'blob' : url || '(none)'
+}
+
+// Hotkey actions that keep firing while their key is held down.
+const REPEATABLE_HOTKEYS = new Set(['seek-forward', 'seek-backward', 'volume-up', 'volume-down', 'speed-up', 'speed-down'])
 
 // How long the pause-fade ramps volume when "smooth fade when pausing" is on.
 const PAUSE_FADE_MS = 400
@@ -197,10 +225,53 @@ function ElapsedTime(): JSX.Element {
   return <>{formatDuration(currentTime)}</>
 }
 
+// 999 FM's elapsed time, ticking locally between WS updates. Same reasoning as
+// above: a 500ms tick in the Player body re-rendered all of it twice a second
+// for as long as FM played, so only the parts that show it tick.
+function useFmElapsedMs(): number {
+  const active = useStore((s) => s.radioFmActive)
+  const elapsed = useStore((s) => s.radioFmNowPlaying?.elapsed_ms)
+  const [ms, setMs] = useState(0)
+  const base = useRef({ elapsed: 0, at: 0 })
+  const tick = useRef<ReturnType<typeof setInterval> | null>(null)
+  // Keyed on elapsed_ms rather than the whole now-playing object: that object is
+  // replaced on every metadata broadcast, which tore the interval down and
+  // rebuilt it faster than its own 500ms tick, so the bar sat still.
+  useEffect(() => {
+    if (!active || !elapsed) {
+      if (tick.current) { clearInterval(tick.current); tick.current = null }
+      setMs(0)
+      return
+    }
+    base.current = { elapsed, at: Date.now() }
+    setMs(elapsed)
+    if (!tick.current) {
+      tick.current = setInterval(() => setMs(base.current.elapsed + (Date.now() - base.current.at)), 500)
+    }
+  }, [active, elapsed])
+  useEffect(() => () => { if (tick.current) { clearInterval(tick.current); tick.current = null } }, [])
+  return ms
+}
+
+function useFmProgress(): number {
+  const elapsed = useFmElapsedMs()
+  const duration = useStore((s) => s.radioFmNowPlaying?.duration_ms ?? 0)
+  return duration > 0 ? Math.min(elapsed / duration, 1) : 0
+}
+
+function FmProgressFill({ className }: { className: string }): JSX.Element {
+  const progress = useFmProgress()
+  return <div className={className} style={{ width: `${progress * 100}%` }} />
+}
+
+function FmElapsedTime(): JSX.Element {
+  const elapsed = useFmElapsedMs()
+  return <>{formatDuration(Math.floor(elapsed / 1000))}</>
+}
+
 interface SeekRangeProps {
   seekDrag: number | null
   radioFmActive: boolean
-  fmProgress: number
   disabled: boolean
   onMouseDown?: () => void
   onTouchStart?: () => void
@@ -209,8 +280,9 @@ interface SeekRangeProps {
   onTouchEnd?: () => void
   onKeyUp?: () => void
 }
-function SeekRange({ seekDrag, radioFmActive, fmProgress, ...rest }: SeekRangeProps): JSX.Element {
+function SeekRange({ seekDrag, radioFmActive, ...rest }: SeekRangeProps): JSX.Element {
   const progress = useStore((s) => s.progress)
+  const fmProgress = useFmProgress()
   const v = radioFmActive ? fmProgress : (seekDrag !== null ? seekDrag : progress)
   return (
     <input
@@ -255,6 +327,7 @@ export default function Player(): JSX.Element {
     setCurrentTrackFull,
     toggleShuffle,
     toggleRepeat,
+    setRepeat,
     nextTrack,
     prevTrack,
     setShowNowPlaying,
@@ -277,7 +350,7 @@ export default function Player(): JSX.Element {
     toggleLike,
     setActiveView,
     activeView,
-    playNext, account, setPendingEditorSongId } = useStorePick('currentTrack', 'currentTrackFull', 'isPlaying', 'volume', 'shuffle', 'repeat', 'setIsPlaying', 'setVolume', 'setProgress', 'setCurrentTime', 'setCurrentTrackFull', 'toggleShuffle', 'toggleRepeat', 'nextTrack', 'prevTrack', 'setShowNowPlaying', 'showNowPlaying', 'showQueue', 'setShowQueue', 'playerCollapsed', 'setPlayerCollapsed', 'queue', 'queueIndex', 'crossfadeEnabled', 'crossfadeDuration', 'sleepTimerEnd', 'setSleepTimer', 'audioOutput', 'setAudioOutput', 'playbackSpeed', 'setPlaybackSpeed', 'likedTrackIds', 'toggleLike', 'setActiveView', 'activeView', 'playNext', 'account', 'setPendingEditorSongId')
+    playNext, account, setPendingEditorSongId } = useStorePick('currentTrack', 'currentTrackFull', 'isPlaying', 'volume', 'shuffle', 'repeat', 'setIsPlaying', 'setVolume', 'setProgress', 'setCurrentTime', 'setCurrentTrackFull', 'toggleShuffle', 'toggleRepeat', 'setRepeat', 'nextTrack', 'prevTrack', 'setShowNowPlaying', 'showNowPlaying', 'showQueue', 'setShowQueue', 'playerCollapsed', 'setPlayerCollapsed', 'queue', 'queueIndex', 'crossfadeEnabled', 'crossfadeDuration', 'sleepTimerEnd', 'setSleepTimer', 'audioOutput', 'setAudioOutput', 'playbackSpeed', 'setPlaybackSpeed', 'likedTrackIds', 'toggleLike', 'setActiveView', 'activeView', 'playNext', 'account', 'setPendingEditorSongId')
   const canEditSong = useCanEdit()
   // iOS ignores element volume and suspends RAF while locked, so its two-slot
   // fade cannot provide a reliable background transition.
@@ -339,32 +412,8 @@ export default function Player(): JSX.Element {
   }
 
 
-  // FM elapsed time - ticks locally between WS updates
-  const [fmElapsedMs, setFmElapsedMs] = useState(0)
-  const fmBaseRef = useRef<{ elapsed: number; at: number }>({ elapsed: 0, at: 0 })
-  const fmTickRef = useRef<ReturnType<typeof setInterval> | null>(null)
-  const fmElapsed = radioFmNowPlaying?.elapsed_ms
-  // Keyed on elapsed_ms rather than the whole now-playing object: that object is
-  // replaced on every metadata broadcast, which tore the interval down and
-  // rebuilt it faster than its own 500ms tick, so the bar sat still.
-  useEffect(() => {
-    if (!radioFmActive || !fmElapsed) {
-      if (fmTickRef.current) { clearInterval(fmTickRef.current); fmTickRef.current = null }
-      setFmElapsedMs(0)
-      return
-    }
-    fmBaseRef.current = { elapsed: fmElapsed, at: Date.now() }
-    setFmElapsedMs(fmElapsed)
-    if (!fmTickRef.current) {
-      fmTickRef.current = setInterval(() => {
-        const { elapsed, at } = fmBaseRef.current
-        setFmElapsedMs(elapsed + (Date.now() - at))
-      }, 500)
-    }
-  }, [radioFmActive, fmElapsed])
-  useEffect(() => () => { if (fmTickRef.current) clearInterval(fmTickRef.current) }, [])
+  // FM elapsed time ticks in FmElapsedTime / FmProgressFill / SeekRange.
   const fmDurationMs = radioFmNowPlaying?.duration_ms ?? 0
-  const fmProgress = fmDurationMs > 0 ? Math.min(fmElapsedMs / fmDurationMs, 1) : 0
   // Global infoSongId (not local state) so the info panel survives switching
   // to another tab, which unmounts this view.
   const openSongInfo = (): void => {
@@ -835,6 +884,8 @@ export default function Player(): JSX.Element {
         a.src = url
         a.volume = volumeRef.current
         applyRate(a)
+        // Through playSlot like every other play: it wakes the effects graph
+        // and lets a quick pause wait for this play() to settle.
         if (s.isPlaying) playSlot(a)
       }).catch((err) => {
         console.error('Could not load donor file', err)
@@ -1129,32 +1180,35 @@ export default function Player(): JSX.Element {
       recoveryProbe.current = probe
       const trackId = track.id
       const generation = recoveryGeneration.current
-      void probeSource(url).then((verdict) => {
+      void probeSource(url).then((result) => {
         if (recoveryProbe.current !== probe) return
         recoveryProbe.current = null
         const s = useStore.getState()
         // Paused, skipped or crossfaded away while the server answered.
         if (getActive() !== audio || !s.isPlaying || s.currentTrack?.id !== trackId
           || recoveryGeneration.current !== generation || cfActive.current || recoveryTimer.current != null) return
-        if (verdict === 'down' && Date.now() - recoveryStartedAt.current < RECOVERY_WINDOW_MS) {
-          console.warn(`Playback ${reason} - server unreachable, retrying "${track.title}" in ${SLOW_RETRY_MS / 1000}s`)
+        if (result.verdict === 'down' && Date.now() - recoveryStartedAt.current < RECOVERY_WINDOW_MS) {
+          runLog('playback', `${reason} on "${track.title}" (${trackId}), ${result.detail} - retrying in ${SLOW_RETRY_MS / 1000}s`)
           scheduleReload(audio, trackId, url, SLOW_RETRY_MS)
           return
         }
         if (recoveryLoading.current?.audio === audio) recoveryLoading.current = null
-        if (verdict === 'down') {
+        if (result.verdict === 'down') {
           // Still no connection. Stop pretending - a paused player the user
           // can tap is far better than a play button that lies.
-          console.error(`Playback recovery gave up on "${track.title}" after ${RECOVERY_WINDOW_MS / 60000} minutes unreachable (${reason})`)
-          showAppToast(`Couldn't play "${track.title}"`)
+          runLog('playback', `gave up on "${track.title}" (${trackId}) after ${RECOVERY_WINDOW_MS / 60000} minutes (${reason}), ${result.detail}`)
+          showAppToast(`Couldn't play "${track.title}" (${result.reason})`)
           setIsPlaying(false)
           return
         }
         // The server answers fine, so it's this file that won't play through
         // (cut short, or broken at this point). Stopping the whole queue on it
         // is the wrong call - move on, as with any other unplayable song.
-        console.error(`Playback recovery gave up on "${track.title}" after ${MAX_RECOVERY_ATTEMPTS} attempts (${reason}) - skipping it`)
-        skipUnplayableTrack()
+        const why = result.verdict === 'broken' ? result.reason
+          : reason === 'stalled' ? (lastProgressTime.current === 0 ? 'they never started playing' : 'playback kept stalling')
+          : reason === 'play-rejected' ? "the player wouldn't start them"
+          : 'they kept failing to load'
+        skipUnplayableTrack(why, `${reason} after ${MAX_RECOVERY_ATTEMPTS} reloads, ${describeMediaError(audio.error)}, ${describeSource(url)}, probe ${result.verdict}: ${result.detail}`)
       })
       return
     }
@@ -1166,21 +1220,26 @@ export default function Player(): JSX.Element {
     // This ref is authoritative: the element can retain an obsolete non-zero
     // currentTime when a user seek/restart throws during an error state.
     const resumeAt = recoveryResumeAt.current
-    console.warn(`Playback ${reason} - reloading "${track.title}" at ${resumeAt.toFixed(1)}s (attempt ${attempt + 1}/${MAX_RECOVERY_ATTEMPTS})`)
+    runLog('playback', `${reason} on "${track.title}" (${track.id}) - reloading at ${resumeAt.toFixed(1)}s (attempt ${attempt + 1}/${MAX_RECOVERY_ATTEMPTS})`)
     scheduleReload(audio, track.id, url, Math.min(1000 * 2 ** attempt, 8000))
   }
 
   // A source the browser can't play at all - a 404, a codec it doesn't
   // support - will never come back on retry, and stopping dead in the middle
   // of a queue is the same complaint from the user's side. Move past it.
-  const skipUnplayableTrack = (): void => {
+  // `reason` finishes the stop toast; `detail` is for the run log.
+  const skipUnplayableTrack = (reason: string, detail: string): void => {
+    const track = useStore.getState().currentTrack
+    const label = track ? `"${track.title}" (${track.id})` : 'the current track'
     if (consecutiveSkips.current >= MAX_CONSECUTIVE_SKIPS) {
-      console.error('Too many unplayable tracks in a row - stopping playback')
-      showAppToast("Stopped: several songs in a row couldn't be played")
+      const count = consecutiveSkips.current + 1
+      runLog('playback', `stopping after ${count} unplayable songs in a row, the last ${label}: ${detail}`)
+      showAppToast(`Stopped: ${count} songs in a row couldn't be played (${reason})`)
       setIsPlaying(false)
       return
     }
     consecutiveSkips.current++
+    runLog('playback', `skipping ${label}, ${consecutiveSkips.current} in a row: ${detail}`)
     if (!nextTrack()) setIsPlaying(false)
   }
 
@@ -1205,21 +1264,27 @@ export default function Player(): JSX.Element {
       if (cfActive.current && audio === getNext()) cancelCF()
       return
     }
-    console.error(`Audio error (${slot}): code ${err.code}`, err.message)
-    if (!useStore.getState().isPlaying) return
+    const src = audio.currentSrc || audio.src
+    const { currentTrack: track, isPlaying: playing } = useStore.getState()
+    runLog('playback', `error on "${track?.title}" (${track?.id}) in ${slot}: ${describeMediaError(err)}, ${describeSource(src)}`)
+    if (!playing) return
     // Unsupported before a single frame played = the file itself is the
     // problem, or the server errored on the first request (see probeSource) -
     // retry that, skip the rest. Mid-song it means the connection died, which
     // is recoverable.
     if (err.code === MediaError.MEDIA_ERR_SRC_NOT_SUPPORTED && lastProgressTime.current === 0) {
-      const trackId = useStore.getState().currentTrack?.id
-      void probeSource(audio.currentSrc || audio.src).then((verdict) => {
+      const trackId = track?.id
+      void probeSource(src).then((result) => {
         // Moved on while the server answered: skipped, paused, or a reload
         // already cleared the error.
         if (audio !== getActive() || !audio.error || !useStore.getState().isPlaying
           || useStore.getState().currentTrack?.id !== trackId) return
-        if (verdict !== 'broken') recoverPlayback('server error')
-        else skipUnplayableTrack()
+        if (result.verdict !== 'broken') {
+          runLog('playback', `"${track?.title}" (${trackId}) failed to open, ${result.detail} - retrying`)
+          recoverPlayback('server error')
+        } else {
+          skipUnplayableTrack(result.reason, `${describeMediaError(err)}, ${describeSource(src)}, probe ${result.verdict}: ${result.detail}`)
+        }
       })
       return
     }
@@ -1307,7 +1372,13 @@ export default function Player(): JSX.Element {
       if (!audio) return
       if (audio.ended) { onAudioEnded(audio); return }
       if (audio.error) { recoverPlayback('error'); return }
-      if (audio.paused) { playSlot(audio, () => recoverPlayback('play-rejected')); return }
+      if (audio.paused) {
+        playSlot(audio, (e) => {
+          runLog('playback', `play() refused on "${useStore.getState().currentTrack?.title}": ${String(e)}`)
+          recoverPlayback('play-rejected')
+        })
+        return
+      }
       // Playing on paper, but the clock isn't moving. Very common on mobile:
       // the connection goes away without the element ever firing 'error', so it
       // sits in a rebuffer that will never finish. Nothing else detects this.
@@ -1858,13 +1929,9 @@ export default function Player(): JSX.Element {
 
   const handlePrev = (): void => {
     const audio = getActive()
-    // When on repeat-one, skip back = restart the same song (mirrors handleNext).
-    // Radio keeps its played songs in `queue` as history, so it falls through
-    // to the normal "restart if >3s in, otherwise previous song" logic below.
-    if (repeat === 'one' && !radioMode) {
-      restartCurrentTrack()
-      return
-    }
+    // Restart if more than 3s in, otherwise go back a song, looped or not.
+    // Restarting lands back under 3s, so a second press (or one just after a
+    // loop comes round) is what reaches the song before.
     if (audio && getAudioCurrentTime() > 3) {
       restartCurrentTrack()
       return
@@ -1875,6 +1942,8 @@ export default function Player(): JSX.Element {
       restartCurrentTrack()
       return
     }
+    // The loop belonged to the song being left, as in handleNext.
+    if (repeat === 'one' && !radioMode) setRepeat('all')
     cancelCF()
     const previousId = currentTrack?.id
     const previous = prevTrack()
@@ -1886,12 +1955,12 @@ export default function Player(): JSX.Element {
 
   const handleNext = (): void => {
     cancelCF()
-    // Radio owns its own generated-next-track flow, even if repeat-one was
-    // persisted from a normal queue session.
-    if (repeat === 'one' && !radioMode) {
-      restartCurrentTrack()
-      return
-    }
+    // Skipping off a looped song moves on to the next one, like Spotify: the
+    // loop belonged to that song, so repeat-one drops to repeat-all (nextTrack
+    // would otherwise pick the same index again). Radio owns its own
+    // generated-next-track flow, even if repeat-one was persisted from a
+    // normal queue session.
+    if (repeat === 'one' && !radioMode) setRepeat('all')
     const previousId = currentTrack?.id
     const next = nextTrack()
     // Nothing left to skip to (radio returns null too, but only while its
@@ -2018,6 +2087,9 @@ export default function Player(): JSX.Element {
       const fn = hotkeyActionsRef.current[id]
       if (!fn) return
       e.preventDefault()
+      // A held key repeats. That's wanted for stepping (seek, volume, speed),
+      // but a held Space or L flipped play/pause or the like on and off.
+      if (e.repeat && !REPEATABLE_HOTKEYS.has(id)) return
       fn()
     }
     document.addEventListener('keydown', handler)
@@ -2295,7 +2367,7 @@ export default function Player(): JSX.Element {
             clear of its rounded ends. */}
         {radioFmActive ? (
           <div className="absolute left-6 right-6 bottom-[3px] h-[2px] rounded-full bg-red-900/40 overflow-hidden pointer-events-none">
-            <div className="h-full bg-red-400 absolute left-0 top-0 transition-none" style={{ width: `${fmProgress * 100}%` }} />
+            <FmProgressFill className="h-full bg-red-400 absolute left-0 top-0 transition-none" />
           </div>
         ) : (
         // Seekable. The visible line is 2px but the hit area is taller so
@@ -2325,13 +2397,18 @@ export default function Player(): JSX.Element {
             let last = pctAt(e.touches[0].clientX)
             setSeekDrag(last)
             const onMove = (ev: TouchEvent): void => { last = pctAt(ev.touches[0].clientX); setSeekDrag(last) }
-            const onEnd = (): void => {
+            const detach = (): void => {
               document.removeEventListener('touchmove', onMove)
               document.removeEventListener('touchend', onEnd)
-              seekToPercent(last); setSeekDrag(null)
+              document.removeEventListener('touchcancel', onCancel)
             }
+            const onEnd = (): void => { detach(); seekToPercent(last); setSeekDrag(null) }
+            // A cancelled touch (system gesture, incoming call) never sends
+            // touchend - without this the bar stayed frozen on the drag.
+            const onCancel = (): void => { detach(); setSeekDrag(null) }
             document.addEventListener('touchmove', onMove, { passive: true })
             document.addEventListener('touchend', onEnd)
+            document.addEventListener('touchcancel', onCancel)
           }}
         >
           <div className="absolute inset-x-0 bottom-[3px] h-[2px] rounded-full bg-[var(--fill)] overflow-hidden">
@@ -2351,7 +2428,7 @@ export default function Player(): JSX.Element {
           {/* Thin progress line along the top edge */}
           {radioFmActive ? (
             <div className="absolute top-0 left-0 right-0 h-[2px] bg-red-900/40">
-              <div className="h-full bg-red-400" style={{ width: `${fmProgress * 100}%` }} />
+              <FmProgressFill className="h-full bg-red-400" />
             </div>
           ) : (
             <div className="absolute top-0 left-0 right-0 h-[2px] bg-surface-overlay">
@@ -2380,7 +2457,7 @@ export default function Player(): JSX.Element {
           </TrackSwap>
           <span className="text-text-muted text-xs tabular-nums shrink-0">
             {radioFmActive
-              ? `${formatDuration(Math.floor(fmElapsedMs / 1000))} / ${formatDuration(Math.floor(fmDurationMs / 1000))}`
+              ? <><FmElapsedTime /> / {formatDuration(Math.floor(fmDurationMs / 1000))}</>
               : <><ElapsedTime /> / {formatDuration(duration)}</>}
           </span>
           <button
@@ -2538,12 +2615,12 @@ export default function Player(): JSX.Element {
           <div className="flex items-center gap-2 w-full max-w-xl">
             <span className="text-text-muted text-xs w-10 text-right tabular-nums">
               {radioFmActive
-                ? formatDuration(Math.floor(fmElapsedMs / 1000))
+                ? <FmElapsedTime />
                 : <ElapsedTime />}
             </span>
             <div className="flex-1 progress-track">
               <SeekRange
-                seekDrag={seekDrag} radioFmActive={radioFmActive} fmProgress={fmProgress}
+                seekDrag={seekDrag} radioFmActive={radioFmActive}
                 onMouseDown={radioFmActive ? undefined : handleSeekMouseDown}
                 onTouchStart={radioFmActive ? undefined : handleSeekMouseDown}
                 onChange={handleSeekChange}

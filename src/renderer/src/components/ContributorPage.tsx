@@ -146,7 +146,7 @@ export default function ContributorPage(): JSX.Element {
   const [submitError, setSubmitError] = useState<string | null>(null)
   const [withdrawingId, setWithdrawingId] = useState<number | null>(null)
   const [togglingLeakId, setTogglingLeakId] = useState<number | null>(null)
-  const [reviewingId, setReviewingId] = useState<number | null>(null)
+  const [reviewingId, setReviewingId] = useState<ReadonlySet<number>>(new Set())
   const [picker, setPicker] = useState<PickerTarget | null>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
   // React state lags a render behind, so `submitState` alone can't stop a
@@ -334,12 +334,14 @@ export default function ContributorPage(): JSX.Element {
     }
 
     const failed: string[] = []
+    const failedPaths: string[] = []
     setBatchProgress(jobs.length > 1 ? { done: 0, total: jobs.length } : null)
     for (const [i, job] of jobs.entries()) {
       try {
         await userApi.createCompProposal(buildForm(job.path, job.file))
       } catch {
         failed.push(basename(job.path))
+        failedPaths.push(job.path)
       }
       if (jobs.length > 1) setBatchProgress({ done: i + 1, total: jobs.length })
     }
@@ -356,6 +358,9 @@ export default function ContributorPage(): JSX.Element {
       return
     }
     if (failed.length > 0) {
+      // Only delete batches have several bodiless jobs. Leave just the failed
+      // paths picked, so submitting again doesn't file the landed ones twice.
+      if (isDelete) setDeletePaths(failedPaths)
       setSubmitState('error')
       setSubmitError(`${jobs.length - failed.length} of ${jobs.length} submitted. Failed: ${failed.join(', ')}`)
       setTimeout(() => { setSubmitState('idle'); submitLatch.current = false }, 6000)
@@ -396,7 +401,7 @@ export default function ContributorPage(): JSX.Element {
   // Staff approving/denying their own proposal in place - same endpoint as
   // the admin Comp queue.
   const review = async (p: CompFileProposal, action: 'approve' | 'reject'): Promise<void> => {
-    setReviewingId(p.id)
+    setReviewingId(s => new Set(s).add(p.id))
     setSubmitError(null)
     try {
       const updated = await userApi.adminReviewCompProposal(p.id, { action, channel: activeChannel })
@@ -404,7 +409,7 @@ export default function ContributorPage(): JSX.Element {
     } catch (e) {
       setSubmitError(errorMessage(e, `Could not ${action} that proposal`))
     } finally {
-      setReviewingId(null)
+      setReviewingId(s => { const n = new Set(s); n.delete(p.id); return n })
     }
   }
 

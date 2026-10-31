@@ -12,6 +12,7 @@ import CompProposalList, { CompFilterBar } from './CompProposalList'
 import RoleBadges from './RoleBadges'
 import { Tile } from './Tile'
 import ProposalListItem from './ProposalListItem'
+import { LoadMoreSentinel } from './LoadMoreSentinel'
 import BroadcastModal from './BroadcastModal'
 import AddSongModal from './AddSongModal.mobile'
 import { useLeaderboard } from '../hooks/useLeaderboard'
@@ -106,7 +107,8 @@ export default function EditorProfileView(): JSX.Element {
     proposalsView, setProposalsView, expandedProposalId, setExpandedProposalId, compSearch, setCompSearch,
     isContributor, isAdmin, isManager, canReviewReports, canReviewStaff, canReviewCoverArt,
     loadingProposals, refreshing, filter, setFilter, search, setSearch, deletingId, resubmittingId,
-    filteredProposals, handleDelete, handleResubmit, handleReview, reviewingId, canReviewProposals, tabCount, proposals,
+    filteredProposals, handleDelete, handleResubmit, handleReview, reviewingId, canReviewProposals, tabCount, totalProposals,
+    loadingMoreProposals, hasMoreProposals, loadMoreProposals,
     leaderboard, loadingLeaderboard, myEntry,
     compProposals, loadingComp, compFilter, setCompFilter, reviewingCompId, handleReviewComp,
     compTabCount, filteredCompProposals,
@@ -213,7 +215,7 @@ export default function EditorProfileView(): JSX.Element {
               <p className="text-footnote text-text-secondary truncate">
                 {myEntry
                   ? `Rank #${myEntry.rank} · ${myEntry.approved_count} approved`
-                  : !loadingProposals ? `${proposals.length} proposal${proposals.length !== 1 ? 's' : ''} submitted` : ''}
+                  : !loadingProposals ? `${totalProposals} proposal${totalProposals !== 1 ? 's' : ''} submitted` : ''}
               </p>
             </div>
           </div>
@@ -394,6 +396,7 @@ export default function EditorProfileView(): JSX.Element {
                           onToggleExpand={() => setExpandedProposalId(id => id === p.id ? null : p.id)}
                         />
                       ))}
+                      <LoadMoreSentinel hasMore={hasMoreProposals} loading={loadingMoreProposals} onVisible={loadMoreProposals} />
                     </div>
                   )}
                 </div>
@@ -442,6 +445,7 @@ export default function EditorProfileView(): JSX.Element {
                 <div className="max-h-96 overflow-y-auto min-h-0 pr-1">
                   <CompProposalList
                     proposals={filteredCompProposals}
+                    fill
                     loading={loadingComp}
                     onSelect={() => setActiveView('contributor')}
                     onReview={canReviewProposals ? handleReviewComp : undefined}

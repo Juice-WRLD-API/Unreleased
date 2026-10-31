@@ -4,24 +4,24 @@ import { displayName, useChatStore, type RoomRef } from '../../store/chatStore'
 
 const EMPTY: ChatUserBrief[] = []
 
+// Selects only this room's own conversation / server / member list, so an
+// update to some other room doesn't hand every message row a new array.
 export function useRoomPeople(room: RoomRef | null): ChatUserBrief[] {
-  const servers = useChatStore((s) => s.servers)
-  const members = useChatStore((s) => s.members)
-  const conversations = useChatStore((s) => s.conversations)
+  const conv = useChatStore((s) => (room?.kind === 'conversation' ? s.conversations.find((c) => c.id === room.id) : undefined))
+  const server = useChatStore((s) => (room?.kind === 'channel' ? s.servers.find((x) => x.channels.some((c) => c.id === room.id)) : undefined))
+  const serverId = server?.id
+  const memberList = useChatStore((s) => (serverId != null ? s.members[serverId] : undefined))
   return useMemo(() => {
     if (!room) return EMPTY
-    if (room.kind === 'conversation') {
-      return conversations.find((c) => c.id === room.id)?.participants.map((p) => p.user) ?? EMPTY
-    }
-    const server = servers.find((s) => s.channels.some((c) => c.id === room.id))
+    if (room.kind === 'conversation') return conv?.participants.map((p) => p.user) ?? EMPTY
     const channel = server?.channels.find((c) => c.id === room.id)
-    const list = server ? members[server.id]?.map((m) => m.user) ?? EMPTY : EMPTY
+    const list = memberList?.map((m) => m.user) ?? EMPTY
     if (channel?.is_private && channel.allowed_members?.length) {
       const allowed = new Set(channel.allowed_members)
       return list.filter((u) => allowed.has(u.id) || server?.owner === u.id)
     }
     return list
-  }, [room, servers, members, conversations])
+  }, [room, conv, server, memberList])
 }
 
 export function useStaffDirectory(): ChatUserBrief[] {

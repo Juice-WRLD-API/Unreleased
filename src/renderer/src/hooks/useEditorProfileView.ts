@@ -85,8 +85,11 @@ export function useEditorProfileView(): {
   canReviewReports: boolean
   canReviewStaff: boolean
   canReviewCoverArt: boolean
-  proposals: ReturnType<typeof useMyProposals>['proposals']
+  totalProposals: number
   loadingProposals: boolean
+  loadingMoreProposals: boolean
+  hasMoreProposals: boolean
+  loadMoreProposals: () => void
   refreshing: boolean
   filter: ProposalFilterTab
   setFilter: ReturnType<typeof useMyProposals>['setFilter']
@@ -98,7 +101,7 @@ export function useEditorProfileView(): {
   handleDelete: ReturnType<typeof useMyProposals>['handleDelete']
   handleResubmit: ReturnType<typeof useMyProposals>['handleResubmit']
   handleReview: ReturnType<typeof useMyProposals>['handleReview']
-  reviewingId: number | null
+  reviewingId: ReadonlySet<number>
   /** Staff (admin, or manager of this channel) past the 2FA lock - gets
    *  approve/deny on their own pending proposals here. */
   canReviewProposals: boolean
@@ -229,7 +232,8 @@ export function useEditorProfileView(): {
   const canReviewCoverArt = useCanManage()
 
   const {
-    proposals, loading: loadingProposals, refreshing,
+    totalProposals, loading: loadingProposals, refreshing,
+    loadingMore: loadingMoreProposals, hasMore: hasMoreProposals, loadMore: loadMoreProposals,
     filter, setFilter, search, setSearch, deletingId, resubmittingId,
     filteredProposals, handleDelete, handleResubmit, handleReview, reviewingId, tabCount,
   } = useMyProposals(activeChannel, refreshKey)
@@ -356,7 +360,8 @@ export function useEditorProfileView(): {
     refreshKey, setRefreshKey, showAddSong, setShowAddSong, openAdmin,
     proposalsView, setProposalsView, expandedProposalId, setExpandedProposalId, compSearch, setCompSearch,
     isContributor, isAdmin, isManager, canReviewReports, canReviewStaff, canReviewCoverArt,
-    proposals, loadingProposals, refreshing, filter, setFilter, search, setSearch, deletingId, resubmittingId,
+    totalProposals, loadingProposals, loadingMoreProposals, hasMoreProposals, loadMoreProposals,
+    refreshing, filter, setFilter, search, setSearch, deletingId, resubmittingId,
     filteredProposals, handleDelete, handleResubmit, handleReview, reviewingId, canReviewProposals, tabCount,
     leaderboard, loadingLeaderboard, myEntry,
     compProposals, loadingComp, compFilter, setCompFilter, withdrawingCompId, handleWithdrawComp,

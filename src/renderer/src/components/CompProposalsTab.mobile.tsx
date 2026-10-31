@@ -80,7 +80,7 @@ export default function CompProposalsTab({ embedded = false, onChanged }: { embe
   const {
     status, setStatus, proposals, selected, setSelected, loading, actionId,
     reviewNotes, setReviewNotes, error, setError, loadError,
-    doReview, doReverse, downloadStaging, bulkApproving, doAcceptAll,
+    doReview, doReverse, downloadStaging, bulkApproving, doReviewAll,
   } = useCompProposalsQueue(activeChannel, onChanged, false)
   const [propagationId, setPropagationId] = useState<number | null>(null)
 
@@ -95,17 +95,17 @@ export default function CompProposalsTab({ embedded = false, onChanged }: { embe
   const p = selected
   const approveBlockedReason = compApproveBlockedReason(p, account)
 
-  // Every other pending proposal from the same contributor, minus anything
-  // this reviewer isn't allowed to approve (delete_folder gating).
+  // Denial remains available for proposals this reviewer cannot approve.
   const pendingFromContributor = p
-    ? proposals.filter(x => x.contributor_username === p.contributor_username && x.status === 'pending' && !compApproveBlockedReason(x, account))
+    ? proposals.filter(x => x.contributor_id === p.contributor_id && x.status === 'pending')
     : []
+  const approvableFromContributor = pendingFromContributor.filter(x => !compApproveBlockedReason(x, account))
 
-  const doAcceptAllForContributor = (): void => {
-    const ids = pendingFromContributor.map(x => x.id)
+  const doReviewAllForContributor = (action: 'approve' | 'reject'): void => {
+    const ids = (action === 'approve' ? approvableFromContributor : pendingFromContributor).map(x => x.id)
     if (ids.length === 0) return
-    if (!confirm(`Approve all ${ids.length} pending comp proposal${ids.length !== 1 ? 's' : ''} from ${p!.contributor_username}?`)) return
-    doAcceptAll(ids)
+    if (!confirm(`${action === 'approve' ? 'Approve' : 'Deny'} all ${ids.length} pending comp proposal${ids.length !== 1 ? 's' : ''} from ${p!.contributor_username}?`)) return
+    void doReviewAll(ids, action)
   }
 
   useBackToClose(() => setSelected(null), p != null)
@@ -230,7 +230,7 @@ export default function CompProposalsTab({ embedded = false, onChanged }: { embe
       </div>
 
       <div className="shrink-0 p-3 border-t border-[var(--separator)] flex flex-col gap-2">
-        {actionId === p.id || bulkApproving ? (
+        {actionId !== null || bulkApproving ? (
           <div className="flex justify-center py-2.5"><Loader2 size={16} className="animate-spin text-text-muted" /></div>
         ) : p.status === 'pending' ? (
           <>
@@ -246,10 +246,16 @@ export default function CompProposalsTab({ embedded = false, onChanged }: { embe
                 </button>
               )}
             </div>
-            {pendingFromContributor.length > 1 && (
-              <button onClick={doAcceptAllForContributor}
+            {approvableFromContributor.length > 1 && (
+              <button onClick={() => doReviewAllForContributor('approve')}
                 className="w-full h-10 rounded-xl bg-emerald-500/10 active:bg-emerald-500/20 text-emerald-400 text-sm font-semibold flex items-center justify-center gap-1.5">
-                <CheckCircle size={14} /> Accept all ({pendingFromContributor.length}) from {p.contributor_username}
+                <CheckCircle size={14} /> Accept all ({approvableFromContributor.length}) from {p.contributor_username}
+              </button>
+            )}
+            {pendingFromContributor.length > 1 && (
+              <button onClick={() => doReviewAllForContributor('reject')}
+                className="w-full h-10 rounded-xl bg-red-500/10 active:bg-red-500/20 text-red-400 text-sm font-semibold flex items-center justify-center gap-1.5">
+                <XCircle size={14} /> Deny all ({pendingFromContributor.length}) from {p.contributor_username}
               </button>
             )}
           </>

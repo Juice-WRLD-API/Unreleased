@@ -36,6 +36,7 @@ import { displaySongName } from '../lib/songPrefs'
 import { SearchHelpButton } from './SearchHelpPopover'
 import { useVirtualWindow } from '../hooks/useVirtualWindow'
 import { runLog } from '../lib/runLog'
+import { showAppToast } from '../lib/appToast'
 import { formatDuration, dateSortValue, compareDates } from '../lib/format'
 import { registerBackHandler } from '../lib/backHandlers'
 import { loadEraFullNames, eraLabel, listEras } from '../lib/eras'
@@ -165,8 +166,13 @@ interface RowProps {
 
 // ─── Song row (list mode) ─────────────────────────────────────────────────────
 const SongRow = memo(function SongRow({
-  song, onPlay, onMenu, selectMode, selected, onToggleSelect, playingId, isPlaying, versionLabel,
-}: RowProps & { versionLabel?: string | null }): JSX.Element {
+  song, onPlay, onMenu, selectMode, selected, onToggleSelect, playingId, isPlaying, versionLabel, lazyCover,
+}: RowProps & {
+  versionLabel?: string | null
+  /** Rows outside a virtual window (Overview / Producers lists) load their
+   *  covers lazily, so a long list doesn't request every cover at once. */
+  lazyCover?: boolean
+}): JSX.Element {
   // This song's personal override, if any. Selecting just this song's row keeps
   // the map's other churn from re-rendering the row, and songToTrack picks up
   // the custom cover from the same source on the render this triggers.
@@ -185,7 +191,7 @@ const SongRow = memo(function SongRow({
   return (
     <ListRow
       {...press}
-      art={<AlbumArtThumbnail track={track} size={48} shimmer={false} eager />}
+      art={<AlbumArtThumbnail track={track} size={48} shimmer={false} eager={!lazyCover} />}
       artOverlay={selectMode ? <ArtSelectOverlay selected={selected} /> : undefined}
       dimArt={!canPlay}
       title={<>
@@ -416,7 +422,8 @@ const LyricResultRow = memo(function LyricResultRow({
       {...press}
     >
       <div className="relative shrink-0 w-12 h-12 rounded-lg overflow-hidden bg-[var(--fill)]">
-        <AlbumArtThumbnail track={track} size={48} shimmer={false} eager />
+        {/* Lyric results aren't windowed - Load more appends to one list. */}
+        <AlbumArtThumbnail track={track} size={48} shimmer={false} />
         {selectMode && <ArtSelectOverlay selected={selected} />}
       </div>
       <div className="flex-1 min-w-0">
@@ -915,9 +922,11 @@ export default function ApiTrackerView(): JSX.Element {
     if ((trackerTab !== 'calendar' && trackerTab !== 'producers') || calendarFetchedRef.current) return
     calendarFetchedRef.current = true
     setCalendarLoading(true)
+    setCalendarError(null)
     apiFetch<JWApiSong[]>('/songs/', { all: 'true', omit: OMIT_BULK })
       .then(setCalendarSongs)
-      .catch((err) => setCalendarError(err.message))
+      // Leave the ref unset so coming back to the tab tries again.
+      .catch((err) => { calendarFetchedRef.current = false; setCalendarError(err.message) })
       .finally(() => setCalendarLoading(false))
   }, [trackerTab])
 
@@ -1119,7 +1128,6 @@ export default function ApiTrackerView(): JSX.Element {
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [catalog, renamedHits, matchesFilters, matchesSearch, searchPrefs],
   )
-  const count = songs.length
 
   // Only the title sort reads the prefs, so other sorts don't re-run on every
   // playcount bump.
@@ -1267,6 +1275,7 @@ export default function ApiTrackerView(): JSX.Element {
       return
     }
     const ids = selectedSongs.map(s => s.id)
+    let cancelled = false
     Promise.all(
       playlists.map(p =>
         userApi.getPlaylist(p.id)
@@ -1276,7 +1285,8 @@ export default function ApiTrackerView(): JSX.Element {
           })
           .catch(() => ({ id: p.id, allIn: false }))
       )
-    ).then(results => setBulkContained(new Set(results.filter(r => r.allIn).map(r => r.id))))
+    ).then(results => { if (!cancelled) setBulkContained(new Set(results.filter(r => r.allIn).map(r => r.id))) })
+    return () => { cancelled = true }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [playlists, account, selectedSongs, playlistsPageOpen])
 
@@ -1405,7 +1415,7 @@ export default function ApiTrackerView(): JSX.Element {
       {list.map((song) => (
         // selected last: rowProps carries the whole selection Map for the
         // virtual lists, and the row wants just this song's boolean.
-        <SongRow key={song.id} song={song} {...rowProps} selected={selected.has(song.id)} />
+        <SongRow key={song.id} song={song} {...rowProps} selected={selected.has(song.id)} lazyCover />
       ))}
     </div>
   )
@@ -1436,7 +1446,7 @@ export default function ApiTrackerView(): JSX.Element {
       ? 'Loading…'
       : compactView
         ? `${filteredCompactGroups.length.toLocaleString()} version group${filteredCompactGroups.length === 1 ? '' : 's'}`
-        : `${(count || sortedSongs.length).toLocaleString()} songs`
+        : `${sortedSongs.length.toLocaleString()} songs`
     : trackerTab === 'lyrics'
       ? debouncedLyricsQuery.trim() ? `${lyricsCount.toLocaleString()} matches` : 'Search the catalog by lyric'
       : trackerTab === 'calendar' ? `${calendarByDate.size.toLocaleString()} recording dates`
@@ -1807,7 +1817,7 @@ export default function ApiTrackerView(): JSX.Element {
             </div>
           )}
           {!loading && sortedSongs.length > 0 && !compactView && (
-            <p className="text-center text-text-muted text-xs py-4">{count.toLocaleString()} songs total</p>
+            <p className="text-center text-text-muted text-xs py-4">{sortedSongs.length.toLocaleString()} songs total</p>
           )}
         </div>
       )}
@@ -2149,9 +2159,12 @@ export default function ApiTrackerView(): JSX.Element {
             try {
               await setGroupVersionTitle(titlePromptGroupId, title)
               invalidateCompactGroupsCache()
+              setTitlePromptGroupId(null)
+            } catch (e) {
+              // Stay open so the title can be retried (or skipped).
+              showAppToast(`Couldn't save the title: ${(e as Error).message}`, { tone: 'error' })
             } finally {
               setSavingTitlePrompt(false)
-              setTitlePromptGroupId(null)
             }
           }}
         />

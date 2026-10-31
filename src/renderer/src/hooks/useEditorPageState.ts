@@ -240,22 +240,31 @@ export function useEditorPageState(initialSongId: number | null = null) {
     lastSubmittedPatchRef.current = null
   }, [])
 
-  const loadSong = useCallback(async (id: number): Promise<void> => {
+  // Resolves true once this song is on the form. False when it failed, or when
+  // another song was asked for meanwhile - a slow earlier response must not
+  // land on top of the later one.
+  const loadSong = useCallback(async (id: number): Promise<boolean> => {
     lastLoadIdRef.current = id
     setLoading(true)
     setLoadError(null)
     try {
       const s = await apiFetch<JWApiSong>(`/songs/${id}/`)
+      if (lastLoadIdRef.current !== id) return false
       setSong(s)
       populate(s)
+      return true
     } catch (e) {
-      setLoadError(errorMessage(e, 'Failed to load song'))
+      if (lastLoadIdRef.current === id) setLoadError(errorMessage(e, 'Failed to load song'))
+      return false
     } finally {
-      setLoading(false)
-      // Once a load completes (success or failure), `song` (if set) already
-      // blocks the currently-playing prefill effect on its own - the ref's
-      // job was only to cover the race window while this was in flight.
-      manualLoadRef.current = false
+      // A superseded load leaves both to the one that replaced it.
+      if (lastLoadIdRef.current === id) {
+        setLoading(false)
+        // Once a load completes (success or failure), `song` (if set) already
+        // blocks the currently-playing prefill effect on its own - the ref's
+        // job was only to cover the race window while this was in flight.
+        manualLoadRef.current = false
+      }
     }
   }, [populate])
 
@@ -270,7 +279,11 @@ export function useEditorPageState(initialSongId: number | null = null) {
       setLoadedTitle(''); setLinkedCount(0)
       return
     }
+    // A late answer for the previous song would put its version label on this
+    // one, and the next save would write it here.
+    let stale = false
     getOwnVersionMeta(song.id).then(meta => {
+      if (stale) return
       setVersionNum(meta?.version ?? '')
       setVersionTitle(meta?.versionTitle ?? '')
       setLoadedTitle(meta?.versionTitle ?? '')
@@ -278,7 +291,8 @@ export function useEditorPageState(initialSongId: number | null = null) {
     })
     // How many other songs share this song's group - decides whether a retitle
     // renames in place or splits this song out, and is shown as a hint below.
-    getVersionGroup(song.id).then(g => setLinkedCount(g.length))
+    getVersionGroup(song.id).then(g => { if (!stale) setLinkedCount(g.length) })
+    return () => { stale = true }
   }, [song])
 
   useEffect(() => {
@@ -459,7 +473,10 @@ export function useEditorPageState(initialSongId: number | null = null) {
       applyProposedData()
     } else {
       setIsNewSongDraft(false)
-      loadSong(songId).then(applyProposedData)
+      // Only on top of the proposal's own song: after a failed load the form
+      // still holds whatever was open before, and the proposal's fields would
+      // be diffed against (and resubmitted as edits to) that song.
+      loadSong(songId).then((ok) => { if (ok) applyProposedData(); else setEditingPropId(null) })
     }
   }, [pendingEditProposal, canEdit, setPendingEditProposal, loadSong])
 
@@ -500,6 +517,11 @@ export function useEditorPageState(initialSongId: number | null = null) {
   // True once changedCount > 0 has already been sent and nothing has been
   // edited since - see lastSubmittedPatchRef above.
   const alreadySubmitted = changedCount > 0 && JSON.stringify(patch) === lastSubmittedPatchRef.current
+
+  // Close, Back and Pop out all drop the form, so ask first while it holds
+  // edits that haven't been sent.
+  const confirmDiscard = (): boolean =>
+    changedCount === 0 || alreadySubmitted || confirm('Discard your unsent changes to this song?')
 
   const cancelEditProposal = (): void => {
     setEditingPropId(null)
@@ -647,6 +669,6 @@ export function useEditorPageState(initialSongId: number | null = null) {
     loadedTitle, linkedCount, versionSaveStatus, linkError, saveVersionInfo,
     titleSuggestions, showTitleSuggestions, setShowTitleSuggestions, handlePickTitleSuggestion,
 
-    base, current, patch, changedCount, alreadySubmitted,
+    base, current, patch, changedCount, alreadySubmitted, confirmDiscard,
   }
 }

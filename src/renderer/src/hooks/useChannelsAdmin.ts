@@ -8,6 +8,7 @@ import * as userApi from '../lib/userApi'
 import type { AdminUser } from '../lib/userApi'
 import { useStore } from '../store/useStore'
 import { errorMessage } from '../lib/format'
+import { showAppToast } from '../lib/appToast'
 
 export const MEMBER_FLAGS: { key: keyof ChannelMembershipRow; label: string }[] = [
   { key: 'editor_enabled', label: 'Editor' },
@@ -57,6 +58,8 @@ export function useToggleChannelActive(onChanged: () => void): {
       if (channel.is_active) await channelApi.adminDeactivateChannel(channel.id)
       else await channelApi.adminUpdateChannel(channel.id, { is_active: true })
       onChanged()
+    } catch (e) {
+      showAppToast(errorMessage(e, channel.is_active ? "Couldn't deactivate the channel" : "Couldn't activate the channel"))
     } finally {
       setBusyId(null)
     }

@@ -11,6 +11,7 @@ import { addTracksInBackground, addEntriesInBackground, setPlaylistPublic } from
 import { playlistItemsToTracks, playlistSongIds, playlistItemToEntry } from '../lib/playlistItems'
 import type { PlaylistEntryInput } from '../lib/userApi'
 import { showAppToast } from '../lib/appToast'
+import { fetchImageBlob } from '../lib/coverImage'
 import { rememberRecentPlaylist } from '../lib/recentPlaylists'
 import type { PlaylistDetail, PlaylistSummary } from '../lib/userApi'
 import { useCanEdit } from '../hooks/useChannelRoles'
@@ -496,9 +497,12 @@ export default function PlaylistsView(): JSX.Element {
   // Local playlists store library track ids; resolve them against the scanned
   // library (dropping ids whose file is no longer there).
   const localLibTracks = useMemo(
-    () => (localPl
-      ? localPl.trackIds.map(id => libraryTracks.find(t => t.id === id)).filter(Boolean) as LibraryTrack[]
-      : []),
+    () => {
+      if (!localPl) return []
+      // A map, not a find() per track: a big playlist against a big library stalled.
+      const byId = new Map(libraryTracks.map(t => [t.id, t]))
+      return localPl.trackIds.map(id => byId.get(id)).filter((t): t is LibraryTrack => !!t)
+    },
     [localPl, libraryTracks]
   )
   // Rows need the LibraryTrack back (AlbumArtThumb reads art off disk by
@@ -603,6 +607,11 @@ export default function PlaylistsView(): JSX.Element {
     groupPlaylistBySong(tracks, t => userApi.trackIdToSongId(t.id) ?? -1).then(units => {
       if (cancelled) return
       setSongUnits(units)
+      setLoadingCompact(false)
+    }, () => {
+      // Rows fall back to one per track rather than "Loading…" for good.
+      if (cancelled) return
+      setSongUnits([])
       setLoadingCompact(false)
     })
     return () => { cancelled = true }
@@ -829,7 +838,7 @@ export default function PlaylistsView(): JSX.Element {
     try {
       await Promise.all(items.map(it => userApi.removePlaylistEntry(selectedId, it.id)))
       await refreshPlaylists()
-    } catch { await loadDetail(selectedId) }
+    } catch { showAppToast("Couldn't remove every track"); await loadDetail(selectedId) }
     setBulkRemoving(false)
     exitSelectMode()
   }, [isLocal, localPl, removeFromLocalPlaylist, selectedId, selectedTrackList, refreshPlaylists, loadDetail, exitSelectMode])
@@ -954,8 +963,8 @@ export default function PlaylistsView(): JSX.Element {
         await userApi.setPlaylistCoverBase64(newPl.id, b64)
       } else if (url) {
         try {
-          const res = await fetch(url)
-          const blob = await res.blob()
+          // Checks the status too, so an error page never becomes the cover.
+          const blob = await fetchImageBlob(url)
           const file = new File([blob], 'cover.jpg', { type: blob.type || 'image/jpeg' })
           await userApi.uploadPlaylistCover(newPl.id, file)
         } catch { /* skip cover on CORS/network failure */ }
@@ -1833,8 +1842,10 @@ export default function PlaylistsView(): JSX.Element {
     const isApi = target.kind === 'api'
     const pl = target.playlist
     const key = isApi ? `api:${pl.id}` : `local:${pl.id}`
-    const localTracksOf = (lp: LocalPlaylist): Track[] =>
-      lp.trackIds.map(id => libraryTracks.find(t => t.id === id)).filter((t): t is LibraryTrack => !!t).map(libTrackToTrack)
+    const localTracksOf = (lp: LocalPlaylist): Track[] => {
+      const byId = new Map(libraryTracks.map(t => [t.id, t]))
+      return lp.trackIds.map(id => byId.get(id)).filter((t): t is LibraryTrack => !!t).map(libTrackToTrack)
+    }
 
     return (
       <Sheet onClose={closeSheet} title={pl.name}>
@@ -1886,8 +1897,10 @@ export default function PlaylistsView(): JSX.Element {
               title: 'Rename playlist', initial: pl.name, submitLabel: 'Save',
               onSubmit: async v => {
                 if (target.kind === 'local') { renameLocalPlaylist(target.playlist.id, v); return }
-                await userApi.renamePlaylist(target.playlist.id, v).catch(() => {})
-                await refreshPlaylists()
+                try {
+                  await userApi.renamePlaylist(target.playlist.id, v)
+                  await refreshPlaylists()
+                } catch { showAppToast("Couldn't rename the playlist") }
               },
             })
           }}

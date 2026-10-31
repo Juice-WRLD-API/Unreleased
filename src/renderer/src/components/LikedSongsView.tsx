@@ -15,7 +15,7 @@ import { clickable } from '../lib/a11y'
 /** `onBack` replaces the back button's default (the previous view) - for a
  *  host that shows this inside one of its own screens, like mobile Library. */
 export default function LikedSongsView({ onBack }: { onBack?: () => void } = {}): JSX.Element {
-  const { account, playTrack, playCollection, playNext, toggleLike, setShowUserAuth, setActiveView, previousView, setPendingEditorSongId, libraryTracks, likedTrackIds } = useStorePick('account', 'playTrack', 'playCollection', 'playNext', 'toggleLike', 'setShowUserAuth', 'setActiveView', 'previousView','setPendingEditorSongId', 'libraryTracks', 'likedTrackIds')
+  const { account, playTrack, playCollection, playNext, addToQueue, toggleLike, setShowUserAuth, setActiveView, previousView, setPendingEditorSongId, libraryTracks, likedTrackIds } = useStorePick('account', 'playTrack', 'playCollection', 'playNext', 'addToQueue', 'toggleLike', 'setShowUserAuth', 'setActiveView', 'previousView','setPendingEditorSongId', 'libraryTracks', 'likedTrackIds')
   const canEdit = useCanEdit()
   const [apiTracks, setApiTracks] = useState<Track[]>([])
   const [loading, setLoading] = useState(true)
@@ -180,6 +180,7 @@ export default function LikedSongsView({ onBack }: { onBack?: () => void } = {})
         onInfo={() => ctxMenu.songId != null && openSongInfo(ctxMenu.songId)}
         onPlay={() => playTrack(ctxMenu.track, visible)}
         onPlayNext={() => playNext(ctxMenu.track)}
+        onAddToQueue={() => addToQueue(ctxMenu.track)}
         removeAction={{ label: 'Unlike', onClick: () => removeLiked(ctxMenu.track) }}
       />
     )}

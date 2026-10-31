@@ -253,6 +253,14 @@ export interface Corpus {
   byRoom: Map<number, ScopeRoom>
 }
 
+// The panel rebuilds its corpus on every indexing tick and every store change,
+// and buildFacts is the costly part. A message's facts are reused until its
+// text, its room names or what's known of its attachment names changes; store
+// edits replace the message object, which drops it from here.
+const factsCache = new WeakMap<ChatMessage, { raw: string | null; names: string[]; metaSig: string; facts: Facts }>()
+
+const metaSigOf = (m: ChatMessage): string => (m.is_encrypted ? m.attachments.map((a) => (attMeta.get(a.id) ? '1' : '0')).join('') : '')
+
 export function collectFacts(targets: ScopeRoom[], mutedUserIds: number[]): Corpus {
   const s = useChatStore.getState()
   const facts: Facts[] = []
@@ -281,7 +289,14 @@ export function collectFacts(targets: ScopeRoom[], mutedUserIds: number[]): Corp
         raw = live && 'text' in live ? live.text : texts.get(m.id)?.text ?? null
         if (raw === null) locked++
       }
-      const f = buildFacts(m, raw, t.names, meta)
+      const metaSig = metaSigOf(m)
+      const hit = factsCache.get(m)
+      let f: Facts
+      if (hit && hit.raw === raw && hit.names === t.names && hit.metaSig === metaSig) f = hit.facts
+      else {
+        f = buildFacts(m, raw, t.names, meta)
+        factsCache.set(m, { raw, names: t.names, metaSig, facts: f })
+      }
       if (f.atts.some((a) => a.unresolved)) pendingAttachments++
       facts.push(f)
       byRoom.set(m.id, t)

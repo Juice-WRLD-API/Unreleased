@@ -51,7 +51,8 @@ export interface CoverArtCounts { total: number; pending: number; approved: numb
 
 /** The song the submit dialog is open for (the store's `coverArtModal`). */
 export interface CoverArtTarget {
-  songId: number
+  /** Null opens the dialog on a song search (Home → Tools). */
+  songId: number | null
   songName: string
   /** The cover the song shows now, for comparison. */
   currentCover?: string | null

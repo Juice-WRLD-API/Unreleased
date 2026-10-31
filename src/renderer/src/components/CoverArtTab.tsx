@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   AlertCircle, Calendar, Check, CheckCircle, ChevronLeft, Hash, Loader2, MessageSquare, RefreshCw, RotateCcw, XCircle,
 } from 'lucide-react'
@@ -45,28 +45,37 @@ export default function CoverArtTab({ onCountsChanged, stacked = false }: {
   // only while that detail is what's on screen.
   useBackToClose(() => setSelectedId(null), stacked && selectedId != null)
 
+  // Bumped by every first-page load, so a slow answer for the filter you just
+  // left (or a "Show more" started before the switch) can't land on this one.
+  const loadSeq = useRef(0)
+
   const load = useCallback(async () => {
+    const seq = ++loadSeq.current
     setLoading(true)
     setError(null)
     try {
       const page = await adminListCoverArt({ status: status || undefined, limit: PAGE })
+      if (seq !== loadSeq.current) return
       setRows(page.results)
       setCount(page.count)
     } catch (e) {
+      if (seq !== loadSeq.current) return
       setRows([])
       setCount(0)
       setError(errorMessage(e, 'Could not load cover art'))
     } finally {
-      setLoading(false)
+      if (seq === loadSeq.current) setLoading(false)
     }
   }, [status])
 
   useEffect(() => { void load() }, [load])
 
   const loadMore = async (): Promise<void> => {
+    const seq = loadSeq.current
     setLoadingMore(true)
     try {
       const page = await adminListCoverArt({ status: status || undefined, limit: PAGE, offset: rows.length })
+      if (seq !== loadSeq.current) return
       const have = new Set(rows.map((r) => r.id))
       setRows([...rows, ...page.results.filter((r) => !have.has(r.id))])
       setCount(page.count)

@@ -7,8 +7,8 @@ import { loadSessionEditFiles, loadSessionEditLinks } from '../sessionEditsApi'
 import { useStore } from '../../store/useStore'
 import {
   adminCompFileHistory, adminFetchCompProposalStaging, compChangeTypeLabel, createCompProposal, createCompProposalUpload, createProposal,
-  getLeaderboard, getMyApplication, getMyCompProposals, getMyProposals, getProposal, resubmitProposal, submitApplication, updateCompProposal,
-  updateProposal, withdrawCompProposal, withdrawProposal, type ApplicationType, type CompProposalChangeType, type ProposalChangeType,
+  getLeaderboard, getMyApplication, getMyCompProposals, getMyProposals, getMyProposalsPage, MY_PROPOSALS_PAGE_SIZE, getProposal, resubmitProposal, submitApplication, updateCompProposal,
+  updateProposal, withdrawCompProposal, withdrawProposal, type ApplicationType, type CompProposalChangeType, type ProposalChangeType, type ProposalStatus,
 } from '../userApi'
 import { pickLocalFile, pickLocalFolder, saveBlob } from './pick'
 import { pageLines } from './more'
@@ -38,9 +38,9 @@ const NEEDS_DESTINATION = new Set<CompProposalChangeType>(['move', 'rename_folde
 
 const proposalCommand: TermCommand = {
   name: 'proposal', aliases: ['edits'], group: 'Editor',
-  usage: 'proposal [ls] · show <id> · new <create|update|delete> [song] [{json}] [--title t] [--note n] · edit <id> [{json}] [--title t] [--note n] · withdraw <id> · resubmit <id>   (--channel c)',
+  usage: 'proposal [ls [--status s] [--search q] [--page n]] · show <id> · new <create|update|delete> [song] [{json}] [--title t] [--note n] · edit <id> [{json}] [--title t] [--note n] · withdraw <id> · resubmit <id>   (--channel c)',
   description: 'Your song-edit proposals: list, show, create, change, withdraw or resubmit one. The JSON body is the fields you propose, e.g. proposal new update <song> {"name":"New title"}',
-  covers: ['userApi.getMyProposals', 'userApi.getProposal', 'userApi.withProposalData', 'userApi.createProposal', 'userApi.updateProposal', 'userApi.withdrawProposal', 'userApi.resubmitProposal'],
+  covers: ['userApi.getMyProposals', 'userApi.getMyProposalsPage', 'userApi.getProposal', 'userApi.withProposalData', 'userApi.createProposal', 'userApi.updateProposal', 'userApi.withdrawProposal', 'userApi.resubmitProposal'],
   complete: (before, partial) => {
     const p = partial.toLowerCase()
     if (before.length === 0) return ['ls', 'show', 'new', 'edit', 'withdraw', 'resubmit'].filter((v) => v.startsWith(p))
@@ -51,11 +51,24 @@ const proposalCommand: TermCommand = {
   run: async (args, ctx) => {
     signedIn()
     const { head, body } = splitBody(args)
-    const { rest, bool, value } = parseArgs(head, ['title', 'note', 'channel'])
+    const { rest, bool, value } = parseArgs(head, ['title', 'note', 'channel', 'status', 'search', 'page'])
     const channel = value.get('channel')
     const sub = (rest.shift() ?? 'ls').toLowerCase()
 
-    if (sub === 'ls' || sub === 'list') {
+    if ((sub === 'ls' || sub === 'list') && (value.has('status') || value.has('search') || value.has('page'))) {
+      // One server-side page, filtered, with the totals per status.
+      const status = value.get('status')
+      if (status && !['pending', 'approved', 'rejected', 'reversed'].includes(status)) fail('status is pending, approved, rejected or reversed')
+      const page = Math.max(1, Math.floor(Number(value.get('page') ?? 1)) || 1)
+      const got = await getMyProposalsPage(channel, {
+        offset: (page - 1) * MY_PROPOSALS_PAGE_SIZE, status: status as ProposalStatus | undefined, q: value.get('search'),
+      })
+      if (asJson(ctx, bool.has('json'), got)) return
+      if (got.results.length === 0) { ctx.print('no matching proposals', 'dim'); return }
+      const c = got.counts
+      ctx.print(`${table(got.results.map((p) => [`#${p.id}`, p.status, p.change_type, p.title, relativeTime(p.created_at)]))}
+${got.count} match · page ${page} of ${Math.ceil(got.count / MY_PROPOSALS_PAGE_SIZE)}${c ? ` · ${c.total} total (${c.pending} pending, ${c.approved} approved, ${c.rejected} rejected)` : ''}`)
+    } else if (sub === 'ls' || sub === 'list') {
       const list = await getMyProposals(channel)
       if (asJson(ctx, bool.has('json'), list)) return
       if (list.length === 0) { ctx.print('no proposals yet', 'dim'); return }

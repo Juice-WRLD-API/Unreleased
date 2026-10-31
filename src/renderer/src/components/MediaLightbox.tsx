@@ -2,6 +2,7 @@ import { useEffect, useCallback, useState, useRef } from 'react'
 import { X, ChevronLeft, ChevronRight, AlertCircle, Download, Loader2, ZoomIn, ZoomOut } from 'lucide-react'
 import { smallCoverUrl } from '../lib/juicewrldApi'
 import { syncThemeColorMeta } from '../lib/themeEffects'
+import { useEscapeToClose } from '../hooks/useEscapeToClose'
 
 export interface LightboxItem {
   url: string
@@ -81,16 +82,17 @@ export default function MediaLightbox({ items, index, onClose, onNav }: Props): 
     if (index < items.length - 1) onNav(index + 1)
   }, [index, items.length, onNav])
 
-  // Keyboard navigation
+  // Keyboard navigation. Escape goes through the shared stack so only the
+  // lightbox closes, not a dialog it was opened from as well.
+  useEscapeToClose(onClose)
   useEffect(() => {
     const handler = (e: KeyboardEvent): void => {
-      if (e.key === 'Escape') onClose()
       if (e.key === 'ArrowLeft') goPrev()
       if (e.key === 'ArrowRight') goNext()
     }
     window.addEventListener('keydown', handler)
     return () => window.removeEventListener('keydown', handler)
-  }, [onClose, goPrev, goNext])
+  }, [goPrev, goNext])
 
   // This overlay is `fixed inset-0` with its own black backdrop (deliberate -
   // photos/video look better against black than the app's theme surface), but
