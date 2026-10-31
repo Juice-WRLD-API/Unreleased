@@ -122,5 +122,6 @@ public class SiriCommandsPlugin: CAPPlugin, CAPBridgedPlugin {
 class BridgeViewController: CAPBridgeViewController {
     override func capacitorDidLoad() {
         bridge?.registerPluginInstance(SiriCommandsPlugin())
+        bridge?.registerPluginInstance(LocalLibraryPlugin())
     }
 }

@@ -1,14 +1,8 @@
-// Local music library on Android — the JS side of LocalLibraryPlugin.java.
-//
-// Android has no general filesystem access, so a "library folder" here is a
-// Storage Access Framework tree the user granted us, and a track's `filePath`
-// is a `content://` URI rather than a path. Nothing outside this module needs
-// to care: ids, scanning and persistence keep the same shapes the rest of the
-// app already used for the desktop scanner.
-//
-// Playback deliberately does NOT go through the plugin — see toStreamUrl().
+// On-device library backed by the iOS LocalLibrary Capacitor plugin.
+// Files are opened in place using security-scoped bookmarks.
 
 import type { LibraryTrack, LocalPlaylist } from '../types'
+import { Capacitor, registerPlugin } from '@capacitor/core'
 
 export interface ScanProgress {
   /** Audio files discovered so far. */
@@ -18,6 +12,7 @@ export interface ScanProgress {
 }
 
 interface LocalLibraryPlugin {
+  writeTags(opts: { uri: string; changes: LocalTagChanges }): Promise<{ track: LibraryTrack }>
   pickFolder(): Promise<{ uri?: string; name?: string; canceled?: boolean }>
   pickFiles(): Promise<{ uris?: string[]; canceled?: boolean }>
   releaseSource(opts: { uri: string }): Promise<void>
@@ -31,39 +26,27 @@ interface LocalLibraryPlugin {
   addListener(event: 'scanProgress', fn: (p: ScanProgress) => void): Promise<{ remove: () => void }>
 }
 
-interface CapacitorGlobal {
-  isNativePlatform?: () => boolean
-  getPlatform?: () => string
-  convertFileSrc?: (path: string) => string
-  Plugins?: { LocalLibrary?: LocalLibraryPlugin }
+export type LocalTagChanges = Partial<Record<'title' | 'artist' | 'album' | 'albumArtist' | 'composer' | 'genre' | 'year' | 'trackNumber' | 'discNumber', string>>
+
+export async function writeLocalTags(uri: string, changes: LocalTagChanges): Promise<LibraryTrack> {
+  const p = plugin()
+  if (!p) throw new Error('Local tag editing requires the iOS app.')
+  return (await p.writeTags({ uri, changes })).track
 }
 
-function capacitor(): CapacitorGlobal | undefined {
-  return (window as unknown as { Capacitor?: CapacitorGlobal }).Capacitor
-}
+const nativeLibrary = registerPlugin<LocalLibraryPlugin>('LocalLibrary')
 
 function plugin(): LocalLibraryPlugin | null {
-  return capacitor()?.Plugins?.LocalLibrary ?? null
+  return localLibraryAvailable() ? nativeLibrary : null
 }
 
-/** True when a local library is usable — i.e. the native plugin is present. */
 export function localLibraryAvailable(): boolean {
-  const cap = capacitor()
-  return !!cap?.isNativePlatform?.() && !!plugin()
+  return Capacitor.isNativePlatform() && Capacitor.isPluginAvailable('LocalLibrary')
 }
 
-/**
- * Turns a track's stored URI into something the `<audio>` element can load.
- *
- * A WebView can't fetch `content://` from an https page, so Capacitor's local
- * server proxies it at `https://localhost/_capacitor_content_/…`. That keeps
- * local files same-origin with the app, which is what lets the Web Audio
- * effects chain attach to them (a cross-origin element without CORS headers
- * would produce silence — see lib/audioEffects).
- */
+/** Capacitor serves granted file URLs to the WebView through its local server. */
 export function toStreamUrl(uri: string): string {
-  const convert = capacitor()?.convertFileSrc
-  return convert ? convert(uri) : uri
+  return Capacitor.convertFileSrc(uri)
 }
 
 // ── Sources ──────────────────────────────────────────────────────────────────

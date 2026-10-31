@@ -545,6 +545,7 @@ interface AppState {
   // read so far), null when no scan is running - see scanLibrary.
   libraryScanProgress: { found: number; parsed: number } | null
   libraryScanning: boolean
+  libraryTagSaving: boolean
   libraryLastScanned: number | null
   // When enabled, periodically re-checks library files against their cached
   // size/mtime and reloads tags for any that changed on disk (e.g. edited in
@@ -897,6 +898,7 @@ interface AppActions {
   setLibraryAutoRefresh: (enabled: boolean) => void
   setDeveloperMode: (enabled: boolean) => void
   scanLibrary: () => Promise<void>
+  saveLocalTags: (id: string, changes: localLibrary.LocalTagChanges) => Promise<void>
 
   createLocalPlaylist: (name: string) => void
   deleteLocalPlaylist: (id: string) => void
@@ -2747,6 +2749,7 @@ export const useStore = create<AppStore>((set, get, store) => ({
   libraryScanProgress: null,
   libraryFolders: ls.get<string[]>('libraryFolders') ?? [],
   libraryScanning: false,
+  libraryTagSaving: false,
   libraryLastScanned: ls.get<number>('libraryLastScanned') ?? null,
   // Off by default - periodic disk scans of a large library aren't free, so
   // this is opt-in rather than always re-checking every file's mtime/size.
@@ -2775,8 +2778,7 @@ export const useStore = create<AppStore>((set, get, store) => ({
     if (!track) return false
 
     // Un-lists the track; the file on disk is untouched. Deleting it would
-    // need a write grant on the source folder, and the Storage Access
-    // Framework permission we take is read-only.
+    // is deliberately separate from editing tags in the original file.
     if (get().currentTrack?.id === id && get().isPlaying) get().setIsPlaying(false)
 
     const { libraryTracks, libraryArt, localPlaylists, queue, queueIndex, libraryFolders, libraryLastScanned } = get()
@@ -2809,9 +2811,7 @@ export const useStore = create<AppStore>((set, get, store) => ({
     if (touchedPlaylists) localLibrary.savePlaylists(nextPlaylists)
     return true
   },
-  // Moving a file needs a write grant on its folder, which the read-only
-  // Storage Access Framework permission we take doesn't carry - the desktop
-  // build's "Move to folder…" has no Android equivalent.
+  // Moving files between document providers is not implemented on Android.
   moveLibraryTrack: async () => false,
   updateLibraryTrack: (id, updates) => set((s) => {
     const artChanged = updates.albumArt !== undefined
@@ -2908,7 +2908,36 @@ export const useStore = create<AppStore>((set, get, store) => ({
     ls.set('developerMode', enabled)
   },
 
+  saveLocalTags: async (id, changes) => {
+    const before = get().libraryTracks.find(t => t.id === id)
+    if (!before) throw new Error('This file is no longer in the library.')
+    if (get().libraryScanning) throw new Error('Wait for the library scan to finish, then save again.')
+    if (get().libraryTagSaving) throw new Error('Another file is being saved. Try again when it finishes.')
+    if (get().currentTrack?.id === id && get().isPlaying)
+      throw new Error('Pause this song before editing its tags.')
+    set({ libraryTagSaving: true })
+    try {
+      const updated = await localLibrary.writeLocalTags(before.filePath, changes)
+      updated.addedAt = before.addedAt
+      const refresh = <T extends Track>(t: T): T => t.id === id ? { ...t,
+        title: updated.title, artist: updated.artist, album: updated.album,
+        albumArtist: updated.albumArtist, genre: updated.genre, year: updated.year,
+        trackNumber: updated.trackNumber,
+      } : t
+      set(s => ({
+        libraryTracks: s.libraryTracks.map(t => t.id === id ? updated : t),
+        queue: s.queue.map(refresh),
+        currentTrack: s.currentTrack ? refresh(s.currentTrack) : null,
+        currentTrackFull: s.currentTrackFull ? refresh(s.currentTrackFull) : null,
+      }))
+      const s = get()
+      await localLibrary.saveLibrary({ tracks: s.libraryTracks, sources: s.libraryFolders, lastScanned: s.libraryLastScanned })
+    } finally {
+      set({ libraryTagSaving: false })
+    }
+  },
   scanLibrary: async () => {
+    if (get().libraryTagSaving || get().libraryScanning) return
     if (!localLibrary.localLibraryAvailable()) return
     const { libraryFolders, libraryTracks } = get()
     if (libraryFolders.length === 0) return

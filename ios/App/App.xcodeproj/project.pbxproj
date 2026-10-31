@@ -19,6 +19,8 @@
 		A1B2C3D42FF000020072D4E8 /* SiriCommands.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3D42FF000010072D4E8 /* SiriCommands.swift */; };
 		A1B2C3D42FF000040072D4E8 /* SiriIntents.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3D42FF000030072D4E8 /* SiriIntents.swift */; };
 		A1B2C3D42FF000060072D4E8 /* AppIntents.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = A1B2C3D42FF000050072D4E8 /* AppIntents.framework */; settings = {ATTRIBUTES = (Weak, ); }; };
+		A1B2C3D42FF000080072D4E8 /* LocalLibraryPlugin.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3D42FF000070072D4E8 /* LocalLibraryPlugin.swift */; };
+		A1B2C3D42FF0000A0072D4E8 /* LocalMP3Tags.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3D42FF000090072D4E8 /* LocalMP3Tags.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -36,6 +38,8 @@
 		A1B2C3D42FF000010072D4E8 /* SiriCommands.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SiriCommands.swift; sourceTree = "<group>"; };
 		A1B2C3D42FF000030072D4E8 /* SiriIntents.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SiriIntents.swift; sourceTree = "<group>"; };
 		A1B2C3D42FF000050072D4E8 /* AppIntents.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = AppIntents.framework; path = System/Library/Frameworks/AppIntents.framework; sourceTree = SDKROOT; };
+		A1B2C3D42FF000070072D4E8 /* LocalLibraryPlugin.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocalLibraryPlugin.swift; sourceTree = "<group>"; };
+		A1B2C3D42FF000090072D4E8 /* LocalMP3Tags.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocalMP3Tags.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -75,6 +79,8 @@
 				9582B6822FE993A50072D4E8 /* SceneDelegate.swift */,
 				A1B2C3D42FF000030072D4E8 /* SiriIntents.swift */,
 				A1B2C3D42FF000010072D4E8 /* SiriCommands.swift */,
+				A1B2C3D42FF000090072D4E8 /* LocalMP3Tags.swift */,
+				A1B2C3D42FF000070072D4E8 /* LocalLibraryPlugin.swift */,
 				50379B222058CBB4000EE86E /* capacitor.config.json */,
 				504EC3071FED79650016851F /* AppDelegate.swift */,
 				504EC30B1FED79650016851F /* Main.storyboard */,
@@ -180,6 +186,8 @@
 				9582B6832FE993A70072D4E8 /* SceneDelegate.swift in Sources */,
 				A1B2C3D42FF000040072D4E8 /* SiriIntents.swift in Sources */,
 				A1B2C3D42FF000020072D4E8 /* SiriCommands.swift in Sources */,
+				A1B2C3D42FF0000A0072D4E8 /* LocalMP3Tags.swift in Sources */,
+				A1B2C3D42FF000080072D4E8 /* LocalLibraryPlugin.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -320,14 +328,14 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 15;
+				CURRENT_PROJECT_VERSION = 16;
 				INFOPLIST_FILE = App/Info.plist;
 				IPHONEOS_DEPLOYMENT_TARGET = 15.0;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 3.2.6;
+				MARKETING_VERSION = 3.2.7;
 				OTHER_SWIFT_FLAGS = "$(inherited) \"-D\" \"COCOAPODS\" \"-DDEBUG\"";
 				PRODUCT_BUNDLE_IDENTIFIER = com.juicewrldapi.player;
 				PRODUCT_NAME = "$(TARGET_NAME)";
@@ -342,14 +350,14 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 15;
+				CURRENT_PROJECT_VERSION = 16;
 				INFOPLIST_FILE = App/Info.plist;
 				IPHONEOS_DEPLOYMENT_TARGET = 15.0;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 3.2.6;
+				MARKETING_VERSION = 3.2.7;
 				PRODUCT_BUNDLE_IDENTIFIER = com.juicewrldapi.player;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "";

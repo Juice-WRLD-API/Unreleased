@@ -1,4 +1,5 @@
 import { useStore } from '../../store/useStore'
+import type { LocalTagChanges } from '../localLibrary'
 import {
   addPlaylistEntry, addToPlaylist, createPlaylist, deletePlaylist, getPlaylist, removeFromPlaylist, removePlaylistEntry, trackIdToSongId,
   type PlaylistEntryInput, type PlaylistItemEntry, type PlaylistSummary,
@@ -175,6 +176,27 @@ function dayFromArgs(words: string[]): { month: number; day: number } {
 }
 
 export const LIBRARY_COMMANDS: TermCommand[] = [
+  {
+    name: 'local-tags', group: 'Library',
+    usage: 'local-tags <file title or id> [--title text] [--artist text] [--album text] [--album-artist text] [--composer text] [--genre text] [--year YYYY] [--track N] [--disc N]',
+    description: 'Read or edit an on-device MP3. Quoted empty values clear a field. Changes are written to the original file.',
+    covers: ['localLibrary.writeLocalTags'],
+    run: async (args, ctx) => {
+      const keys = { title: 'title', artist: 'artist', album: 'album', 'album-artist': 'albumArtist', composer: 'composer', genre: 'genre', year: 'year', track: 'trackNumber', disc: 'discNumber' } as const
+      const { rest, value, bool } = parseArgs(args, Object.keys(keys))
+      if (bool.size) fail(`unknown flag: ${[...bool].join(', ')}`)
+      if (!rest.length) fail('usage: local-tags <file title or id> [--title text ...]')
+      await st().loadLibrary()
+      const query = rest.join(' ')
+      const track = st().libraryTracks.find(t => t.id === query) ?? pickByName(st().libraryTracks, t => t.title, query) ?? fail(`no single local file matches "${query}"`)
+      if (!value.size) { ctx.print(JSON.stringify(track, null, 2)); return }
+      if (track.ext.toLowerCase() !== 'mp3') fail('tag editing currently supports MP3 files only')
+      const changes: LocalTagChanges = {}
+      for (const [flag, text] of value) changes[keys[flag as keyof typeof keys]] = text
+      await st().saveLocalTags(track.id, changes)
+      ctx.print('Tags saved.')
+    },
+  },
   {
     name: 'song', aliases: ['info'], group: 'Library', usage: 'song <title | N>',
     description: 'Everything the library knows about a song: era, credits, dates and its file. N is a number from find. (In the terminal this replaces the chat /song, which posts to a room)',

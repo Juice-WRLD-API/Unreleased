@@ -62,6 +62,7 @@ interface Props {
   onShowInFiles?: () => void
   /** Tracker / Library - enters multi-select mode with this song selected. */
   onSelect?: () => void
+  onEditLocalTags?: () => void
 
   /** WRLD's simple like toggle. */
   liked?: boolean
@@ -116,7 +117,7 @@ function downloadZipEntry(entry: JWApiFileEntry): void {
 
 export default function SongContextMenu({
   state, onClose, canEdit, onInfo,
-  onPlay, onPlayNext, onAddToQueue, onShowInFiles, onSelect,
+  onPlay, onPlayNext, onAddToQueue, onShowInFiles, onSelect, onEditLocalTags,
   liked, onToggleLike, removeAction, song, disableChangeVersion, onShareLyrics,
   canLinkSessionFile, hasSessionLinkOverride, onLinkSessionFile, onClearSessionLink,
 }: Props): JSX.Element {
@@ -378,6 +379,7 @@ export default function SongContextMenu({
         hasValidSong && { icon: linkCopied ? Check : Link2, label: linkCopied ? 'Link copied' : 'Copy link', keepOpen: true, onSelect: handleCopyLink },
         onShowInFiles && !!track.path && { icon: Folder, label: 'Show in Files', onSelect: onShowInFiles },
         canEdit && hasValidSong && { icon: Pencil, label: 'Edit', onSelect: () => useStore.getState().openSongEditor(songId as number) },
+        onEditLocalTags && { icon: Pencil, label: 'Edit tags', onSelect: onEditLocalTags },
         onToggleLike && { icon: liked ? HeartFilled : Heart, label: liked ? 'Unlike' : 'Like', active: liked, onSelect: onToggleLike },
         versionsEnabled && !disableChangeVersion && hasValidSong && {
           icon: Layers,

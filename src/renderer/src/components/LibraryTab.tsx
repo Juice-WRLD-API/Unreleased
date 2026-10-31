@@ -17,6 +17,7 @@ import { useVirtualWindow } from '../hooks/useVirtualWindow'
 import { formatDuration, formatTotalDuration } from '../lib/format'
 import { registerBackHandler } from '../lib/backHandlers'
 import { readArt } from '../lib/localLibrary'
+import LocalTagEditor from './LocalTagEditor'
 
 /* ══════════════════════════════════════════════════════════════════════════════
    Library - the on-device music collection, built for a phone rather than
@@ -571,6 +572,7 @@ export default function LibraryTab(): JSX.Element {
   const filterCount = countFilters(filters)
 
   const [sheet, setSheet] = useState<SheetKind>(null)
+  const [editingTrack, setEditingTrack] = useState<LibraryTrack | null>(null)
   const [ctx, setCtx] = useState<{ track: LibraryTrack; queue: LibraryTrack[]; x: number; y: number } | null>(null)
 
   const [selectMode, setSelectMode] = useState(false)
@@ -1246,6 +1248,7 @@ export default function LibraryTab(): JSX.Element {
         </Sheet>
       )}
 
+      {editingTrack && <LocalTagEditor key={editingTrack.id} track={editingTrack} onClose={() => setEditingTrack(null)} />}
       {ctx && (
         <SongContextMenu
           state={{ track: toQueueTrack(ctx.track), songId: userApi.trackIdToSongId(ctx.track.id), x: ctx.x, y: ctx.y } as SongContextMenuState}
@@ -1256,6 +1259,7 @@ export default function LibraryTab(): JSX.Element {
           onPlayNext={() => playNext(toQueueTrack(ctx.track))}
           onAddToQueue={() => addToQueue(toQueueTrack(ctx.track))}
           onSelect={() => toggleSelect(ctx.track)}
+          onEditLocalTags={ctx.track.id.startsWith('local-') && ctx.track.filePath.startsWith('file://') ? () => setEditingTrack(ctx.track) : undefined}
           liked={likedTrackIds.includes(ctx.track.id)}
           onToggleLike={() => toggleLike(ctx.track.id)}
         />
