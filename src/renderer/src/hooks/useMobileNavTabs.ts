@@ -3,13 +3,13 @@ import { orderedNavItems, isNavItemVisible, splitMobileNavTabs, type NavItemDef 
 import type { ViewType } from '../types'
 import { hasChatAccess } from '../lib/chatAccess'
 
-// Games ('heardle' - see NAV_ITEMS) and Playlists: Home's own sections cover
-// both directly, so a tab here would just be a second, less complete route
-// to the same destination. WRLD: mobile already reaches it through the mini
+// Games ('heardle' - see NAV_ITEMS): Home's own Games section covers it
+// directly, so a tab here would just be a second, less complete route to the
+// same destination. WRLD: mobile already reaches it through the mini
 // player/now-playing bar, its one real entry point on that surface - a nav
 // tab would be a second, redundant route to the same full-screen view.
 // Staff page: the bottom bar already has its own profile button.
-const MOBILE_HIDDEN_VIEWS: ViewType[] = ['heardle', 'playlists', 'wrld', 'editor-profile']
+const MOBILE_HIDDEN_VIEWS: ViewType[] = ['heardle', 'wrld', 'editor-profile']
 
 // Every mobile-eligible item, ordered - pulled out so BottomNav, HomeView
 // (the "More" trigger), and MoreNavSheet (its contents) all agree on what's

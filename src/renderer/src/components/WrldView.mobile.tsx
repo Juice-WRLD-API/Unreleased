@@ -11,7 +11,7 @@ import { useStore, useStorePick } from '../store/useStore'
 import { useShallow } from 'zustand/react/shallow'
 import { getCurrentLineIndex, downloadSyncedLyrics, splitAdLibs, splitColorWords, ADLIB_OPACITY } from '../lib/lyrics'
 import { formatDuration } from '../lib/format'
-import { seekAudio, getAudioDuration, getAudioCurrentTime, runPlayerCommand } from './Player'
+import { seekAudio, getAudioDuration, getAudioCurrentTime, runPlayerCommand, usePlayerLoading } from './Player'
 import { apiFetch, getSongsByIds, fullCoverUrl, smallCoverUrl } from '../lib/juicewrldApi'
 import { getActiveRadioClient } from '../lib/radioSocketService'
 import { EFFECTS_SUPPORTED, fxInUse } from '../lib/audioEffects'
@@ -1578,6 +1578,7 @@ const FmProgressBar = memo(function FmProgressBar({ txtPri, txtSec, trackBg }: {
 
 const ProgressBar = memo(function ProgressBar({ txtPri, txtSec, trackBg }: { txtPri: string; txtSec: string; trackBg: string }): JSX.Element {
   const { progress, currentTime } = useStore(useShallow(s => ({ progress: s.progress, currentTime: s.currentTime })))
+  const loading = usePlayerLoading(s => s.on)
   const barRef = useRef<HTMLDivElement>(null)
   // Buffer the scrub position visually while dragging - only call seekAudio
   // on release, since seeking on every move makes playback glitch/stutter.
@@ -1633,12 +1634,17 @@ const ProgressBar = memo(function ProgressBar({ txtPri, txtSec, trackBg }: { txt
             swells under the finger (scaleY, so nothing reflows) and brightens
             from its resting dim. */}
         <div
-          className="w-full h-1 rounded-full overflow-hidden transition-transform duration-200 motion-reduce:transition-none"
+          className="relative w-full h-1 rounded-full overflow-hidden transition-transform duration-200 motion-reduce:transition-none"
           style={{ background: trackBg, transform: dragPct !== null ? 'scaleY(1.75)' : 'none' }}
         >
           <div
             className="h-full transition-opacity duration-200"
             style={{ width: `${pct}%`, background: txtPri, opacity: dragPct !== null ? 1 : 0.75 }}
+          />
+          {/* Same sweep as the player bars, in this screen's text color. */}
+          <span
+            className={`player-loading ${loading ? 'on' : ''}`}
+            style={{ '--sweep': `color-mix(in srgb, ${txtPri} 70%, transparent)` } as React.CSSProperties}
           />
         </div>
       </div>

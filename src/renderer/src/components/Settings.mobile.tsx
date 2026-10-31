@@ -555,12 +555,11 @@ export default function Settings(): JSX.Element {
   const setChatReadEnabled = useChatStore((s) => s.setReadEnabled)
 
   // ── Menu items (Appearance) ──────────────────────────────────────────────
-  // Games ('heardle' - see NAV_ITEMS) and Playlists are dropped from the
-  // reorder/show-hide list here: both are unconditionally excluded from the
-  // actual mobile nav now that Home covers them directly (see
-  // useMobileNavTabs' MOBILE_HIDDEN_VIEWS), so a row for either here would
-  // toggle something with no visible effect. Desktop's Settings keeps them -
-  // Sidebar still has its own tabs for both.
+  // Games ('heardle' - see NAV_ITEMS) is dropped from the reorder/show-hide
+  // list here: it's unconditionally excluded from the actual mobile nav now
+  // that Home covers it directly (see useMobileNavTabs' MOBILE_HIDDEN_VIEWS),
+  // so a row for it here would toggle something with no visible effect.
+  // Desktop's Settings keeps it - Sidebar still has its own tab for it.
   const {
     customAccent, setCustomAccent, setAccentDebounced,
     editingSkinId, setEditingSkinId, skinImportRef, skinImportError, createSkin, importSkinFile,
@@ -569,7 +568,7 @@ export default function Settings(): JSX.Element {
     sleepMinutes, setSleepMinutes,
     devices,
   } = useSettingsAppearance({
-    filterNavRows: (i) => i.view !== 'heardle' && i.view !== 'playlists',
+    filterNavRows: (i) => i.view !== 'heardle',
     onSkinCreated: () => setPickerOpen(null),
   })
   const navDrag = useDragReorder(navRows.length, moveNavItem)
