@@ -26,7 +26,7 @@ const VIEWS: Record<string, ViewType> = {
   albums: 'albums-admin',
 }
 const SETTINGS_TABS: SettingsTab[] = ['appearance', 'preferences', 'playback', 'desktop', 'shortcuts', 'library', 'app', 'developer', 'feedback', 'about']
-const ADMIN_TABS: AdminTab[] = ['proposals', 'comp-proposals', 'comp-replace', 'cover-art', 'applications', 'reports', 'feedback', 'users', 'stats', 'channels', 'eras', 'cdn-nodes', 'beta', 'lyrics', 'logs']
+const ADMIN_TABS: AdminTab[] = ['proposals', 'comp-proposals', 'comp-replace', 'cover-art', 'applications', 'reports', 'feedback', 'users', 'stats', 'channels', 'news-channels', 'eras', 'cdn-nodes', 'beta', 'lyrics', 'logs']
 const OPEN_TARGETS = [...Object.keys(VIEWS), 'settings', 'profile', 'admin', 'queue', 'eq', 'diagnostics', 'notifications', 'identify', 'user', 'song']
 // `notifications` filters, by the names the notification area shows.
 const NOTIFY_KINDS: Record<string, NotificationKind> = { chat: 'chat', news: 'news', announcements: 'broadcast', app: 'app' }
