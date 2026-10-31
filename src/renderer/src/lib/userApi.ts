@@ -873,14 +873,48 @@ function storePlaylistDetail(id: number, patch: PlaylistDetail): PlaylistDetail 
   return detail
 }
 
+// The detail endpoint only answers for the account's own playlists, so a 404
+// means the playlist is gone (deleted on another device, or still in a list
+// cached before that). The menus and the prefetch fetch every listed playlist,
+// so one left in the list was asked for again on every open. It's dropped from
+// the caches and the store is told to drop it too.
+const playlistGoneListeners = new Set<(id: number) => void>()
+
+export function onPlaylistGone(fn: (id: number) => void): () => void {
+  playlistGoneListeners.add(fn)
+  return () => { playlistGoneListeners.delete(fn) }
+}
+
+function forgetPlaylist(id: number): void {
+  playlistDetailCache.delete(id)
+  playlistCoverCache.delete(id)
+  cacheDelete(playlistDetailUrl(id))
+  const rows = cacheGet<PlaylistRow[]>(PLAYLISTS_URL)
+  if (Array.isArray(rows) && rows.some((row) => row.id === id)) {
+    cacheSet(PLAYLISTS_URL, rows.filter((row) => row.id !== id))
+  }
+}
+
 // Single request - tracks + cover in one response. Concurrent callers for the
 // same id share the in-flight request.
 export function getPlaylist(id: number): Promise<PlaylistDetail> {
   const pending = playlistDetailInFlight.get(id)
   if (pending) return pending
   const url = playlistDetailUrl(id)
-  const p = request<PlaylistDetail>(withoutLyricsParam(url), { transform: detailWithoutLyrics }, true, url)
+  let notFound = false
+  const parseError = (res: Response): Promise<string> => {
+    notFound = res.status === 404
+    return defaultParseError(res)
+  }
+  const p = request<PlaylistDetail>(withoutLyricsParam(url), { transform: detailWithoutLyrics, parseError }, true, url)
     .then((result) => storePlaylistDetail(id, result))
+    .catch((err) => {
+      if (notFound) {
+        forgetPlaylist(id)
+        playlistGoneListeners.forEach((fn) => fn(id))
+      }
+      throw err
+    })
     .finally(() => playlistDetailInFlight.delete(id))
   playlistDetailInFlight.set(id, p)
   return p
@@ -968,9 +1002,7 @@ export async function setPlaylistCoverBase64(id: number, b64: string): Promise<v
 
 export async function deletePlaylist(id: number): Promise<void> {
   await request(`${LIBRARY_BASE}/playlists/${id}/`, { method: 'DELETE' })
-  playlistDetailCache.delete(id)
-  playlistCoverCache.delete(id)
-  cacheDelete(playlistDetailUrl(id))
+  forgetPlaylist(id)
 }
 
 type PlaylistItemsAddCreated = {

@@ -25,15 +25,23 @@ export const LS_TRACKER_SEARCH = 'api-tracker:search'
 // than a real recording date - treat it as invalid.
 export const MIN_PLAUSIBLE_RECORD_YEAR = 2010
 
-// The `q` URL param takes priority over the saved localStorage query so that
+// The `q` URL param takes priority over the saved query so that
 // following/reloading a link with a search in it (or navigating back to one)
-// shows that search rather than whatever was last typed.
+// shows that search rather than whatever was last typed. The query lives in
+// sessionStorage: it survives switching views but not a restart.
 export function getInitialSearch(): string {
   if (window.location.protocol !== 'file:') {
     const q = new URLSearchParams(window.location.search).get('q')
     if (q) return q
   }
-  try { return localStorage.getItem(LS_TRACKER_SEARCH) || '' } catch { return '' }
+  try { return sessionStorage.getItem(LS_TRACKER_SEARCH) || '' } catch { return '' }
+}
+
+export function saveTrackerSearch(search: string): void {
+  try {
+    sessionStorage.setItem(LS_TRACKER_SEARCH, search)
+    localStorage.removeItem(LS_TRACKER_SEARCH)
+  } catch { /* storage unavailable */ }
 }
 
 // ─── Era color palette (Calendar tab) ─────────────────────────────────────────

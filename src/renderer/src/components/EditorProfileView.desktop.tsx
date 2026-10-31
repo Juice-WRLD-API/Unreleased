@@ -30,26 +30,35 @@ import { RANK_STYLES } from '../lib/proposalSearch'
 // All data/state lives in useEditorProfileView (shared with the mobile
 // variant) - this file is just the desktop bento layout on top of it.
 
-function AdminStatBox({ label, value, highlight, onClick }: {
+function AdminStatBox({ label, value, highlight, onClick, labelOnly }: {
   label: string
-  value: number | string | null | undefined
+  value?: number | string | null
   /** Render the value in accent color - pass for a "pending" count that's
    *  nonzero, or any other value worth calling out. Plain totals (Users,
    *  Channels) leave this unset. */
   highlight?: boolean
   onClick?: () => void
+  /** For entries with no number behind them (Feedback, Logs, Broadcast…):
+   *  show just the label, centred in a box the same height as the others. */
+  labelOnly?: boolean
 }): JSX.Element {
   const Comp = onClick ? 'button' : 'div'
   return (
     <Comp
       type={onClick ? 'button' : undefined}
       onClick={onClick}
-      className={`rounded-lg bg-[var(--surface-raised)]/60 px-2 py-1.5 text-center min-w-0 ${onClick ? 'hover:bg-[var(--surface-raised)] transition-colors cursor-pointer' : ''}`}
+      className={`rounded-lg bg-[var(--surface-raised)]/60 px-2 py-1.5 text-center min-w-0 ${labelOnly ? 'flex items-center justify-center min-h-[3.25rem]' : ''} ${onClick ? 'hover:bg-[var(--surface-raised)] transition-colors cursor-pointer' : ''}`}
     >
-      <p className={`text-base font-bold tabular-nums truncate ${highlight ? 'text-accent' : 'text-text-primary'}`}>
-        {value === null || value === undefined ? '—' : value}
-      </p>
-      <p className="text-[9px] font-bold uppercase tracking-wider text-text-muted mt-0.5 truncate">{label}</p>
+      {labelOnly ? (
+        <p className="text-[10px] font-bold uppercase tracking-wider text-text-primary truncate">{label}</p>
+      ) : (
+        <>
+        <p className={`text-base font-bold tabular-nums truncate ${highlight ? 'text-accent' : 'text-text-primary'}`}>
+          {value === null || value === undefined ? '—' : value}
+        </p>
+        <p className="text-[9px] font-bold uppercase tracking-wider text-text-muted mt-0.5 truncate">{label}</p>
+        </>
+      )}
     </Comp>
   )
 }
@@ -550,21 +559,21 @@ export default function EditorProfileView(): JSX.Element {
                             <AdminStatBox label="Song edits" value={adminPreview?.pendingProposals} highlight={!!adminPreview?.pendingProposals} onClick={() => openAdmin('proposals')} />
                             {canReviewCoverArt && <AdminStatBox label="Cover art" value={adminPreview?.pendingCoverArt} highlight={!!adminPreview?.pendingCoverArt} onClick={() => openAdmin('cover-art')} />}
                             <AdminStatBox label="Comp files" value={adminPreview?.pendingComp} highlight={!!adminPreview?.pendingComp} onClick={() => openAdmin('comp-proposals')} />
-                            {CONTRIBUTOR_ENABLED && <AdminStatBox label="Replace comp" value="Open" onClick={() => openAdmin('comp-replace')} />}
+                            {CONTRIBUTOR_ENABLED && <AdminStatBox label="Replace comp" labelOnly onClick={() => openAdmin('comp-replace')} />}
                           </>
                         )}
                         {isAdmin && !otpLocked && (
                           <>
                             <AdminStatBox label="Applications" value={adminPreview?.pendingApplications} highlight={!!adminPreview?.pendingApplications} onClick={() => openAdmin('applications')} />
                             <AdminStatBox label="Reports" value={adminPreview?.pendingReports} highlight={!!adminPreview?.pendingReports} onClick={() => openAdmin('reports')} />
-                            <AdminStatBox label="Feedback" value="Read" onClick={() => openAdmin('feedback')} />
+                            <AdminStatBox label="Feedback" labelOnly onClick={() => openAdmin('feedback')} />
                             <AdminStatBox label="Users" value={adminPreview?.totalUsers} onClick={() => openAdmin('users')} />
                             <AdminStatBox label="Channels" value={adminPreview?.totalChannels} onClick={() => openAdmin('channels')} />
                             <AdminStatBox label="Eras" value={adminPreview?.totalEras} onClick={() => openAdmin('eras')} />
                             <AdminStatBox label="CDN nodes" value={adminPreview?.pendingCdnNodes} highlight={!!adminPreview?.pendingCdnNodes} onClick={() => openAdmin('cdn-nodes')} />
-                            <AdminStatBox label="Lyrics" value="Open" onClick={() => openAdmin('lyrics')} />
-                            <AdminStatBox label="Logs" value="Open" onClick={() => openAdmin('logs')} />
-                            <AdminStatBox label="Broadcast" value="Send" onClick={() => setShowBroadcast(true)} />
+                            <AdminStatBox label="Lyrics" labelOnly onClick={() => openAdmin('lyrics')} />
+                            <AdminStatBox label="Logs" labelOnly onClick={() => openAdmin('logs')} />
+                            <AdminStatBox label="Broadcast" labelOnly onClick={() => setShowBroadcast(true)} />
                           </>
                         )}
                         {/* The 2FA status lives in Settings → Account; this box
