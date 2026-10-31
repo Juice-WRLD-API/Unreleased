@@ -26,7 +26,7 @@ import { adminCoverArtCounts } from '../lib/coverArtApi'
 import { useStrictModeSafeEffect } from './useStrictModeSafeEffect'
 import { errorMessage } from '../lib/format'
 
-export type AdminTab = 'proposals' | 'cover-art' | 'comp-proposals' | 'comp-replace' | 'applications' | 'reports' | 'feedback' | 'users' | 'stats' | 'channels' | 'eras' | 'cdn-nodes' | 'beta' | 'lyrics' | 'logs'
+export type AdminTab = 'proposals' | 'cover-art' | 'comp-proposals' | 'comp-replace' | 'applications' | 'reports' | 'feedback' | 'users' | 'stats' | 'channels' | 'news-channels' | 'eras' | 'cdn-nodes' | 'beta' | 'lyrics' | 'logs'
 
 // Deep-link paths for the standalone (non-embedded) admin console - each
 // section its own top-level URL instead of one flat "/admin" for every tab.
@@ -44,6 +44,7 @@ export const ADMIN_TAB_PATHS: Partial<Record<AdminTab, string>> = {
   feedback: '/feedback',
   users: '/users',
   channels: '/channels',
+  'news-channels': '/news-channels',
   eras: '/eras',
   'cdn-nodes': '/cdn-nodes',
   beta: '/beta',
@@ -62,7 +63,7 @@ export type FeedbackFilter = 'human' | 'automated' | ''
 export interface AdminNavItem {
   id: AdminTab
   label: string
-  iconKey: 'proposals' | 'cover-art' | 'comp-proposals' | 'comp-replace' | 'applications' | 'reports' | 'feedback' | 'users' | 'stats' | 'channels' | 'eras' | 'cdn-nodes' | 'beta' | 'lyrics' | 'logs'
+  iconKey: 'proposals' | 'cover-art' | 'comp-proposals' | 'comp-replace' | 'applications' | 'reports' | 'feedback' | 'users' | 'stats' | 'channels' | 'news-channels' | 'eras' | 'cdn-nodes' | 'beta' | 'lyrics' | 'logs'
   badge?: number
 }
 
@@ -221,6 +222,7 @@ export function useAdminQueue(opts: UseAdminQueueOptions) {
     { id: 'users',        label: 'Users',        iconKey: 'users' },
     { id: 'stats',        label: 'Stats',        iconKey: 'stats' },
     { id: 'channels',     label: 'Channels',     iconKey: 'channels' },
+    { id: 'news-channels', label: 'News channels', iconKey: 'news-channels' },
     { id: 'eras',         label: 'Eras',         iconKey: 'eras' },
     { id: 'cdn-nodes',    label: 'CDN nodes',    iconKey: 'cdn-nodes' },
     { id: 'beta',         label: 'Beta',         iconKey: 'beta' },

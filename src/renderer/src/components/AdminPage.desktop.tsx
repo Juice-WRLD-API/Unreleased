@@ -20,6 +20,7 @@ import CompProposalsTab from './CompProposalsTab'
 import CompReplaceTab from './CompReplaceTab'
 import CoverArtTab from './CoverArtTab'
 import ChannelsTab from './ChannelsTab'
+import NewsChannelsTab from './NewsChannelsTab'
 import EraTab from './EraTab'
 import CdnNodesTab from './CdnNodesTab'
 import BetaTab from './BetaTab'
@@ -169,7 +170,7 @@ export default function AdminPage({ embedded = false, initialTab, onExit }: {
         {/* A tab's data loads once per visit (see the sig comment in
             useAdminQueue) rather than refetching every time it's reselected -
             this is the explicit way back to fresh data instead. */}
-        {tab !== 'cover-art' && tab !== 'comp-proposals' && tab !== 'comp-replace' && tab !== 'channels' && tab !== 'eras' && tab !== 'cdn-nodes' && tab !== 'beta' && tab !== 'lyrics' && tab !== 'logs' && (
+        {tab !== 'cover-art' && tab !== 'comp-proposals' && tab !== 'comp-replace' && tab !== 'channels' && tab !== 'news-channels' && tab !== 'eras' && tab !== 'cdn-nodes' && tab !== 'beta' && tab !== 'lyrics' && tab !== 'logs' && (
           <button onClick={() => refresh()} disabled={loading} title="Refresh"
             className="shrink-0 p-1.5 rounded-lg text-accent hover:bg-surface-overlay transition-colors disabled:opacity-40">
             <RefreshCw size={12} className={loading ? 'animate-spin' : ''} />
@@ -272,6 +273,11 @@ export default function AdminPage({ embedded = false, initialTab, onExit }: {
         {visited.has('channels') && (
           <div className={tab === 'channels' ? 'h-full' : 'hidden'}>
             <ChannelsTab />
+          </div>
+        )}
+        {visited.has('news-channels') && (
+          <div className={tab === 'news-channels' ? 'h-full' : 'hidden'}>
+            <NewsChannelsTab />
           </div>
         )}
         {visited.has('eras') && (
