@@ -771,6 +771,15 @@ input[type='range']:active::-moz-range-thumb {
   animation: menu-pop 0.45s cubic-bezier(0.4, 0, 0.2, 1) backwards;
 }
 
+/* A full page pushed over a phone screen (the notifications page). */
+@keyframes m-page-in {
+  from { opacity: 0; transform: translateX(32px); }
+  to   { opacity: 1; transform: none; }
+}
+.animate-m-page-in {
+  animation: m-page-in 0.42s cubic-bezier(0.33, 0, 0.15, 1) both;
+}
+
 /* Settings disclosures only arrive in response to expanding a section. */
 @keyframes disclosure-in {
   from { opacity: 0; transform: translateY(-6px); }
@@ -1025,6 +1034,7 @@ img[data-img-fade="in"] { animation: img-fade-in 0.42s cubic-bezier(0.33, 0, 0.1
   .wrld-q-row,
   .animate-wordle-shake,
   .animate-menu-pop,
+  .animate-m-page-in,
   .animate-disclosure-in,
   .animate-fade-in,
   .animate-slide-in-right,
