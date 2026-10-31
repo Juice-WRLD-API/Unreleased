@@ -1,5 +1,5 @@
 import { useRef, useState } from 'react'
-import { ChevronRight, Play, ListMusic, Gamepad2, Flame, Music2, Disc3, User, Newspaper, Radio, Heart, Search, MoreHorizontal, Album, Music, Wrench, MicVocal, RefreshCw, AudioLines, ImagePlus } from 'lucide-react'
+import { ChevronRight, Play, ListMusic, Gamepad2, Flame, Music2, Disc3, User, Newspaper, Radio, Heart, Search, MoreHorizontal, Album, Music, Wrench, MicVocal, RefreshCw, AudioLines, ImagePlus, Download } from 'lucide-react'
 import { AlbumArtThumbnail } from './AlbumArtThumbnail'
 import { ProgressiveCover } from './ProgressiveCover'
 import { Tile } from './Tile'
@@ -338,7 +338,8 @@ function Stat({ value, label }: { value: string; label: string }): JSX.Element {
 
 // Lists the nav destinations that ship off by default (Liked Songs, API
 // Docs - see `defaultHidden` in navItems.tsx): still one click away without
-// having to turn them on in Settings first.
+// having to turn them on in Settings first. Download app always goes last:
+// the desktop side menu never shows it.
 function MoreMenu({ anchorRef, onClose, items, onSelect }: {
   anchorRef: React.RefObject<HTMLElement>
   onClose: () => void
@@ -385,9 +386,10 @@ export default function HomeView(): JSX.Element {
   const [playlistMenu, setPlaylistMenu] = useState<PlaylistContextMenuState | null>(null)
   const [newsMenu, setNewsMenu] = useState<NewsMenuState | null>(null)
   const [sharingNews, setSharingNews] = useState<NewsItem | null>(null)
-  const hiddenNavItems = orderedNavItems(navOrder).filter(
-    (i) => i.defaultHidden && !isNavItemVisible(i, navVisibility, true),
-  )
+  const moreItems: { view: ViewType; label: string; icon: React.ReactNode }[] = [
+    ...orderedNavItems(navOrder).filter((i) => i.defaultHidden && !isNavItemVisible(i, navVisibility, true)),
+    { view: 'download', label: 'Download app', icon: <Download size={18} /> },
+  ]
 
   const showRecent = showSection('recent') && recent.length > 0
   const showOnThisDay = showSection('onthisday')
@@ -451,7 +453,7 @@ export default function HomeView(): JSX.Element {
               <MoreMenu
                 anchorRef={moreBtnRef}
                 onClose={() => setShowMore(false)}
-                items={hiddenNavItems}
+                items={moreItems}
                 onSelect={setActiveView}
               />
             )}

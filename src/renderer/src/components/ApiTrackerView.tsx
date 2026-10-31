@@ -51,7 +51,7 @@ import { useLongPress } from '../hooks/useLongPress'
 import {
   Category, ViewMode, TrackerTab, TRACKER_TABS, isTrackerTab,
   EraColor, ERA_COLOR_PALETTE, DEFAULT_ERA_COLOR, GROUP_CATEGORY_PRIORITY, groupCategory,
-  LS_TRACKER_SEARCH, MIN_PLAUSIBLE_RECORD_YEAR, getInitialSearch,
+  saveTrackerSearch, MIN_PLAUSIBLE_RECORD_YEAR, getInitialSearch,
   SNIPPET_CONTEXT_CHARS, getLyricSnippet, MONTH_LABELS, buildMonthGrid,
   extractDateKeys, dateKey,
 } from '../lib/apiTrackerShared'
@@ -2214,7 +2214,7 @@ export default function ApiTrackerView(): JSX.Element {
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const isFirstDebounce = useRef(true)
 
-  useEffect(() => { localStorage.setItem(LS_TRACKER_SEARCH, search) }, [search])
+  useEffect(() => { saveTrackerSearch(search) }, [search])
 
   // Reflect each settled search in the URL (?q=...) via pushState, one history
   // entry per search, so the back button steps through previous searches

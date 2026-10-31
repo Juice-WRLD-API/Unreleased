@@ -22,6 +22,9 @@ import { PopLayer } from './PopLayer'
 // open it carry data-notifications-toggle, so their click isn't an outside
 // click that closes it only for the button to reopen it.
 
+// Same check App uses to mount WindowControls.
+const IN_ELECTRON = navigator.userAgent.includes('Electron')
+
 const KIND_LABEL: Record<NotificationKind, string> = { chat: 'Chat', news: 'News', broadcast: 'Announcements', app: 'App' }
 const KIND_ORDER: NotificationKind[] = ['chat', 'news', 'broadcast', 'app']
 const KIND_ICON: Record<NotificationKind, LucideIcon> = { chat: MessageSquare, news: Newspaper, broadcast: Megaphone, app: Info }
@@ -135,9 +138,11 @@ export default function NotificationCenter(): JSX.Element {
       ref={panelRef}
       role="dialog"
       aria-label="Notifications"
+      // In the desktop app, drop below the window controls (fixed top-right,
+      // h-7) so the header's Clear / close don't sit under min/max/close.
       style={{
-        top: 'calc(env(safe-area-inset-top, 0px) + 0.5rem)',
-        maxHeight: 'min(600px, calc(100svh - env(safe-area-inset-top, 0px) - var(--bottom-nav-height, 0px) - 7rem))',
+        top: `calc(env(safe-area-inset-top, 0px) + ${IN_ELECTRON ? '2.25rem' : '0.5rem'})`,
+        maxHeight: `min(600px, calc(100svh - env(safe-area-inset-top, 0px) - var(--bottom-nav-height, 0px) - ${IN_ELECTRON ? '8.75rem' : '7rem'}))`,
       }}
       className="animate-menu-pop fixed right-3 z-[9990] w-[360px] max-w-[calc(100vw-1.5rem)] flex flex-col rounded-xl border border-[var(--border)] bg-[var(--surface)] shadow-[0_8px_32px_rgba(0,0,0,0.4)] overflow-hidden"
     >

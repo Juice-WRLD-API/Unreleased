@@ -3700,6 +3700,11 @@ export const useStore = create<AppStore>((set, get, store) => ({
   },
 }))
 
+userApi.onPlaylistGone((id) => {
+  const { playlists } = useStore.getState()
+  if (playlists.some(p => p.id === id)) useStore.setState({ playlists: playlists.filter(p => p.id !== id) })
+})
+
 // Notification-socket tickets wait for a confirmed account, not just a stored token.
 useStore.subscribe((s, prev) => {
   if (s.account !== prev.account) setNotificationsSignedIn(!!s.account)
