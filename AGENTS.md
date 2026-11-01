@@ -1,6 +1,6 @@
 # Agent guide: Juice WRLD API and Unreleased
 
-**Version 1.48** · updated 2026-10-30. Bump the version and date whenever you
+**Version 1.49** · updated 2026-11-01. Bump the version and date whenever you
 change this file (minor for fixes and additions, major for rewrites).
 
 **Keep this file current.** If you find something in the docs or this file that
@@ -428,6 +428,9 @@ entries that stop being true.
   songs with no listed duration (most sessions): it used `track.duration`. A
   window without the audio element should take the length from the synced
   position (`currentTime / progress`), with the listed one only as a fallback.
+  The Desktop player widget had the same bug for files (0:00, no seeking); the
+  bridge now sends the audio's length when none is listed (`playingLength` in
+  `lib/desktopBridge.ts`).
 - 2026-10-30: Testing the app over CDP. `electron . --smoke-test` and plain
   `electron .` exit 0 without a word while the installed app runs (the
   single-instance lock), so always pass `--user-data-dir=<scratch>`; signed out

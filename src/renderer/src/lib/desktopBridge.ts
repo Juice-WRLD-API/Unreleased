@@ -15,7 +15,7 @@ import { runHotkeyAction } from './hotkeys'
 import { seekAudio, getAudioDuration } from '../components/Player'
 import { apiFetch, buildImageUrl, getSongById, playlistCoverUrl, searchSongs, sizedCoverUrl, smallCoverUrl, songToTrack, type JWApiPaginatedResponse } from './juicewrldApi'
 import * as userApi from './userApi'
-import { playlistItemsToTracks } from './playlistItems'
+import { isPrivateEntry, playlistItemsToTracks, trackToPlaylistEntry } from './playlistItems'
 import { listEras } from './eras'
 import { libraryTrackToTrack } from './fileTypes'
 import { fxInUse } from './audioEffects'
@@ -24,9 +24,9 @@ import { memberVersionPrefs, prefLabel, versionPrefToggles } from './versionPref
 import { showAppToast } from './appToast'
 import { copyText } from './clipboard'
 import { trackShareUrl } from './platform'
-import { addSongsInBackground } from './optimisticPlaylist'
+import { addSongsInBackground, addTracksInBackground } from './optimisticPlaylist'
 import { toggleRadioFm } from '../hooks/useWrldCore'
-import { downloadTrack } from '../components/SongContextMenu'
+import { downloadTrack, filesLocation, openInFiles } from '../components/SongContextMenu'
 import type { DesktopPatch } from '../store/desktopSlice'
 import { widgetMenu, type WidgetPart, type WidgetWhich } from '../desktop/widgetMenu'
 import type { Track } from '../types'
@@ -120,6 +120,15 @@ export function nowCover(s: AppStore): string | null {
   return nowTrack(s)?.cover ?? null
 }
 
+/** The song playing's length: the listed one, or the audio's own once it's loaded (files and most sessions list none,
+ *  which left the widget's bar at 0:00 and nothing to seek along). */
+function playingLength(s: AppStore): number {
+  const listed = s.currentTrack?.duration || 0
+  if (listed > 0) return listed
+  const audio = getAudioDuration()
+  return Number.isFinite(audio) && audio > 0 ? audio : 0
+}
+
 function nowTrack(s: AppStore): { id: string; title: string; artist: string; album: string; duration: number; cover: string | null } | null {
   if (s.radioFmActive && s.radioFmNowPlaying) {
     const r = s.radioFmNowPlaying
@@ -130,7 +139,7 @@ function nowTrack(s: AppStore): { id: string; title: string; artist: string; alb
   if (!t) return null
   const full = s.currentTrackFull?.id === t.id ? s.currentTrackFull : null
   const art = full?.albumArt ? buildImageUrl(full.albumArt) ?? full.albumArt : null
-  return { id: t.id, title: t.title, artist: t.artist, album: t.album, duration: t.duration || 0, cover: coverOf(t) ?? art ?? null }
+  return { id: t.id, title: t.title, artist: t.artist, album: t.album, duration: playingLength(s), cover: coverOf(t) ?? art ?? null }
 }
 
 /** Anything in the equalizer away from neutral, as the app's EQ button reckons it (components/Player.tsx). */
@@ -145,17 +154,21 @@ function menuSong(s: AppStore): { songId: number | null; track: Track | null } {
 }
 
 /** What the ⋯ menu offers for it, as the app's song menu would (components/SongContextMenu). */
-function songMenu(s: AppStore): { title: string; info: boolean; link: boolean; download: boolean; edit: boolean; lyrics: boolean; playlists: { id: number; name: string }[] | null } | null {
+function songMenu(s: AppStore): { title: string; info: boolean; link: boolean; download: boolean; edit: boolean; lyrics: boolean; files: boolean; playlists: { id: number; name: string }[] | null } | null {
   const { songId, track } = menuSong(s)
   const title = nowTrack(s)?.title
   if (!title || (songId == null && !track)) return null
   const has = songId != null && songId > 0
   const editor = userApi.isChannelEditor(s.account, s.channels.find((c) => c.is_primary)?.slug, true)
+  // A song, or a comp, donor or local file: whatever a playlist can point at. Donor and local files are private, so
+  // public playlists are left off for them.
+  const entry = has ? { song_id: songId } : songId == null && track ? trackToPlaylistEntry(track) : null
+  const privateEntry = !!entry && isPrivateEntry(entry)
   return {
     title, info: has, link: has, edit: has && editor, lyrics: !!rawLyrics(s)?.trim(),
     download: !!track?.path && !(songId == null && track.id.startsWith('local-')),
-    // Signed in, an API song can go on a playlist.
-    playlists: has && s.account ? s.playlists.map((p) => ({ id: p.id, name: p.name })) : null,
+    files: !!track && !!filesLocation(track, songId),
+    playlists: entry && s.account ? s.playlists.filter((p) => !(privateEntry && p.is_public)).map((p) => ({ id: p.id, name: p.name })) : null,
   }
 }
 
@@ -201,7 +214,7 @@ let lyricsMade: { id: string; lines: TimedLine[] } | null = null
 function nowLyrics(s: AppStore): { id: string; lines: TimedLine[] } | null {
   const raw = rawLyrics(s)
   const id = nowTrack(s)?.id ?? ''
-  const duration = s.radioFmActive ? (s.radioFmNowPlaying?.duration_ms || 0) / 1000 : s.currentTrack?.duration || 0
+  const duration = s.radioFmActive ? (s.radioFmNowPlaying?.duration_ms || 0) / 1000 : playingLength(s)
   if (lyricsFor && lyricsFor.raw === raw && lyricsFor.offset === s.lyricsOffset && lyricsFor.duration === duration && lyricsMade?.id === id) return lyricsMade
   lyricsFor = { raw, offset: s.lyricsOffset, duration }
   if (!raw?.trim()) { lyricsMade = null; return null }
@@ -382,6 +395,13 @@ export async function runDesktopCommand(cmd: string, arg: unknown): Promise<void
       if (track?.path) downloadTrack(track, songId)
       break
     }
+    // The song or comp file playing: its folder in Files, in its own channel.
+    case 'show-in-files': {
+      const { songId, track } = menuSong(s)
+      const at = track ? filesLocation(track, songId) : null
+      if (at) openInFiles(at)
+      break
+    }
     case 'prefer-version':
     case 'exclude-version': {
       const anchor = s.currentTrack && !s.radioFmActive ? userApi.trackIdToSongId(s.currentTrack.id) : null
@@ -464,10 +484,12 @@ export async function answerDesktopRequest(kind: string, arg: unknown): Promise<
       return copyText(trackShareUrl(songId)).then(() => true, () => false)
     }
     case 'add-to-playlist': {
-      const { songId } = menuSong(useStore.getState())
+      const { songId, track } = menuSong(useStore.getState())
       const playlistId = Number(arg)
-      if (songId == null || !Number.isInteger(playlistId)) return false
-      return (await addSongsInBackground(playlistId, [songId])).length === 0
+      if (!Number.isInteger(playlistId)) return false
+      if (songId != null) return (await addSongsInBackground(playlistId, [songId])).length === 0
+      if (!track) return false
+      return (await addTracksInBackground(playlistId, [track])).length === 0
     }
     case 'list': {
       if (typeof arg !== 'string') return null
@@ -545,9 +567,11 @@ export function watchDesktopState(send: (patch: Record<string, unknown>) => void
     const { preferred, excluded } = memberVersionPrefs(members, useStore.getState().songPrefs)
     push({ versionPrefs: { preferred: [...preferred], excluded: [...excluded] } })
   }
+  let sentLength = 0
   const sendState = (): void => {
     const s = useStore.getState()
     const track = nowTrack(s)
+    sentLength = track?.duration ?? 0
     push({
       playing: s.radioFmActive ? true : s.isPlaying,
       track,
@@ -607,6 +631,8 @@ export function watchDesktopState(send: (patch: Record<string, unknown>) => void
       || s.eqEnabled !== p.eqEnabled || s.playbackSpeed !== p.playbackSpeed || s.eqBalance !== p.eqBalance || s.eqMono !== p.eqMono
       || s.eqBoost !== p.eqBoost || s.skipSilence !== p.skipSilence || s.reverbEnabled !== p.reverbEnabled || s.audioFx !== p.audioFx
       || s.lyricsScale !== p.lyricsScale || s.lyricsColorActive !== p.lyricsColorActive || s.lyricsColorInactive !== p.lyricsColorInactive) later()
+    // A song with no listed length gets one when its audio loads, which no store key says.
+    else if (s.currentTime !== p.currentTime && !s.radioFmActive && playingLength(s) !== sentLength) later()
   })
   return () => { stopped = true; stopCovers(); stopClock(); unsubscribe() }
 }

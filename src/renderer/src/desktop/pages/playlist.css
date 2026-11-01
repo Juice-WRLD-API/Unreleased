@@ -3,6 +3,8 @@
 :root { --s: 1; }
 #stage { position: absolute; left: 24px; top: 24px; width: var(--width); height: var(--stage-height); transform-style: preserve-3d;
   transform-origin: var(--hinge) 50%; transform: perspective(var(--depth)) rotateY(var(--angle)); transition: transform 0.6s cubic-bezier(0.25, 1, 0.4, 1); }
+/* In the WRLD tab it turns to face the user while the pointer is over it. */
+.in-tab #stage:hover { transform: perspective(var(--depth)) rotateY(0deg); }
 #catcher { position: absolute; inset: 0; background: rgba(0, 0, 0, 0.01); }
 
 #header { position: absolute; left: 0; top: 0; width: var(--width); height: var(--header-height); display: flex; align-items: center;

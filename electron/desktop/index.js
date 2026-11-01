@@ -211,7 +211,7 @@ function createDesktop(options) {
   /** A press on a desktop window (or a row of its menu), for the main window to act on - but the desk, which is ours. */
   function command(cmd, arg) {
     if (cmd === 'clear') { clear.set(arg === undefined ? undefined : Boolean(arg)); return }
-    if (cmd === 'open-app' || cmd === 'open-settings' || cmd === 'song-info' || cmd === 'edit-song') showMainWindow()
+    if (cmd === 'open-app' || cmd === 'open-settings' || cmd === 'song-info' || cmd === 'edit-song' || cmd === 'show-in-files') showMainWindow()
     main()?.webContents.send('desktop:command', cmd, arg)
   }
 

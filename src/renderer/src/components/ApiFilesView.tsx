@@ -11,16 +11,16 @@ const DonorFiles = lazyView(() => import('./DonorFiles'))
 // Donors get a second location beside the comp channels: their own cloud
 // storage. It's a separate store with its own routes, so it swaps in as its
 // own page rather than being threaded through the channel file browser.
-export default function ApiFilesView(): JSX.Element {
+export default function ApiFilesView({ embedded = false }: { embedded?: boolean } = {}): JSX.Element {
   const isDonor = useStore((s) => !!s.account?.is_donor)
   const [mine, setMine] = useState(false)
   const contentRef = useRef<HTMLDivElement>(null)
   useContentMotion(contentRef, mine ? 'mine' : 'channels')
-  if (!isDonor) return <ApiFilesBrowser />
+  if (!isDonor) return <ApiFilesBrowser embedded={embedded} />
 
   return (
     <div className="flex-1 flex flex-col min-h-0 min-w-0 overflow-hidden">
-      <div className="shrink-0 flex items-center gap-2 pt-3 px-5">
+      <div className={`shrink-0 flex items-center gap-2 px-5 ${embedded ? 'pb-2' : 'pt-3'}`}>
         <div className="flex items-center bg-surface-overlay rounded-lg p-1 gap-0.5">
           {([[false, 'Channels'], [true, 'My files']] as const).map(([value, label]) => (
             <button
@@ -40,7 +40,7 @@ export default function ApiFilesView(): JSX.Element {
             </div>
             <Suspense fallback={null}><DonorFiles /></Suspense>
           </div>
-        ) : <ApiFilesBrowser />}
+        ) : <ApiFilesBrowser embedded={embedded} />}
       </div>
     </div>
   )

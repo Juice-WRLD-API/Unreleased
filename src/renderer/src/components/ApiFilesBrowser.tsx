@@ -5,7 +5,7 @@ import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import {
   Folder, Music2, ChevronRight, ArrowLeft, Home, Play, Loader2,
   FolderOpen, HardDrive, LayoutList, LayoutGrid, ImageIcon, Video,
-  Download, ArrowUpDown, ArrowUp, ArrowDown, Link, Check, Info, ListPlus, Heart,
+  Download, ArrowUpDown, ArrowUp, ArrowDown, Link, Check, Info, ListEnd, ListPlus, Heart,
   X, Pencil, PackageOpen, CheckSquare2, Square, MonitorSmartphone, Globe, Search,
   Filter, MoreHorizontal, Clipboard, Plus, ListMusic, Replace, Trash2,
   FolderPlus, FilePlus, ExternalLink, FileText, RefreshCw, Upload,
@@ -196,8 +196,8 @@ function LocalCoverThumb({ path, size = 36, fill = false }: { path: string; size
   )
 }
 
-export default function ApiFilesBrowser(): JSX.Element {
-  const { playTrack, addToQueue, apiFilesPath, setApiFilesPath, apiFilesLastPath, setApiFilesLastPath, account, setActiveView, setPendingEditorSongId, setPendingCompProposal, likedTrackIds, toggleLike, playlists, setShowUserAuth, channels, activeChannel, setActiveChannel, loadChannels } = useStorePick('playTrack', 'addToQueue', 'apiFilesPath', 'setApiFilesPath', 'apiFilesLastPath', 'setApiFilesLastPath', 'account', 'setActiveView', 'setPendingEditorSongId', 'setPendingCompProposal', 'likedTrackIds', 'toggleLike', 'playlists', 'setShowUserAuth', 'channels', 'activeChannel', 'setActiveChannel', 'loadChannels')
+export default function ApiFilesBrowser({ embedded = false }: { embedded?: boolean } = {}): JSX.Element {
+  const { playTrack, playNext, addToQueue, apiFilesPath, setApiFilesPath, apiFilesLastPath, setApiFilesLastPath, account, setActiveView, setPendingEditorSongId, setPendingCompProposal, likedTrackIds, toggleLike, playlists, setShowUserAuth, channels, activeChannel, setActiveChannel, loadChannels } = useStorePick('playTrack', 'playNext', 'addToQueue', 'apiFilesPath', 'setApiFilesPath', 'apiFilesLastPath', 'setApiFilesLastPath', 'account', 'setActiveView', 'setPendingEditorSongId', 'setPendingCompProposal', 'likedTrackIds', 'toggleLike', 'playlists', 'setShowUserAuth', 'channels', 'activeChannel', 'setActiveChannel', 'loadChannels')
   const isPrimary = isPrimaryChannelSlug(channels, activeChannel)
   const canEdit = userApi.isChannelEditor(account, activeChannel, isPrimary)
   const canPropose = userApi.isChannelContributor(account, activeChannel, isPrimary)
@@ -221,7 +221,7 @@ export default function ApiFilesBrowser(): JSX.Element {
     searchLoading, isSearching, searchInFolder, setSearchInFolder,
   } = useApiFilesBrowse({
     activeChannel, setActiveChannel, channels, loadChannels,
-    apiFilesPath, setApiFilesPath, apiFilesLastPath, setApiFilesLastPath,
+    apiFilesPath, setApiFilesPath, apiFilesLastPath, setApiFilesLastPath, embedded,
   })
   const [jumpOpen, setJumpOpen] = useState(false)
   // Resting the mouse on a folder for a moment fetches its listing ahead of
@@ -860,11 +860,12 @@ export default function ApiFilesBrowser(): JSX.Element {
     <>
       <div className="flex-1 flex flex-col min-h-0 overflow-hidden">
         {/* Header */}
-        <div className={`px-5 pb-3 shrink-0 ${isElectron ? 'pt-9' : 'pt-5'}`}>
+        {/* Inside the Tracker, the Tracker's own title and tabs sit above. */}
+        <div className={`px-5 pb-3 shrink-0 ${embedded ? '' : isElectron ? 'pt-9' : 'pt-5'}`}>
           <div className="flex items-center justify-between mb-3 gap-4">
             <div className="flex items-center gap-2 min-w-0 flex-1">
-              <HardDrive size={18} className="text-text-muted shrink-0" />
-              <h1 className="text-text-primary text-xl font-bold shrink-0">API Files</h1>
+              {!embedded && <HardDrive size={18} className="text-text-muted shrink-0" />}
+              {!embedded && <h1 className="text-text-primary text-xl font-bold shrink-0">API Files</h1>}
               {channelDescription && !localMode && (
                 <p className="text-text-muted text-sm truncate">{channelDescription}</p>
               )}
@@ -1686,6 +1687,7 @@ export default function ApiFilesBrowser(): JSX.Element {
             className="min-w-[180px]"
             items={[
               isAudio && { icon: Play, label: 'Play', onSelect: () => handlePlay(entry) },
+              isAudio && { icon: ListEnd, label: 'Play next', onSelect: () => playNext(fileToTrack(entry, activeChannel)) },
               isAudio && { icon: ListPlus, label: 'Add to queue', onSelect: () => addToQueue(fileToTrack(entry, activeChannel)) },
               isAudio && {
                 icon: Plus,
@@ -1793,6 +1795,7 @@ export default function ApiFilesBrowser(): JSX.Element {
             items={[
               entry.type === 'directory' && { icon: FolderOpen, label: 'Open', onSelect: () => browseLocal(entry.path) },
               media === 'audio' && { icon: Play, label: 'Play', onSelect: () => handleLocalPlay(entry) },
+              media === 'audio' && { icon: ListEnd, label: 'Play next', onSelect: () => playNext(localFileToTrack(entry)) },
               media === 'audio' && { icon: ListPlus, label: 'Add to queue', onSelect: () => addToQueue(localFileToTrack(entry)) },
               media === 'text' && { icon: FileText, label: 'View', onSelect: () => openLocalText(entry) },
               { icon: ExternalLink, label: 'Open with system app', onSelect: () => openLocalFile(entry.path) },

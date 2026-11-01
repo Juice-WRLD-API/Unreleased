@@ -10,8 +10,8 @@ import { locateFuzzy } from './lyricSearch'
 
 export type Category = 'released' | 'unreleased' | 'unsurfaced' | 'recording_session' | ''
 export type ViewMode = 'list' | 'detail' | 'grid'
-export type TrackerTab = 'songs' | 'lyrics' | 'calendar' | 'producers' | 'statistics'
-export const TRACKER_TABS: TrackerTab[] = ['songs', 'lyrics', 'calendar', 'producers', 'statistics']
+export type TrackerTab = 'songs' | 'lyrics' | 'calendar' | 'producers' | 'statistics' | 'files'
+export const TRACKER_TABS: TrackerTab[] = ['songs', 'lyrics', 'calendar', 'producers', 'statistics', 'files']
 export function isTrackerTab(v: string): v is TrackerTab {
   return (TRACKER_TABS as string[]).includes(v)
 }

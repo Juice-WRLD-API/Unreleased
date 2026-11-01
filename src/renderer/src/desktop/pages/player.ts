@@ -626,7 +626,7 @@ function paintVersionPrefs(): void {
 
 // ---- the song playing's own menu (the ⋯ by the heart): what of the app's song menu a widget can do ----
 
-interface SongMenu { title: string; info: boolean; link: boolean; download: boolean; edit: boolean; lyrics: boolean; playlists: { id: number; name: string }[] | null }
+interface SongMenu { title: string; info: boolean; link: boolean; download: boolean; edit: boolean; lyrics: boolean; files: boolean; playlists: { id: number; name: string }[] | null }
 let songMenu: SongMenu | null = null
 const songMenuOpen = (): boolean => menuOpen('song')
 
@@ -655,7 +655,7 @@ function paintSongMenu(playlists: boolean): void {
       : '<div class="menu-note">No playlists yet</div>'}`
   } else {
     const rows = [m.info && row('info', 'Song info'), m.playlists && row('playlists', 'Add to playlist…'), m.lyrics && live.inTab && row('share-lyrics', 'Share lyrics'), m.link && row('link', 'Copy link'),
-      m.download && row('download', 'Download'), m.edit && row('edit', 'Edit')].filter(Boolean).join('')
+      m.files && row('files', 'Show in Files'), m.download && row('download', 'Download'), m.edit && row('edit', 'Edit')].filter(Boolean).join('')
     html = `<div class="menu-title">${escapeText(m.title)}</div>${rows || '<div class="menu-note">Nothing more for this song</div>'}`
   }
   showMenu('song', html, songMenuAnchor ?? $<HTMLElement>('[data-action="more"]'))
@@ -668,6 +668,7 @@ function songMenuPick(what: string): void {
   closeMenu()
   if (what === 'info') page.command('song-info')
   if (what === 'edit') page.command('edit-song')
+  if (what === 'files') page.command('show-in-files')
   if (what === 'share-lyrics') page.command('share-lyrics')
   if (what === 'download') { page.command('download-song'); notice('Downloading', title) }
   if (what === 'link') {
