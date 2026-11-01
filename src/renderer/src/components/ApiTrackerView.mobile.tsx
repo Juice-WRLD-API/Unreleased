@@ -4,7 +4,7 @@ import {
   Search, Loader2, Music2, X, Check, ListPlus, ChevronDown, ChevronLeft,
   ChevronRight, MoreHorizontal, Plus, ListMusic, PackageOpen, Link2, Layers, LayoutGrid,
   LayoutList, Rows3, Mic2, CalendarDays, Users, AlertTriangle, Pencil, SlidersHorizontal,
-  Filter, CheckCircle2, Circle, ArrowLeft, ArrowUp, ArrowDown, MapPin, BarChart3,
+  Filter, CheckCircle2, Circle, ArrowLeft, ArrowUp, ArrowDown, MapPin, BarChart3, HardDrive,
 } from 'lucide-react'
 import { useStore } from '../store/useStore'
 import { useShallow } from 'zustand/react/shallow'
@@ -54,6 +54,8 @@ import { ListRow, RowDuration, RowMenuButton } from './mobile/ListRow'
 import { SearchField } from './mobile/SearchField'
 
 const StatisticsPanel = lazyView(() => import('./StatisticsPanel.mobile'))
+// The Files page, embedded as a Tracker tab (it's still its own page too).
+const FilesPanel = lazyView(() => import('./ApiFilesView'))
 
 // ─── Tracker ──────────────────────────────────────────────────────────────────
 // Phone-first rewrite of the catalog browser. Every fetch path is unchanged -
@@ -1381,8 +1383,8 @@ export default function ApiTrackerView(): JSX.Element {
     const parts = path.split('/')
     const folderPath = parts.slice(0, -1).join('/')
     setApiFilesPath(folderPath)
-    setActiveView('api-files')
-  }, [setApiFilesPath, setActiveView, activeChannel, setActiveChannel])
+    setTrackerTab('files')
+  }, [setApiFilesPath, activeChannel, setActiveChannel])
 
   // Hardware back, innermost first. Registered once through a ref: handlers run
   // last-registered-first, so re-registering on state changes would keep moving
@@ -1439,6 +1441,7 @@ export default function ApiTrackerView(): JSX.Element {
     { key: 'calendar', label: 'Overview', icon: CalendarDays },
     { key: 'producers', label: 'Credits', icon: Users },
     { key: 'statistics', label: 'Statistics', icon: BarChart3 },
+    { key: 'files', label: 'Files', icon: HardDrive },
   ]
 
   const subtitle = trackerTab === 'songs'
@@ -1451,6 +1454,7 @@ export default function ApiTrackerView(): JSX.Element {
       ? debouncedLyricsQuery.trim() ? `${lyricsCount.toLocaleString()} matches` : 'Search the catalog by lyric'
       : trackerTab === 'calendar' ? `${calendarByDate.size.toLocaleString()} recording dates`
       : trackerTab === 'statistics' ? 'Catalog and play counts'
+      : trackerTab === 'files' ? 'Browse the API file channels'
       : `${producersByName.length} producers · ${engineersByName.length} engineers`
 
   const viewLabel = compactView ? 'Version groups' : viewMode === 'list' ? 'List' : viewMode === 'detail' ? 'Detailed' : 'Grid'
@@ -1721,6 +1725,10 @@ export default function ApiTrackerView(): JSX.Element {
               </>
             )}
         </div>
+      ) : trackerTab === 'files' ? (
+        <Suspense fallback={spinner('Loading files…')}>
+          <FilesPanel embedded />
+        </Suspense>
       ) : trackerTab === 'statistics' ? (
         <Suspense fallback={spinner('Loading statistics…')}>
           <StatisticsPanel onOpenEra={(era) => { setEraFilter(new Set([era])); setTrackerTab('songs') }} />

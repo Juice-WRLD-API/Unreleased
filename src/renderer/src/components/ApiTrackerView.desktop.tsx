@@ -7,7 +7,7 @@ import {
   LayoutList, Rows3, Info, ListPlus, ListFilter,
   ChevronUp, ChevronDown, MoreHorizontal, Plus, ListMusic, PackageOpen,
   CheckSquare2, Square, Link2, Layers, LayoutGrid, Mic2, CalendarDays, ChevronLeft, ChevronRight, Users,
-  AlertTriangle, Pencil, Clock, Timer, User, MapPin, Folder, SlidersHorizontal, Download, Type, BarChart3,
+  AlertTriangle, Pencil, Clock, Timer, User, MapPin, Folder, SlidersHorizontal, Download, Type, BarChart3, HardDrive,
 } from 'lucide-react'
 import { useStore } from '../store/useStore'
 import { useShallow } from 'zustand/react/shallow'
@@ -68,6 +68,8 @@ import { reorderField, apiFieldsFor, useTrackerOmit, OPTIONAL_SONG_FIELDS } from
 import { useFieldDrag } from '../hooks/useFieldDrag'
 
 const StatisticsPanel = lazyView(() => import('./StatisticsPanel.desktop'))
+// The Files page, embedded as a Tracker tab (it's still its own page too).
+const FilesPanel = lazyView(() => import('./ApiFilesView'))
 
 const LS_TRACKER_VIEW = 'api-tracker:viewMode'
 const LS_TRACKER_COMPACT = 'api-tracker:compactView'
@@ -1746,6 +1748,10 @@ function VersionTitlePromptModal({
 }
 
 // ─── Main view ────────────────────────────────────────────────────────────────
+function warmFiles(): void {
+  import('./ApiFilesView').then((m) => m.default.preload?.()).catch(() => undefined)
+}
+
 function warmStatistics(): void {
   import('./StatisticsPanel.desktop').catch(() => undefined)
   apiFetch('/stats/').catch(() => undefined)
@@ -1758,7 +1764,7 @@ export default function ApiTrackerView(): JSX.Element {
     apiTrackerCategory, setApiTrackerCategory,
     apiTrackerEra, setApiTrackerEra,
     apiTrackerTab, setApiTrackerTab,
-    setActiveView, setApiFilesPath,
+    setApiFilesPath,
     playlists, refreshPlaylists, setShowUserAuth, likedTrackIds, toggleLike,
     openBulkEditor, fullEraNames, activeChannel, channels, setActiveChannel,
   } = useStore(useShallow(s => ({
@@ -1767,7 +1773,7 @@ export default function ApiTrackerView(): JSX.Element {
     apiTrackerCategory: s.apiTrackerCategory, setApiTrackerCategory: s.setApiTrackerCategory,
     apiTrackerEra: s.apiTrackerEra, setApiTrackerEra: s.setApiTrackerEra,
     apiTrackerTab: s.apiTrackerTab, setApiTrackerTab: s.setApiTrackerTab,
-    setActiveView: s.setActiveView, setApiFilesPath: s.setApiFilesPath,
+    setApiFilesPath: s.setApiFilesPath,
     playlists: s.playlists, refreshPlaylists: s.refreshPlaylists, setShowUserAuth: s.setShowUserAuth,
     likedTrackIds: s.likedTrackIds, toggleLike: s.toggleLike,
     openBulkEditor: s.openBulkEditor,
@@ -2647,8 +2653,8 @@ export default function ApiTrackerView(): JSX.Element {
     const parts = path.split('/')
     const folderPath = parts.slice(0, -1).join('/')
     setApiFilesPath(folderPath)
-    setActiveView('api-files')
-  }, [setApiFilesPath, setActiveView, activeChannel, setActiveChannel])
+    setTrackerTab('files')
+  }, [setApiFilesPath, activeChannel, setActiveChannel])
 
   const handleSessionFilePicked = useCallback(async (path: string, fileChannel: string): Promise<void> => {
     const song = linkingSessionSong
@@ -2733,6 +2739,18 @@ export default function ApiTrackerView(): JSX.Element {
             }`}
           >
             <BarChart3 size={11} /> Statistics
+          </button>
+          <button
+            onClick={() => setTrackerTab('files')}
+            onPointerEnter={warmFiles}
+            onFocus={warmFiles}
+            className={`flex items-center gap-1 px-2 py-1 rounded text-[0.6875rem] font-medium transition-colors ${
+              trackerTab === 'files'
+                ? 'bg-surface-raised text-text-primary'
+                : 'text-text-muted hover:text-text-secondary'
+            }`}
+          >
+            <HardDrive size={11} /> Files
           </button>
         </div>
 
@@ -3164,6 +3182,10 @@ export default function ApiTrackerView(): JSX.Element {
             </div>
           )}
         </div>
+      ) : trackerTab === 'files' ? (
+        <Suspense fallback={<div className="flex items-center justify-center h-40 gap-2 text-text-muted"><Loader2 size={18} className="animate-spin" /></div>}>
+          <FilesPanel embedded />
+        </Suspense>
       ) : trackerTab === 'statistics' ? (
         <Suspense fallback={<div className="flex items-center justify-center h-40 gap-2 text-text-muted"><Loader2 size={18} className="animate-spin" /></div>}>
           <StatisticsPanel onOpenEra={(era) => { setEraFilter(new Set([era])); setTrackerTab('songs') }} />

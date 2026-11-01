@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import {
   Folder, Music2, ChevronRight, ChevronDown, ArrowLeft, Play, Loader2,
-  ImageIcon, Video, Download, ArrowUp, ArrowDown, Link, Check, Info, ListPlus,
+  ImageIcon, Video, Download, ArrowUp, ArrowDown, Link, Check, Info, ListEnd, ListPlus,
   Heart, X, Pencil, PackageOpen, Search, Filter, MoreHorizontal, Clipboard, Plus,
   ListMusic, Replace, Trash2, LayoutGrid, LayoutList, FileQuestion, Home,
   CheckCircle2, Circle, SlidersHorizontal, Radio, Sparkles,
@@ -153,14 +153,14 @@ function EqBars({ paused }: { paused: boolean }): JSX.Element {
 
 // ─── View ─────────────────────────────────────────────────────────────────────
 
-export default function ApiFilesView(): JSX.Element {
+export default function ApiFilesView({ embedded = false }: { embedded?: boolean }): JSX.Element {
   const {
-    playTrack, addToQueue, apiFilesPath, setApiFilesPath, apiFilesLastPath, setApiFilesLastPath,
+    playTrack, playNext, addToQueue, apiFilesPath, setApiFilesPath, apiFilesLastPath, setApiFilesLastPath,
     account, setActiveView, setPendingEditorSongId, setPendingCompProposal, likedTrackIds,
     toggleLike, playlists, refreshPlaylists, setShowUserAuth, currentTrack, isPlaying,
     channels, activeChannel, setActiveChannel, loadChannels,
   } = useStorePick(
-    'playTrack', 'addToQueue', 'apiFilesPath', 'setApiFilesPath', 'apiFilesLastPath', 'setApiFilesLastPath',
+    'playTrack', 'playNext', 'addToQueue', 'apiFilesPath', 'setApiFilesPath', 'apiFilesLastPath', 'setApiFilesLastPath',
     'account', 'setActiveView', 'setPendingEditorSongId', 'setPendingCompProposal', 'likedTrackIds',
     'toggleLike', 'playlists', 'refreshPlaylists', 'setShowUserAuth', 'currentTrack', 'isPlaying',
     'channels', 'activeChannel', 'setActiveChannel', 'loadChannels')
@@ -232,7 +232,7 @@ export default function ApiFilesView(): JSX.Element {
   } = useApiFilesBrowse({
     activeChannel, setActiveChannel, channels, loadChannels,
     apiFilesPath, setApiFilesPath, apiFilesLastPath, setApiFilesLastPath,
-    onNavigateStart,
+    onNavigateStart, embedded,
   })
 
   // Whether a file has a matching song in the Tracker - resolved lazily per
@@ -622,6 +622,22 @@ export default function ApiFilesView(): JSX.Element {
                   onClick={() => setViewMode(viewMode === 'list' ? 'grid' : 'list')}
                 >{viewMode === 'list' ? <LayoutGrid size={20} /> : <LayoutList size={20} />}</BarButton>
               </>
+              // As the Tracker's Files tab the Tracker's large title is
+              // already above, so a second one shrinks to a plain heading.
+              if (embedded) return (
+                <div className="flex items-center gap-2 px-3 pt-1">
+                  {currentPath && (
+                    <BackButton
+                      onClick={() => { if (isSearching || search) { setSearch(''); setDebouncedSearch('') } else goBack() }}
+                    />
+                  )}
+                  <div className={`flex-1 min-w-0 ${currentPath ? '' : 'pl-1'}`}>
+                    {(currentPath || isSearching) && <h2 className="text-headline text-text-primary truncate">{title}</h2>}
+                    {currentPath && <div className="text-footnote">{titleSub}</div>}
+                  </div>
+                  {actions}
+                </div>
+              )
               return currentPath ? (
                 <>
                   <div className="flex items-center gap-2 px-3 pt-1">
@@ -984,6 +1000,7 @@ export default function ApiFilesView(): JSX.Element {
               {sheetIsAudio && (
                 <>
                   <SheetItem icon={Play} label="Play" onClick={() => { handlePlay(sheetEntry); closeSheet() }} />
+                  <SheetItem icon={ListEnd} label="Play next" onClick={async () => { const e = sheetEntry; closeSheet(); playNext(fileToTrack(e, (await resolveTrackChannel()) ?? activeChannel)); showToast('Playing next') }} />
                   <SheetItem icon={ListPlus} label="Add to queue" onClick={async () => { const e = sheetEntry; closeSheet(); addToQueue(fileToTrack(e, (await resolveTrackChannel()) ?? activeChannel)); showToast('Added to queue') }} />
                   {sheetIsAudio && (
                     <SheetItem

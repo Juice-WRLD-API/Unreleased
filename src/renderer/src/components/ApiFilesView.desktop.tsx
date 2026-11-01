@@ -2,7 +2,7 @@ import { useState, useEffect, useMemo, useRef } from 'react'
 import {
   Folder, Music2, ChevronRight, ArrowLeft, Home, Play, Loader2,
   FolderOpen, HardDrive, LayoutList, LayoutGrid, ImageIcon, Video,
-  Download, ArrowUpDown, ArrowUp, ArrowDown, Link, Check, Info, ListPlus, Heart,
+  Download, ArrowUpDown, ArrowUp, ArrowDown, Link, Check, Info, ListEnd, ListPlus, Heart,
   X, Pencil, PackageOpen, CheckSquare2, Square, Search,
   Filter, MoreHorizontal, Clipboard, Plus, ListMusic, Replace, Trash2,
   FileText, FolderInput, CornerLeftUp, RefreshCw, FolderPlus, FilePlus, Upload, Sparkles, FolderSearch,
@@ -143,8 +143,8 @@ function ApiImageThumb({ path, size = 36 }: { path: string; size?: number }): JS
   )
 }
 
-export default function ApiFilesView(): JSX.Element {
-  const { playTrack, addToQueue, apiFilesPath, setApiFilesPath, apiFilesLastPath, setApiFilesLastPath, account, setActiveView, setPendingCompProposal, likedTrackIds, toggleLike, playlists, refreshPlaylists, setShowUserAuth, channels, activeChannel, setActiveChannel, loadChannels } = useStorePick('playTrack', 'addToQueue', 'apiFilesPath', 'setApiFilesPath', 'apiFilesLastPath', 'setApiFilesLastPath', 'account', 'setActiveView', 'setPendingCompProposal', 'likedTrackIds', 'toggleLike', 'playlists', 'refreshPlaylists', 'setShowUserAuth', 'channels', 'activeChannel', 'setActiveChannel', 'loadChannels')
+export default function ApiFilesView({ embedded = false }: { embedded?: boolean }): JSX.Element {
+  const { playTrack, playNext, addToQueue, apiFilesPath, setApiFilesPath, apiFilesLastPath, setApiFilesLastPath, account, setActiveView, setPendingCompProposal, likedTrackIds, toggleLike, playlists, refreshPlaylists, setShowUserAuth, channels, activeChannel, setActiveChannel, loadChannels } = useStorePick('playTrack', 'playNext', 'addToQueue', 'apiFilesPath', 'setApiFilesPath', 'apiFilesLastPath', 'setApiFilesLastPath', 'account', 'setActiveView', 'setPendingCompProposal', 'likedTrackIds', 'toggleLike', 'playlists', 'refreshPlaylists', 'setShowUserAuth', 'channels', 'activeChannel', 'setActiveChannel', 'loadChannels')
   const isPrimary = isPrimaryChannelSlug(channels, activeChannel)
   const { trackChannel, channelsReady, resolveTrackChannel } = useTrackChannel()
   // Bails rather than guessing: writing an id built from an unknown channel is
@@ -178,7 +178,7 @@ export default function ApiFilesView(): JSX.Element {
     searchLoading, isSearching, searchInFolder, setSearchInFolder,
   } = useApiFilesBrowse({
     activeChannel, setActiveChannel, channels, loadChannels,
-    apiFilesPath, setApiFilesPath, apiFilesLastPath, setApiFilesLastPath,
+    apiFilesPath, setApiFilesPath, apiFilesLastPath, setApiFilesLastPath, embedded,
   })
   const [jumpOpen, setJumpOpen] = useState(false)
   // Resting the mouse on a folder for a moment fetches its listing ahead of
@@ -587,11 +587,13 @@ export default function ApiFilesView(): JSX.Element {
     <>
       <div className="flex-1 flex flex-col min-h-0 overflow-hidden">
         {/* Header */}
-        <div className="px-5 pb-3 shrink-0 pt-5">
+        <div className={`px-5 pb-3 shrink-0 ${embedded ? 'pt-0' : 'pt-5'}`}>
           <div className="flex items-center flex-wrap gap-x-4 gap-y-2 mb-3">
             <div className="flex items-center gap-2.5 min-w-0">
-              <HardDrive size={18} className="text-text-muted shrink-0" />
-              <h1 className="text-text-primary text-xl font-bold shrink-0">API Files</h1>
+              {!embedded && <>
+                <HardDrive size={18} className="text-text-muted shrink-0" />
+                <h1 className="text-text-primary text-xl font-bold shrink-0">API Files</h1>
+              </>}
               {channelDescription && (
                 <p className="text-text-muted text-sm truncate max-w-xl">{channelDescription}</p>
               )}
@@ -1255,6 +1257,11 @@ export default function ApiFilesView(): JSX.Element {
             className="min-w-[180px]"
             items={[
               isAudio && { icon: Play, label: 'Play', onSelect: () => handlePlay(entry) },
+              isAudio && {
+                icon: ListEnd,
+                label: 'Play next',
+                onSelect: async () => { playNext(fileToTrack(entry, (await resolveTrackChannel()) ?? activeChannel)) },
+              },
               isAudio && {
                 icon: ListPlus,
                 label: 'Add to queue',

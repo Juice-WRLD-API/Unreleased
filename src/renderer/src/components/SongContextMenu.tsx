@@ -7,7 +7,7 @@ import { useStore } from '../store/useStore'
 import { useShallow } from 'zustand/react/shallow'
 import * as userApi from '../lib/userApi'
 import { ensureDonorUrl, isDonorStreamUrl } from '../lib/donorPlayback'
-import { buildStreamUrl, findSessionZips, songToTrack, JWApiSong, JWApiFileEntry, ZIP_OPERATIONS_ENABLED } from '../lib/juicewrldApi'
+import { apiFileIdToRef, buildStreamUrl, findSessionZips, songToTrack, JWApiSong, JWApiFileEntry, ZIP_OPERATIONS_ENABLED } from '../lib/juicewrldApi'
 import { downloadWithEmbed } from '../lib/downloadEmbed'
 import { trackShareUrl } from '../lib/platform'
 import { Track } from '../types'
@@ -30,12 +30,13 @@ const HeartFilled = (p: ComponentProps<typeof Heart>): JSX.Element => <Heart {..
 
 // The one context menu used everywhere a song can be right-clicked (Tracker,
 // Liked Songs, Playlists, the bottom Player bar, WRLD). Built around `Track`
-// + `songId` (the common denominator across those five places - some only
-// have a Track, not a full JWApiSong) so it works without every caller
-// re-fetching a full song object first. Common actions (Song info's caller
-// hook aside, playlists, download, add-to-library, edit navigation, change
-// version) are handled internally; only genuinely view-specific actions
-// (Play/Play next/Add to queue, Select, Unlike/Remove, Like) are passed in.
+// + `songId` (the common denominator across those places - some only have a
+// Track, not a full JWApiSong) so it works without every caller re-fetching a
+// full song object first. Everything that doesn't depend on the view is done
+// here, so a song gets the same rows wherever it's right-clicked: Play next,
+// Add to queue, Like and Show in Files fall back to the app's own actions when
+// the caller passes none. Only what does depend on the view (Play from this
+// list, Select, Remove from this list) has to be passed in.
 
 export interface SongContextMenuState {
   track: Track
@@ -54,13 +55,14 @@ interface Props {
   onInfo: () => void
 
   onPlay?: () => void
+  /** Play next, Add to queue, Show in Files and Like default to the app's own
+   *  actions; pass one only to do something else. */
   onPlayNext?: () => void
   onAddToQueue?: () => void
   onShowInFiles?: () => void
   /** Tracker / Library - enters multi-select mode with this song selected. */
   onSelect?: () => void
 
-  /** WRLD's simple like toggle. */
   liked?: boolean
   onToggleLike?: () => void
 
@@ -119,6 +121,28 @@ export function downloadTrack(track: Track, songId: number | null): void {
   document.body.removeChild(a)
 }
 
+/** Where the track's file sits in Files: a comp file's own folder and channel,
+ *  or a catalogue song's path in the primary channel. Null for sessions (their
+ *  file has to be looked up; the Tracker does that), donor and local files. */
+export function filesLocation(track: Track, songId: number | null): { folder: string; channel: string | null } | null {
+  const ref = apiFileIdToRef(track.id)
+  const primary = (): string | null => useStore.getState().channels.find(c => c.is_primary)?.slug ?? null
+  const folderOf = (path: string): string => path.split('/').slice(0, -1).join('/')
+  if (ref) return { folder: folderOf(ref.path), channel: ref.channel ?? primary() }
+  if (songId != null && songId > 0 && track.path && track.genre !== 'recording_session' && !isDonorStreamUrl(track.streamUrl)) {
+    return { folder: folderOf(track.path), channel: primary() }
+  }
+  return null
+}
+
+/** Opens Files at that folder. */
+export function openInFiles(at: { folder: string; channel: string | null }): void {
+  const s = useStore.getState()
+  if (at.channel && at.channel !== s.activeChannel) s.setActiveChannel(at.channel)
+  s.setApiFilesPath(at.folder)
+  s.setActiveView('api-files')
+}
+
 function downloadZipEntry(entry: JWApiFileEntry): void {
   const a = document.createElement('a')
   a.href = buildStreamUrl(entry.path)
@@ -132,12 +156,13 @@ function downloadZipEntry(entry: JWApiFileEntry): void {
 
 export default function SongContextMenu({
   state, onClose, canEdit, onInfo,
-  onPlay, onPlayNext, onAddToQueue, onShowInFiles, onSelect,
-  liked, onToggleLike, removeAction, song, disableChangeVersion, onShareLyrics,
+  onPlay, onPlayNext: playNextProp, onAddToQueue: addToQueueProp, onShowInFiles: showInFilesProp, onSelect,
+  liked: likedProp, onToggleLike: toggleLikeProp, removeAction, song, disableChangeVersion, onShareLyrics,
   canLinkSessionFile, hasSessionLinkOverride, onLinkSessionFile, onClearSessionLink,
 }: Props): JSX.Element {
-  const { playlists, account, refreshPlaylists, setShowUserAuth, changeVersion, localPlaylists, addToLocalPlaylist, createLocalPlaylist } = useStore(
+  const { playlists, account, refreshPlaylists, setShowUserAuth, changeVersion, localPlaylists, addToLocalPlaylist, createLocalPlaylist, likedTrackIds } = useStore(
     useShallow(s => ({
+      likedTrackIds: s.likedTrackIds,
       playlists: s.playlists, account: s.account, refreshPlaylists: s.refreshPlaylists,
       setShowUserAuth: s.setShowUserAuth, changeVersion: s.changeVersion,
       localPlaylists: s.localPlaylists, addToLocalPlaylist: s.addToLocalPlaylist, createLocalPlaylist: s.createLocalPlaylist,
@@ -255,6 +280,16 @@ export default function SongContextMenu({
   // disk (so "Download" is meaningless). It can join a synced playlist (as an
   // entry only this device can play) or one of the device-local playlists.
   const isLocalOnly = songId == null && track.id.startsWith('local-')
+
+  // The rows every view gets, done the app's own way unless the caller passed
+  // its own. 999 FM's track has an id of its own; its like is the song's.
+  const likeId = track.id.startsWith('fm-') && songId != null ? `jw-${songId}` : track.id
+  const liked = likedProp ?? likedTrackIds.includes(likeId)
+  const onToggleLike = toggleLikeProp ?? (() => useStore.getState().toggleLike(likeId))
+  const onPlayNext = playNextProp ?? (() => useStore.getState().playNext(track))
+  const onAddToQueue = addToQueueProp ?? (() => useStore.getState().addToQueue(track))
+  const filesAt = showInFilesProp ? null : filesLocation(track, songId)
+  const onShowInFiles = showInFilesProp ?? (filesAt ? () => openInFiles(filesAt) : undefined)
   const canAddToPlaylist = !isUnplayable && (hasValidSong || isLocalOnly || !!entry)
   // Sharing rides the song's own stream URL, so it only makes sense for
   // real API songs (not local-only files, which nobody else can reach) and
