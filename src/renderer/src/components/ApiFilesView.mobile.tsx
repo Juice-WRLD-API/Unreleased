@@ -3,7 +3,7 @@ import {
   Folder, Music2, ChevronRight, ChevronDown, ArrowLeft, Play, Loader2,
   ImageIcon, Video, Download, ArrowUp, ArrowDown, Link, Check, Info, ListEnd, ListPlus,
   Heart, X, Pencil, PackageOpen, Search, Filter, MoreHorizontal, Clipboard, Plus,
-  ListMusic, Replace, Trash2, LayoutGrid, LayoutList, FileQuestion, Home,
+  ListMusic, Replace, Trash2, Tags, LayoutGrid, LayoutList, FileQuestion, Home,
   CheckCircle2, Circle, SlidersHorizontal, Radio, Sparkles,
 } from 'lucide-react'
 import { useStore, useStorePick } from '../store/useStore'
@@ -158,12 +158,12 @@ export default function ApiFilesView({ embedded = false }: { embedded?: boolean 
     playTrack, playNext, addToQueue, apiFilesPath, setApiFilesPath, apiFilesLastPath, setApiFilesLastPath,
     account, setActiveView, setPendingEditorSongId, setPendingCompProposal, likedTrackIds,
     toggleLike, playlists, refreshPlaylists, setShowUserAuth, currentTrack, isPlaying,
-    channels, activeChannel, setActiveChannel, loadChannels,
+    channels, activeChannel, setActiveChannel, loadChannels, openBulkFileEditor,
   } = useStorePick(
     'playTrack', 'playNext', 'addToQueue', 'apiFilesPath', 'setApiFilesPath', 'apiFilesLastPath', 'setApiFilesLastPath',
     'account', 'setActiveView', 'setPendingEditorSongId', 'setPendingCompProposal', 'likedTrackIds',
     'toggleLike', 'playlists', 'refreshPlaylists', 'setShowUserAuth', 'currentTrack', 'isPlaying',
-    'channels', 'activeChannel', 'setActiveChannel', 'loadChannels')
+    'channels', 'activeChannel', 'setActiveChannel', 'loadChannels', 'openBulkFileEditor')
   const isPrimary = isPrimaryChannelSlug(channels, activeChannel)
   const { trackChannel, channelsReady, resolveTrackChannel } = useTrackChannel()
   // Bails rather than guessing: writing an id built from an unknown channel is
@@ -176,6 +176,11 @@ export default function ApiFilesView({ embedded = false }: { embedded?: boolean 
   }
   const canEdit = userApi.isChannelEditor(account, activeChannel, isPrimary)
   const canPropose = userApi.isChannelContributor(account, activeChannel, isPrimary)
+  // The selected audio files, for Edit tags.
+  const selectedAudioFiles = (): { path: string; name: string }[] =>
+    filteredEntries
+      .filter((e) => selectedPaths.has(e.path) && e.type === 'file' && getMediaType(e.name) === 'audio')
+      .map((e) => ({ path: e.path, name: e.name }))
   // Set lookup for the per-row liked check - .includes on the array made the
   // listing O(rows × likes).
   const likedSet = useMemo(() => new Set(likedTrackIds), [likedTrackIds])
@@ -802,6 +807,16 @@ export default function ApiFilesView({ embedded = false }: { embedded?: boolean 
             >Select all</button>
           </div>
           <div className="flex items-center gap-2 px-3 pb-2.5 pt-1">
+            {/* Tag edits go up as one batch of retag proposals; only audio
+                files carry tags. */}
+            {canPropose && (
+              <button
+                onClick={() => openBulkFileEditor(selectedAudioFiles(), activeChannel)}
+                disabled={selectedAudioFiles().length === 0}
+                className="shrink-0 w-12 h-12 flex items-center justify-center rounded-full text-text-secondary active:bg-[var(--fill)] disabled:opacity-40"
+                aria-label="Edit tags"
+              ><Tags size={19} /></button>
+            )}
             {canPropose && (
               <button
                 onClick={() => {
@@ -1062,6 +1077,16 @@ export default function ApiFilesView({ embedded = false }: { embedded?: boolean 
               {canPropose && sheetEntry.type !== 'directory' && (
                 <>
                   <SheetDivider />
+                  {getMediaType(sheetEntry.name) === 'audio' && (
+                    <SheetItem
+                      icon={Tags}
+                      label="Edit tags…"
+                      onClick={() => {
+                        openBulkFileEditor([{ path: sheetEntry.path, name: sheetEntry.name }], activeChannel)
+                        closeSheet()
+                      }}
+                    />
+                  )}
                   <SheetItem
                     icon={Replace}
                     label="Propose replacement"

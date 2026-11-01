@@ -481,7 +481,10 @@ interface AppState {
   // Holds the full objects the caller already had rather than ids, so the
   // dialog can show "same across all"/"mixed" per field without re-fetching.
   // See BulkEditModal.
-  bulkEdit: { kind: 'api'; songs: JWApiSong[] } | null
+  bulkEdit:
+    | { kind: 'api'; songs: JWApiSong[] }
+    | { kind: 'comp'; files: { path: string; name: string }[]; channel: string }
+    | null
 
 
   // Library (Electron only)
@@ -821,6 +824,9 @@ interface AppActions {
   // "Edit" on a multi-song selection - opens the bulk editor dialog, which
   // submits one update proposal per song.
   openBulkEditor: (songs: JWApiSong[]) => void
+  // "Edit tags" on comp files in the Files tab - same dialog, submitting one
+  // batch of retag proposals.
+  openBulkFileEditor: (files: { path: string; name: string }[], channel: string) => void
   closeBulkEditor: () => void
   /** Opens / closes the "Synced lyrics" dialog (hand sync, and Whisper for donors), optionally on a song. */
   openLyricsGen: (target?: LyricsGenTarget) => void
@@ -2667,6 +2673,7 @@ export const useStore = create<AppStore>((set, get, store) => ({
   pendingEditProposal: null,
   bulkEdit: null,
   openBulkEditor: (songs) => set({ bulkEdit: songs.length ? { kind: 'api', songs } : null }),
+  openBulkFileEditor: (files, channel) => set({ bulkEdit: files.length ? { kind: 'comp', files, channel } : null }),
   closeBulkEditor: () => set({ bulkEdit: null }),
   lyricsGenModal: null,
   openLyricsGen: (target = {}) => {

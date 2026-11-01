@@ -4,7 +4,7 @@ import {
   FolderOpen, HardDrive, LayoutList, LayoutGrid, ImageIcon, Video,
   Download, ArrowUpDown, ArrowUp, ArrowDown, Link, Check, Info, ListEnd, ListPlus, Heart,
   X, Pencil, PackageOpen, CheckSquare2, Square, Search,
-  Filter, MoreHorizontal, Clipboard, Plus, ListMusic, Replace, Trash2,
+  Filter, MoreHorizontal, Clipboard, Plus, ListMusic, Replace, Trash2, Tags,
   FileText, FolderInput, CornerLeftUp, RefreshCw, FolderPlus, FilePlus, Upload, Sparkles, FolderSearch,
 } from 'lucide-react'
 import { useStore, useStorePick } from '../store/useStore'
@@ -144,7 +144,7 @@ function ApiImageThumb({ path, size = 36 }: { path: string; size?: number }): JS
 }
 
 export default function ApiFilesView({ embedded = false }: { embedded?: boolean }): JSX.Element {
-  const { playTrack, playNext, addToQueue, apiFilesPath, setApiFilesPath, apiFilesLastPath, setApiFilesLastPath, account, setActiveView, setPendingCompProposal, likedTrackIds, toggleLike, playlists, refreshPlaylists, setShowUserAuth, channels, activeChannel, setActiveChannel, loadChannels } = useStorePick('playTrack', 'playNext', 'addToQueue', 'apiFilesPath', 'setApiFilesPath', 'apiFilesLastPath', 'setApiFilesLastPath', 'account', 'setActiveView', 'setPendingCompProposal', 'likedTrackIds', 'toggleLike', 'playlists', 'refreshPlaylists', 'setShowUserAuth', 'channels', 'activeChannel', 'setActiveChannel', 'loadChannels')
+  const { playTrack, playNext, addToQueue, apiFilesPath, setApiFilesPath, apiFilesLastPath, setApiFilesLastPath, account, setActiveView, setPendingCompProposal, likedTrackIds, toggleLike, playlists, refreshPlaylists, setShowUserAuth, channels, activeChannel, setActiveChannel, loadChannels, openBulkFileEditor } = useStorePick('playTrack', 'playNext', 'addToQueue', 'apiFilesPath', 'setApiFilesPath', 'apiFilesLastPath', 'setApiFilesLastPath', 'account', 'setActiveView', 'setPendingCompProposal', 'likedTrackIds', 'toggleLike', 'playlists', 'refreshPlaylists', 'setShowUserAuth', 'channels', 'activeChannel', 'setActiveChannel', 'loadChannels', 'openBulkFileEditor')
   const isPrimary = isPrimaryChannelSlug(channels, activeChannel)
   const { trackChannel, channelsReady, resolveTrackChannel } = useTrackChannel()
   // Bails rather than guessing: writing an id built from an unknown channel is
@@ -373,6 +373,11 @@ export default function ApiFilesView({ embedded = false }: { embedded?: boolean 
     setCtxMenu(null)
   }
   const toggleSelect = (path: string): void => toggle(path, path)
+  // The selected audio files, for Edit tags.
+  const selectedAudioFiles = (): { path: string; name: string }[] =>
+    filteredEntries
+      .filter((e) => selectedPaths.has(e.path) && e.type === 'file' && getMediaType(e.name) === 'audio')
+      .map((e) => ({ path: e.path, name: e.name }))
   // Mouse press-and-hold - the desktop equivalent of the touch long-press
   // above, as a second way into select mode alongside Ctrl/Cmd+click.
   const mouseLongPress = useLongPress()
@@ -1114,6 +1119,17 @@ export default function ApiFilesView({ embedded = false }: { embedded?: boolean 
             >
               Clear
             </button>
+            {/* Tag edits go up as one batch of retag proposals; only audio
+                files carry tags, so folders and the rest are left out. */}
+            {canPropose && (
+              <button
+                onClick={() => openBulkFileEditor(selectedAudioFiles(), activeChannel)}
+                disabled={selectedAudioFiles().length === 0}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium border border-[var(--border)] text-text-secondary hover:text-text-primary hover:border-accent/40 disabled:opacity-50 transition-colors"
+              >
+                <Tags size={13} /> Edit tags
+              </button>
+            )}
             {/* Deletion only: a replace swaps one file's body for another,
                 which has no meaning across a selection. Directories are
                 dropped - proposals target files. */}
@@ -1324,6 +1340,15 @@ export default function ApiFilesView({ embedded = false }: { embedded?: boolean 
               // Contributor actions - proposals target a file, so directories
               // are excluded. Both land on the contributor page prefilled.
               canPropose && !isDir && 'divider',
+              // On a selected row this edits the whole selection's audio.
+              canPropose && isAudio && {
+                icon: Tags,
+                label: selectedPaths.has(entry.path) && selectedPaths.size > 1 ? 'Edit tags of selection…' : 'Edit tags…',
+                onSelect: () => {
+                  const files = selectedPaths.has(entry.path) ? selectedAudioFiles() : [{ path: entry.path, name: entry.name }]
+                  openBulkFileEditor(files, activeChannel)
+                },
+              },
               canPropose && !isDir && {
                 icon: Replace,
                 label: 'Propose replacement',

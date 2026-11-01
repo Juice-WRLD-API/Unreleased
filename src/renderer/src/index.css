@@ -556,14 +556,22 @@ input[type='range']:active::-moz-range-thumb {
   animation: eq-bar 0.9s ease-in-out infinite;
 }
 
-/* WRLD's mini lyric line under the cover - keyed on the active line index, so
-   this replays as a soft crossfade every time the line changes rather than a
-   hard text swap. */
-@keyframes lyric-line-in {
-  from { opacity: 0; transform: translateY(3px); }
-  to   { opacity: 1; transform: translateY(0); }
+/* Mobile WRLD's blurred-cover backdrop, never quite still - Apple Music's
+   now-playing background drifts the same way. Scale never drops below 1.08,
+   so the translate never uncovers an edge. Transform only, on its own layer. */
+@keyframes wrld-backdrop-drift {
+  0%   { transform: scale(1.08) translate(0, 0); }
+  33%  { transform: scale(1.18) translate(-3%, 2%); }
+  66%  { transform: scale(1.12) translate(3%, -2%); }
+  100% { transform: scale(1.08) translate(0, 0); }
 }
-.animate-lyric-line-in { animation: lyric-line-in 0.3s ease-out both; }
+.wrld-backdrop-drift {
+  animation: wrld-backdrop-drift 36s ease-in-out infinite;
+  will-change: transform;
+}
+@media (prefers-reduced-motion: reduce) {
+  .wrld-backdrop-drift { animation: none; }
+}
 
 @keyframes slide-in-right {
   from { transform: translateX(18px); opacity: 0; }

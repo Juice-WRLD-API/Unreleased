@@ -154,8 +154,9 @@ export function SheetItem({
   )
 }
 
-/** The gap between groups of SheetItems - a band, as in iOS menus, rather
- *  than one more hairline. */
+/** The gap between groups of SheetItems: an inset hairline. It was an 8px
+ *  filled band for a while, which read as a thick grey bar everywhere it
+ *  appeared (menus, the queue, pickers). */
 export function SheetDivider(): JSX.Element {
-  return <div className="h-2 bg-[var(--fill)]" />
+  return <div className="h-px bg-[var(--separator)] my-1.5 mx-5" />
 }
