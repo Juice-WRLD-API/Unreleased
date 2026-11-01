@@ -1,4 +1,6 @@
 import * as userApi from './userApi'
+import type { CompBatchItem, CompBatchSubmitted, CompTagChanges } from './userApi'
+import { stageCompFiles } from './compChunkedUpload'
 import { COMP_UPLOADS_CHANGED, queueCompUploads } from './compUploads'
 import { errorMessage } from './format'
 import { apiFetch, listFilesRecursive, listSubtree, parseBrowseEntries, type JWApiBrowseResponse, type JWApiFileEntry } from './juicewrldApi'
@@ -144,4 +146,44 @@ export async function proposeFileChanges(changes: CompFileChange[]): Promise<{ p
 
   if (proposed > uploads.length) window.dispatchEvent(new CustomEvent(COMP_UPLOADS_CHANGED))
   return { proposed, failed, error }
+}
+
+export interface CompTagEdit {
+  path: string
+  tags: CompTagChanges
+  /** A new cover as a data URL. Omit to leave the cover alone; `tags.cover: ''`
+   *  removes it instead. */
+  cover?: string
+}
+
+function dataUrlToFile(dataUrl: string, stem: string): File {
+  const comma = dataUrl.indexOf(',')
+  const header = dataUrl.slice(0, comma)
+  const mime = /^data:([^;,]+)/.exec(header)?.[1] ?? 'image/jpeg'
+  const raw = header.includes(';base64') ? atob(dataUrl.slice(comma + 1)) : decodeURIComponent(dataUrl.slice(comma + 1))
+  const bytes = new Uint8Array(raw.length)
+  for (let i = 0; i < raw.length; i++) bytes[i] = raw.charCodeAt(i)
+  return new File([bytes], `${stem}.${mime === 'image/png' ? 'png' : 'jpg'}`, { type: mime })
+}
+
+/** Proposes tag edits on comp files as one batch of retag proposals, so a
+ *  reviewer approves or rejects them together. Each distinct cover goes up
+ *  once and is shared by every file that takes it. Nothing is submitted if any
+ *  edit is invalid; the error names the first bad file. */
+export async function proposeTagEdits(edits: CompTagEdit[], channel: string, note = ''): Promise<CompBatchSubmitted> {
+  const covers = [...new Set(edits.map(e => e.cover).filter((c): c is string => !!c))]
+  const coverIds = new Map<string, string>()
+  if (covers.length > 0) {
+    const ids = await stageCompFiles(covers.map((c, i) => dataUrlToFile(c, `cover-${i + 1}`)), channel).promise
+    covers.forEach((c, i) => coverIds.set(c, ids[i]))
+  }
+  const items: CompBatchItem[] = edits.map(e => ({
+    change_type: 'retag',
+    file_path: e.path,
+    tags: e.tags,
+    ...(e.cover ? { upload_id: coverIds.get(e.cover) } : {}),
+  }))
+  const res = await userApi.submitCompProposalBatch(items, { channel, contributorNotes: note })
+  window.dispatchEvent(new CustomEvent(COMP_UPLOADS_CHANGED))
+  return res
 }

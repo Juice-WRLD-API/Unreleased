@@ -10,7 +10,7 @@ import { useStore } from '../store/useStore'
 import { getMediaType } from '../lib/fileTypes'
 import { formatBytes, formatDuration } from '../lib/format'
 import { useAuthedBlobUrl, useCompProposalsQueue } from '../hooks/useCompProposalsQueue'
-import { FOLDER_LEVEL_TYPES, DESTINATION_TYPES, compApproveBlockedReason } from '../lib/compProposalShared'
+import { FOLDER_LEVEL_TYPES, DESTINATION_TYPES, compApproveBlockedReason, compTagChangeRows } from '../lib/compProposalShared'
 import ProposalPropagationModal from './ProposalPropagationModal'
 
 /** One preview slot - a live comp/ path (plain <img>/<audio>/<video> against
@@ -294,7 +294,7 @@ export default function CompProposalsTab({ embedded = false, onChanged }: { embe
                   <MediaPreview label="Current file" name={p.file_path} src={buildStreamUrl(p.file_path, activeChannel)} />
                   {p.staging_filename && (
                     <MediaPreview
-                      label="Proposed file"
+                      label={p.change_type === 'retag' ? 'Proposed cover' : 'Proposed file'}
                       name={p.staging_filename}
                       src={staged.src}
                       loading={p.status === 'pending' && staged.loading}
@@ -302,6 +302,22 @@ export default function CompProposalsTab({ embedded = false, onChanged }: { embe
                       bytes={staged.bytes}
                     />
                   )}
+                </div>
+              )}
+              {p.change_type === 'retag' && (
+                <div>
+                  <p className="text-[10px] font-bold uppercase tracking-wider text-text-muted mb-1">Tag changes</p>
+                  <table className="w-full text-xs">
+                    <tbody>
+                      {compTagChangeRows(p).map(r => (
+                        <tr key={r.key} className="border-b border-[var(--border)] last:border-0">
+                          <td className="py-1.5 pr-3 text-text-muted whitespace-nowrap align-top">{r.label}</td>
+                          <td className="py-1.5 pr-3 text-text-muted break-words align-top">{r.from || '—'}</td>
+                          <td className="py-1.5 text-text-primary break-words align-top">→ {r.to || <span className="text-red-400">removed</span>}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
                 </div>
               )}
               {p.contributor_notes && (

@@ -513,6 +513,7 @@ interface AppState {
   bulkEdit:
     | { kind: 'api'; songs: JWApiSong[] }
     | { kind: 'local'; tracks: LibraryTrack[] }
+    | { kind: 'comp'; files: { path: string; name: string }[]; channel: string }
     | null
 
 
@@ -902,6 +903,9 @@ interface AppActions {
   // "Edit tags" on a multi-file selection in the Library � same dialog, but
   // writing ID3 tags to each file instead.
   openBulkTrackEditor: (tracks: LibraryTrack[]) => void
+  // "Edit tags" on comp files in the Files tab - same dialog, submitting one
+  // batch of retag proposals.
+  openBulkFileEditor: (files: { path: string; name: string }[], channel: string) => void
   closeBulkEditor: () => void
 
 
@@ -2816,6 +2820,7 @@ export const useStore = create<AppStore>((set, get, store) => ({
   bulkEdit: null,
   openBulkEditor: (songs) => set({ bulkEdit: songs.length ? { kind: 'api', songs } : null }),
   openBulkTrackEditor: (tracks) => set({ bulkEdit: tracks.length ? { kind: 'local', tracks } : null }),
+  openBulkFileEditor: (files, channel) => set({ bulkEdit: files.length ? { kind: 'comp', files, channel } : null }),
   closeBulkEditor: () => set({ bulkEdit: null }),
   setPendingCompProposal: (pendingCompProposal) => set({ pendingCompProposal }),
   setPendingEditorSongId: (pendingEditorSongId) => set({ pendingEditorSongId }),

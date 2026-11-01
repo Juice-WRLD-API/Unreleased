@@ -2,7 +2,7 @@ import { Check, Loader2, Sparkles, Ban, X } from 'lucide-react'
 import type { CompFileProposal } from '../lib/userApi'
 import { compChangeTypeLabel } from '../lib/userApi'
 import { StatusChip, relativeTime } from './adminShared'
-import { compApproveBlockedReason } from '../lib/compProposalShared'
+import { compApproveBlockedReason, compTagChangeRows } from '../lib/compProposalShared'
 import { useStore } from '../store/useStore'
 
 // A contributor's own comp proposals, with the status filter above them.
@@ -110,6 +110,11 @@ export default function CompProposalList({ proposals, loading, onSelect, onWithd
             )}
             {affectedFiles && (
               <p className="text-[11px] text-text-muted mt-0.5">({affectedFiles.length} file{affectedFiles.length === 1 ? '' : 's'})</p>
+            )}
+            {p.change_type === 'retag' && (
+              <p className="text-xs text-text-muted truncate mt-0.5">
+                {compTagChangeRows(p).map(r => `${r.label}: ${r.to || 'removed'}`).join(' · ')}
+              </p>
             )}
           </>
         )

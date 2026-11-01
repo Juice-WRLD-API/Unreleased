@@ -1104,7 +1104,14 @@ export async function removeFromPlaylist(id: number, songId: number): Promise<vo
 export type ProposalStatus = 'pending' | 'approved' | 'rejected' | 'reversed'
 export type CompProposalChangeType =
   | 'upload' | 'replace' | 'move' | 'delete' | 'create_folder'
-  | 'rename_folder' | 'move_folder' | 'delete_folder'
+  | 'rename_folder' | 'move_folder' | 'delete_folder' | 'retag'
+
+/** The tags a retag proposal can change; the same names POST /files/tags/ reads. */
+export const COMP_TAG_KEYS = ['title', 'artist', 'album', 'album_artist', 'genre', 'year', 'track', 'composer', 'comment'] as const
+export type CompTagKey = typeof COMP_TAG_KEYS[number]
+/** A retag's edits. Tags left out stay as they are, '' removes one, and
+ *  `cover: ''` removes the embedded cover (a new cover goes up as a file). */
+export type CompTagChanges = Partial<Record<CompTagKey | 'cover', string>>
 
 // Only the underscored ones need spelling out; everything else reads fine as
 // the raw enum. Lives here rather than in one of the review components because
@@ -1114,6 +1121,7 @@ const COMP_CHANGE_LABELS: Record<string, string> = {
   rename_folder: 'rename folder',
   move_folder: 'move folder',
   delete_folder: 'delete folder',
+  retag: 'edit tags',
 }
 
 export function compChangeTypeLabel(type: string): string {
@@ -1129,6 +1137,8 @@ export interface CompFileProposal {
   change_type: CompProposalChangeType
   staging_filename: string
   original_snapshot: Record<string, unknown>
+  /** retag only: the tags it writes ('' removes one). Absent on older servers. */
+  tag_changes?: CompTagChanges
   contributor_notes: string
   // Optional on the way in: rows cached before the field shipped lack it.
   is_new_leak?: boolean
@@ -1702,6 +1712,58 @@ export async function getMyCompProposals(channel?: string): Promise<CompFileProp
   assertContributorApi()
   const url = myCompProposalsUrl(channel)
   return request(url, { method: 'GET' }, true, url)
+}
+
+/** One item of a contributor batch. Files go up first (stageCompFiles) and
+ *  are referenced by upload_id; retag items may share one cover upload. */
+export interface CompBatchItem {
+  change_type: CompProposalChangeType
+  file_path: string
+  destination_path?: string
+  upload_id?: string
+  /** retag only. */
+  tags?: CompTagChanges
+  contributor_notes?: string
+  is_new_leak?: boolean
+}
+
+export interface CompBatchSubmitted {
+  batch_id: string
+  count: number
+  auto_approved: number
+  pending: number
+  proposals: CompFileProposal[]
+  auto_approve_error?: { id: number; detail: string }
+}
+
+/** Submits many comp changes as one ordered batch. Validated as a whole: a 400
+ *  means nothing was submitted, and its `errors` name the bad items by index. */
+export async function submitCompProposalBatch(
+  items: CompBatchItem[],
+  opts: { channel?: string; contributorNotes?: string } = {},
+): Promise<CompBatchSubmitted> {
+  assertContributorApi()
+  const res = await request<CompBatchSubmitted>(`${ACCOUNT_BASE}/contributor/proposals/batch/`, {
+    method: 'POST',
+    body: JSON.stringify({ items, channel: opts.channel, contributor_notes: opts.contributorNotes ?? '' }),
+    // The 400 names bad items by index; say which file and why rather than
+    // just "3 of 40 items are invalid".
+    parseError: async (res) => {
+      try {
+        const body = await res.clone().json() as { errors?: { index: number; errors: Record<string, unknown> }[] }
+        const first = body.errors?.[0]
+        if (first) {
+          const value = first.errors.detail ?? Object.values(first.errors)[0]
+          const why = Array.isArray(value) ? String(value[0]) : String(value)
+          const more = body.errors!.length > 1 ? ` (and ${body.errors!.length - 1} more)` : ''
+          return `${items[first.index]?.file_path ?? `Item ${first.index + 1}`}: ${why}${more}`
+        }
+      } catch {}
+      return defaultParseError(res)
+    },
+  })
+  cacheDelete(myCompProposalsUrl(opts.channel))
+  return res
 }
 
 export async function createCompProposal(form: FormData): Promise<CompFileProposal> {

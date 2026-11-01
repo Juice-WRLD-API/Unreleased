@@ -6,12 +6,14 @@ import {
 } from 'lucide-react'
 import { useStore } from '../store/useStore'
 import { useShallow } from 'zustand/react/shallow'
-import { apiFetch, getSongById, loadAllSongs, CATEGORY_LABELS } from '../lib/juicewrldApi'
+import { apiFetch, getSongById, getCompFileTags, loadAllSongs, CATEGORY_LABELS } from '../lib/juicewrldApi'
+import type { CompFileTags } from '../lib/juicewrldApi'
+import { proposeTagEdits } from '../lib/compFileChanges'
 import { OPTIONAL_SONG_FIELDS } from '../lib/trackerFields'
 import type { JWApiSong, JWApiEra } from '../lib/juicewrldApi'
 import type { LibraryTrack } from '../types'
 import * as userApi from '../lib/userApi'
-import { useCanEdit } from '../hooks/useChannelRoles'
+import { useCanContribute, useCanEdit } from '../hooks/useChannelRoles'
 import { broadcastLibraryTrackUpdate } from '../lib/windowSync'
 import { getVersionMetaForSongs, getOwnVersionMeta, setOwnVersionTitle, linkSongVersion, setGroupVersionTitle } from '../lib/versionsApi'
 import type { SongVersionMeta } from '../lib/versionsApi'
@@ -30,6 +32,9 @@ import ThemedCheckbox from './ThemedCheckbox'
 //   • Local library files, from the Library's multi-select "Edit tags". These
 //     write ID3 frames straight to disk through the writeTrackMetadata
 //     channel, then mirror the change into the in-memory library index.
+//   • Comp files, from the Files tab's "Edit tags". These go up as one batch
+//     of retag proposals (commitAll), so a reviewer takes them as a whole and
+//     the server writes the tags when they're approved.
 //
 // Both share the whole interaction model - tick a field, pick how the value
 // combines with what's there, preview, submit - so the machinery below is
@@ -106,6 +111,9 @@ interface BulkSpec<T> {
   /** Applies one item's changes. Patch values are final strings; '' means the
    *  field should end up empty. Throwing marks that item failed. */
   commit: (item: T, patch: Record<string, string>, note: string) => Promise<void>
+  /** Sends every item's changes in one request instead of commit() per item.
+   *  All or nothing: throwing marks the whole set failed. */
+  commitAll?: (targets: { item: T; patch: Record<string, string> }[], note: string) => Promise<void>
   /** Copy for the submit button and the success state. */
   actionLabel: (n: number) => string
   doneLabel: (n: number) => string
@@ -320,6 +328,41 @@ const LOCAL_FIELDS: BulkField<LibraryTrack>[] = [
   { key: 'initialKey', label: 'Key', kind: 'text', group: 'Extra tags', placeholder: 'A Minor', writeOnly: true, read: () => '' },
 ]
 
+/* ── Comp files ────────────────────────────────────────────────────────────── */
+
+type CompFile = { path: string; name: string }
+
+const COMP_GROUPS = ['Tags', 'More']
+const COMP_TAGGABLE = new Set(['mp3', 'm4a', 'flac', 'opus', 'wav', 'aiff', 'aif'])
+const compExt = (name: string): string => name.split('.').pop()?.toLowerCase() ?? ''
+
+/** Fields for comp files. `tags` is null while the current tags load; title
+ *  and track number are only offered for a single file, since setting them
+ *  across many would only ever be a mistake. */
+function compFields(tags: Map<string, CompFileTags> | null, single: boolean): BulkField<CompFile>[] {
+  const read = (key: keyof Omit<CompFileTags, 'has_cover'>) => (f: CompFile): string => tags?.get(f.path)?.[key] ?? ''
+  const pending = tags === null
+  const fields: BulkField<CompFile>[] = [
+    { key: 'artist', label: 'Artist', kind: 'list', group: 'Tags', pending, read: read('artist') },
+    { key: 'album_artist', label: 'Album artist', kind: 'text', group: 'Tags', pending, read: read('album_artist') },
+    { key: 'album', label: 'Album', kind: 'text', group: 'Tags', pending, read: read('album') },
+    { key: 'genre', label: 'Genre', kind: 'list', group: 'Tags', pending, read: read('genre') },
+    { key: 'year', label: 'Year', kind: 'text', group: 'Tags', placeholder: '2019', mono: true, pending, read: read('year') },
+    { key: 'composer', label: 'Composer', kind: 'list', group: 'Tags', pending, read: read('composer') },
+    {
+      key: 'cover', label: 'Cover', kind: 'image', group: 'Tags', modes: ['set', 'clear'], pending,
+      note: 'PNG or JPEG under 10 MB, embedded in each file.',
+      read: f => (tags?.get(f.path)?.has_cover ? 'cover' : ''),
+    },
+    { key: 'comment', label: 'Comment', kind: 'textarea', group: 'More', pending, read: read('comment') },
+  ]
+  if (single) {
+    fields.unshift({ key: 'title', label: 'Title', kind: 'text', group: 'Tags', pending, read: read('title') })
+    fields.push({ key: 'track', label: 'Track number', kind: 'text', group: 'More', placeholder: '3 or 3/12', mono: true, pending, read: read('track') })
+  }
+  return fields
+}
+
 /* ── Component ─────────────────────────────────────────────────────────────── */
 
 export default function BulkEditModal(): JSX.Element | null {
@@ -330,6 +373,22 @@ export default function BulkEditModal(): JSX.Element | null {
     }))
   )
   const canEdit = useCanEdit()
+  const canContribute = useCanContribute()
+
+  // Comp files: their current tags, read in one request per 500 files. Null
+  // while loading, which keeps every field disabled; files whose tags can't
+  // be read are skipped rather than treated as untagged.
+  const [compTags, setCompTags] = useState<Map<string, CompFileTags> | null>(null)
+  useEffect(() => {
+    if (target?.kind !== 'comp') { setCompTags(null); return }
+    let stale = false
+    setCompTags(null)
+    const taggable = target.files.filter(f => COMP_TAGGABLE.has(compExt(f.name))).map(f => f.path)
+    getCompFileTags(taggable, target.channel)
+      .catch(() => new Map<string, CompFileTags>())
+      .then(found => { if (!stale) setCompTags(found) })
+    return () => { stale = true }
+  }, [target])
 
   const [eras, setEras] = useState<JWApiEra[]>([])
   // Which version group each selected song sits in, and that group's shared
@@ -480,7 +539,42 @@ export default function BulkEditModal(): JSX.Element | null {
     }
   }, [target, updateLibraryTrack])
 
+  const compSpec = useMemo<BulkSpec<CompFile> | null>(() => {
+    if (target?.kind !== 'comp') return null
+    const channel = target.channel
+    return {
+      items: target.files,
+      groups: COMP_GROUPS,
+      fields: compFields(compTags, target.files.length === 1),
+      keyOf: f => f.path,
+      titleOf: f => f.name,
+      noun: ['file', 'files'],
+      subtitle: 'Proposes the tag changes as one batch; they are written when it is approved.',
+      notePlaceholder: 'Notes for the reviewer…',
+      unavailable: canContribute ? undefined : 'Only contributors can propose file changes.',
+      skip: f => {
+        if (!COMP_TAGGABLE.has(compExt(f.name))) return `${compExt(f.name).toUpperCase() || 'These'} files have no tags`
+        if (compTags && !compTags.has(f.path)) return 'tags could not be read'
+        return null
+      },
+      actionLabel: n => `Propose tags for ${n} file${n === 1 ? '' : 's'}`,
+      doneLabel: n => `Tags proposed for ${n} file${n === 1 ? '' : 's'}`,
+      commit: async () => { throw new Error('Comp files are submitted together') },
+      commitAll: async (targets, note) => {
+        await proposeTagEdits(targets.map(({ item, patch }) => {
+          const { cover, ...tags } = patch
+          return {
+            path: item.path,
+            tags: cover === '' ? { ...tags, cover: '' } : tags,
+            cover: cover || undefined,
+          }
+        }), channel, note)
+      },
+    }
+  }, [target, compTags, canContribute])
+
   if (!target) return null
+  if (compSpec) return <BulkEditor key="comp" spec={compSpec} onClose={close} />
   if (apiSpec) return <BulkEditor key="api" spec={apiSpec} onClose={close} />
   if (localSpec) return <BulkEditor key="local" spec={localSpec} onClose={close} />
   return null
@@ -552,7 +646,9 @@ function BulkEditor<T>({ spec, onClose }: { spec: BulkSpec<T>; onClose: () => vo
   )
 
   const display = (f: BulkField<T>, value: string): string => {
-    if (f.kind === 'image') return value ? 'new cover' : '—'
+    // Comp files read a cover as a placeholder (they report only whether one
+    // is there); a picked image is a data URL.
+    if (f.kind === 'image') return value.startsWith('data:') ? 'new cover' : value ? 'cover' : '—'
     if (!value) return '-'
     if (f.options) return f.options.find(o => o.value === value)?.label ?? value
     return value
@@ -601,6 +697,21 @@ function BulkEditor<T>({ spec, onClose }: { spec: BulkSpec<T>; onClose: () => vo
     if (spec.unavailable || batch.length === 0 || status === 'submitting' || status === 'done') return
     setStatus('submitting')
     setError(null); setProgress(0); setFailed(0)
+    if (spec.commitAll) {
+      try {
+        await spec.commitAll(batch.map(t => ({ item: t.item, patch: t.patch })), note)
+        setProgress(batch.length)
+        setSucceeded(n => n + batch.length)
+        setRetryTargets(null)
+        setStatus('done')
+      } catch (e) {
+        setFailed(batch.length)
+        setRetryTargets(batch)
+        setError(errorMessage(e, 'Failed'))
+        setStatus('error')
+      }
+      return
+    }
     const failures: Target<T>[] = []
     let lastError = ''
     await pooled(batch, 4, async (target) => {
@@ -642,8 +753,9 @@ function BulkEditor<T>({ spec, onClose }: { spec: BulkSpec<T>; onClose: () => vo
     const on = !enabled[f.key]
     // Prefill with the shared value the first time a field is ticked, so the
     // input starts from what the items already have rather than from nothing.
+    // Images start empty: what an item "has" there isn't a picture to edit.
     if (on && values[f.key] === undefined) {
-      setValues(v => ({ ...v, [f.key]: commonValues[f.key] ?? '' }))
+      setValues(v => ({ ...v, [f.key]: f.kind === 'image' ? '' : commonValues[f.key] ?? '' }))
     }
     setEnabled(prev => ({ ...prev, [f.key]: on }))
   }
@@ -669,9 +781,23 @@ function BulkEditor<T>({ spec, onClose }: { spec: BulkSpec<T>; onClose: () => vo
   const pickImage = async (key: string): Promise<void> => {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const el = (window as any).electron
-    if (!el?.selectImageFile) return
-    const dataUrl = await el.selectImageFile()
-    if (dataUrl) setValue(key, dataUrl)
+    if (el?.selectImageFile) {
+      const dataUrl = await el.selectImageFile()
+      if (dataUrl) setValue(key, dataUrl)
+      return
+    }
+    // No native picker (web): a plain file input, read as a data URL.
+    const input = document.createElement('input')
+    input.type = 'file'
+    input.accept = 'image/png,image/jpeg'
+    input.onchange = () => {
+      const file = input.files?.[0]
+      if (!file) return
+      const reader = new FileReader()
+      reader.onload = () => { if (typeof reader.result === 'string') setValue(key, reader.result) }
+      reader.readAsDataURL(file)
+    }
+    input.click()
   }
 
   const summaryFor = (f: BulkField<T>): string => {

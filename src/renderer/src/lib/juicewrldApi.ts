@@ -479,6 +479,39 @@ function triggerBlobDownload(url: string, filename: string, onBeforeNavigate?: (
   }
 }
 
+/** The tags a comp audio file carries, as POST /files/tags/ reports them.
+ *  Every value is a string, '' when the tag is missing. */
+export interface CompFileTags {
+  title: string
+  artist: string
+  album: string
+  album_artist: string
+  genre: string
+  year: string
+  track: string
+  composer: string
+  comment: string
+  has_cover: boolean
+}
+
+const FILE_TAGS_MAX_PATHS = 500
+
+/** Current tags of comp audio files, keyed by path. Files whose tags can't be
+ *  read (missing, not audio) are left out. Asks in groups of 500. */
+export async function getCompFileTags(paths: string[], channel?: string): Promise<Map<string, CompFileTags>> {
+  const out = new Map<string, CompFileTags>()
+  for (let i = 0; i < paths.length; i += FILE_TAGS_MAX_PATHS) {
+    const res = await apiRequest<{ tags: Record<string, CompFileTags> }>(routeUrl('/files/tags/'), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ paths: paths.slice(i, i + FILE_TAGS_MAX_PATHS), channel }),
+      parseError: async (r) => `JW API error ${r.status}`,
+    })
+    for (const [path, tags] of Object.entries(res.tags ?? {})) out.set(path, tags)
+  }
+  return out
+}
+
 export async function downloadZipSelection(paths: string[], filename: string, onBeforeNavigate?: () => void): Promise<boolean> {
   const res = await fetch(routeUrl('/files/zip-selection/'), {
     method: 'POST',
