@@ -483,6 +483,10 @@ interface AppState {
   playlistsSelectedId: number | null
   playlistsSelectedLocalId: string | null
 
+  // The album open on the Albums page, kept here for the same reason as
+  // playlistsSelectedId: switching tabs remounts the view.
+  albumsSelectedId: number | null
+
   // The open playlist's track sort � same "lives in the store, not local
   // state" reasoning as playlistsSelectedId above: without this, tabbing
   // away from Playlists and back would silently drop the sort back to
@@ -884,6 +888,7 @@ interface AppActions {
   setPendingPlaylistId: (id: number | null) => void
   setPlaylistsSelectedId: (id: number | null) => void
   setPlaylistsSelectedLocalId: (id: string | null) => void
+  setAlbumsSelectedId: (id: number | null) => void
   setPlaylistsSort: (sort: { field: string; dir: 'asc' | 'desc' }) => void
   setPlaylistsOpenFolderId: (id: string | null) => void
 
@@ -1544,6 +1549,7 @@ export const useStore = create<AppStore>((set, get, store) => ({
       'albums-admin': '/albums-admin',
       'liked': '/liked',
       'playlists': '/playlists',
+      'albums': '/albums',
       'docs': '/docs',
       'wrld': '/wrld',
       'news': '/news',
@@ -1571,8 +1577,11 @@ export const useStore = create<AppStore>((set, get, store) => ({
     // restores it instead of falling back to /tracker.
     const current = get().activeView
     if (PATH_PARAM_VIEWS.includes(current)) lastPathParamUrl[current] = window.location.pathname
+    const selectedAlbumId = get().albumsSelectedId
     const path = view === 'playlists' && selectedPlaylistId != null
       ? `/playlists?id=${selectedPlaylistId}`
+      : view === 'albums' && selectedAlbumId != null
+        ? `/albums?id=${selectedAlbumId}`
       : view === 'admin' && activeAdminTab
         ? ADMIN_TAB_PATHS[activeAdminTab] ?? '/admin'
         : paths[view] ?? lastPathParamUrl[view] ?? '/tracker'
@@ -2542,6 +2551,14 @@ export const useStore = create<AppStore>((set, get, store) => ({
     if (path !== window.location.pathname + window.location.search) window.history.pushState({}, '', path)
   },
   setPlaylistsSelectedLocalId: (id) => set({ playlistsSelectedLocalId: id }),
+  albumsSelectedId: null,
+  setAlbumsSelectedId: (id) => {
+    set({ albumsSelectedId: id })
+    // /albums?id=<id>, like Playlists, so the address bar can be shared.
+    if (window.location.pathname !== '/albums') return
+    const path = id != null ? `/albums?id=${id}` : '/albums'
+    if (path !== window.location.pathname + window.location.search) window.history.pushState({}, '', path)
+  },
   playlistsOpenFolderId: null,
   setPlaylistsOpenFolderId: (id) => set({ playlistsOpenFolderId: id }),
 

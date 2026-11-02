@@ -161,21 +161,29 @@ function AlbumsTile({ albums, onAll, span }: {
     <Tile title="Albums" icon={<Album size={15} />} action={{ label: 'All', onClick: onAll }} span={span}>
       <CoverGrid cols={cols} bodyRef={bodyRef}>
         {albums.slice(0, count).map((a) => (
-          <button key={a.key} onClick={a.open} className="group text-left min-w-0">
-            <div className="relative aspect-square rounded-lg overflow-hidden bg-surface-raised mb-1.5 flex items-center justify-center">
-              {a.cover ? (
-                <img src={a.cover} alt={a.title} className="w-full h-full object-cover" />
-              ) : (
-                <Music size={20} className="text-text-muted" />
-              )}
-              <span className="absolute inset-0 bg-black/25 opacity-0 group-hover:opacity-100 transition-opacity" />
-              <span className="absolute bottom-1.5 right-1.5 w-8 h-8 rounded-full bg-accent text-black flex items-center justify-center opacity-0 translate-y-1 group-hover:opacity-100 group-hover:translate-y-0 transition-all">
+          <div key={a.key} className="group text-left min-w-0">
+            <div className="relative aspect-square rounded-lg overflow-hidden bg-surface-raised mb-1.5">
+              <button onClick={a.open} aria-label={a.title} className="absolute inset-0 flex items-center justify-center">
+                {a.cover ? (
+                  <img src={a.cover} alt={a.title} className="w-full h-full object-cover" />
+                ) : (
+                  <Music size={20} className="text-text-muted" />
+                )}
+              </button>
+              <span className="pointer-events-none absolute inset-0 bg-black/25 opacity-0 group-hover:opacity-100 transition-opacity" />
+              <button
+                onClick={a.play}
+                aria-label={`Play ${a.title}`}
+                className="absolute bottom-1.5 right-1.5 w-8 h-8 rounded-full bg-accent text-black flex items-center justify-center opacity-0 translate-y-1 group-hover:opacity-100 group-hover:translate-y-0 focus-visible:opacity-100 transition-all"
+              >
                 <Play size={13} className="ml-0.5" fill="currentColor" />
-              </span>
+              </button>
             </div>
-            <p className="text-text-primary text-xs leading-snug truncate group-hover:text-accent transition-colors">{a.title}</p>
-            <p className="text-text-muted text-[11px] truncate mt-0.5">{a.subtitle}</p>
-          </button>
+            <button onClick={a.open} className="block w-full text-left">
+              <p className="text-text-primary text-xs leading-snug truncate group-hover:text-accent transition-colors">{a.title}</p>
+              <p className="text-text-muted text-[11px] truncate mt-0.5">{a.subtitle}</p>
+            </button>
+          </div>
         ))}
       </CoverGrid>
     </Tile>
@@ -522,7 +530,7 @@ export default function HomeView(): JSX.Element {
                 {showAlbums && (
                   <AlbumsTile
                     albums={albumRow}
-                    onAll={() => setActiveView('wrld')}
+                    onAll={() => setActiveView('albums')}
                     span="shrink-0"
                   />
                 )}
