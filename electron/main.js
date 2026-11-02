@@ -309,7 +309,8 @@ async function runUpdateCheck(reason) {
     // A beta user checks the gated beta list first; only when it has nothing
     // newer does the normal stable check run.
     if (await checkBetaUpdate()) return
-    await autoUpdater.checkForUpdatesAndNotify()
+    if (process.platform === 'darwin') await checkMacUpdate()
+    else await autoUpdater.checkForUpdatesAndNotify()
   } catch (err) {
     log('checkForUpdates error:', err.message)
   } finally {
@@ -468,6 +469,79 @@ async function checkBetaUpdate({ force = false } = {}) {
   })
   if (response === 0) installUpdateAndRestart()
   return true
+}
+
+// macOS: electron-updater can't update this app. Its MacUpdater only installs
+// from a .zip (the release has DMGs only), and Squirrel.Mac refuses any update
+// for an unsigned app, which this is until there's a Developer ID. So on Mac
+// the check is ours: compare the latest GitHub release, download the DMG for
+// this Mac's chip, and open it for the user to drag into Applications.
+// The DMG the last check downloaded, for installUpdateAndRestart.
+let macDmgPath = null
+
+function fetchLatestRelease() {
+  const { owner, repo } = UPDATE_REPO
+  return new Promise((resolve, reject) => {
+    https.get(`https://api.github.com/repos/${owner}/${repo}/releases/latest`, {
+      headers: { 'User-Agent': 'Unreleased-App', 'Accept': 'application/vnd.github+json' }, timeout: 15000,
+    }, (res) => {
+      if (res.statusCode !== 200) { res.resume(); return reject(new Error(`GitHub API HTTP ${res.statusCode}`)) }
+      let data = ''
+      res.on('data', d => { data += d })
+      res.on('end', () => { try { resolve(JSON.parse(data)) } catch (e) { reject(e) } })
+    }).on('error', reject).on('timeout', function () { this.destroy(new Error('GitHub API timed out')) })
+  })
+}
+
+// The release names them Unreleased-<v>-arm64.dmg and Unreleased-<v>.dmg (x64).
+// An Intel build running under Rosetta on Apple silicon gets the arm64 one.
+function macDmgAsset(assets) {
+  const arm = process.arch === 'arm64' || app.runningUnderARM64Translation
+  const dmgs = (assets || []).filter(a => a.name.endsWith('.dmg'))
+  return dmgs.find(a => /-arm64\.dmg$/.test(a.name) === arm) || null
+}
+
+// `force` ignores the auto-download setting.
+async function checkMacUpdate({ force = false } = {}) {
+  broadcastToWindows('update-status', { type: 'checking' })
+  const release = await fetchLatestRelease()
+  const version = String(release.tag_name).replace(/^v/, '')
+  if (compareVersions(version, app.getVersion()) <= 0) {
+    log('Up to date:', app.getVersion())
+    broadcastToWindows('update-status', { type: 'not-available', version })
+    return
+  }
+  log('Update available:', version)
+  broadcastToWindows('update-status', { type: 'available', version })
+  if (!appSettings.autoDownload && !force) return
+
+  const asset = macDmgAsset(release.assets)
+  if (!asset) throw new Error(`No ${process.arch} DMG in release ${release.tag_name}`)
+  const dest = path.join(app.getPath('temp'), asset.name)
+  log('Downloading update:', asset.name)
+  broadcastToWindows('update-status', { type: 'downloading', percent: 0, version })
+  await downloadFile(asset.browser_download_url, dest,
+    (percent) => broadcastToWindows('update-status', { type: 'downloading', percent, version }))
+
+  macDmgPath = dest
+  updateDownloadedPending = true
+  pendingUpdate = { version, installer: dest }
+  log('Update downloaded:', dest)
+  broadcastToWindows('update-status', { type: 'downloaded', version })
+
+  /** @type {Electron.MessageBoxOptions} */
+  const opts = {
+    type: 'info',
+    title: 'Update ready',
+    message: `Unreleased ${version} has been downloaded.`,
+    detail: 'Install opens the download and closes the app. Drag Unreleased into Applications to replace this version, then open it again.',
+    buttons: ['Install', 'Later'],
+    defaultId: 0,
+  }
+  const { response } = mainWindow && !mainWindow.isDestroyed()
+    ? await dialog.showMessageBox(mainWindow, opts)
+    : await dialog.showMessageBox(opts)
+  if (response === 0) installUpdateAndRestart()
 }
 
 const initialBetaCode = readBetaCode()
@@ -1283,6 +1357,15 @@ ipcMain.handle('force-update', async () => {
   // the installed copy outdated (unlike Windows, where the downloaded .exe
   // is an installer). Status updates and the restart dialog come from the
   // shared autoUpdater event handlers at the bottom of this file.
+  if (process.platform === 'darwin') {
+    try {
+      return await checkMacUpdate({ force: true })
+    } catch (err) {
+      log('Force update error:', err.message)
+      broadcastToWindows('update-status', { type: 'error', message: err.message })
+      throw err
+    }
+  }
   if (process.platform === 'linux') {
     try {
       const result = await autoUpdater.checkForUpdates()
@@ -1316,8 +1399,8 @@ ipcMain.handle('force-update', async () => {
     broadcastToWindows('update-status', { type: 'checking' })
     const { owner, repo } = UPDATE_REPO
     const release = await fetchJson(`https://api.github.com/repos/${owner}/${repo}/releases/latest`)
-    const assetSuffix = process.platform === 'win32' ? '.exe' : process.platform === 'darwin' ? '.dmg' : '.AppImage'
-    const asset = release.assets.find(a => a.name.endsWith(assetSuffix))
+    // Mac and Linux returned above, so this is the Windows installer.
+    const asset = release.assets.find(a => a.name.endsWith('.exe'))
     if (!asset) throw new Error('No installer found in latest release')
 
     const tmpPath = path.join(app.getPath('temp'), asset.name)
@@ -1340,7 +1423,6 @@ ipcMain.handle('force-update', async () => {
       detail: 'The app will restart and reinstall.',
     })
     if (response === 0) {
-      if (process.platform === 'linux') fs.chmodSync(tmpPath, 0o755)
       shell.openPath(tmpPath)
       app.quit()
     }
@@ -1354,6 +1436,14 @@ ipcMain.handle('force-update', async () => {
 ipcMain.handle('check-for-updates', async () => {
   log('Manual update check triggered')
   if (await checkBetaUpdate()) return
+  if (process.platform === 'darwin') {
+    try {
+      return await checkMacUpdate()
+    } catch (err) {
+      broadcastToWindows('update-status', { type: 'error', message: err.message })
+      throw err
+    }
+  }
   return autoUpdater.checkForUpdatesAndNotify()
 })
 ipcMain.handle('install-update', () => {
@@ -3963,6 +4053,9 @@ function closeUpdatingWindow() {
 // updates itself, false when it skipped the check.
 async function updateBeforeLaunch() {
   if (isDev || isSmokeTest || !appSettings.autoDownload) return false
+  // A Mac update is installed by hand from its DMG (checkMacUpdate), so don't
+  // hold the launch for it: the startup check runs once the app is open.
+  if (process.platform === 'darwin') return false
   // The last update install didn't take (it failed, or its UAC prompt was
   // turned down). Open the app and leave the update to its prompt this time,
   // instead of failing out of sight at every launch.
@@ -4497,8 +4590,23 @@ async function installUpdateAndRestart() {
   // button can race; a second handoff would start a second installer.
   if (installingUpdate) return
   installingUpdate = true
+  if (process.platform === 'darwin') {
+    // The user drags the new copy over this one, so get out of its way.
+    if (!macDmgPath) { installingUpdate = false; return }
+    log('Opening update:', macDmgPath)
+    const err = await shell.openPath(macDmgPath)
+    if (err) {
+      installingUpdate = false
+      log('Opening the update failed:', err)
+      broadcastToWindows('update-status', { type: 'error', message: `Couldn't open the update: ${err}` })
+      return
+    }
+    isQuitting = true
+    app.quit()
+    return
+  }
   if (process.platform !== 'win32') {
-    // Squirrel.Mac and the AppImage updater relaunch on their own.
+    // The AppImage updater relaunches on its own.
     autoUpdater.quitAndInstall(true, true)
     return
   }

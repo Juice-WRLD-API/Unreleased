@@ -1,6 +1,6 @@
 # Agent guide: Juice WRLD API and Unreleased
 
-**Version 1.49** · updated 2026-11-01. Bump the version and date whenever you
+**Version 1.50** · updated 2026-11-02. Bump the version and date whenever you
 change this file (minor for fixes and additions, major for rewrites).
 
 **Keep this file current.** If you find something in the docs or this file that
@@ -297,6 +297,14 @@ silently behind a stand-in (`electron/updating/standin.ps1`, PowerShell + WPF):
 a capture of the updating window with a live sweep, kept up until the new
 version deletes `update-standin` in userData. If the stand-in can't start, or
 the last install didn't take, the installer shows its own progress window.
+On macOS electron-updater is not used: it only installs from a `.zip` and
+Squirrel.Mac rejects updates for an unsigned app. `checkMacUpdate` in
+`main.js` compares the latest GitHub release, downloads the DMG for the
+Mac's chip (`-arm64.dmg` or the plain x64 one), and opens it for the user to
+drag over the old copy; the launch doesn't wait for it. Linux uses
+electron-updater's AppImage updater. Once the app is signed, a `zip` mac
+target plus uploading it in `build-mac.yml` would bring Mac back to
+electron-updater.
 
 **Sync** (Home → Tools, `app` only, off by default) keeps every released and
 unreleased song with audio offline. It is one more entry in the offline
