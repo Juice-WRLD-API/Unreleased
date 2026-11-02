@@ -242,7 +242,7 @@ export default function HomeViewMobile(): JSX.Element {
           )}
 
           {HOME_ALBUMS_SHOWN && showSection('albums') && albumRow.length > 0 && (
-            <Section title="Albums" onMore={() => setActiveView('wrld')}>
+            <Section title="Albums" onMore={() => setActiveView('albums')}>
               <Rail>
                 {albumRow.map((a) => (
                   <ArtTile
@@ -253,7 +253,6 @@ export default function HomeViewMobile(): JSX.Element {
                       : <Music size={22} className="text-text-muted" />}
                     title={a.title}
                     subtitle={a.subtitle}
-                    playBadge
                   />
                 ))}
               </Rail>

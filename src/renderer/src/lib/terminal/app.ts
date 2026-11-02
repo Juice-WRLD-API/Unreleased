@@ -22,7 +22,7 @@ const VIEWS: Record<string, ViewType> = {
   home: 'home', tracker: 'api-tracker', songs: 'api-tracker', files: 'api-files', playlists: 'playlists', liked: 'liked',
   chat: 'chat', news: 'news', docs: 'docs', wrld: 'wrld', stats: 'stats', statistics: 'statistics', download: 'download',
   heardle: 'heardle', wordle: 'wordle', tierlist: 'tierlist', thanks: 'thanks', editor: 'editor', contributor: 'contributor',
-  albums: 'albums-admin',
+  albums: 'albums', 'albums-admin': 'albums-admin',
 }
 const SETTINGS_TABS: SettingsTab[] = ['account', 'appearance', 'preferences', 'playback', 'desktop', 'shortcuts', 'app', 'developer', 'feedback', 'about']
 const ADMIN_TABS: AdminTab[] = ['proposals', 'comp-proposals', 'comp-replace', 'cover-art', 'applications', 'reports', 'feedback', 'users', 'stats', 'channels', 'news-channels', 'eras', 'cdn-nodes', 'beta', 'lyrics', 'logs']

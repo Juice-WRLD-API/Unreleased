@@ -26,7 +26,7 @@ const HOLD_UNDER_TERMINAL: ViewType[] = ['editor', 'contributor', 'albums-admin'
 // + mini player) and pad their own ends for it (.pb-dock). Every other view
 // gets that room reserved on `main` instead, so its layout ends above the dock
 // exactly as it did when the dock took up space in the column.
-const MOBILE_SCROLL_UNDER: ViewType[] = ['home', 'playlists', 'liked', 'api-tracker', 'api-files', 'settings', 'stats', 'docs']
+const MOBILE_SCROLL_UNDER: ViewType[] = ['home', 'playlists', 'albums', 'liked', 'api-tracker', 'api-files', 'settings', 'stats', 'docs']
 // Of those, the ones whose large title draws under the status bar: their own
 // nav bar pads itself by --top-inset (mobile/NavBar). Tracker and Files keep
 // the reserved strip - their search and tabs stay pinned at the top.
@@ -54,6 +54,7 @@ function getViewFromPath(pathname: string): ViewType {
   if (pathname === '/albums-admin') return 'albums-admin'
   if (pathname === '/liked') return 'liked'
   if (pathname === '/playlists') return 'playlists'
+  if (pathname === '/albums') return 'albums'
   if (pathname === '/docs') return 'docs'
   if (pathname === '/wrld') return 'wrld'
   if (pathname === '/news' || pathname.startsWith('/news/')) return 'news'
@@ -107,7 +108,7 @@ import MoreNavSheet from './components/MoreNavSheet'
 // chunk on hover/tap without importing this file; preloadView is the warmer.
 import {
   ApiTrackerView, EditorPage, AdminPage, SharedPlaylistView, PublicProfileView, EditorProfileView, NotFoundView,
-  DocsPage, WrldView, NewsView, HeardleView, WordleView, TierlistView,
+  DocsPage, WrldView, AlbumsView, NewsView, HeardleView, WordleView, TierlistView,
   StatsView, StatisticsView, DownloadAppView, ThankYouView, AlbumsAdminView, ContributorPage,
   ContributorProfileView, HomeView, Settings, PlaylistsView, ApiFilesView,
   LikedSongsView, DiagnosticsModal, ChatView, TerminalPage, TrackView, preloadView,
@@ -366,6 +367,7 @@ export default function App(): JSX.Element {
               : bgView === 'public-profile' ? <PublicProfileView />
               : bgView === 'editor-profile' ? <EditorProfileView />
               : bgView === 'docs' ? <DocsPage />
+              : bgView === 'albums' ? <AlbumsView />
               : bgView === 'news' ? <NewsView />
               : bgView === 'heardle' ? <HeardleView />
               : bgView === 'wordle' ? <WordleView />

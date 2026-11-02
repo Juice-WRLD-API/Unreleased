@@ -101,6 +101,7 @@ const ROUTES: Record<ViewType, SeoEntry> = {
   editor: { path: '/editor', title: 'Editor', description: 'Catalog editing tools.', noindex: true },
   contributor: { path: '/contributor', title: 'Contributor', description: 'Contributor tools.', noindex: true },
   admin: { path: '/admin', title: 'Admin', description: 'Administration.', noindex: true },
+  albums: { path: '/albums', title: 'Albums', description: "Juice WRLD's albums, EPs and mixtapes." },
   'albums-admin': { title: 'Albums', description: 'Album administration.', noindex: true },
   'editor-profile': { title: 'Editor profile', description: 'Your editor profile.', noindex: true },
   'contributor-profile': { title: 'Contributor profile', description: 'Your contributor profile.', noindex: true },
