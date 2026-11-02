@@ -1,6 +1,6 @@
 # Agent guide: Juice WRLD API and Unreleased
 
-**Version 1.50** · updated 2026-11-02. Bump the version and date whenever you
+**Version 1.51** · updated 2026-11-02. Bump the version and date whenever you
 change this file (minor for fixes and additions, major for rewrites).
 
 **Keep this file current.** If you find something in the docs or this file that
@@ -112,15 +112,28 @@ docs and the server disagree, the backend code in `backend/` wins.
 - **`/versions/?all=true`** returns every version row as a flat array.
   `/versions/` ignores filter params; filter on the client. `/versions/{song_id}/`
   is paginated and empty (`count: 0`) for songs with no version group.
-- **`/albums/` holds every official album and EP** (24 rows as of 2026-10-30,
-  filled from Spotify, Apple Music and SoundCloud), each with `type` (Album, EP,
-  Mixtape), `cover_url` (a site asset or a storage path, so go through
-  `buildImageUrl`) and an ordered `songs` list of catalogue song `path`s.
-  Reads add a read-only `song` to each track (`id`, `public_id`, `name`,
-  `category`, `length`, `image_url`, or null) once the backend change from
-  2026-10-30 is deployed; writes still take `{order, path}` only. Editions are
-  rows of their own that repeat the base album's paths. The public list is
-  cached for 15 minutes, so admin edits show there late.
+- **`/albums/` is paginated** (`{count, next, previous, results}`, 20 per
+  page). The rows are the official albums and EPs, filled from Spotify, Apple
+  Music and SoundCloud. Checked 2026-11-02: `count` is 24 and page 2 is the
+  four edition rows
+  (Death Race for Love bonus, both Fighting Demons editions, The Party Never
+  Ends 2.0). `next` comes back as `http://`, same as the other lists. Each row
+  has `type` (Album, EP, Mixtape), `cover_url` (a site asset or a storage path,
+  so go through `buildImageUrl`) and an ordered `songs` list of catalogue song
+  `path`s. Reads add a read-only `song` summary to each track (`id`,
+  `public_id`, `name`, `category`, `length`, `image_url`, or null); writes
+  still take `{order, path}` only. Editions are rows of their own that repeat
+  the base album's paths. The public list is cached for 15 minutes
+  (`Cache-Control: max-age=900`), so admin edits show there late.
+  `fetchAlbums`, `adminFetchAlbums` and `fetchArtists` unwrap that first page
+  and do not follow `next`, so the Albums page and the Home shelf currently
+  drop page 2. Walk `next` (rebuild it on https) before treating those helpers
+  as the full list.
+- **`POST /files/tags/`** reads comp-file tags. Body is `{paths, channel}`,
+  at most 500 paths per call (`getCompFileTags` loops). The response is
+  `{tags: {path: CompFileTags}}`. Missing files and anything that is not audio
+  are left out of `tags`, not returned as empty strings. Every tag value is a
+  string, `""` when the tag is absent, plus `has_cover`. There is no GET.
 - **`/files/download/?path=` supports Range** (206 with `Content-Range`, CORS
   exposes the range headers). An `<audio>` element handles seeking by itself.
 - **`/files/image-thumbnail/` 404s for real images** (nginx's HTML 404 page,
@@ -253,6 +266,66 @@ scripts/                  release.bat, beta.bat, run.bat, check-terminal-coverag
 `.env.local` (copy `.env.local.example`): `VITE_AUTH_TOKEN` skips Discord login in
 dev, `VITE_JWAPI_WS` points the sockets elsewhere, plus Last.fm and release
 tokens. Never print or commit these values.
+
+### Albums, the Tracker Files tab, and comp tag edits
+
+These landed in 2.6.25–2.6.30. The names collide with older screens.
+
+**Albums page.** The public page is the `albums` view (`components/AlbumsView.tsx`,
+`/albums` and `/albums?id=<id>`): a cover grid, then Play, Shuffle and a
+numbered tracklist. Staff editing stays on `albums-admin` (`AlbumsAdminView`).
+`open albums` and `open albums-admin` match that split. The `album` command is
+admin CRUD and does not open the page. Home's shelf calls
+`setAlbumsSelectedId` and then `setActiveView('albums')`. Keep that order.
+The setter rewrites `/albums?id=` only while the pathname is already `/albums`,
+and `setActiveView` copies whatever id is stored into the one history entry it
+pushes. Setting the view first, while the id is still empty, pushes `/albums`
+and Back from the album stops on the grid. On `file:` (the packaged
+app) the page does not read `?id=` on mount, only on `popstate`; the store is
+the source of truth there. Playback does not use a track's `song` summary.
+`tracksOf` keeps only catalogue songs found by path
+(`indexSongsByPath(loadAllSongs())`); a path with no catalogue song is shown
+dimmed and left out of Play, Shuffle and the queue. Covers go through
+`albumCoverUrl`: the lead track's personal cover, then the album `cover_url`,
+then the lead track's API art. "Other Versions" is every other album whose
+title matches after stripping a trailing parenthetical, so an edition that
+never loaded cannot appear there.
+
+**Files inside Tracker.** Tracker tabs include `files` (`ApiFilesView` with
+`embedded`). Folder changes in that copy must not call `history.pushState` or
+rewrite the address bar; `useApiFilesBrowse`'s `embedded` flag is what leaves
+`/tracker` alone. "Show in Files" on a Tracker song stays in Tracker
+(`setApiFilesPath` plus `setTrackerTab('files')`). The song menu and the
+desktop player call `openInFiles`, which switches to the standalone `api-files`
+view instead. `apiFilesPath` is consumed once, when the browser mounts, then
+cleared. Setting it while that browser is already mounted does not move the
+folder. Sessions are not in `filesLocation`: the Tracker looks the file up
+(`resolveSongFile`) and may switch comp channel before opening the tab. Donor
+and local files have no Files location.
+
+**Comp tag edits.** Files → Edit tags and `comp retag` propose tag changes.
+They are not the Library's on-disk ID3 write and not a song-metadata proposal.
+`proposeTagEdits` submits one `retag` batch through `submitCompProposalBatch`;
+a 400 means nothing was submitted, and the error names the first bad item by
+path. Send only the keys that change (`COMP_TAG_KEYS`: title, artist, album,
+album_artist, genre, year, track, composer, comment). A missing key stays as
+it is, `""` clears one, and `cover: ""` removes the embedded cover. A new
+cover is a data URL, staged once and shared by `upload_id` across every file
+that takes it. The bulk editor only tags `mp3`, `m4a`, `flac`, `opus`, `wav`,
+`aiff` and `aif`, and it skips a file whose tags could not be read rather than
+treating it as untagged. Title and track number are offered for a single file
+only. The terminal reads with `comp tags <file|folder>` (`--recursive`,
+`--channel`) and proposes with `comp retag <file|folder> {json}`.
+
+**News channels.** Admin tab id `news-channels` (`open admin news-channels`,
+path `/news-channels`) hosts `NewsChannelsEditor`, the same editor News →
+Manage channels opens. This is not the Files-tab Channels tab (`channels`).
+The editor sends `label` and an optional `description` (capped at 80 and 280
+characters in the form); the server assigns the slug `id`. `ALL_CHANNEL`
+(`all`) is a client-side tab and is never a channel id. `NEWS_CHANNELS` in
+`newsApi.ts` is only the fallback used when `/news/channels/` cannot be read.
+The delete confirmation says a channel that still has posts cannot be deleted.
+Terminal: `news channels`.
 
 ---
 
@@ -399,11 +472,18 @@ Node 22.
 
 - **comp / channel**: one of the Files-tab sources (`comp`, `redemptionz`,
   `legacy`), not a separate computer. Unrelated to news channels.
-- **Tracker**: the song catalogue view (`/songs/`). **Files**: the file archive
-  (`/files/`).
+- **Tracker**: the song catalogue view (`/songs/`). Its Files tab embeds the
+  archive and must not take over the address bar. **Files**: the standalone
+  file archive (`/files/`, view `api-files`).
+- **Albums**: the public album page (`albums`). **Albums admin**
+  (`albums-admin`) is the staff editor. The `album` terminal command is the
+  admin API, not the page.
 - **Era**: a period of Juice WRLD's work (`/eras/`), e.g. "jute", "LND".
 - **Proposal**: an edit waiting for review, either song data (editor) or comp
-  file (contributor).
+  file (contributor). A comp `retag` proposes tag changes; it does not write
+  them until the batch is approved.
+- **News channel**: a feed tab (`/news/channels/`). Not a comp channel. The
+  admin tab id is `news-channels`.
 - **999 FM**: the live radio. **WRLD**: the full-screen now-playing view.
 - **Relay / port**: copying work from one platform branch to another.
 
@@ -413,6 +493,12 @@ Node 22.
 
 Newest first. One entry each: date, what went wrong, what to do instead. Delete
 entries that stop being true.
+
+- 2026-11-02: `fetchAlbums` looked like the full public catalogue. `/albums/`
+  is paginated, 20 per page, and the helper unwraps page 1 only. With 24 rows
+  the four edition albums never reach the Albums page, the Home shelf or
+  "Other Versions". Follow `next` (https, not the `http://` link). The same
+  unwrap is on `adminFetchAlbums` and `fetchArtists`.
 
 - 2026-10-30: WRLD's Artwork colors toggle only changed the visualizer palette,
   leaving the blurred cover visible when off. Background and text/queue contrast
