@@ -109,7 +109,7 @@ test('native loop detection advances once per wrap, ignores source changes and e
 
 test('iOS starts the next source synchronously on the same element without a render or spare', () => {
   const calls = []
-  const audio = { src: 'old', pause: () => calls.push('pause') }
+  const audio = { src: 'old', load: () => calls.push(['load', audio.src]), pause: () => calls.push('pause') }
   const state = { repeat: 'none', queue: [], queueIndex: 0, currentTrack: { id: 'old' }, isPlaying: true }
   const env = {
     IS_IOS: true, useStore: { getState: () => state }, getActive: () => audio,
@@ -122,7 +122,7 @@ test('iOS starts the next source synchronously on the same element without a ren
   const ended = run(block('  const onAudioEnded =', '  const restartCurrentTrack ='), 'onAudioEnded', env)
   ended(audio)
   assert.equal(audio.src, 'next-url')
-  assert.deepEqual(calls, [['play', 'next-url']])
+  assert.deepEqual(calls, [['load', 'next-url'], ['play', 'next-url']])
   assert.equal(env.recoveryResumeAt.current, 0)
   calls.length = 0
   env.nextTrack = () => null
@@ -138,4 +138,31 @@ test('iOS starts the next source synchronously on the same element without a ren
   state.isPlaying = false
   ended(audio)
   assert.deepEqual(calls, [])
+})
+
+test('iOS keeps native playback intent on the active slot while loading, and clears it when paused', () => {
+  const ast = ts.createSourceFile('Player.tsx', source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX)
+  const slots = []
+  function visit(node) {
+    if (ts.isJsxSelfClosingElement(node) && node.tagName.getText(ast) === 'audio') slots.push(node)
+    ts.forEachChild(node, visit)
+  }
+  visit(ast)
+  assert.equal(slots.length, 2)
+  const props = (node, state) => Object.fromEntries(['autoPlay', 'preload', 'loop'].map(name => {
+    const attr = node.attributes.properties.find(a => a.name?.getText(ast) === name)
+    return [name, attr ? vm.runInNewContext(attr.initializer.expression.getText(ast), state) : undefined]
+  }))
+  for (const active of ['A', 'B']) {
+    const state = { IS_IOS: true, isPlaying: true, crossfadeEnabled: false, activeSlot: ref(active) }
+    slots.forEach((node, i) => {
+      const p = props(node, state)
+      assert.equal(p.autoPlay, ['A', 'B'][i] === active, 'only the active slot may start as data arrives')
+      assert.equal(p.preload, 'auto', 'a background source change must not opt out of loading')
+      assert.equal(p.loop, true, 'retain native continuity at the track boundary')
+      assert.equal(props(node, { ...state, isPlaying: false }).autoPlay, false, 'paused loads must not autoplay')
+      assert.equal(props(node, { ...state, isPlaying: false }).preload, 'none', 'restoring a paused queue must not fetch audio')
+      assert.equal(props(node, { ...state, IS_IOS: false }).autoPlay, false, 'other platforms retain explicit playback')
+    })
+  }
 })

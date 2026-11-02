@@ -1172,7 +1172,7 @@ export default function Player(): JSX.Element {
       recoveryLoading.current = { audio: a, generation }
       a.src = url
       a.load()
-      // The slots are preload="none", so load() on its own fetches nothing -
+      // With preload="none", load() on its own fetches nothing -
       // not even the metadata onReady waits for (WebKit holds the load until
       // play()). Every reload then sat idle until the watchdog's next tick
       // happened to call play(), and a phone with its screen off may never
@@ -1938,6 +1938,10 @@ export default function Player(): JSX.Element {
       const url = resolvePlaybackUrl(next)
       if (!url) { audio.pause(); return } // donor download is handled by the load effect
       audio.src = url
+      // Reset the old resource before requesting playback of the new one.
+      // Keep load/play together in the native event: background React effects
+      // and watchdog timers may not run until the phone is unlocked.
+      audio.load()
       recoveryResumeAt.current = 0
       audio.volume = volumeRef.current
       applyRate(audio)
@@ -2261,10 +2265,14 @@ export default function Player(): JSX.Element {
       {/* crossOrigin: required for the Web Audio effects chain - without CORS
           clearance createMediaElementSource outputs pure silence. The API and
           the local-media:// protocol both send Access-Control-Allow-Origin. */}
+      {/* On iOS, retain native autoplay intent while the next source buffers.
+          Only the active slot may autoplay; a paused/restored queue must not
+          start fetching or playing on its own. Explicit play() still runs. */}
       <audio
         ref={slotA}
         loop={IS_IOS}
-        preload={crossfadeEnabled ? 'auto' : 'none'}
+        autoPlay={IS_IOS && isPlaying && activeSlot.current === 'A'}
+        preload={crossfadeEnabled || (IS_IOS && isPlaying) ? 'auto' : 'none'}
         crossOrigin="anonymous"
         onLoadedMetadata={handleLoadedMetadata}
         onTimeUpdate={handleTimeUpdate}
@@ -2283,7 +2291,8 @@ export default function Player(): JSX.Element {
       <audio
         ref={slotB}
         loop={IS_IOS}
-        preload={crossfadeEnabled ? 'auto' : 'none'}
+        autoPlay={IS_IOS && isPlaying && activeSlot.current === 'B'}
+        preload={crossfadeEnabled || (IS_IOS && isPlaying) ? 'auto' : 'none'}
         crossOrigin="anonymous"
         onLoadedMetadata={handleLoadedMetadata}
         onTimeUpdate={handleTimeUpdate}
