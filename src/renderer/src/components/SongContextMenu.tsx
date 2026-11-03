@@ -92,7 +92,7 @@ interface Props {
 }
 
 /** Saves the song's file. Also the desktop player's song menu (lib/desktopBridge). */
-export function downloadTrack(track: Track, songId: number | null): void {
+export function downloadTrack(track: Track, songId: number | null, tagged?: boolean): void {
   // Donor files need the auth header, so hand them to the blob path instead.
   if (isDonorStreamUrl(track.streamUrl)) {
     void ensureDonorUrl(track.streamUrl).then((url) => {
@@ -107,8 +107,8 @@ export function downloadTrack(track: Track, songId: number | null): void {
   }
   // Lyrics embedding needs the file bytes, so it takes the fetch path; with the
   // setting off (or nothing to embed) this stays a plain anchor download.
-  if (songId != null && useStore.getState().embedSongInfoOnDownload) {
-    void downloadWithEmbed(track.streamUrl ?? buildStreamUrl(track.path), `${track.title}.mp3`, track.path, songId)
+  if (songId != null && (tagged ?? useStore.getState().embedSongInfoOnDownload)) {
+    void downloadWithEmbed(track.streamUrl ?? buildStreamUrl(track.path), `${track.title}.mp3`, track.path, songId, tagged)
     return
   }
   const a = document.createElement('a')
@@ -478,7 +478,17 @@ export default function SongContextMenu({
         showSessionLink && { icon: FileAudio2, label: 'Link session file…', onSelect: onLinkSessionFile },
         showSessionLink && !!hasSessionLinkOverride && !!onClearSessionLink && { icon: X, label: 'Clear manual link', onSelect: onClearSessionLink },
         canDownload && 'divider',
-        canDownload && { icon: Download, label: 'Download', onSelect: () => downloadTrack(track, state.songId) },
+        // Clicking "Download" itself (its flyout is already open under the
+        // pointer) saves the file as the "Add song info to downloads" setting says.
+        canDownload && {
+          icon: Download,
+          label: 'Download',
+          onSelect: () => downloadTrack(track, state.songId),
+          children: [
+            { icon: Download, label: 'Download tagged', onSelect: () => downloadTrack(track, state.songId, true) },
+            { icon: Download, label: 'Download untagged', onSelect: () => downloadTrack(track, state.songId, false) },
+          ],
+        },
         removeAction && 'divider',
         removeAction && { icon: Trash2, label: removeAction.label, danger: true, onSelect: removeAction.onClick },
       ]}

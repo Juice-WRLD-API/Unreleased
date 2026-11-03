@@ -574,6 +574,7 @@ interface AppActions {
   playCommunityEdit: (edit: CommunityEdit) => void
 
   setActiveView: (view: ViewType) => void
+  navigateHistory: (direction: 'back' | 'forward') => void
   /** Sets which section the standalone admin console should show, and - when
    *  it's the active view - updates the address bar to that section's own
    *  deep-link path (via replaceState, not pushState: switching sections
@@ -1015,6 +1016,19 @@ let _reportsFlushing = false
 const PATH_PARAM_VIEWS: ViewType[] = ['track', 'shared-playlist', 'public-profile']
 const lastPathParamUrl: Partial<Record<ViewType, string>> = {}
 
+// View history for the mouse back/forward buttons. The desktop build skips URL
+// routing (file://), so browser history can't carry this.
+const NAV_HISTORY_MAX = 50
+const navBack: ViewType[] = []
+const navForward: ViewType[] = []
+let navReplaying = false
+function recordNav(from: ViewType): void {
+  if (navReplaying) return
+  if (navBack[navBack.length - 1] !== from) navBack.push(from)
+  if (navBack.length > NAV_HISTORY_MAX) navBack.shift()
+  navForward.length = 0
+}
+
 const PROFILE_PUSH_DEBOUNCE_MS = 1500
 let _profilePushTimer: ReturnType<typeof setTimeout> | null = null
 let _profilePushDirty = { songPrefs: false, listeningPlays: false, folders: false, userSettings: false }
@@ -1394,6 +1408,7 @@ export const useStore = create<AppStore>((set, get, store) => ({
     // Already there: skip, so a repeat call can't stack duplicate history
     // entries or churn subscribers that key off previousView.
     if (get().activeView === view) return
+    recordNav(get().activeView)
     const paths: Partial<Record<ViewType, string>> = {
       'home': '/home',
       'api-tracker': '/tracker',
@@ -1444,6 +1459,19 @@ export const useStore = create<AppStore>((set, get, store) => ({
         : paths[view] ?? lastPathParamUrl[view] ?? '/tracker'
     window.history.pushState({ view }, '', path)
     set((s) => ({ activeView: view, previousView: view === s.activeView ? s.previousView : s.activeView }))
+  },
+  navigateHistory: (direction) => {
+    const from = direction === 'back' ? navBack : navForward
+    const to = direction === 'back' ? navForward : navBack
+    const target = from.pop()
+    if (!target) return
+    const current = get().activeView
+    to.push(current)
+    navReplaying = true
+    try {
+      if (target === 'public-profile') get().openPublicProfile(Number(lastPathParamUrl['public-profile']?.match(/\/u\/(\d+)/)?.[1]) || get().account?.id || 0)
+      else get().setActiveView(target)
+    } finally { navReplaying = false }
   },
   setActiveAdminTab: (tab) => {
     set({ activeAdminTab: tab })
@@ -1528,6 +1556,7 @@ export const useStore = create<AppStore>((set, get, store) => ({
     // e.g. navigating there from someone else's page) so the view re-reads
     // the new path.
     const path = `/u/${userId}`
+    if (get().activeView !== 'public-profile') recordNav(get().activeView)
     if (path !== window.location.pathname) window.history.pushState({ view: 'public-profile' }, '', path)
     set((s) => ({ activeView: 'public-profile', previousView: s.activeView === 'public-profile' ? s.previousView : s.activeView }))
   },

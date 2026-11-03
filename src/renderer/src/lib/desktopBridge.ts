@@ -12,7 +12,7 @@ import { timedFromLines, pacedFromText, type TimedLine } from '../desktop/lyrics
 import { downloadSyncedLyrics, isLrcFormat, parseLrc } from './lyrics'
 import { runHotkeyAction } from './hotkeys'
 import { seekAudio, getAudioDuration } from '../components/Player'
-import { apiFetch, buildImageUrl, getSongById, playlistCoverUrl, searchSongs, sizedCoverUrl, smallCoverUrl, songToTrack, type JWApiPaginatedResponse } from './juicewrldApi'
+import { apiFetch, apiFileIdToRef, apiFileRefToTrack, buildImageUrl, getSongById, playlistCoverUrl, searchSongs, sizedCoverUrl, smallCoverUrl, songToTrack, type JWApiPaginatedResponse } from './juicewrldApi'
 import * as userApi from './userApi'
 import { playlistItemsToTracks } from './playlistItems'
 import { listEras } from './eras'
@@ -213,7 +213,9 @@ async function listTracks(id: string): Promise<Track[]> {
     const api = s.account ? await userApi.getFavorites().then((f) => f.map((e) => userApi.liteSongToTrack(e.song))).catch(() => []) : []
     const liked = new Set(s.likedTrackIds)
     const local = s.libraryTracks.filter((t) => liked.has(t.id)).map(libraryTrackToTrack)
-    tracks = [...api, ...local]
+    // Liked comp files are stored locally by id, which carries the comp.
+    const files = s.likedTrackIds.map((tid) => { const ref = apiFileIdToRef(tid); return ref ? apiFileRefToTrack(ref) : null }).filter((t): t is Track => t != null)
+    tracks = [...api, ...local, ...files]
   } else if (id.startsWith('playlist:')) {
     const detail = await userApi.getPlaylist(Number(id.slice('playlist:'.length))).catch(() => null)
     tracks = detail ? playlistItemsToTracks(detail.items).filter((t) => t.path) : []

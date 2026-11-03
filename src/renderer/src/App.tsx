@@ -202,6 +202,25 @@ export default function App(): JSX.Element {
     return () => window.removeEventListener('popstate', onPopState)
   }, [])
 
+  // Mouse back/forward buttons (3 and 4) step through the views visited.
+  useEffect(() => {
+    const onMouseUp = (e: MouseEvent): void => {
+      if (e.button !== 3 && e.button !== 4) return
+      e.preventDefault()
+      useStore.getState().navigateHistory(e.button === 3 ? 'back' : 'forward')
+    }
+    // Stop the browser's own history jump (web) from firing on top of ours.
+    const onDown = (e: MouseEvent): void => {
+      if (e.button === 3 || e.button === 4) e.preventDefault()
+    }
+    window.addEventListener('mouseup', onMouseUp)
+    window.addEventListener('mousedown', onDown)
+    return () => {
+      window.removeEventListener('mouseup', onMouseUp)
+      window.removeEventListener('mousedown', onDown)
+    }
+  }, [])
+
   // Give each route its own title/description/canonical. Web only - no-op in
   // the desktop app, including electron:dev (see lib/seo.ts).
   useEffect(() => { applySeo(activeView) }, [activeView])

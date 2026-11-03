@@ -66,6 +66,18 @@ function SidePanelSlot({ open, keepMounted = false, slotRef, children }: {
     }
   }, [open, slotRef])
 
+  // Backstop: an open slot must never keep the closing slide's held end frame
+  // (opacity 0) or its lifted-out position, or the panel's space is reserved
+  // but nothing paints in it.
+  useLayoutEffect(() => {
+    if (!open) return
+    const slot = slotRef.current
+    if (!slot) return
+    if (slot.style.position) Object.assign(slot.style, { position: '', top: '', bottom: '', left: '', width: '', zIndex: '' })
+    const panel = slot.firstElementChild
+    if (panel instanceof HTMLElement) panel.getAnimations().forEach(a => { if (a.effect?.getTiming().fill === 'forwards') a.cancel() })
+  })
+
   const render = keepMounted ? everOpened : mounted
   // flex so the panel stretches to the full height; a plain block wrapper let
   // it collapse to its content height.
