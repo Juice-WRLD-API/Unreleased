@@ -125,9 +125,10 @@ test('native ZIP exports wait for the device save and reject failed writes', asy
     'client-zip': { downloadZip: () => ({ blob: async () => new Blob(['zip']) }) },
     './cdn': { default: {} },
     './downloadEmbed': { embedForDownload: async () => null },
+    './runLog': { runLog() {} },
     './apiFilesShared': {}, './format': {}, './appToast': {},
     '../store/useStore': {}, '../hooks/useIsMobile': {},
-  }, { fetch: async () => new Response('audio'), Response })
+  }, { fetch: async () => new Response('audio'), Response, ReadableStream, AbortController, DOMException, setTimeout, clearTimeout, setInterval, clearInterval })
   const target = await api.openZipTarget('Playlist')
   assert.equal(target.kind, 'memory')
   let settled = false

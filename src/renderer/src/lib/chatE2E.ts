@@ -83,11 +83,17 @@ export async function localDeviceId(userId: number): Promise<string | null> {
   return (await loadDevice(userId))?.deviceId ?? null
 }
 
+// Sign-out: also drops the decrypted bodies and attachment names held in
+// memory, so they don't outlive the session.
 export function resetDevice(): void {
   devicePromise = null
   deviceUserId = null
   resetIdentity()
   invalidateTrust(0)
+  keyFetches.clear()
+  bodies.clear()
+  manifests.clear()
+  metaCache.clear()
 }
 
 export function ownKeys(device: ActiveDevice): OwnDeviceKeys {

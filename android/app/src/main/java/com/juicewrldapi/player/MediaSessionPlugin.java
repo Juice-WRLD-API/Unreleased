@@ -258,6 +258,13 @@ public class MediaSessionPlugin extends Plugin implements PlaybackService.Listen
         call.resolve();
     }
 
+    /** Settings → Playback → "Resume when Bluetooth connects". */
+    @PluginMethod
+    public void setResumeOnBluetooth(PluginCall call) {
+        PlaybackService.setResumeOnBluetooth(getContext(), call.getBoolean("enabled", true));
+        call.resolve();
+    }
+
     // ── PlaybackService.Listener — native callbacks routed to JS ────────────
 
     @Override public void onPlay() { notifyListeners("play", new JSObject()); }

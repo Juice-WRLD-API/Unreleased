@@ -74,13 +74,49 @@ const TOKEN_RE = /([a-zA-Z_]+):(?:"([^"]*)"|'([^']*)'|(\S+))/g
 // legitimate search like "R&B" is untouched.
 const AND_OPERATOR_RE = /(?:^|\s)&{1,2}(?=\s|$)/g
 
-export interface ParsedSearch { freeText: string; filters: FieldFilter[] }
+// `sort:length`, `sort:-length` or `sort:length:desc` orders the Tracker list
+// by that column for as long as the token is in the query, over the header
+// sort. Dates start newest-first and everything else ascending, like the
+// header buttons.
+export type SortField = 'name' | 'credited_artists' | 'era__name' | 'category' | 'length' | 'date_added' | 'date_leaked'
+export interface SortSpec { field: SortField; dir: 'asc' | 'desc' }
+
+const SORT_KEYS: Record<string, SortField> = {
+  title: 'name', name: 'name', song: 'name',
+  artist: 'credited_artists', artists: 'credited_artists',
+  era: 'era__name', category: 'category', cat: 'category',
+  length: 'length', duration: 'length', time: 'length',
+  added: 'date_added', dateadded: 'date_added',
+  leaked: 'date_leaked', dateleaked: 'date_leaked', leak: 'date_leaked', date: 'date_leaked',
+}
+export const SORT_HELP_KEYS = ['title', 'artist', 'era', 'category', 'length', 'added', 'leaked']
+
+function parseSort(value: string): SortSpec | null {
+  let v = value.toLowerCase().replace(/[\s_-]+(?=asc$|desc$)/, ':')
+  let dir: 'asc' | 'desc' | null = null
+  if (v.startsWith('-')) { dir = 'desc'; v = v.slice(1) } else if (v.startsWith('+')) { dir = 'asc'; v = v.slice(1) }
+  const m = /^(.*?):(asc|desc)$/.exec(v)
+  if (m) { v = m[1]; dir = m[2] as 'asc' | 'desc' }
+  const field = SORT_KEYS[v]
+  if (!field) return null
+  return { field, dir: dir ?? (field === 'date_leaked' || field === 'date_added' ? 'desc' : 'asc') }
+}
+
+export interface ParsedSearch { freeText: string; filters: FieldFilter[]; sort: SortSpec | null }
 
 export function parseSearchQuery(raw: string): ParsedSearch {
   const filters: FieldFilter[] = []
+  let sort = null as SortSpec | null
   const freeText = raw
     .replace(TOKEN_RE, (match, rawField: string, dq?: string, sq?: string, plain?: string) => {
-      const def = FIELD_LOOKUP.get(rawField.toLowerCase())
+      const lower = rawField.toLowerCase()
+      if (lower === 'sort' || lower === 'order' || lower === 'sortby') {
+        const spec = parseSort((dq ?? sq ?? plain ?? '').trim())
+        if (!spec) return match
+        sort = spec
+        return ''
+      }
+      const def = FIELD_LOOKUP.get(lower)
       if (!def) return match
       const value = (dq ?? sq ?? plain ?? '').trim()
       if (!value) return ''
@@ -90,7 +126,7 @@ export function parseSearchQuery(raw: string): ParsedSearch {
     .replace(AND_OPERATOR_RE, ' ')
     .replace(/\s+/g, ' ')
     .trim()
-  return { freeText, filters }
+  return { freeText, filters, sort }
 }
 
 // Apostrophe-insensitive substring match, matching compactGroups.ts's

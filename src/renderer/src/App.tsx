@@ -23,6 +23,16 @@ const FOCUS_REFRESH_MIN_INTERVAL_MS = 60 * 1000
 // Wordle play audio, so those are left to remount.
 const HOLD_UNDER_TERMINAL: ViewType[] = ['editor', 'contributor', 'albums-admin', 'playlists', 'settings', 'chat']
 
+// Mobile views that run their scrollers under the floating glass dock (tab bar
+// + mini player) and pad their own ends for it (.pb-dock). Every other view
+// gets that room reserved on `main` instead, so its layout ends above the dock
+// exactly as it did when the dock took up space in the column.
+const MOBILE_SCROLL_UNDER: ViewType[] = ['home', 'playlists', 'albums', 'liked', 'api-tracker', 'api-files', 'settings', 'stats', 'docs']
+// Of those, the ones whose large title draws under the status bar: their own
+// nav bar pads itself by --top-inset (mobile/NavBar). Tracker and Files keep
+// the reserved strip - their search and tabs stay pinned at the top.
+const MOBILE_BLEED_TOP: ViewType[] = ['home', 'playlists', 'settings', 'stats', 'docs']
+
 function getViewFromPath(pathname: string): ViewType {
   if (pathname === '/library') return 'library'
   if (pathname === '/home') return 'home'
@@ -46,6 +56,7 @@ function getViewFromPath(pathname: string): ViewType {
   if (pathname === '/albums-admin') return 'albums-admin'
   if (pathname === '/liked') return 'liked'
   if (pathname === '/playlists') return 'playlists'
+  if (pathname === '/albums') return 'albums'
   if (pathname === '/docs') return 'docs'
   if (pathname === '/wrld') return 'wrld'
   if (pathname === '/news' || pathname.startsWith('/news/')) return 'news'
@@ -100,7 +111,7 @@ import MoreNavSheet from './components/MoreNavSheet'
 // chunk on hover/tap without importing this file; preloadView is the warmer.
 import {
   ApiTrackerView, EditorPage, AdminPage, SharedPlaylistView, PublicProfileView, EditorProfileView, NotFoundView,
-  DocsPage, WrldView, NewsView, HeardleView, WordleView, TierlistView,
+  DocsPage, WrldView, AlbumsView, NewsView, HeardleView, WordleView, TierlistView,
   StatsView, StatisticsView, DownloadAppView, ThankYouView, AlbumsAdminView, ContributorPage,
   ContributorProfileView, HomeView, Settings, PlaylistsView, ApiFilesView,
   LikedSongsView, DiagnosticsModal, ChatView, TerminalPage, TrackView, LibraryTab, preloadView,
@@ -112,9 +123,11 @@ import { useChatBootstrap } from './hooks/useChatBootstrap'
 import { UserCardHost } from './components/chat/UserCard'
 const UserAuthModal = lazyOverlay(() => import('./components/UserAuthModal'))
 const DebugLogViewer = lazyView(() => import('./components/DebugLogViewer'))
+const RecognitionModal = lazyView(() => import('./components/RecognitionModal'))
 const LoginApprovalPrompt = lazyView(() => import('./components/LoginApprovalPrompt'))
 // Donors and administrators only - fetched the first time it opens.
 const LyricsGenModal = lazyOverlay(() => import('./components/LyricsGenModal'))
+const CoverArtSubmitModal = lazyOverlay(() => import('./components/CoverArtSubmitModal'))
 const BulkEditModal = lazyOverlay(() => import('./components/BulkEditModal'))
 const UploadManager = lazyOverlay(() => import('./components/UploadManager'))
 const NotificationCenter = lazyOverlay(() => import('./components/NotificationCenter'))
@@ -143,6 +156,7 @@ export default function App(): JSX.Element {
     const interval = setInterval(() => { void scanLibrary() }, 15 * 60 * 1000)
     return () => { document.removeEventListener('visibilitychange', onVisible); clearInterval(interval) }
   }, [libraryAutoRefresh, libraryFolders, loadLibrary, scanLibrary])
+  const showRecognition = useStore((s) => s.showRecognition)
   const { showNowPlaying, showQueue, showSettings, setShowSettings, showDiagnostics, setShowDiagnostics, showUploadManager, setShowUploadManager, showNotifications, setShowNotifications, activeView, previousView, sidebarPosition, navStyle, autoHideNav, loadAccount, completeDiscordLogin, showUserAuth, setShowUserAuth, prefetchApiData, refreshPlaylists, heroBleedTop, navOrder, navVisibility, activeChannel, bulkEdit, infoSongId } = useStorePick(
     'showNowPlaying', 'showQueue', 'showSettings', 'setShowSettings', 'showDiagnostics', 'setShowDiagnostics', 'showUploadManager', 'setShowUploadManager', 'showNotifications', 'setShowNotifications', 'activeView', 'previousView', 'sidebarPosition', 'navStyle', 'autoHideNav', 'loadAccount', 'completeDiscordLogin', 'showUserAuth', 'setShowUserAuth', 'prefetchApiData', 'refreshPlaylists', 'heroBleedTop', 'navOrder', 'navVisibility', 'activeChannel', 'bulkEdit', 'infoSongId')
   // What renders behind WRLD - WRLD is a full-screen overlay on top of
@@ -166,6 +180,7 @@ export default function App(): JSX.Element {
   const isMobile = useIsMobile()
   const debugLogOpen = useDebugLogViewer((s) => s.log !== null)
   const lyricsGenOpen = useStore((s) => s.lyricsGenModal !== null)
+  const coverArtOpen = useStore((s) => s.coverArtModal !== null)
   useThemeEffects()
   useChatBootstrap()
   // Seed auth token from env in local dev only - import.meta.env.DEV is false in production
@@ -210,6 +225,25 @@ export default function App(): JSX.Element {
     const onPopState = (e: PopStateEvent): void => syncFromPath(e.state)
     window.addEventListener('popstate', onPopState)
     return () => window.removeEventListener('popstate', onPopState)
+  }, [])
+
+  // Mouse back/forward buttons (3 and 4) step through the views visited.
+  useEffect(() => {
+    const onMouseUp = (e: MouseEvent): void => {
+      if (e.button !== 3 && e.button !== 4) return
+      e.preventDefault()
+      useStore.getState().navigateHistory(e.button === 3 ? 'back' : 'forward')
+    }
+    // Stop the browser's own history jump (web) from firing on top of ours.
+    const onDown = (e: MouseEvent): void => {
+      if (e.button === 3 || e.button === 4) e.preventDefault()
+    }
+    window.addEventListener('mouseup', onMouseUp)
+    window.addEventListener('mousedown', onDown)
+    return () => {
+      window.removeEventListener('mouseup', onMouseUp)
+      window.removeEventListener('mousedown', onDown)
+    }
   }, [])
 
   // Give each route its own title/description/canonical. Web only - no-op in
@@ -338,10 +372,19 @@ export default function App(): JSX.Element {
           // needed there.
           // Mobile's nav bar is bottom-only (no per-platform top option any
           // more - see BottomNav), so on mobile this only ever depends on
-          // heroBleedTop. sidebarPosition still gates it on desktop, where
-          // Sidebar itself can sit at the top and already reserves the space.
-          style={(isMobile || sidebarPosition !== 'top' || autoHideNav || navStyle === 'pill') && !heroBleedTop
-            ? { paddingTop: 'var(--top-inset)' } : undefined}
+          // heroBleedTop and the large-title views (MOBILE_BLEED_TOP).
+          // sidebarPosition still gates it on desktop, where Sidebar itself
+          // can sit at the top and already reserves the space.
+          //
+          // The bottom: the mobile dock floats over `main` rather than
+          // sitting under it, so views that don't scroll beneath it get its
+          // height reserved here instead.
+          style={{
+            paddingTop: (isMobile || sidebarPosition !== 'top' || autoHideNav || navStyle === 'pill') && !heroBleedTop
+              && !(isMobile && MOBILE_BLEED_TOP.includes(bgView))
+              ? 'var(--top-inset)' : undefined,
+            paddingBottom: isMobile && !MOBILE_SCROLL_UNDER.includes(bgView) ? 'var(--dock-h)' : undefined,
+          }}
         >
           <div className="flex-1 overflow-hidden flex">
             <ErrorBoundary>
@@ -374,6 +417,7 @@ export default function App(): JSX.Element {
               : bgView === 'public-profile' ? <PublicProfileView />
               : bgView === 'editor-profile' ? <EditorProfileView />
               : bgView === 'docs' ? <DocsPage />
+              : bgView === 'albums' ? <AlbumsView />
               : bgView === 'news' ? <NewsView />
               : bgView === 'heardle' ? <HeardleView />
               : bgView === 'wordle' ? <WordleView />
@@ -488,6 +532,12 @@ export default function App(): JSX.Element {
           <LyricsGenModal />
         </ErrorBoundary>
       )}
+      {coverArtOpen && (
+        <ErrorBoundary variant="overlay" onDismiss={() => useStore.getState().closeCoverArtSubmit()}>
+          <CoverArtSubmitModal />
+        </ErrorBoundary>
+      )}
+      {showRecognition && <ErrorBoundary variant="overlay"><Suspense fallback={null}><RecognitionModal /></Suspense></ErrorBoundary>}
       <ErrorBoundary fallback={null}><InstallPrompt /></ErrorBoundary>
       <ErrorBoundary fallback={null}><CookieNotice /></ErrorBoundary>
       <ErrorBoundary fallback={null}><DonationNotice /></ErrorBoundary>

@@ -22,6 +22,9 @@ export function useApiFilesBrowse(opts: {
   /** Mobile scrolls its listing back to top on every navigate() call, right
    *  before the fetch fires - desktop has no such scroller to reset. */
   onNavigateStart?: () => void
+  /** Shown inside another view (the Tracker's Files tab): folders don't touch
+   *  the address bar or browser history, which belong to the host view. */
+  embedded?: boolean
 }): {
   currentPath: string
   entries: JWApiFileEntry[]
@@ -51,7 +54,7 @@ export function useApiFilesBrowse(opts: {
   searchInFolder: boolean
   setSearchInFolder: (v: boolean) => void
 } {
-  const { activeChannel, setActiveChannel, channels, loadChannels, apiFilesPath, setApiFilesPath, apiFilesLastPath, setApiFilesLastPath, onNavigateStart } = opts
+  const { activeChannel, setActiveChannel, channels, loadChannels, apiFilesPath, setApiFilesPath, apiFilesLastPath, setApiFilesLastPath, onNavigateStart, embedded = false } = opts
 
   const [currentPath, setCurrentPath] = useState('')
   const [entries, setEntries] = useState<JWApiFileEntry[]>([])
@@ -93,7 +96,7 @@ export function useApiFilesBrowse(opts: {
     const paint = (items: JWApiFileEntry[]): void => {
       if (!painted && pushHistory) {
         setHistory((h) => [...h, currentPath])
-        window.history.pushState({ view: 'api-files', folderPath: path }, '', pathToUrl(path))
+        if (!embedded) window.history.pushState({ view: 'api-files', folderPath: path }, '', pathToUrl(path))
       }
       painted = true
       setEntries(items)
@@ -127,7 +130,7 @@ export function useApiFilesBrowse(opts: {
     } finally {
       if (requestId === navigateRequestId.current) setLoading(false)
     }
-  }, [currentPath, browseParams, activeChannel, onNavigateStart])
+  }, [currentPath, browseParams, activeChannel, onNavigateStart, embedded])
 
   // Hovering a folder starts fetching its listing, so the click usually lands
   // on a cached one. Not needed once the index is in: that already has it.
@@ -207,10 +210,11 @@ export function useApiFilesBrowse(opts: {
   // On mount: read path from URL, or an explicit deep-link (apiFilesPath), or
   // fall back to wherever the user last browsed to (apiFilesLastPath).
   useEffect(() => {
-    const urlPath = urlToPath(window.location.pathname)
+    const urlPath = embedded ? '' : urlToPath(window.location.pathname)
     const initialPath = apiFilesPath || urlPath || apiFilesLastPath
     if (apiFilesPath) setApiFilesPath('')  // consume it
     navigateRef.current(initialPath, false)
+    if (embedded) return
 
     const handlePopstate = (): void => {
       const p = window.location.pathname
@@ -234,10 +238,16 @@ export function useApiFilesBrowse(opts: {
     setHistory([])
     setSearch(''); setDebouncedSearch('')
     setCurrentPath('')
-    window.history.pushState({ view: 'api-files', folderPath: '' }, '', pathToUrl(''))
+    if (!embedded) window.history.pushState({ view: 'api-files', folderPath: '' }, '', pathToUrl(''))
   }
 
+  // Channel switches only. On mount the effect above has already navigated to
+  // the deep link / last folder, and a second navigation here would win the
+  // request race and drop the view back at the root.
+  const navigatedChannelRef = useRef(activeChannel)
   useEffect(() => {
+    if (navigatedChannelRef.current === activeChannel) return
+    navigatedChannelRef.current = activeChannel
     navigateRef.current('', false)
   }, [activeChannel]) // eslint-disable-line react-hooks/exhaustive-deps
 

@@ -5,7 +5,7 @@ import { startCdnFileDownload } from '../hooks/useCdnFileDownload'
 import cdnService from './cdn'
 import { openZipTarget, saveItems, type ZipItem } from './clientZip'
 import { formatBytes } from './format'
-import { apiFetch, buildStreamUrl, listFilesRecursive, listSubtree, parseBrowseEntries, type JWApiBrowseResponse, type JWApiFileEntry } from './juicewrldApi'
+import { apiFetch, buildStreamUrl, fetchFileText, listFilesRecursive, listSubtree, parseBrowseEntries, type JWApiBrowseResponse, type JWApiFileEntry } from './juicewrldApi'
 
 // The Files tab as a little filesystem for the admin terminal: the root lists
 // the file channels, a channel is a directory, and below that it's the same
@@ -163,13 +163,11 @@ export interface EditorFile {
 /** Fetches a file the way the Files tab's text viewer does (the stream URL,
  *  2 MB cap, binary files refused). `cmd` and `label` only shape the error. */
 export async function fetchEntryText(entry: JWApiFileEntry, channel: string, cmd: string, label: string): Promise<string> {
-  const res = await fetch(buildStreamUrl(entry.path, channel))
-  if (!res.ok) throw new Error(`${cmd}: ${label}: couldn't load (HTTP ${res.status})`)
-  const buf = await res.arrayBuffer()
-  if (buf.byteLength > EDIT_MAX_BYTES) throw new Error(`${cmd}: ${label}: too large (${formatBytes(buf.byteLength)}, limit ${formatBytes(EDIT_MAX_BYTES)})`)
-  const bytes = new Uint8Array(buf)
-  if (bytes.subarray(0, 8000).includes(0)) throw new Error(`${cmd}: ${label}: looks like a binary file`)
-  return new TextDecoder('utf-8').decode(bytes)
+  const file = await fetchFileText(entry.path, channel, EDIT_MAX_BYTES)
+  if (!file.ok) throw new Error(`${cmd}: ${label}: couldn't load (HTTP ${file.status})`)
+  if (file.truncated) throw new Error(`${cmd}: ${label}: too large (${formatBytes(file.bytes)}, limit ${formatBytes(EDIT_MAX_BYTES)})`)
+  if (file.binary) throw new Error(`${cmd}: ${label}: looks like a binary file`)
+  return file.text
 }
 
 /** Finds `typed` ("name", "a/b/name", "/chan/a/name") from `cwd`: the folder

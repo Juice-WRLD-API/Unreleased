@@ -14,16 +14,17 @@ import { isPrivateEntry, playlistItemToEntry, trackToPlaylistEntry } from './pla
 import type { Track } from '../types'
 
 export async function addSongsInBackground(playlistId: number, songIds: number[]): Promise<number[]> {
-  const results = await Promise.allSettled(songIds.map(id => userApi.addToPlaylist(playlistId, id)))
-  const failed = songIds.filter((_, i) => results[i].status === 'rejected')
-  void useStore.getState().refreshPlaylists()
-  if (failed.length) {
+  if (!songIds.length) return []
+  try {
+    await userApi.addSongsToPlaylist(playlistId, songIds)
+    void useStore.getState().refreshPlaylists()
+    return []
+  } catch {
+    void useStore.getState().refreshPlaylists()
     const name = useStore.getState().playlists.find(p => p.id === playlistId)?.name ?? 'playlist'
-    showAppToast(failed.length === songIds.length
-      ? `Couldn't add to "${name}"`
-      : `${failed.length} of ${songIds.length} songs couldn't be added to "${name}"`)
+    showAppToast(`Couldn't add to "${name}"`)
+    return songIds
   }
-  return failed
 }
 
 // The same for entries of any source (comp, donor and local files as well as

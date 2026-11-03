@@ -23,12 +23,13 @@ import { anchorOf, clickable } from '../../lib/a11y'
 function PanelShell({ title, subtitle, onClose, children }: { title: string; subtitle?: string; onClose: () => void; children: React.ReactNode }): JSX.Element {
   return (
     <aside className="w-full md:w-[340px] shrink-0 min-h-0 flex flex-col border-l border-[var(--border)] bg-surface">
-      <header className="h-14 shrink-0 flex items-center gap-2 px-4 border-b border-[var(--border)]">
+      <header className="h-14 shrink-0 flex items-center gap-2 px-4 border-b border-[var(--separator)]">
         <div className="flex-1 min-w-0">
-          <h3 className="text-sm font-bold text-text-primary truncate">{title}</h3>
-          {subtitle && <p className="text-[11px] text-text-muted truncate">{subtitle}</p>}
+          <h3 className="text-headline md:text-sm md:font-bold md:tracking-normal text-text-primary truncate">{title}</h3>
+          {subtitle && <p className="text-footnote md:text-[11px] md:tracking-normal text-text-muted truncate">{subtitle}</p>}
         </div>
-        <IconButton label="Close" onClick={onClose}><X size={17} /></IconButton>
+        <IconButton label="Close" className="hidden md:flex" onClick={onClose}><X size={17} /></IconButton>
+        <button onClick={onClose} className="md:hidden h-11 px-1 text-body font-semibold text-accent active:opacity-60">Done</button>
       </header>
       {children}
     </aside>
@@ -319,11 +320,11 @@ export function MembersPanel({ serverId, onClose, onAddMembers }: { serverId: nu
           <div className="flex justify-center py-6"><Loader2 size={18} className="animate-spin text-text-muted" /></div>
         ) : (
           <>
-            {onlineList.length > 0 && <p className="px-2 pt-3 pb-1 text-[10px] font-bold uppercase tracking-wider text-text-muted">Online — {onlineList.length}</p>}
+            {onlineList.length > 0 && <p className="px-2 pt-3 pb-1 text-footnote font-semibold text-text-secondary md:text-[10px] md:font-bold md:uppercase md:tracking-wider md:text-text-muted">Online — {onlineList.length}</p>}
             {onlineList.sort(byName).map((m) => (
               <MemberRow key={m.id} member={m} serverId={serverId} canManage={canManage} canManageRoles={canManageRoles} canKick={canKick} canBan={canBan} ownerId={server?.owner ?? -1} onMessage={message} listening={!!nowPlaying[m.user.id]} />
             ))}
-            {offlineList.length > 0 && <p className="px-2 pt-3 pb-1 text-[10px] font-bold uppercase tracking-wider text-text-muted">Offline — {offlineList.length}</p>}
+            {offlineList.length > 0 && <p className="px-2 pt-3 pb-1 text-footnote font-semibold text-text-secondary md:text-[10px] md:font-bold md:uppercase md:tracking-wider md:text-text-muted">Offline — {offlineList.length}</p>}
             <div className="opacity-60">
               {offlineList.sort(byName).map((m) => (
                 <MemberRow key={m.id} member={m} serverId={serverId} canManage={canManage} canManageRoles={canManageRoles} canKick={canKick} canBan={canBan} ownerId={server?.owner ?? -1} onMessage={message} />

@@ -5,18 +5,26 @@ import android.app.NotificationChannel;
 import android.app.NotificationManager;
 import android.app.PendingIntent;
 import android.app.Service;
+import android.content.BroadcastReceiver;
 import android.content.Context;
 import android.content.Intent;
+import android.content.IntentFilter;
 import android.content.pm.ServiceInfo;
 import android.graphics.Bitmap;
+import android.media.AudioDeviceCallback;
+import android.media.AudioDeviceInfo;
+import android.media.AudioManager;
 import android.os.Build;
+import android.os.Handler;
 import android.os.IBinder;
+import android.os.Looper;
 import android.support.v4.media.MediaMetadataCompat;
 import android.support.v4.media.session.MediaSessionCompat;
 import android.support.v4.media.session.PlaybackStateCompat;
 
 import androidx.annotation.Nullable;
 import androidx.core.app.NotificationCompat;
+import androidx.core.content.ContextCompat;
 import androidx.media.app.NotificationCompat.MediaStyle;
 import androidx.media.session.MediaButtonReceiver;
 
@@ -33,6 +41,10 @@ import androidx.media.session.MediaButtonReceiver;
  *  - A MediaSessionCompat, so the notification/lock-screen/Bluetooth/wear
  *    transport controls exist at all and hardware media buttons have
  *    somewhere to go.
+ *  - Pause when the headphones or car disconnect mid-song, and play again
+ *    when a Bluetooth output connects (if "Resume when Bluetooth connects" is
+ *    on). Being a running foreground service is what lets it see the
+ *    reconnect at all while the app sits paused in the background.
  *
  * Deliberately does NOT request its own AudioManager focus. Chromium already
  * requests audio focus automatically the moment the WebView's <audio>
@@ -104,9 +116,82 @@ public class PlaybackService extends Service {
     private String album = "";
     private Bitmap artwork;
     private long durationMs = 0L;
-    private boolean isPlaying = false;
+    // volatile: written from the plugin thread, read by the audio-route
+    // callbacks below on the main thread.
+    private volatile boolean isPlaying = false;
     private long positionMs = 0L;
     private float speed = 1f;
+
+    // ── Bluetooth: pause on disconnect, resume on reconnect ──────────────────
+
+    private static final String PREFS = "playback";
+    private static final String PREF_RESUME_ON_BLUETOOTH = "resumeOnBluetooth";
+    // A car stereo takes a moment after connecting before it plays what the
+    // phone sends, and some send their own Play in that window anyway.
+    private static final long RESUME_DELAY_MS = 2000L;
+
+    /** Stored natively so it still applies when the process was restarted
+     *  and JS hasn't pushed it again yet. JS sets it (MediaSessionPlugin). */
+    public static void setResumeOnBluetooth(Context ctx, boolean enabled) {
+        ctx.getSharedPreferences(PREFS, MODE_PRIVATE).edit().putBoolean(PREF_RESUME_ON_BLUETOOTH, enabled).apply();
+    }
+
+    private boolean resumeOnBluetoothEnabled() {
+        return getSharedPreferences(PREFS, MODE_PRIVATE).getBoolean(PREF_RESUME_ON_BLUETOOTH, true);
+    }
+
+    // Set only when the output disappeared while a song was playing, cleared
+    // once anything plays again or the notification is dismissed. A reconnect
+    // only ever resumes on this flag, so a song the user paused themselves
+    // never starts on its own.
+    private volatile boolean resumeOnReconnect = false;
+    private AudioManager audioManager;
+    private final Handler mainHandler = new Handler(Looper.getMainLooper());
+
+    // Sent when audio is about to move from headphones/Bluetooth to the
+    // speaker. Pause on it: Player.tsx replays any pause it didn't ask for
+    // (handleAudioPause), so otherwise the song carried on out loud from the
+    // phone the moment the car turned off.
+    private final BroadcastReceiver noisyReceiver = new BroadcastReceiver() {
+        @Override
+        public void onReceive(Context context, Intent intent) {
+            if (!AudioManager.ACTION_AUDIO_BECOMING_NOISY.equals(intent.getAction()) || !isPlaying) return;
+            resumeOnReconnect = true;
+            if (listener != null) listener.onPause();
+        }
+    };
+
+    // Registering calls onAudioDevicesAdded once with everything already
+    // connected; resumeOnReconnect is false then, so that's ignored.
+    private final AudioDeviceCallback deviceCallback = new AudioDeviceCallback() {
+        @Override
+        public void onAudioDevicesAdded(AudioDeviceInfo[] added) {
+            if (!resumeOnReconnect || !hasBluetoothOutput(added)) return;
+            mainHandler.removeCallbacks(resumeAfterReconnect);
+            mainHandler.postDelayed(resumeAfterReconnect, RESUME_DELAY_MS);
+        }
+    };
+
+    private final Runnable resumeAfterReconnect = () -> {
+        if (!resumeOnReconnect) return;
+        resumeOnReconnect = false;
+        if (isPlaying || listener == null || !resumeOnBluetoothEnabled()) return;
+        listener.onPlay();
+    };
+
+    // Classic Bluetooth audio plus LE Audio (API 31 constants; they're plain
+    // ints, so they just never match on older phones). Not SCO: that's the
+    // hands-free call link, which connects separately from the media one.
+    private static boolean hasBluetoothOutput(AudioDeviceInfo[] devices) {
+        for (AudioDeviceInfo d : devices) {
+            if (!d.isSink()) continue;
+            int type = d.getType();
+            if (type == AudioDeviceInfo.TYPE_BLUETOOTH_A2DP
+                || type == AudioDeviceInfo.TYPE_BLE_HEADSET
+                || type == AudioDeviceInfo.TYPE_BLE_SPEAKER) return true;
+        }
+        return false;
+    }
 
     @Override
     public void onCreate() {
@@ -119,7 +204,10 @@ public class PlaybackService extends Service {
         mediaSession.setCallback(new MediaSessionCompat.Callback() {
             @Override public void onPlay() { if (listener != null) listener.onPlay(); }
             @Override public void onPause() { if (listener != null) listener.onPause(); }
-            @Override public void onStop() { if (listener != null) listener.onPause(); }
+            @Override public void onStop() {
+                resumeOnReconnect = false;
+                if (listener != null) listener.onPause();
+            }
             @Override public void onSkipToNext() { if (listener != null) listener.onNext(); }
             @Override public void onSkipToPrevious() { if (listener != null) listener.onPrevious(); }
             @Override public void onSeekTo(long pos) { if (listener != null) listener.onSeekTo(pos); }
@@ -132,6 +220,13 @@ public class PlaybackService extends Service {
         isPlaying = pendingPlaying; positionMs = pendingPositionMs; speed = pendingSpeed;
         applyMetadataToSession();
         applyStateToSession();
+
+        audioManager = (AudioManager) getSystemService(Context.AUDIO_SERVICE);
+        // NOT_EXPORTED still receives broadcasts from the system, which is
+        // the only sender of this one.
+        ContextCompat.registerReceiver(this, noisyReceiver,
+            new IntentFilter(AudioManager.ACTION_AUDIO_BECOMING_NOISY), ContextCompat.RECEIVER_NOT_EXPORTED);
+        if (audioManager != null) audioManager.registerAudioDeviceCallback(deviceCallback, mainHandler);
 
         createChannel();
         startForegroundCompat(buildNotification());
@@ -155,6 +250,9 @@ public class PlaybackService extends Service {
 
     @Override
     public void onDestroy() {
+        mainHandler.removeCallbacks(resumeAfterReconnect);
+        unregisterReceiver(noisyReceiver);
+        if (audioManager != null) audioManager.unregisterAudioDeviceCallback(deviceCallback);
         if (mediaSession != null) { mediaSession.setActive(false); mediaSession.release(); }
         if (instance == this) instance = null;
         super.onDestroy();
@@ -173,6 +271,9 @@ public class PlaybackService extends Service {
 
     /** Called by MediaSessionPlugin whenever JS reports a play/pause/seek. */
     public void updatePlaybackState(boolean playing, long positionMs, float speed) {
+        // Only a real start clears it: JS's periodic "still playing" push can
+        // land just after the disconnect, before its own pause has.
+        if (playing && !this.isPlaying) resumeOnReconnect = false;
         this.isPlaying = playing;
         this.positionMs = positionMs;
         this.speed = speed;

@@ -42,6 +42,7 @@ export const KNOWN_ROUTE_PREFIXES: { prefix: string; label: string }[] = [
   { prefix: '/library/tierlists', label: 'Tier lists' },
   { prefix: '/news', label: 'News' },
   { prefix: '/radio', label: 'Radio' },
+  { prefix: '/recognition', label: 'Song recognition' },
   { prefix: '/reports', label: 'Reports' },
   { prefix: '/songs', label: 'Songs' },
 ]
@@ -83,8 +84,8 @@ function readRules(): RouteRule[] {
     if (raw === null) {
       const migrated: RouteRule[] = []
       for (const [key, prefix] of Object.entries(LEGACY_KEYS)) {
-        const base = localStorage.getItem(key)
-        if (base) migrated.push({ prefix, base: stripSlash(base) })
+        const base = stripSlash(localStorage.getItem(key) ?? '')
+        if (isHttpUrl(base)) migrated.push({ prefix, base })
         localStorage.removeItem(key)
       }
       if (migrated.length) localStorage.setItem(RULES_KEY, JSON.stringify(migrated))

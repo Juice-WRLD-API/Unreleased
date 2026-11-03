@@ -26,16 +26,16 @@ export interface ProposalListItemProps {
   /** Staff only - adds approve/deny to a pending row (an admin reviewing
    *  their own proposal without detouring through the Admin queue). */
   onReview?: (p: SongEditProposal, action: 'approve' | 'reject') => void
-  reviewingId?: number | null
+  reviewingId?: ReadonlySet<number>
 }
 
 export default function ProposalListItem({
   proposal: p, onEdit, onResubmit, onDelete, resubmittingId, deletingId, variant = 'desktop',
-  expanded, onToggleExpand, onReview, reviewingId = null,
+  expanded, onToggleExpand, onReview, reviewingId,
 }: ProposalListItemProps): JSX.Element {
   const isMobile = variant === 'mobile'
   const s = STATUS_STYLES[p.status]
-  const reviewing = reviewingId === p.id
+  const reviewing = !!reviewingId?.has(p.id)
   const busy = resubmittingId === p.id || deletingId === p.id || reviewing
   const iconSize = isMobile ? 13 : 12
 

@@ -1,14 +1,16 @@
 import { relativeTime } from '../../components/adminShared'
 import { fetchCompChanges, fetchTrackerChanges } from '../changesApi'
 import { COMP_CHUNK_THRESHOLD, createCompProposalChunked } from '../compChunkedUpload'
-import { existingCompPaths } from '../compFileChanges'
+import { existingCompPaths, proposeTagEdits } from '../compFileChanges'
+import { getMediaType } from '../fileTypes'
+import { apiFetch, getCompFileTags, listFilesRecursive, listSubtree, parseBrowseEntries, type JWApiBrowseResponse } from '../juicewrldApi'
 import { loadLiveComp, localCompFiles, planCompReplace, runCompReplace } from '../compReplace'
 import { loadSessionEditFiles, loadSessionEditLinks } from '../sessionEditsApi'
 import { useStore } from '../../store/useStore'
 import {
   adminCompFileHistory, adminFetchCompProposalStaging, compChangeTypeLabel, createCompProposal, createCompProposalUpload, createProposal,
-  getLeaderboard, getMyApplication, getMyCompProposals, getMyProposals, getProposal, resubmitProposal, submitApplication, updateCompProposal,
-  updateProposal, withdrawCompProposal, withdrawProposal, type ApplicationType, type CompProposalChangeType, type ProposalChangeType,
+  getLeaderboard, getMyApplication, getMyCompProposals, getMyProposals, getMyProposalsPage, MY_PROPOSALS_PAGE_SIZE, getProposal, resubmitProposal, submitApplication, updateCompProposal,
+  updateProposal, withdrawCompProposal, withdrawProposal, COMP_TAG_KEYS, type ApplicationType, type CompTagChanges, type CompProposalChangeType, type ProposalChangeType, type ProposalStatus,
 } from '../userApi'
 import { pickLocalFile, pickLocalFolder, saveBlob } from './pick'
 import { pageLines } from './more'
@@ -32,15 +34,15 @@ function splitBody(args: string): { head: string; body: Record<string, unknown> 
 }
 
 const PROPOSAL_TYPES: ProposalChangeType[] = ['create', 'update', 'delete']
-const COMP_TYPES: CompProposalChangeType[] = ['upload', 'replace', 'move', 'delete', 'create_folder', 'rename_folder', 'move_folder', 'delete_folder']
+const COMP_TYPES: CompProposalChangeType[] = ['upload', 'replace', 'move', 'delete', 'create_folder', 'rename_folder', 'move_folder', 'delete_folder', 'retag']
 const NEEDS_FILE = new Set<CompProposalChangeType>(['upload', 'replace'])
 const NEEDS_DESTINATION = new Set<CompProposalChangeType>(['move', 'rename_folder', 'move_folder'])
 
 const proposalCommand: TermCommand = {
   name: 'proposal', aliases: ['edits'], group: 'Editor',
-  usage: 'proposal [ls] · show <id> · new <create|update|delete> [song] [{json}] [--title t] [--note n] · edit <id> [{json}] [--title t] [--note n] · withdraw <id> · resubmit <id>   (--channel c)',
+  usage: 'proposal [ls [--status s] [--search q] [--page n]] · show <id> · new <create|update|delete> [song] [{json}] [--title t] [--note n] · edit <id> [{json}] [--title t] [--note n] · withdraw <id> · resubmit <id>   (--channel c)',
   description: 'Your song-edit proposals: list, show, create, change, withdraw or resubmit one. The JSON body is the fields you propose, e.g. proposal new update <song> {"name":"New title"}',
-  covers: ['userApi.getMyProposals', 'userApi.getProposal', 'userApi.withProposalData', 'userApi.createProposal', 'userApi.updateProposal', 'userApi.withdrawProposal', 'userApi.resubmitProposal'],
+  covers: ['userApi.getMyProposals', 'userApi.getMyProposalsPage', 'userApi.getProposal', 'userApi.withProposalData', 'userApi.createProposal', 'userApi.updateProposal', 'userApi.withdrawProposal', 'userApi.resubmitProposal'],
   complete: (before, partial) => {
     const p = partial.toLowerCase()
     if (before.length === 0) return ['ls', 'show', 'new', 'edit', 'withdraw', 'resubmit'].filter((v) => v.startsWith(p))
@@ -51,11 +53,24 @@ const proposalCommand: TermCommand = {
   run: async (args, ctx) => {
     signedIn()
     const { head, body } = splitBody(args)
-    const { rest, bool, value } = parseArgs(head, ['title', 'note', 'channel'])
+    const { rest, bool, value } = parseArgs(head, ['title', 'note', 'channel', 'status', 'search', 'page'])
     const channel = value.get('channel')
     const sub = (rest.shift() ?? 'ls').toLowerCase()
 
-    if (sub === 'ls' || sub === 'list') {
+    if ((sub === 'ls' || sub === 'list') && (value.has('status') || value.has('search') || value.has('page'))) {
+      // One server-side page, filtered, with the totals per status.
+      const status = value.get('status')
+      if (status && !['pending', 'approved', 'rejected', 'reversed'].includes(status)) fail('status is pending, approved, rejected or reversed')
+      const page = Math.max(1, Math.floor(Number(value.get('page') ?? 1)) || 1)
+      const got = await getMyProposalsPage(channel, {
+        offset: (page - 1) * MY_PROPOSALS_PAGE_SIZE, status: status as ProposalStatus | undefined, q: value.get('search'),
+      })
+      if (asJson(ctx, bool.has('json'), got)) return
+      if (got.results.length === 0) { ctx.print('no matching proposals', 'dim'); return }
+      const c = got.counts
+      ctx.print(`${table(got.results.map((p) => [`#${p.id}`, p.status, p.change_type, p.title, relativeTime(p.created_at)]))}
+${got.count} match · page ${page} of ${Math.ceil(got.count / MY_PROPOSALS_PAGE_SIZE)}${c ? ` · ${c.total} total (${c.pending} pending, ${c.approved} approved, ${c.rejected} rejected)` : ''}`)
+    } else if (sub === 'ls' || sub === 'list') {
       const list = await getMyProposals(channel)
       if (asJson(ctx, bool.has('json'), list)) return
       if (list.length === 0) { ctx.print('no proposals yet', 'dim'); return }
@@ -114,25 +129,83 @@ function progressPrinter(ctx: TermCtx, label: string): (sent: number, total: num
   }
 }
 
+// The audio files at a comp path: the file itself, or a folder's audio
+// (its whole subtree with --recursive).
+async function compAudioAt(path: string, channel: string | undefined, recursive: boolean): Promise<string[]> {
+  const isAudio = (name: string): boolean => getMediaType(name) === 'audio'
+  if (isAudio(path)) return [path]
+  const entries = recursive
+    ? (await listSubtree(path, channel)) ?? await listFilesRecursive(path, channel)
+    : parseBrowseEntries(await apiFetch<JWApiBrowseResponse>('/files/browse/', { path: path || undefined, channel }))
+  return entries.filter((e) => e.type === 'file' && isAudio(e.name)).map((e) => e.path)
+}
+
+function readAsDataUrl(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onload = () => resolve(String(reader.result))
+    reader.onerror = () => reject(new Error('could not read the image'))
+    reader.readAsDataURL(file)
+  })
+}
+
+const TAGS_HINT = `{"album":"GBGR","year":"2018"} - tags: ${COMP_TAG_KEYS.join(', ')}; "" removes one, "cover":"" removes the cover`
+
 const compCommand: TermCommand = {
   name: 'comp', group: 'Editor',
-  usage: 'comp [ls] · new <type> <path> [--to dest] [--note n] [--new-leak] · edit <id> [--path p] [--to dest] [--note n] [--file] [--new-leak|--not-new-leak] · withdraw <id> · staging <id> · history <path>   (--channel c)',
-  description: `Your comp file proposals (changes to the Files tab): types ${COMP_TYPES.join(', ')}. upload/replace open a file picker. staging and history are for reviewers`,
+  usage: 'comp [ls] · new <type> <path> [--to dest] [--note n] [--new-leak] · edit <id> [--path p] [--to dest] [--note n] [--file] [--new-leak|--not-new-leak] · withdraw <id> · staging <id> · history <path> · tags <file|folder> [--recursive] · retag <file|folder> {tags} [--cover] [--recursive] [--note n]   (--channel c)',
+  description: `Your comp file proposals (changes to the Files tab): types ${COMP_TYPES.join(', ')}. upload/replace open a file picker. tags reads a file's or folder's tags; retag proposes tag changes on every audio file there as one batch (--cover picks a cover image). staging and history are for reviewers`,
   covers: [
     'userApi.getMyCompProposals', 'userApi.createCompProposal', 'userApi.createCompProposalUpload', 'userApi.updateCompProposal', 'userApi.withdrawCompProposal',
     'userApi.adminFetchCompProposalStaging', 'userApi.adminCompFileHistory', 'compChunkedUpload.createCompProposalChunked',
+    'juicewrldApi.getCompFileTags', 'compFileChanges.proposeTagEdits', 'userApi.submitCompProposalBatch',
   ],
   complete: (before, partial) => {
     const p = partial.toLowerCase()
-    if (before.length === 0) return ['ls', 'new', 'edit', 'withdraw', 'staging', 'history'].filter((v) => v.startsWith(p))
+    if (before.length === 0) return ['ls', 'new', 'edit', 'withdraw', 'staging', 'history', 'tags', 'retag'].filter((v) => v.startsWith(p))
     if (before[0] === 'new' && before.length === 1) return COMP_TYPES.filter((v) => v.startsWith(p))
     return []
   },
   run: async (args, ctx) => {
-    signedIn()
-    const { rest, bool, value } = parseArgs(args, ['to', 'note', 'channel', 'path'])
+    // retag carries a JSON body of tags; everything before it is the usual words and flags.
+    const { head, body } = /^\s*retag\b/i.test(args) ? splitBody(args) : { head: args, body: null }
+    const { rest, bool, value } = parseArgs(head, ['to', 'note', 'channel', 'path'])
     const channel = value.get('channel')
     const sub = (rest.shift() ?? 'ls').toLowerCase()
+    if (sub !== 'tags') signedIn()
+
+    if (sub === 'tags') {
+      const path = rest.join(' ')
+      if (!path) fail('usage: comp tags <file|folder> [--recursive] [--json]')
+      const paths = await compAudioAt(path, channel, bool.has('recursive'))
+      const tags = await getCompFileTags(paths, channel)
+      if (asJson(ctx, bool.has('json'), Object.fromEntries(tags))) return
+      if (tags.size === 0) { ctx.print('no audio with readable tags there', 'dim'); return }
+      if (tags.size === 1) {
+        const [only] = [...tags.values()]
+        ctx.print(table([...COMP_TAG_KEYS.map((k) => [k, only[k] || '-']), ['cover', only.has_cover ? 'yes' : 'no']]))
+        return
+      }
+      ctx.print(`${table([...tags].map(([p, t]) => [p.split('/').pop() ?? p, t.artist, t.album, t.year, t.has_cover ? 'cover' : '']))}\n${tags.size} files`)
+      return
+    }
+    if (sub === 'retag') {
+      const path = rest.join(' ')
+      if (!path || (!body && !bool.has('cover'))) fail(`usage: comp retag <file|folder> {tags} [--cover] [--recursive] [--note n] - ${TAGS_HINT}`)
+      const tags: CompTagChanges = {}
+      for (const [k, v] of Object.entries(body ?? {})) {
+        if (k !== 'cover' && !(COMP_TAG_KEYS as readonly string[]).includes(k)) fail(`unknown tag "${k}" - ${TAGS_HINT}`)
+        tags[k as keyof CompTagChanges] = v == null ? '' : String(v)
+      }
+      const paths = await compAudioAt(path, channel, bool.has('recursive'))
+      if (paths.length === 0) fail(`no audio files at ${path}`)
+      const cover = bool.has('cover') ? await readAsDataUrl(await pickLocalFile('image/png,image/jpeg')) : undefined
+      if (!confirmAction(ctx, `Propose tag changes on ${paths.length} file${paths.length === 1 ? '' : 's'}?`, bool.has('y') || paths.length === 1)) return
+      const res = await proposeTagEdits(paths.map((p) => ({ path: p, tags, cover })), channel ?? '', value.get('note') ?? '')
+      ctx.print(`${res.count} retag proposal${res.count === 1 ? '' : 's'} sent as batch ${res.batch_id.slice(0, 8)} (${res.auto_approved} applied, ${res.pending} pending)`, 'ok')
+      if (res.auto_approve_error) ctx.print(`stopped at #${res.auto_approve_error.id}: ${res.auto_approve_error.detail}`, 'error')
+      return
+    }
 
     if (sub === 'ls' || sub === 'list') {
       const list = await getMyCompProposals(channel)

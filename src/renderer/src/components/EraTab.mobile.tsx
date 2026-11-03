@@ -19,7 +19,7 @@ function CreatePanel({ onCreated, onClose }: { onCreated: (era: Era) => void; on
   }
 
   return (
-    <div className="rounded-2xl border border-[var(--border)] bg-surface-raised/50 p-4 space-y-3 m-3">
+    <div className="rounded-2xl border border-[var(--separator)] bg-surface-raised/50 p-4 space-y-3 m-3">
       <div className="flex items-center gap-2">
         <p className="text-sm font-bold text-text-primary flex items-center gap-2 flex-1"><Plus size={14} /> New era</p>
         <button onClick={onClose} title="Close" className="p-1 rounded text-text-muted active:text-text-primary"><X size={14} /></button>
@@ -28,7 +28,7 @@ function CreatePanel({ onCreated, onClose }: { onCreated: (era: Era) => void; on
         value={name}
         onChange={(e) => setName(e.target.value)}
         placeholder="Era name - e.g. Late 2019"
-        className="w-full rounded-xl border border-[var(--border)] bg-surface-overlay px-3 py-2 text-sm text-text-primary focus:outline-none focus:border-accent/40"
+        className="w-full rounded-xl border border-[var(--separator)] bg-surface-overlay px-3 py-2 text-sm text-text-primary focus:outline-none focus:border-accent/40"
       />
       {error && <p className="text-xs text-red-400 flex items-center gap-1.5"><AlertCircle size={12} />{error}</p>}
       <button
@@ -58,12 +58,12 @@ function EraDetail({ era, onBack, onSaved, onDeleted }: {
 
   return (
     <div className="flex-1 flex flex-col h-full overflow-hidden">
-      <div className="shrink-0 flex items-center gap-1 px-2 py-1.5 border-b border-[var(--border)]">
-        <button onClick={onBack} title="Back" className="w-11 h-11 shrink-0 flex items-center justify-center rounded-full text-text-primary active:bg-surface-overlay transition-colors">
-          <ChevronLeft size={20} />
+      <div className="shrink-0 flex items-center gap-2 px-2 py-1.5 border-b border-[var(--separator)]">
+        <button onClick={onBack} title="Back" className="glass-button w-11 h-11 shrink-0 flex items-center justify-center rounded-full text-text-primary active:opacity-60 transition-opacity">
+          <ChevronLeft size={24} strokeWidth={2.25} className="-ml-0.5" />
         </button>
         <div className="flex-1 min-w-0">
-          <p className="text-[15px] font-bold text-text-primary truncate">{era.name}</p>
+          <p className="text-headline text-text-primary truncate">{era.name}</p>
           <p className="text-[11px] text-text-muted truncate">Era #{era.id} · {era.play_count} plays</p>
         </div>
         <button
@@ -78,49 +78,49 @@ function EraDetail({ era, onBack, onSaved, onDeleted }: {
 
       <div className="flex-1 overflow-y-auto p-4 space-y-3">
         <label className="block">
-          <span className="text-[10px] font-bold uppercase tracking-widest text-text-muted mb-1 block">Name</span>
+          <span className="text-footnote font-semibold text-text-secondary mb-1 block">Name</span>
           <input
             value={name}
             onChange={(e) => setName(e.target.value)}
-            className="w-full rounded-xl border border-[var(--border)] bg-surface-overlay px-3 py-2.5 text-sm text-text-primary focus:outline-none focus:border-accent/40"
+            className="w-full rounded-xl border border-[var(--separator)] bg-surface-overlay px-3 py-2.5 text-sm text-text-primary focus:outline-none focus:border-accent/40"
           />
         </label>
         <label className="block">
-          <span className="text-[10px] font-bold uppercase tracking-widest text-text-muted mb-1 block">Description</span>
+          <span className="text-footnote font-semibold text-text-secondary mb-1 block">Description</span>
           <input
             value={description}
             onChange={(e) => setDescription(e.target.value)}
             placeholder="Optional"
-            className="w-full rounded-xl border border-[var(--border)] bg-surface-overlay px-3 py-2.5 text-sm text-text-primary focus:outline-none focus:border-accent/40"
+            className="w-full rounded-xl border border-[var(--separator)] bg-surface-overlay px-3 py-2.5 text-sm text-text-primary focus:outline-none focus:border-accent/40"
           />
         </label>
         <label className="block">
-          <span className="text-[10px] font-bold uppercase tracking-widest text-text-muted mb-1 block">Time frame</span>
+          <span className="text-footnote font-semibold text-text-secondary mb-1 block">Time frame</span>
           <input
             value={timeFrame}
             onChange={(e) => setTimeFrame(e.target.value)}
             placeholder="e.g. January - June 2018"
-            className="w-full rounded-xl border border-[var(--border)] bg-surface-overlay px-3 py-2.5 text-sm text-text-primary focus:outline-none focus:border-accent/40"
+            className="w-full rounded-xl border border-[var(--separator)] bg-surface-overlay px-3 py-2.5 text-sm text-text-primary focus:outline-none focus:border-accent/40"
           />
         </label>
         <label className="block">
-          <span className="text-[10px] font-bold uppercase tracking-widest text-text-muted mb-1 block">Play count</span>
+          <span className="text-footnote font-semibold text-text-secondary mb-1 block">Play count</span>
           <input
             type="number"
             value={playCount}
             onChange={(e) => setPlayCount(e.target.value)}
-            className="w-full rounded-xl border border-[var(--border)] bg-surface-overlay px-3 py-2.5 text-sm text-text-primary tabular-nums focus:outline-none focus:border-accent/40"
+            className="w-full rounded-xl border border-[var(--separator)] bg-surface-overlay px-3 py-2.5 text-sm text-text-primary tabular-nums focus:outline-none focus:border-accent/40"
           />
         </label>
 
         {error && <p className="text-xs text-red-400 flex items-center gap-1.5"><AlertCircle size={12} />{error}</p>}
       </div>
 
-      <div className="shrink-0 p-3 border-t border-[var(--border)]">
+      <div className="shrink-0 p-3 border-t border-[var(--separator)]">
         <button
           onClick={save}
           disabled={busy || !dirty || !name.trim()}
-          className="w-full h-11 rounded-xl bg-accent active:bg-accent/90 text-[var(--bg)] text-sm font-semibold transition-colors disabled:opacity-50 flex items-center justify-center gap-1.5"
+          className="w-full h-11 rounded-full bg-accent active:opacity-80 text-white text-headline transition-colors disabled:opacity-50 flex items-center justify-center gap-1.5"
         >
           {busy ? <Loader2 size={14} className="animate-spin" /> : <Check size={14} />}
           Save changes
@@ -150,7 +150,7 @@ export default function EraTab(): JSX.Element {
 
   return (
     <div className="h-full flex flex-col overflow-hidden">
-      <div className="shrink-0 flex items-center justify-between px-4 py-2.5 border-b border-[var(--border)]">
+      <div className="shrink-0 flex items-center justify-between px-4 py-2.5 border-b border-[var(--separator)]">
         <p className="text-[11px] font-bold uppercase tracking-widest text-text-muted flex items-center gap-1.5">
           <Clock size={12} /> Eras
         </p>
@@ -163,7 +163,7 @@ export default function EraTab(): JSX.Element {
       </div>
 
       {error && (
-        <div className="mx-3 mt-2 flex items-start gap-2 px-3 py-2.5 rounded-xl bg-red-500/10 border border-red-500/20 text-red-400 text-xs shrink-0">
+        <div className="mx-3 mt-2 flex items-start gap-2 px-3 py-2.5 rounded-xl bg-red-500/10 text-red-500 text-footnote shrink-0">
           <AlertCircle size={13} className="shrink-0 mt-0.5" /> {error}
         </div>
       )}
@@ -176,7 +176,7 @@ export default function EraTab(): JSX.Element {
           <button
             key={e.id}
             onClick={() => setSelectedId(e.id)}
-            className="w-full text-left px-4 py-3 border-b border-[var(--border)] active:bg-surface-raised transition-colors"
+            className="w-full text-left px-4 py-3 border-b border-[var(--separator)] active:bg-[var(--fill)] transition-colors"
           >
             <div className="flex items-center gap-2">
               <Clock size={13} className="text-text-muted shrink-0" />

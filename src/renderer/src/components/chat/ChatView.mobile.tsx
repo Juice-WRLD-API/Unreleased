@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { MessagesSquare, Plus } from 'lucide-react'
+import { MessagesSquare, Plus, SquarePen } from 'lucide-react'
 import { roomKey, useChatStore } from '../../store/chatStore'
 import { useChatUiStore } from '../../store/chatUiStore'
 import { useOpenModal } from './modalHost'
@@ -9,6 +9,7 @@ import RoomPane from './RoomPane'
 import SearchPanel from './SearchPanel'
 import { DmInfoPanel, MembersPanel, PinsPanel, ThreadPanel } from './SidePanels'
 import { CountBadge, ServerGlyph } from './ui'
+import { BarButton, LargeTitle } from '../mobile/NavBar'
 
 function ServerStrip(): JSX.Element {
   const servers = useChatStore((s) => s.servers)
@@ -20,15 +21,15 @@ function ServerStrip(): JSX.Element {
   const dmUnread = conversations.reduce((n, c) => n + (unread[`d:${c.id}`] ?? 0), 0)
 
   const chip = (active: boolean): string =>
-    `relative shrink-0 flex flex-col items-center gap-1 w-16 pt-1 transition-opacity ${active ? 'opacity-100' : 'opacity-60'}`
+    `relative shrink-0 flex flex-col items-center gap-1 w-16 pt-1 transition-opacity ${active ? 'opacity-100' : 'opacity-60 active:opacity-80'}`
 
   return (
-    <div className="shrink-0 flex gap-1 overflow-x-auto no-scrollbar px-2 pt-3 pb-2 border-b border-[var(--border)]">
+    <div className="shrink-0 flex gap-1 overflow-x-auto no-scrollbar px-2 pt-1 pb-2 border-b border-[var(--separator)]">
       <button onClick={() => selectServer(null)} className={chip(activeServerId === null)}>
-        <span className={`w-12 h-12 flex items-center justify-center rounded-2xl ${activeServerId === null ? 'bg-accent text-white' : 'bg-surface-raised text-text-secondary'}`}>
+        <span className={`w-12 h-12 flex items-center justify-center rounded-[14px] ${activeServerId === null ? 'bg-accent text-white' : 'bg-[var(--fill)] text-text-primary'}`}>
           <MessagesSquare size={22} />
         </span>
-        <span className="text-[10px] font-semibold text-text-primary truncate max-w-full">Messages</span>
+        <span className="text-caption2 font-semibold text-text-primary truncate max-w-full">Messages</span>
         {dmUnread > 0 && <span className="absolute top-0 right-1"><CountBadge count={dmUnread} mention /></span>}
       </button>
       {servers.map((s) => {
@@ -36,16 +37,16 @@ function ServerStrip(): JSX.Element {
         return (
           <button key={s.id} onClick={() => selectServer(s.id)} className={chip(activeServerId === s.id)}>
             <ServerGlyph server={s} size={48} active={activeServerId === s.id} />
-            <span className="text-[10px] font-semibold text-text-primary truncate max-w-full">{s.name}</span>
+            <span className="text-caption2 font-semibold text-text-primary truncate max-w-full">{s.name}</span>
             {hasUnread && <span className="absolute top-1 right-3 w-2.5 h-2.5 rounded-full bg-accent ring-2 ring-[var(--surface)]" />}
           </button>
         )
       })}
       <button onClick={() => openModal({ kind: 'create-server' })} className={chip(false)}>
-        <span className="w-12 h-12 flex items-center justify-center rounded-2xl border border-dashed border-[var(--border)] text-accent">
+        <span className="w-12 h-12 flex items-center justify-center rounded-[14px] bg-[var(--fill)] text-accent">
           <Plus size={22} />
         </span>
-        <span className="text-[10px] font-semibold text-text-muted">New</span>
+        <span className="text-caption2 font-semibold text-text-secondary">New</span>
       </button>
     </div>
   )
@@ -139,6 +140,13 @@ export default function ChatViewMobile(): JSX.Element {
 
   return (
     <div className="flex-1 min-w-0 h-full flex flex-col bg-surface overflow-hidden relative">
+      <LargeTitle
+        inset="none"
+        title="Chat"
+        trailing={activeServerId === null
+          ? <BarButton label="New message" onClick={() => openModal({ kind: 'new-dm' })}><SquarePen size={20} /></BarButton>
+          : undefined}
+      />
       <ServerStrip />
       {activeServerId === null
         ? <DmList onPicked={() => setMobileRoomOpen(true)} showFooter={false} />

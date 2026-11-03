@@ -253,11 +253,14 @@ export default function SyncedLyricsTool({
     if (!clock.ready) { setLit({ line: -1, word: -1 }); return }
     let raf = 0
     let lastDur = -1
+    let lastText = ''
     const tick = (): void => {
       const c = clockRef.current
       const t = c.now()
       const d = c.duration()
-      if (clockTextRef.current) clockTextRef.current.textContent = formatDuration(t)
+      // Only when the second changes: writing the text lays the bar out again.
+      const text = formatDuration(t)
+      if (clockTextRef.current && text !== lastText) { lastText = text; clockTextRef.current.textContent = text }
       if (fillRef.current) fillRef.current.style.transform = `scaleX(${d ? Math.min(t / d, 1) : 0})`
       if (Math.round(d) !== lastDur) { lastDur = Math.round(d); setDuration(d) }
       const ls_ = linesRef.current

@@ -24,12 +24,12 @@ export default function ReportsTab({ reports, status, setStatus, onChanged }: {
 
   if (r) return (
     <div className="flex-1 flex flex-col h-full overflow-hidden">
-      <div className="shrink-0 flex items-center gap-1 px-2 py-1.5 border-b border-[var(--border)]">
+      <div className="shrink-0 flex items-center gap-2 px-2 py-1.5 border-b border-[var(--separator)]">
         <button onClick={() => setSelected(null)}
-          className="w-11 h-11 shrink-0 flex items-center justify-center rounded-full text-text-primary active:bg-surface-overlay transition-colors">
-          <ChevronLeft size={20} />
+          className="glass-button w-11 h-11 shrink-0 flex items-center justify-center rounded-full text-text-primary active:opacity-60 transition-opacity">
+          <ChevronLeft size={24} strokeWidth={2.25} className="-ml-0.5" />
         </button>
-        <h2 className="flex-1 min-w-0 truncate text-text-primary text-[15px] font-bold">{songLabel(r)}</h2>
+        <h2 className="flex-1 min-w-0 truncate text-text-primary text-headline">{songLabel(r)}</h2>
         <StatusChip status={r.status} />
       </div>
 
@@ -57,29 +57,29 @@ export default function ReportsTab({ reports, status, setStatus, onChanged }: {
 
         {r.status === 'pending' && (
           <label className="space-y-2 block">
-            <span className="text-[10px] font-bold uppercase tracking-widest text-text-muted">Review note</span>
+            <span className="text-footnote font-semibold text-text-secondary">Review note</span>
             <textarea
               value={notes[r.id] || ''}
               onChange={e => setNotes(n => ({ ...n, [r.id]: e.target.value }))}
               placeholder="Optional note recorded with the resolution…"
               rows={3}
-              className="w-full bg-surface-overlay border border-[var(--border)] rounded-xl px-3 py-2.5 text-text-primary text-sm resize-none focus:outline-none focus:border-accent/40"
+              className="w-full bg-[var(--fill)] border border-transparent rounded-xl px-3.5 py-2.5 text-text-primary text-sm resize-none focus:outline-none focus:border-accent/40"
             />
           </label>
         )}
       </div>
 
-      <div className="shrink-0 p-3 border-t border-[var(--border)]">
+      <div className="shrink-0 p-3 border-t border-[var(--separator)]">
         {actionId === r.id ? (
           <div className="flex justify-center py-2.5"><Loader2 size={16} className="animate-spin text-text-muted" /></div>
         ) : r.status === 'pending' ? (
           <button onClick={() => doReview(r, 'resolved')}
-            className="w-full h-11 rounded-xl bg-emerald-500/15 active:bg-emerald-500/25 text-emerald-400 text-sm font-semibold transition-colors flex items-center justify-center gap-1.5">
+            className="w-full h-11 rounded-full bg-emerald-500/15 active:bg-emerald-500/25 text-emerald-500 text-headline transition-colors flex items-center justify-center gap-1.5">
             <CheckCircle size={15} /> Resolve
           </button>
         ) : (
           <button onClick={() => doReview(r, 'pending')}
-            className="w-full h-11 rounded-xl bg-surface-overlay active:bg-surface-raised text-text-secondary text-sm font-semibold transition-colors flex items-center justify-center gap-1.5">
+            className="w-full h-11 rounded-xl bg-surface-overlay active:bg-[var(--fill)] text-text-secondary text-sm font-semibold transition-colors flex items-center justify-center gap-1.5">
             <RotateCcw size={15} /> Reopen
           </button>
         )}
@@ -89,7 +89,7 @@ export default function ReportsTab({ reports, status, setStatus, onChanged }: {
 
   return (
     <div className="flex-1 flex flex-col h-full overflow-hidden">
-      <div className="shrink-0 flex gap-2 overflow-x-auto scrollbar-none px-3 py-2.5 border-b border-[var(--border)]">
+      <div className="shrink-0 flex gap-2 overflow-x-auto scrollbar-none px-3 py-2.5 border-b border-[var(--separator)]">
         {REPORT_FILTERS.map(f => (
           <button key={f.id || 'all'} onClick={() => setStatus(f.id)}
             className={`shrink-0 px-3 py-1.5 rounded-full text-xs font-semibold transition-colors ${
@@ -103,11 +103,11 @@ export default function ReportsTab({ reports, status, setStatus, onChanged }: {
         {reports.length === 0 && <Empty label="No reports" />}
         {reports.map(item => (
           <button key={item.id} onClick={() => setSelected(item)}
-            className={`w-full text-left px-3 py-3 border-b border-[var(--border)] border-l-2 ${STATUS_STYLE[item.status]?.border ?? 'border-l-transparent'} transition-colors active:bg-surface-raised ${
+            className={`w-full text-left px-3 py-3 border-b border-[var(--separator)] border-l-2 ${STATUS_STYLE[item.status]?.border ?? 'border-l-transparent'} transition-colors active:bg-[var(--fill)] ${
               item.status !== 'pending' ? 'opacity-60' : ''
             }`}>
-            <p className="text-text-primary text-sm font-semibold truncate">{songLabel(item)}</p>
-            <p className="text-text-muted text-xs truncate mt-0.5">{item.message}</p>
+            <p className="text-text-primary text-body font-semibold truncate">{songLabel(item)}</p>
+            <p className="text-text-muted text-footnote truncate mt-0.5">{item.message}</p>
             <p className="text-text-muted text-[11px] mt-1">
               {item.status === 'pending'
                 ? relativeTime(item.created_at ?? null)

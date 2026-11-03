@@ -52,6 +52,7 @@ export const ContributorProfileView = lazyView(() => import('../components/Contr
 // the route is still worth it - it's off the startup path either way.
 export const LikedSongsView = lazyView(() => import('../components/LikedSongsView'))
 export const DiagnosticsModal = lazyView(() => import('../components/DiagnosticsModal'))
+export const AlbumsView = lazyView(() => import('../components/AlbumsView'))
 export const ChatView = lazyView(() => import('../components/ChatView'))
 export const TerminalPage = lazyView(() => import('../components/TerminalPage'))
 export const LibraryTab = lazyView(() => import('../components/LibraryTab'))
@@ -74,6 +75,7 @@ const LOADERS: Partial<Record<ViewType, () => Promise<unknown>>> = {
   'not-found': () => import('../components/NotFoundView'),
   docs: DocsPage.preload,
   wrld: WrldView.preload,
+  albums: () => import('../components/AlbumsView'),
   news: () => import('../components/NewsView'),
   heardle: HeardleView.preload,
   wordle: WordleView.preload,

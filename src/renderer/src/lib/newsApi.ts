@@ -62,7 +62,7 @@ export async function fetchChannels(): Promise<NewsChannel[]> {
   const res = await apiRequest<{ results: NewsChannel[] } | NewsChannel[]>(`${NEWS_BASE}/channels/`, {
     cacheKey: 'news:channels',
   })
-  return Array.isArray(res) ? res : res.results
+  return Array.isArray(res) ? res : (res?.results ?? [])
 }
 
 // Admin only. The backend assigns the slug id from the label.
@@ -73,12 +73,12 @@ export async function createChannel(input: ChannelInput): Promise<NewsChannel> {
 
 export async function updateChannel(id: string, input: Partial<ChannelInput>): Promise<NewsChannel> {
   assertEnabled()
-  return authed<NewsChannel>(`${NEWS_BASE}/channels/${id}/`, { method: 'PATCH', body: JSON.stringify(input) })
+  return authed<NewsChannel>(`${NEWS_BASE}/channels/${encodeURIComponent(id)}/`, { method: 'PATCH', body: JSON.stringify(input) })
 }
 
 export async function deleteChannel(id: string): Promise<void> {
   assertEnabled()
-  return authed<void>(`${NEWS_BASE}/channels/${id}/`, { method: 'DELETE' })
+  return authed<void>(`${NEWS_BASE}/channels/${encodeURIComponent(id)}/`, { method: 'DELETE' })
 }
 
 // ─── Attachments ──────────────────────────────────────────────────────────────

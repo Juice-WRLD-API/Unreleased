@@ -32,11 +32,11 @@ export function useReportsTabState(reports: SongReportRow[], onChanged: () => vo
   const [notes,    setNotes]    = useState<Record<number, string>>({})
   const [selected, setSelected] = useState<SongReportRow | null>(null)
 
+  // Keep an open report in sync with refreshed data (e.g. after resolving it)
+  // rather than jumping back to the first one; when it's gone, the split view
+  // falls back to the first report and the single-pane one to the list.
   useEffect(() => {
-    if (autoSelect) { setSelected(reports[0] ?? null); return }
-    // Keep an open report in sync with refreshed data (e.g. after resolving
-    // it); drop it if it's no longer in the list.
-    setSelected(cur => (cur ? reports.find(x => x.id === cur.id) ?? null : null))
+    setSelected(cur => (cur && reports.find(x => x.id === cur.id)) ?? (autoSelect ? reports[0] ?? null : null))
   }, [reports, autoSelect])
 
   // Song names for rows that only carry an id - one bulk catalog fetch (the

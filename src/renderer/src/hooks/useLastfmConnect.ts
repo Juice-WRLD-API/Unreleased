@@ -34,6 +34,9 @@ export function useLastfmConnect(setLastfmUser: (name: string | null) => void): 
     try {
       const token = await lastfmGetAuthToken()
       window.open(lastfmAuthUrl(token), '_blank', 'noopener')
+      // Connecting again while still waiting replaces the old poll; leaving it
+      // running orphaned it (nothing could clear it) to poll for good.
+      if (lastfmPollRef.current) clearInterval(lastfmPollRef.current)
       setLastfmWaiting(true)
       const startedAt = Date.now()
       lastfmPollRef.current = setInterval(() => {

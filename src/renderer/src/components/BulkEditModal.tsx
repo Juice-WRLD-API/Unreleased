@@ -2,14 +2,17 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import { ModalOverlay, LockToggle } from './Modal'
 import {
   Loader2, Check, AlertCircle, X, Pencil, ChevronDown, ChevronRight, Eraser, ArrowRight,
+  Image as ImageIcon, Upload,
 } from 'lucide-react'
 import { useStore } from '../store/useStore'
 import * as userApi from '../lib/userApi'
 import { useShallow } from 'zustand/react/shallow'
-import { apiFetch, getSongById, loadAllSongs, CATEGORY_LABELS } from '../lib/juicewrldApi'
+import { apiFetch, getSongById, getCompFileTags, loadAllSongs, CATEGORY_LABELS } from '../lib/juicewrldApi'
+import type { CompFileTags } from '../lib/juicewrldApi'
+import { proposeTagEdits } from '../lib/compFileChanges'
 import { OPTIONAL_SONG_FIELDS } from '../lib/trackerFields'
 import type { JWApiSong, JWApiEra } from '../lib/juicewrldApi'
-import { useCanEdit } from '../hooks/useChannelRoles'
+import { useCanContribute, useCanEdit } from '../hooks/useChannelRoles'
 import { getVersionMetaForSongs, getOwnVersionMeta, setOwnVersionTitle, linkSongVersion, setGroupVersionTitle } from '../lib/versionsApi'
 import type { SongVersionMeta } from '../lib/versionsApi'
 import { invalidateCompactGroupsCache } from '../lib/compactGroups'
@@ -24,9 +27,9 @@ import ThemedCheckbox from './ThemedCheckbox'
 //     endpoint, so this files one ordinary update proposal per song, exactly
 //     like EditorPage does for a single song; review, admin auto-approve and
 //     My Proposals all behave the same.
-//   • Local library files, from the Library's multi-select "Edit tags". These
-//     write ID3 frames straight to disk through the writeTrackMetadata
-//     channel, then mirror the change into the in-memory library index.
+//   • Comp files, from the Files tab's "Edit tags". These go up as one batch
+//     of retag proposals (commitAll), so a reviewer takes them as a whole and
+//     the server writes the tags when they're approved.
 //
 // Both share the whole interaction model - tick a field, pick how the value
 // combines with what's there, preview, submit - so the machinery below is
@@ -38,7 +41,7 @@ import ThemedCheckbox from './ThemedCheckbox'
 
 /* ── Field model ───────────────────────────────────────────────────────────── */
 
-type FieldKind = 'text' | 'textarea' | 'list' | 'select'
+type FieldKind = 'text' | 'textarea' | 'list' | 'select' | 'image'
 
 /** How a field's input is combined with each item's existing value. Which of
  *  these a field offers depends on its kind (see DEFAULT_MODES). */
@@ -103,6 +106,9 @@ interface BulkSpec<T> {
   /** Applies one item's changes. Patch values are final strings; '' means the
    *  field should end up empty. Throwing marks that item failed. */
   commit: (item: T, patch: Record<string, string>, note: string) => Promise<void>
+  /** Sends every item's changes in one request instead of commit() per item.
+   *  All or nothing: throwing marks the whole set failed. */
+  commitAll?: (targets: { item: T; patch: Record<string, string> }[], note: string) => Promise<void>
   /** Copy for the submit button and the success state. */
   actionLabel: (n: number) => string
   doneLabel: (n: number) => string
@@ -121,6 +127,7 @@ const DEFAULT_MODES: Record<FieldKind, Mode[]> = {
   list:     ['set', 'add', 'remove', 'fill', 'clear'],
   textarea: ['set', 'append', 'fill', 'clear'],
   text:     ['set', 'fill', 'clear'],
+  image:    ['set'],
 }
 
 const MODE_LABELS: Record<Mode, string> = {
@@ -287,6 +294,41 @@ function apiFields(
   ]
 }
 
+/* ── Comp files ────────────────────────────────────────────────────────────── */
+
+type CompFile = { path: string; name: string }
+
+const COMP_GROUPS = ['Tags', 'More']
+const COMP_TAGGABLE = new Set(['mp3', 'm4a', 'flac', 'opus', 'wav', 'aiff', 'aif'])
+const compExt = (name: string): string => name.split('.').pop()?.toLowerCase() ?? ''
+
+/** Fields for comp files. `tags` is null while the current tags load; title
+ *  and track number are only offered for a single file, since setting them
+ *  across many would only ever be a mistake. */
+function compFields(tags: Map<string, CompFileTags> | null, single: boolean): BulkField<CompFile>[] {
+  const read = (key: keyof Omit<CompFileTags, 'has_cover'>) => (f: CompFile): string => tags?.get(f.path)?.[key] ?? ''
+  const pending = tags === null
+  const fields: BulkField<CompFile>[] = [
+    { key: 'artist', label: 'Artist', kind: 'list', group: 'Tags', pending, read: read('artist') },
+    { key: 'album_artist', label: 'Album artist', kind: 'text', group: 'Tags', pending, read: read('album_artist') },
+    { key: 'album', label: 'Album', kind: 'text', group: 'Tags', pending, read: read('album') },
+    { key: 'genre', label: 'Genre', kind: 'list', group: 'Tags', pending, read: read('genre') },
+    { key: 'year', label: 'Year', kind: 'text', group: 'Tags', placeholder: '2019', mono: true, pending, read: read('year') },
+    { key: 'composer', label: 'Composer', kind: 'list', group: 'Tags', pending, read: read('composer') },
+    {
+      key: 'cover', label: 'Cover', kind: 'image', group: 'Tags', modes: ['set', 'clear'], pending,
+      note: 'PNG or JPEG under 10 MB, embedded in each file.',
+      read: f => (tags?.get(f.path)?.has_cover ? 'cover' : ''),
+    },
+    { key: 'comment', label: 'Comment', kind: 'textarea', group: 'More', pending, read: read('comment') },
+  ]
+  if (single) {
+    fields.unshift({ key: 'title', label: 'Title', kind: 'text', group: 'Tags', pending, read: read('title') })
+    fields.push({ key: 'track', label: 'Track number', kind: 'text', group: 'More', placeholder: '3 or 3/12', mono: true, pending, read: read('track') })
+  }
+  return fields
+}
+
 /* ── Component ─────────────────────────────────────────────────────────────── */
 
 export default function BulkEditModal(): JSX.Element | null {
@@ -296,6 +338,23 @@ export default function BulkEditModal(): JSX.Element | null {
     }))
   )
   const canEdit = useCanEdit()
+  const canContribute = useCanContribute()
+
+  // Comp files: their current tags, read in one request per 500 files. Null
+  // while loading, which keeps every field disabled; files whose tags can't
+  // be read are skipped rather than treated as untagged.
+  const [compTags, setCompTags] = useState<Map<string, CompFileTags> | null>(null)
+  useEffect(() => {
+    if (target?.kind !== 'comp') { setCompTags(null); return }
+    let stale = false
+    setCompTags(null)
+    const taggable = target.files.filter(f => COMP_TAGGABLE.has(compExt(f.name))).map(f => f.path)
+    getCompFileTags(taggable, target.channel)
+      .catch(() => new Map<string, CompFileTags>())
+      .then(found => { if (!stale) setCompTags(found) })
+    return () => { stale = true }
+  }, [target])
+
 
   const [eras, setEras] = useState<JWApiEra[]>([])
   // Which version group each selected song sits in, and that group's shared
@@ -399,7 +458,42 @@ export default function BulkEditModal(): JSX.Element | null {
     }
   }, [target, songs, canEdit, eras, versionMeta, fetchVersionMeta, activeChannel])
 
+  const compSpec = useMemo<BulkSpec<CompFile> | null>(() => {
+    if (target?.kind !== 'comp') return null
+    const channel = target.channel
+    return {
+      items: target.files,
+      groups: COMP_GROUPS,
+      fields: compFields(compTags, target.files.length === 1),
+      keyOf: f => f.path,
+      titleOf: f => f.name,
+      noun: ['file', 'files'],
+      subtitle: 'Proposes the tag changes as one batch; they are written when it is approved.',
+      notePlaceholder: 'Notes for the reviewer…',
+      unavailable: canContribute ? undefined : 'Only contributors can propose file changes.',
+      skip: f => {
+        if (!COMP_TAGGABLE.has(compExt(f.name))) return `${compExt(f.name).toUpperCase() || 'These'} files have no tags`
+        if (compTags && !compTags.has(f.path)) return 'tags could not be read'
+        return null
+      },
+      actionLabel: n => `Propose tags for ${n} file${n === 1 ? '' : 's'}`,
+      doneLabel: n => `Tags proposed for ${n} file${n === 1 ? '' : 's'}`,
+      commit: async () => { throw new Error('Comp files are submitted together') },
+      commitAll: async (targets, note) => {
+        await proposeTagEdits(targets.map(({ item, patch }) => {
+          const { cover, ...tags } = patch
+          return {
+            path: item.path,
+            tags: cover === '' ? { ...tags, cover: '' } : tags,
+            cover: cover || undefined,
+          }
+        }), channel, note)
+      },
+    }
+  }, [target, compTags, canContribute])
+
   if (!target) return null
+  if (compSpec) return <BulkEditor key="comp" spec={compSpec} onClose={close} />
   if (apiSpec) return <BulkEditor key="api" spec={apiSpec} onClose={close} />
   return null
 }
@@ -470,6 +564,9 @@ function BulkEditor<T>({ spec, onClose }: { spec: BulkSpec<T>; onClose: () => vo
   )
 
   const display = (f: BulkField<T>, value: string): string => {
+    // Comp files read a cover as a placeholder (they report only whether one
+    // is there); a picked image is a data URL.
+    if (f.kind === 'image') return value.startsWith('data:') ? 'new cover' : value ? 'cover' : '—'
     if (!value) return '—'
     if (f.options) return f.options.find(o => o.value === value)?.label ?? value
     return value
@@ -518,6 +615,21 @@ function BulkEditor<T>({ spec, onClose }: { spec: BulkSpec<T>; onClose: () => vo
     if (spec.unavailable || batch.length === 0 || status === 'submitting' || status === 'done') return
     setStatus('submitting')
     setError(null); setProgress(0); setFailed(0)
+    if (spec.commitAll) {
+      try {
+        await spec.commitAll(batch.map(t => ({ item: t.item, patch: t.patch })), note)
+        setProgress(batch.length)
+        setSucceeded(n => n + batch.length)
+        setRetryTargets(null)
+        setStatus('done')
+      } catch (e) {
+        setFailed(batch.length)
+        setRetryTargets(batch)
+        setError(errorMessage(e, 'Failed'))
+        setStatus('error')
+      }
+      return
+    }
     const failures: Target<T>[] = []
     let lastError = ''
     await pooled(batch, 4, async (target) => {
@@ -559,8 +671,9 @@ function BulkEditor<T>({ spec, onClose }: { spec: BulkSpec<T>; onClose: () => vo
     const on = !enabled[f.key]
     // Prefill with the shared value the first time a field is ticked, so the
     // input starts from what the items already have rather than from nothing.
+    // Images start empty: what an item "has" there isn't a picture to edit.
     if (on && values[f.key] === undefined) {
-      setValues(v => ({ ...v, [f.key]: commonValues[f.key] ?? '' }))
+      setValues(v => ({ ...v, [f.key]: f.kind === 'image' ? '' : commonValues[f.key] ?? '' }))
     }
     setEnabled(prev => ({ ...prev, [f.key]: on }))
   }
@@ -581,6 +694,21 @@ function BulkEditor<T>({ spec, onClose }: { spec: BulkSpec<T>; onClose: () => vo
       setCustomActionStatus(prev => ({ ...prev, [f.key]: 'error' }))
       setCustomActionError(prev => ({ ...prev, [f.key]: errorMessage(e, 'Failed') }))
     }
+  }
+
+  // A plain file input, read as a data URL.
+  const pickImage = (key: string): void => {
+    const input = document.createElement('input')
+    input.type = 'file'
+    input.accept = 'image/png,image/jpeg'
+    input.onchange = () => {
+      const file = input.files?.[0]
+      if (!file) return
+      const reader = new FileReader()
+      reader.onload = () => { if (typeof reader.result === 'string') setValue(key, reader.result) }
+      reader.readAsDataURL(file)
+    }
+    input.click()
   }
 
   const summaryFor = (f: BulkField<T>): string => {
@@ -660,6 +788,20 @@ function BulkEditor<T>({ spec, onClose }: { spec: BulkSpec<T>; onClose: () => vo
               <p className="flex items-center gap-1.5 text-[11px] text-red-400">
                 <Eraser size={11} className="shrink-0" /> {MODE_HINTS.clear}
               </p>
+            ) : f.kind === 'image' ? (
+              <div className="flex items-center gap-3">
+                <div className="w-14 h-14 rounded-lg overflow-hidden bg-surface-overlay border border-[var(--border)] flex items-center justify-center shrink-0">
+                  {value
+                    ? <img src={value} alt="" className="w-full h-full object-cover" />
+                    : <ImageIcon size={18} className="text-text-muted opacity-60" />}
+                </div>
+                <button
+                  onClick={() => pickImage(f.key)}
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-surface-overlay border border-[var(--border)] text-xs font-medium text-text-secondary hover:text-text-primary transition-colors"
+                >
+                  <Upload size={12} /> {value ? 'Choose another…' : 'Choose image…'}
+                </button>
+              </div>
             ) : f.kind === 'select' && f.options ? (
               f.options.length <= 4 ? (
                 <div className="flex flex-wrap gap-1.5">
@@ -704,7 +846,9 @@ function BulkEditor<T>({ spec, onClose }: { spec: BulkSpec<T>; onClose: () => vo
 
             <p className={`text-[11px] ${needsInput ? 'text-amber-500' : reach === 0 ? 'text-text-muted opacity-60' : 'text-text-muted opacity-75'}`}>
               {needsInput
-                ? availableModes.includes('clear')
+                ? f.kind === 'image'
+                  ? 'Choose an image to embed in every selected file.'
+                  : availableModes.includes('clear')
                   ? 'Enter a value - or switch to "Clear" to empty this field.'
                   : 'Enter a value.'
                 : reach === 0

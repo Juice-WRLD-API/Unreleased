@@ -27,6 +27,7 @@ interface MediaControlPlugin {
     duration: number
   }): Promise<void>
   updatePlaybackState(opts: { playing: boolean; position: number; speed: number }): Promise<void>
+  setResumeOnBluetooth(opts: { enabled: boolean }): Promise<void>
   addListener(eventName: string, cb: (data: unknown) => void): Promise<{ remove: () => void }>
 }
 
@@ -62,6 +63,13 @@ export function updateMediaMetadata(opts: {
 export function updateMediaPlaybackState(opts: { playing: boolean; position: number; speed: number }): void {
   if (!isAndroidApp()) return
   plugin()?.updatePlaybackState(opts).catch(() => {})
+}
+
+/** PlaybackService pauses when the output disconnects mid-song either way;
+ *  this decides whether a Bluetooth output connecting plays it again. */
+export function setNativeResumeOnBluetooth(enabled: boolean): void {
+  if (!isAndroidApp()) return
+  plugin()?.setResumeOnBluetooth({ enabled }).catch(() => {})
 }
 
 /** Subscribes to a native event ('play' | 'pause' | 'next' | 'previous' |

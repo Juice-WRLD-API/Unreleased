@@ -210,7 +210,8 @@ export const PLAYER_COMMANDS: TermCommand[] = [
     run: (args, ctx) => {
       const want = args.trim().toLowerCase()
       if (want && !['none', 'all', 'one'].includes(want)) fail('usage: repeat [none|all|one]')
-      for (let i = 0; i < 3 && (want ? st().repeat !== want : i === 0); i++) st().toggleRepeat()
+      if (want) st().setRepeat(want as 'none' | 'all' | 'one')
+      else st().toggleRepeat()
       ctx.print(`repeat ${st().repeat}`, 'ok')
     },
   },
@@ -335,11 +336,13 @@ export const PLAYER_COMMANDS: TermCommand[] = [
           return
         }
         case 'clear': s.clearQueue(); ctx.print('queue cleared', 'ok'); return
-        case 'add': { const song = await songFromArg(rest); st().addToQueue(songToTrack(song)); ctx.print(`queued ${displaySongName(song)}`, 'ok'); return }
-        case 'next': { const song = await songFromArg(rest); st().playNext(songToTrack(song)); ctx.print(`playing ${displaySongName(song)} next`, 'ok'); return }
+        case 'add': { if (!rest) fail('usage: queue add <title | N>'); const song = await songFromArg(rest); st().addToQueue(songToTrack(song)); ctx.print(`queued ${displaySongName(song)}`, 'ok'); return }
+        case 'next': { if (!rest) fail('usage: queue next <title | N>'); const song = await songFromArg(rest); st().playNext(songToTrack(song)); ctx.print(`playing ${displaySongName(song)} next`, 'ok'); return }
         case 'remove': case 'rm': {
           const n = Number(rest)
           if (!Number.isInteger(n) || n < 1 || n > s.queue.length) fail(`remove which? 1-${s.queue.length}`)
+          // The store leaves the playing row alone, so say so instead of "removed".
+          if (n - 1 === s.queueIndex) fail(`${n} is playing now; use next to skip it`)
           const gone = s.queue[n - 1]
           s.removeFromQueue(n - 1)
           ctx.print(`removed ${gone.title}`, 'ok')

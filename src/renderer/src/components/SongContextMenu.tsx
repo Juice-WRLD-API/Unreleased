@@ -4,13 +4,13 @@ import { reportSaveError } from '../lib/fileSave'
 import { useEffect, useState } from 'react'
 import type { ComponentProps } from 'react'
 import {
-  Info, ListPlus, ListEnd, Plus, Folder, Pencil, Download, PackageOpen, Check, Loader2, CheckSquare2, Heart, Trash2, ListMusic, Flag, FileAudio2, Share2, X, Link2, Layers, MicVocal, HardDrive, Sparkles, Ellipsis,
+  Info, ListPlus, ListEnd, Plus, Folder, Pencil, Download, PackageOpen, Check, Loader2, CheckSquare2, Heart, Trash2, ListMusic, Flag, FileAudio2, Share2, X, Link2, Layers, MicVocal, HardDrive, Sparkles, Ellipsis, ImagePlus,
 } from 'lucide-react'
 import { useStore } from '../store/useStore'
 import { useShallow } from 'zustand/react/shallow'
 import * as userApi from '../lib/userApi'
 import { ensureDonorUrl, isDonorStreamUrl } from '../lib/donorPlayback'
-import { buildStreamUrl, findSessionZips, songToTrack, JWApiSong, JWApiFileEntry, ZIP_OPERATIONS_ENABLED } from '../lib/juicewrldApi'
+import { apiFileIdToRef, buildStreamUrl, findSessionZips, songToTrack, JWApiSong, JWApiFileEntry, ZIP_OPERATIONS_ENABLED } from '../lib/juicewrldApi'
 import { downloadWithEmbed } from '../lib/downloadEmbed'
 import { trackShareUrl } from '../lib/platform'
 import { Track } from '../types'
@@ -33,12 +33,13 @@ const HeartFilled = (p: ComponentProps<typeof Heart>): JSX.Element => <Heart {..
 
 // The one context menu used everywhere a song can be right-clicked (Tracker,
 // Liked Songs, Playlists, the bottom Player bar, WRLD). Built around `Track`
-// + `songId` (the common denominator across those five places - some only
-// have a Track, not a full JWApiSong) so it works without every caller
-// re-fetching a full song object first. Common actions (Song info's caller
-// hook aside, playlists, download, add-to-library, edit navigation, change
-// version) are handled internally; only genuinely view-specific actions
-// (Play/Play next/Add to queue, Select, Unlike/Remove, Like) are passed in.
+// + `songId` (the common denominator across those places - some only have a
+// Track, not a full JWApiSong) so it works without every caller re-fetching a
+// full song object first. Everything that doesn't depend on the view is done
+// here, so a song gets the same rows wherever it's right-clicked: Play next,
+// Add to queue, Like and Show in Files fall back to the app's own actions when
+// the caller passes none. Only what does depend on the view (Play from this
+// list, Select, Remove from this list) has to be passed in.
 
 export interface SongContextMenuState {
   track: Track
@@ -57,6 +58,8 @@ interface Props {
   onInfo: () => void
 
   onPlay?: () => void
+  /** Play next, Add to queue, Show in Files and Like default to the app's own
+   *  actions; pass one only to do something else. */
   onPlayNext?: () => void
   onAddToQueue?: () => void
   onShowInFiles?: () => void
@@ -64,7 +67,6 @@ interface Props {
   onSelect?: () => void
   onEditLocalTags?: () => void
 
-  /** WRLD's simple like toggle. */
   liked?: boolean
   onToggleLike?: () => void
 
@@ -94,7 +96,7 @@ interface Props {
 }
 
 /** Saves the song's file. Also the desktop player's song menu (lib/desktopBridge). */
-export function downloadTrack(track: Track, songId: number | null): void {
+export function downloadTrack(track: Track, songId: number | null, tagged?: boolean): void {
   // Donor files need the auth header, so hand them to the blob path instead.
   if (isDonorStreamUrl(track.streamUrl)) {
     void ensureDonorUrl(track.streamUrl).then((url) => {
@@ -104,11 +106,33 @@ export function downloadTrack(track: Track, songId: number | null): void {
   }
   // Lyrics embedding needs the file bytes, so it takes the fetch path; with the
   // setting off (or nothing to embed) this stays a plain anchor download.
-  if (songId != null && useStore.getState().embedSongInfoOnDownload) {
-    void downloadWithEmbed(track.streamUrl ?? buildStreamUrl(track.path), `${track.title}.mp3`, track.path, songId)
+  if (songId != null && (tagged ?? useStore.getState().embedSongInfoOnDownload)) {
+    void downloadWithEmbed(track.streamUrl ?? buildStreamUrl(track.path), `${track.title}.mp3`, track.path, songId, tagged)
     return
   }
   void triggerDownload(track.streamUrl ?? buildStreamUrl(track.path), `${track.title}.mp3`).catch(reportSaveError)
+}
+
+/** Where the track's file sits in Files: a comp file's own folder and channel,
+ *  or a catalogue song's path in the primary channel. Null for sessions (their
+ *  file has to be looked up; the Tracker does that), donor and local files. */
+export function filesLocation(track: Track, songId: number | null): { folder: string; channel: string | null } | null {
+  const ref = apiFileIdToRef(track.id)
+  const primary = (): string | null => useStore.getState().channels.find(c => c.is_primary)?.slug ?? null
+  const folderOf = (path: string): string => path.split('/').slice(0, -1).join('/')
+  if (ref) return { folder: folderOf(ref.path), channel: ref.channel ?? primary() }
+  if (songId != null && songId > 0 && track.path && track.genre !== 'recording_session' && !isDonorStreamUrl(track.streamUrl)) {
+    return { folder: folderOf(track.path), channel: primary() }
+  }
+  return null
+}
+
+/** Opens Files at that folder. */
+export function openInFiles(at: { folder: string; channel: string | null }): void {
+  const s = useStore.getState()
+  if (at.channel && at.channel !== s.activeChannel) s.setActiveChannel(at.channel)
+  s.setApiFilesPath(at.folder)
+  s.setActiveView('api-files')
 }
 
 function downloadZipEntry(entry: JWApiFileEntry): void {
@@ -117,12 +141,13 @@ function downloadZipEntry(entry: JWApiFileEntry): void {
 
 export default function SongContextMenu({
   state, onClose, canEdit, onInfo,
-  onPlay, onPlayNext, onAddToQueue, onShowInFiles, onSelect, onEditLocalTags,
-  liked, onToggleLike, removeAction, song, disableChangeVersion, onShareLyrics,
+  onPlay, onPlayNext: playNextProp, onAddToQueue: addToQueueProp, onShowInFiles: showInFilesProp, onSelect, onEditLocalTags,
+  liked: likedProp, onToggleLike: toggleLikeProp, removeAction, song, disableChangeVersion, onShareLyrics,
   canLinkSessionFile, hasSessionLinkOverride, onLinkSessionFile, onClearSessionLink,
 }: Props): JSX.Element {
-  const { playlists, account, refreshPlaylists, setShowUserAuth, changeVersion, localPlaylists, addToLocalPlaylist, createLocalPlaylist } = useStore(
+  const { playlists, account, refreshPlaylists, setShowUserAuth, changeVersion, localPlaylists, addToLocalPlaylist, createLocalPlaylist, likedTrackIds } = useStore(
     useShallow(s => ({
+      likedTrackIds: s.likedTrackIds,
       playlists: s.playlists, account: s.account, refreshPlaylists: s.refreshPlaylists,
       setShowUserAuth: s.setShowUserAuth, changeVersion: s.changeVersion,
       localPlaylists: s.localPlaylists, addToLocalPlaylist: s.addToLocalPlaylist, createLocalPlaylist: s.createLocalPlaylist,
@@ -149,24 +174,30 @@ export default function SongContextMenu({
   const entry = songId != null && songId > 0 ? { song_id: songId } : songId == null ? trackToPlaylistEntry(track) : null
   const entryIsPrivate = !!entry && isPrivateEntry(entry)
 
+  // Which playlists already hold this track. Fetched once "Add to playlist"
+  // opens rather than on every right-click: it's one request per playlist.
+  const [membershipWanted, setMembershipWanted] = useState(false)
   useEffect(() => {
-    if (!account || !entry || playlists.length === 0) return
+    if (!membershipWanted || !account || !entry || playlists.length === 0) return
+    const holds = (d: userApi.PlaylistDetail): boolean => songId != null
+      ? (d.items ?? []).some(it => it.song?.id === songId)
+      : playlistTrackIds(d.items ?? []).has(track.id)
+    // Merged rather than replaced, so a playlist ticked optimistically while
+    // this was in flight doesn't get unticked by the older answer.
+    const merge = (ids: number[]): void => { if (ids.length) setContained(prev => new Set([...prev, ...ids])) }
+    // Details already cached tick at once; the fetch below confirms the rest.
+    merge(playlists.flatMap(p => { const d = userApi.peekPlaylistDetail(p.id); return d && holds(d) ? [p.id] : [] }))
+    let cancelled = false
     Promise.all(
       playlists.map(p =>
         userApi.getPlaylist(p.id)
-          .then(d => ({
-            id: p.id,
-            has: songId != null
-              ? (d.items ?? []).some(it => it.song?.id === songId)
-              : playlistTrackIds(d.items ?? []).has(track.id),
-          }))
+          .then(d => ({ id: p.id, has: holds(d) }))
           .catch(() => ({ id: p.id, has: false }))
       )
-    // Merged rather than replaced, so a playlist ticked optimistically while
-    // this was in flight doesn't get unticked by the older answer.
-    ).then(results => setContained(prev => new Set([...prev, ...results.filter(r => r.has).map(r => r.id)])))
+    ).then(results => { if (!cancelled) merge(results.filter(r => r.has).map(r => r.id)) })
+    return () => { cancelled = true }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [playlists, songId, track.id, account])
+  }, [membershipWanted, playlists, songId, track.id, account])
 
   // Optimistic: tick the row now, send the request in the background, and
   // untick it (with a toast) if the server says no.
@@ -235,6 +266,16 @@ export default function SongContextMenu({
   // disk (so "Download" is meaningless). It can join a synced playlist (as an
   // entry only this device can play) or one of the device-local playlists.
   const isLocalOnly = songId == null && track.id.startsWith('local-')
+
+  // The rows every view gets, done the app's own way unless the caller passed
+  // its own. 999 FM's track has an id of its own; its like is the song's.
+  const likeId = track.id.startsWith('fm-') && songId != null ? `jw-${songId}` : track.id
+  const liked = likedProp ?? likedTrackIds.includes(likeId)
+  const onToggleLike = toggleLikeProp ?? (() => useStore.getState().toggleLike(likeId))
+  const onPlayNext = playNextProp ?? (() => useStore.getState().playNext(track))
+  const onAddToQueue = addToQueueProp ?? (() => useStore.getState().addToQueue(track))
+  const filesAt = showInFilesProp ? null : filesLocation(track, songId)
+  const onShowInFiles = showInFilesProp ?? (filesAt ? () => openInFiles(filesAt) : undefined)
   const canAddToPlaylist = !isUnplayable && (hasValidSong || isLocalOnly || !!entry)
   // Sharing rides the song's own stream URL, so it only makes sense for
   // real API songs (not local-only files, which nobody else can reach) and
@@ -245,8 +286,15 @@ export default function SongContextMenu({
   const canSyncLyrics = !isUnplayable && !!track.streamUrl
     && (!!track.path || isDonorStreamUrl(track.streamUrl))
   const canShareToChat = hasChatAccess(account) && hasValidSong && !!track.streamUrl && !isDonorStreamUrl(track.streamUrl)
-  // Sharing, lyrics and reporting share one flyout, so the top level stays
-  // short. A lone row is shown flat rather than as a submenu of one.
+  // Any signed-in account can send in cover art; a manager reviews it.
+  const canSubmitCover = hasValidSong && !!account
+  // A file with no catalogue song (a session file from Files) links the way
+  // Files' Copy link does: its stream URL. Donor and local files aren't public.
+  const fileLink = !hasValidSong && !isLocalOnly && !!track.path && !isDonorStreamUrl(track.streamUrl) ? track.streamUrl : undefined
+  const canCopyLink = hasValidSong || !!fileLink
+  const hasShareRows = !!(canShareToChat || onShareLyrics || canSyncLyrics)
+  // Sharing, lyrics, cover art and reporting share one flyout, so the top
+  // level stays short. A lone row is shown flat rather than as a submenu of one.
   const moreRows = ([
     canShareToChat && { icon: Share2, label: 'Share to chat', keepOpen: true, onSelect: () => setShareOpen(true) },
     onShareLyrics && { icon: MicVocal, label: 'Share lyrics', onSelect: onShareLyrics },
@@ -255,18 +303,29 @@ export default function SongContextMenu({
       label: 'Synced lyrics',
       onSelect: () => useStore.getState().openLyricsGen({ track, songId, tab: account?.is_donor ? 'create' : 'sync' }),
     },
+    canSubmitCover && {
+      icon: ImagePlus,
+      label: 'Submit cover art',
+      separatorBefore: hasShareRows,
+      onSelect: () => useStore.getState().openCoverArtSubmit({
+        songId: songId as number,
+        songName: track.apiTitle || track.title,
+        currentCover: song?.image_url ?? track.apiImageUrl ?? track.imageUrl,
+      }),
+    },
     hasValidSong && {
       icon: Flag,
       label: 'Report issue',
-      separatorBefore: !!(canShareToChat || onShareLyrics || canSyncLyrics),
+      separatorBefore: hasShareRows && !canSubmitCover,
       onSelect: () => useStore.getState().openReport({ kind: 'song', songId: songId as number, songName: track.apiTitle || track.title }),
     },
   ] satisfies ContextMenuEntry[]).filter((r): r is Exclude<typeof r, false | undefined | null> => !!r)
 
   const handleCopyLink = async (): Promise<void> => {
-    if (!hasValidSong) return
+    const url = hasValidSong ? trackShareUrl(songId) : fileLink
+    if (!url) return
     try {
-      await navigator.clipboard.writeText(trackShareUrl(songId))
+      await navigator.clipboard.writeText(url)
       setLinkCopied(true)
       setTimeout(() => setLinkCopied(false), 2500)
     } catch {}
@@ -370,13 +429,14 @@ export default function SongContextMenu({
         canAddToPlaylist && {
           icon: Plus,
           label: 'Add to playlist',
+          onOpen: () => setMembershipWanted(true),
           children: playlistRows,
           childrenEmpty: !isLocalOnly && !account ? 'Log in to save to playlists.' : 'No playlists yet.',
           childrenFooter: playlistFooter,
         },
         moreRows.length > 1 && { icon: Ellipsis, label: 'More', children: moreRows },
         moreRows.length === 1 && moreRows[0],
-        hasValidSong && { icon: linkCopied ? Check : Link2, label: linkCopied ? 'Link copied' : 'Copy link', keepOpen: true, onSelect: handleCopyLink },
+        canCopyLink && { icon: linkCopied ? Check : Link2, label: linkCopied ? 'Link copied' : 'Copy link', keepOpen: true, onSelect: handleCopyLink },
         onShowInFiles && !!track.path && { icon: Folder, label: 'Show in Files', onSelect: onShowInFiles },
         canEdit && hasValidSong && { icon: Pencil, label: 'Edit', onSelect: () => useStore.getState().openSongEditor(songId as number) },
         onEditLocalTags && { icon: Pencil, label: 'Edit tags', onSelect: onEditLocalTags },
@@ -406,7 +466,17 @@ export default function SongContextMenu({
         showSessionLink && !!hasSessionLinkOverride && !!onClearSessionLink && { icon: X, label: 'Clear manual link', onSelect: onClearSessionLink },
         canDownload && 'divider',
         IS_NATIVE_APP && songId != null && { icon: offline ? Trash2 : Download, label: offline ? 'Remove download' : 'Download offline', onSelect: () => offline ? useStore.getState().removeOfflineTrack(track.id) : useStore.getState().downloadTrackOffline(songId) },
-        canDownload && { icon: Download, label: 'Download', onSelect: () => downloadTrack(track, state.songId) },
+        // Clicking "Download" itself (its flyout is already open under the
+        // pointer) saves the file as the "Add song info to downloads" setting says.
+        canDownload && {
+          icon: Download,
+          label: 'Download',
+          onSelect: () => downloadTrack(track, state.songId),
+          children: [
+            { icon: Download, label: 'Download tagged', onSelect: () => downloadTrack(track, state.songId, true) },
+            { icon: Download, label: 'Download untagged', onSelect: () => downloadTrack(track, state.songId, false) },
+          ],
+        },
         removeAction && 'divider',
         removeAction && { icon: Trash2, label: removeAction.label, danger: true, onSelect: removeAction.onClick },
       ]}

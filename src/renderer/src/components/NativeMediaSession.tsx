@@ -1,13 +1,14 @@
 import { useEffect } from 'react'
 import { useStore, useStorePick } from '../store/useStore'
 import { IS_NATIVE_APP } from '../lib/platform'
-import { onMediaControlEvent, readLocalArtworkBase64, startMediaSession, updateMediaMetadata, updateMediaPlaybackState } from '../lib/mediaControl'
+import { onMediaControlEvent, readLocalArtworkBase64, setNativeResumeOnBluetooth, startMediaSession, updateMediaMetadata, updateMediaPlaybackState } from '../lib/mediaControl'
 import { runPlayerCommand, seekAudio } from './Player'
 
 /** Android's foreground service keeps the WebView player alive when locked. */
 export default function NativeMediaSession(): null {
-  const { currentTrack, currentTrackFull, radioFmActive, radioFmNowPlaying, radioFmMatchedSong } = useStorePick(
-    'currentTrack', 'currentTrackFull', 'radioFmActive', 'radioFmNowPlaying', 'radioFmMatchedSong')
+  const { currentTrack, currentTrackFull, radioFmActive, radioFmNowPlaying, radioFmMatchedSong, resumeOnBluetooth } = useStorePick(
+    'currentTrack', 'currentTrackFull', 'radioFmActive', 'radioFmNowPlaying', 'radioFmMatchedSong', 'resumeOnBluetooth')
+  useEffect(() => { setNativeResumeOnBluetooth(resumeOnBluetooth) }, [resumeOnBluetooth])
   useEffect(() => {
     if (!IS_NATIVE_APP || !currentTrack) return
     startMediaSession()

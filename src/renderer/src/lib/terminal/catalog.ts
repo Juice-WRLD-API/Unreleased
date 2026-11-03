@@ -1,4 +1,4 @@
-import { adminCreateAlbum, adminDeleteAlbum, adminFetchAlbums, adminUpdateAlbum, fetchAlbums, fetchArtists, type AlbumWritePayload } from '../albumsApi'
+import { adminCreateAlbum, adminDeleteAlbum, adminFetchAlbums, adminUpdateAlbum, albumTracks, fetchAlbums, fetchArtists, type AlbumWritePayload } from '../albumsApi'
 import {
   adminCreateChannel, adminDeactivateChannel, adminListChannelMembers, adminSetChannelMember, adminUpdateChannel, fetchChannelList,
 } from '../channelApi'
@@ -51,10 +51,10 @@ export const CATALOG_COMMANDS: TermCommand[] = [
   },
   {
     name: 'album', group: 'Admin',
-    usage: 'album [ls [--public]] · new <title> --artist <id> --date YYYY-MM-DD [--type t] [--desc d] [--cover url] [--songs "path|path"] · edit <id> [same flags] · rm <id>',
-    description: 'Albums (and, with `album artists`, the artists they belong to). --songs lists file paths in track order, separated by |',
+    usage: 'album [ls [--public]] · show <id> [--public] · new <title> --artist <id> --date YYYY-MM-DD [--type t] [--desc d] [--cover url] [--songs "path|path"] · edit <id> [same flags] · rm <id>',
+    description: 'Albums (and, with `album artists`, the artists they belong to). `show` prints a tracklist; --songs lists file paths in track order, separated by |',
     covers: ['albumsApi.fetchAlbums', 'albumsApi.fetchArtists', 'albumsApi.adminFetchAlbums', 'albumsApi.adminCreateAlbum', 'albumsApi.adminUpdateAlbum', 'albumsApi.adminDeleteAlbum'],
-    complete: (before, partial) => (before.length === 0 ? ['ls', 'artists', 'new', 'edit', 'rm'].filter((v) => v.startsWith(partial.toLowerCase())) : []),
+    complete: (before, partial) => (before.length === 0 ? ['ls', 'show', 'artists', 'new', 'edit', 'rm'].filter((v) => v.startsWith(partial.toLowerCase())) : []),
     run: async (args, ctx) => {
       const { rest, bool, value } = parseArgs(args, ['title', 'artist', 'date', 'type', 'desc', 'cover', 'songs', 'plays'])
       const sub = (rest.shift() ?? 'ls').toLowerCase()
@@ -67,6 +67,16 @@ export const CATALOG_COMMANDS: TermCommand[] = [
         const list = bool.has('public') ? await fetchAlbums() : await adminFetchAlbums()
         if (asJson(ctx, bool.has('json'), list)) return
         ctx.print(list.length ? table(list.map((a) => [`#${a.id}`, a.title, a.artist?.name ?? '', a.release_date, `${a.songs?.length ?? 0} songs`])) : 'no albums', list.length ? 'plain' : 'dim')
+      } else if (sub === 'show') {
+        const id = idArg(rest[0], 'album show <id> [--public]')
+        const album = (bool.has('public') ? await fetchAlbums() : await adminFetchAlbums()).find((a) => a.id === id) ?? fail(`no album #${id}`)
+        if (asJson(ctx, bool.has('json'), album)) return
+        ctx.print(`#${album.id} ${album.title} · ${[album.type, album.release_date].filter(Boolean).join(' · ')}`)
+        const tracks = albumTracks(album)
+        // Tracks are file paths; servers that resolve them send the song too.
+        ctx.print(tracks.length
+          ? table(tracks.map((t) => [`${t.order}.`, t.song?.name ?? t.path.split('/').pop() ?? t.path, t.song?.length ?? '', t.song ? `song #${t.song.id}` : 'no song']))
+          : 'no tracks', tracks.length ? 'plain' : 'dim')
       } else if (sub === 'artists') {
         const list = await fetchArtists()
         if (asJson(ctx, bool.has('json'), list)) return
@@ -87,7 +97,7 @@ export const CATALOG_COMMANDS: TermCommand[] = [
         if (!confirmAction(ctx, `Delete album #${id}?`, bool.has('y'))) return
         await adminDeleteAlbum(id)
         ctx.print(`deleted album #${id}`, 'ok')
-      } else fail('usage: album [ls | artists | new | edit | rm]')
+      } else fail('usage: album [ls | show | artists | new | edit | rm]')
     },
   },
   {

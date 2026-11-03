@@ -29,16 +29,17 @@ export default function NowPlayingSharer(): JSX.Element | null {
     if (!active || !currentTrack || songId == null) {
       if (sharedRef.current) {
         sharedRef.current = false
-        void updateNowPlaying(null)
+        updateNowPlaying(null).catch(() => {})
       }
       return
     }
+    // Best effort: offline, every push would otherwise be an unhandled rejection.
     const push = (): void => {
-      void updateNowPlaying({
+      updateNowPlaying({
         song: songId,
         path: currentTrack.path,
         position: useStore.getState().currentTime,
-      })
+      }).catch(() => {})
     }
     push()
     sharedRef.current = true
@@ -49,7 +50,7 @@ export default function NowPlayingSharer(): JSX.Element | null {
 
   // App closing mid-listen: best-effort clear, no response awaited.
   useEffect(() => {
-    const onUnload = (): void => { if (sharedRef.current) void updateNowPlaying(null) }
+    const onUnload = (): void => { if (sharedRef.current) updateNowPlaying(null).catch(() => {}) }
     window.addEventListener('beforeunload', onUnload)
     return () => window.removeEventListener('beforeunload', onUnload)
   }, [])

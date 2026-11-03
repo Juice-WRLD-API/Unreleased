@@ -1,14 +1,18 @@
-import { useMemo } from 'react'
-import { ChevronLeft, ExternalLink, Search, X } from 'lucide-react'
+import { useMemo, useState } from 'react'
+import { ExternalLink, Search } from 'lucide-react'
 import { useStorePick } from '../store/useStore'
 import { TABS, TabPanel } from './docs/content'
 import { DocsPrimitivesProvider } from './docs/primitivesContext'
 import { Code, Section, Endpoint, MethodPath } from './docs/primitives.mobile'
 import { useDocsSearch } from '../hooks/useDocsSearch'
+import { BackButton, BarButton, CompactBar, LargeTitle, LARGE_TITLE_COLLAPSE, useScrolledPast } from './mobile/NavBar'
+import { SearchField } from './mobile/SearchField'
 
 export default function DocsPage(): JSX.Element {
   const { activeTab, setActiveTab, rawQuery, setRawQuery, query, register, hitsByTab, totalHits } = useDocsSearch()
   const { setActiveView, previousView } = useStorePick('setActiveView', 'previousView')
+  const [scrollEl, setScrollEl] = useState<HTMLDivElement | null>(null)
+  const collapsed = useScrolledPast(scrollEl, LARGE_TITLE_COLLAPSE)
 
   // Wherever this was opened from (Settings, most likely) is where "back"
   // should return to - matching the app's other pushed pages (EditorPage,
@@ -18,62 +22,36 @@ export default function DocsPage(): JSX.Element {
   const primitives = useMemo(() => ({ Code, Section, Endpoint, MethodPath }), [])
 
   return (
-    <div className="flex-1 flex flex-col min-h-0 min-w-0">
-      {/* App bar - same shape as the other pushed pages' */}
-      <div className="shrink-0 flex items-center gap-1 px-2 pt-2">
-        <button
-          onClick={() => setActiveView(backView)}
-          aria-label="Back"
-          className="w-11 h-11 shrink-0 flex items-center justify-center rounded-full text-text-primary active:bg-surface-overlay"
-        >
-          <ChevronLeft size={20} />
-        </button>
-        <div className="flex-1 min-w-0 px-0.5">
-          <h1 className="text-text-primary text-[20px] font-bold leading-tight truncate">API Docs</h1>
-          <p className="text-text-muted text-xs font-mono truncate">juicewrldapi.com</p>
-        </div>
-        <a
-          href="https://juicewrldapi.com/api-docs"
-          target="_blank"
-          rel="noopener noreferrer"
-          aria-label="Open live docs"
-          className="w-11 h-11 shrink-0 flex items-center justify-center rounded-full text-text-muted active:bg-surface-overlay"
-        >
-          <ExternalLink size={18} />
-        </a>
-      </div>
+    <div className="relative flex-1 flex flex-col min-h-0 min-w-0">
+      {/* A pushed page: back and the live-docs link stay pinned in the bar,
+          the title collapses into it on scroll. */}
+      <CompactBar
+        title="API Docs"
+        shown={collapsed}
+        leading={<BackButton onClick={() => setActiveView(backView)} />}
+        trailing={
+          <BarButton label="Open live docs" onClick={() => window.open('https://juicewrldapi.com/api-docs', '_blank', 'noopener,noreferrer')}>
+            <ExternalLink size={19} />
+          </BarButton>
+        }
+      />
 
-      <div className="flex-1 min-h-0 min-w-0 overflow-y-auto overflow-x-hidden overscroll-contain px-4 pt-1 pb-6">
-        {/* Search */}
-        <div className="relative mb-3">
-          <Search size={15} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-text-muted pointer-events-none" />
-          <input
+      <div ref={setScrollEl} className="flex-1 min-h-0 min-w-0 overflow-y-auto overflow-x-hidden overscroll-contain pb-dock">
+        <LargeTitle inset="bar" title="API Docs" subtitle="juicewrldapi.com" />
+
+        <div className="px-4">
+          <SearchField
             value={rawQuery}
-            onChange={(e) => setRawQuery(e.target.value)}
+            onChange={setRawQuery}
             onKeyDown={(e) => { if (e.key === 'Escape') setRawQuery('') }}
-            placeholder="Search endpoints, fields, params…"
-            className="w-full bg-[var(--surface-overlay)] rounded-xl pl-10 pr-16 py-3 text-sm text-text-primary placeholder:text-text-muted focus:outline-none transition-colors"
+            placeholder="Endpoints, fields, params"
+            trailing={rawQuery ? <span className="pr-2.5 text-footnote text-text-muted tabular-nums">{totalHits}</span> : undefined}
           />
-          {rawQuery && (
-            <>
-              <span className="absolute right-10 top-1/2 -translate-y-1/2 text-[10px] text-text-muted tabular-nums">
-                {totalHits}
-              </span>
-              <button
-                onClick={() => setRawQuery('')}
-                aria-label="Clear search"
-                className="absolute right-1.5 top-1/2 -translate-y-1/2 w-8 h-8 flex items-center justify-center rounded-full text-text-muted active:bg-surface-raised transition-colors"
-              >
-                <X size={14} />
-              </button>
-            </>
-          )}
         </div>
 
-        {/* Tabs - a horizontally scrollable chip row rather than an
-            underline tab bar (underlines read as desktop chrome and give no
-            touch feedback of their own). */}
-        <div className="flex gap-2 overflow-x-auto pb-3 -mx-4 px-4 scrollbar-none">
+        {/* Tabs - a horizontally scrollable chip row, the selected one
+            inverted like the Tracker's. */}
+        <div className="flex gap-2 overflow-x-auto px-4 pt-3 pb-4 scrollbar-none">
           {TABS.map(tab => {
             const hits = hitsByTab.get(tab.id) ?? 0
             const dimmed = !!query && hits === 0
@@ -91,27 +69,27 @@ export default function DocsPage(): JSX.Element {
                     document.getElementById(`docs-panel-${tab.id}`)?.scrollIntoView({ behavior: 'smooth', block: 'start' })
                   }
                 }}
-                className={`shrink-0 flex items-center gap-1.5 h-9 px-3.5 rounded-full text-[13px] font-medium transition-colors ${
-                  active ? 'bg-accent text-white'
-                    : dimmed ? 'bg-[var(--surface-overlay)] text-text-muted/40'
-                    : 'bg-[var(--surface-overlay)] text-text-secondary active:bg-[var(--surface-raised)]'
+                className={`shrink-0 flex items-center gap-1.5 h-8 px-3.5 rounded-full text-subhead font-medium transition-colors ${
+                  active ? 'bg-text-primary text-surface'
+                    : dimmed ? 'bg-[var(--fill)] text-text-muted/40'
+                    : 'bg-[var(--fill)] text-text-primary active:bg-[var(--fill-strong)]'
                 }`}
               >
                 {tab.label}
                 {!!query && hits > 0 && (
-                  <span className="text-[10px] tabular-nums bg-black/15 rounded px-1 py-0.5">{hits}</span>
+                  <span className="text-caption1 tabular-nums text-accent">{hits}</span>
                 )}
               </button>
             )
           })}
         </div>
 
-        <div className="space-y-3">
+        <div className="px-4 space-y-3">
           {query && totalHits === 0 && (
             <div className="text-center py-16">
-              <Search size={28} className="mx-auto text-text-muted mb-3 opacity-40" />
-              <p className="text-sm text-text-secondary">No matches for &ldquo;{rawQuery.trim()}&rdquo;</p>
-              <p className="text-xs text-text-muted mt-1">Try an endpoint path, a field name, or a parameter.</p>
+              <Search size={32} strokeWidth={1.75} className="mx-auto text-text-muted mb-3" />
+              <p className="text-headline text-text-primary">No results for &ldquo;{rawQuery.trim()}&rdquo;</p>
+              <p className="text-subhead text-text-secondary mt-1">Try an endpoint path, a field name, or a parameter.</p>
             </div>
           )}
           <DocsPrimitivesProvider value={primitives}>

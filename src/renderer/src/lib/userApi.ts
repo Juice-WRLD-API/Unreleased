@@ -19,6 +19,7 @@ const ACCOUNT_BASE = routeUrl('/accounts')
 const LIBRARY_BASE = routeUrl('/library')
 const ME_URL = `${ACCOUNT_BASE}/account/me/`
 const PLAYLISTS_URL = `${LIBRARY_BASE}/playlists/?omit_cover_image=true&include_items=true`
+const FAVORITES_URL = `${LIBRARY_BASE}/favorites/`
 const TOKEN_KEY = 'unreleased:authToken'
 
 export interface AccountUser {
@@ -340,10 +341,16 @@ export function clearToken(): void {
   try {
     localStorage.removeItem(TOKEN_KEY)
   } catch {}
-  // The cached profile and playlists belong to that token: drop them so the
-  // next boot can't paint them for a different account (see peekCachedAccount).
+  // The cached profile, playlists, favorites and own proposals belong to that
+  // token: drop them so the next account can't be shown them (see
+  // peekCachedAccount, peekFavorites).
   cacheDelete(ME_URL)
   cacheDelete(PLAYLISTS_URL)
+  cacheDelete(FAVORITES_URL)
+  cacheDelete(myProposalsUrl())
+  cacheDelete(myCompProposalsUrl())
+  playlistDetailCache.clear()
+  playlistCoverCache.clear()
 }
 
 // `cacheKey` opts a GET call into the offline fallback cache - pass it only
@@ -689,16 +696,16 @@ export async function getNowPlaying(userId: number): Promise<NowPlayingResponse>
 // getNowPlaying/NowPlayingState from here).
 
 export async function getFavorites(): Promise<FavoriteEntry[]> {
-  const url = `${LIBRARY_BASE}/favorites/`
-  return request<FavoriteEntry[]>(withoutLyricsParam(url), {
+  return request<FavoriteEntry[]>(withoutLyricsParam(FAVORITES_URL), {
     method: 'GET',
     transform: (rows) => rows.map((f) => (f.song ? { ...f, song: songWithoutLyrics(f.song) } : f)),
-  }, true, url)
+  }, true, FAVORITES_URL)
 }
 
 /** The last favorites response getFavorites cached, for an instant first paint. */
 export function peekFavorites(): FavoriteEntry[] | undefined {
-  return cacheGet<FavoriteEntry[]>(`${LIBRARY_BASE}/favorites/`)
+  if (!getToken()) return undefined
+  return cacheGet<FavoriteEntry[]>(FAVORITES_URL)
 }
 
 export async function addFavorite(songId: number): Promise<FavoriteEntry> {
@@ -913,14 +920,48 @@ function storePlaylistDetail(id: number, patch: PlaylistDetail): PlaylistDetail 
   return detail
 }
 
+// The detail endpoint only answers for the account's own playlists, so a 404
+// means the playlist is gone (deleted on another device, or still in a list
+// cached before that). The menus and the prefetch fetch every listed playlist,
+// so one left in the list was asked for again on every open. It's dropped from
+// the caches and the store is told to drop it too.
+const playlistGoneListeners = new Set<(id: number) => void>()
+
+export function onPlaylistGone(fn: (id: number) => void): () => void {
+  playlistGoneListeners.add(fn)
+  return () => { playlistGoneListeners.delete(fn) }
+}
+
+function forgetPlaylist(id: number): void {
+  playlistDetailCache.delete(id)
+  playlistCoverCache.delete(id)
+  cacheDelete(playlistDetailUrl(id))
+  const rows = cacheGet<PlaylistRow[]>(PLAYLISTS_URL)
+  if (Array.isArray(rows) && rows.some((row) => row.id === id)) {
+    cacheSet(PLAYLISTS_URL, rows.filter((row) => row.id !== id))
+  }
+}
+
 // Single request - tracks + cover in one response. Concurrent callers for the
 // same id share the in-flight request.
 export function getPlaylist(id: number): Promise<PlaylistDetail> {
   const pending = playlistDetailInFlight.get(id)
   if (pending) return pending
   const url = playlistDetailUrl(id)
-  const p = request<PlaylistDetail>(withoutLyricsParam(url), { transform: detailWithoutLyrics }, true, url)
+  let notFound = false
+  const parseError = (res: Response): Promise<string> => {
+    notFound = res.status === 404
+    return defaultParseError(res)
+  }
+  const p = request<PlaylistDetail>(withoutLyricsParam(url), { transform: detailWithoutLyrics, parseError }, true, url)
     .then((result) => storePlaylistDetail(id, result))
+    .catch((err) => {
+      if (notFound) {
+        forgetPlaylist(id)
+        playlistGoneListeners.forEach((fn) => fn(id))
+      }
+      throw err
+    })
     .finally(() => playlistDetailInFlight.delete(id))
   playlistDetailInFlight.set(id, p)
   return p
@@ -955,7 +996,12 @@ export async function getPublicPlaylistCover(id: number): Promise<PlaylistCoverE
   if (cached) return cached
   const d = await request<PlaylistDetail>(withoutLyricsParam(`${LIBRARY_BASE}/playlists/public/${id}/`))
   const trackImages = playlistTrackImages(d.items ?? [])
-  const entry: PlaylistCoverEntry = { cover_image_url: d.cover_image_url, cover_image: d.cover_image, trackImages }
+  // Site-relative covers resolved like getPlaylistCover's.
+  const entry: PlaylistCoverEntry = {
+    cover_image_url: buildImageUrl(d.cover_image_url) ?? null,
+    cover_image: buildImageUrl(d.cover_image) ?? null,
+    trackImages,
+  }
   playlistCoverCache.set(id, entry)
   return entry
 }
@@ -975,8 +1021,8 @@ export async function uploadPlaylistCover(id: number, file: File): Promise<Playl
     body: JSON.stringify({ cover_image: base64 }),
   })
   playlistCoverCache.set(id, {
-    cover_image_url: result.cover_image_url,
-    cover_image: result.cover_image,
+    cover_image_url: buildImageUrl(result.cover_image_url) ?? null,
+    cover_image: buildImageUrl(result.cover_image) ?? null,
     trackImages: playlistCoverCache.get(id)?.trackImages ?? [],
   })
   const cachedDetail = playlistDetailCache.get(id)
@@ -1003,31 +1049,72 @@ export async function setPlaylistCoverBase64(id: number, b64: string): Promise<v
 
 export async function deletePlaylist(id: number): Promise<void> {
   await request(`${LIBRARY_BASE}/playlists/${id}/`, { method: 'DELETE' })
-  playlistDetailCache.delete(id)
-  playlistCoverCache.delete(id)
-  cacheDelete(playlistDetailUrl(id))
+  forgetPlaylist(id)
 }
 
-export async function addToPlaylist(id: number, songId: number): Promise<PlaylistDetail> {
-  const result = await request<PlaylistDetail>(`${LIBRARY_BASE}/playlists/${id}/items/`, {
+type PlaylistItemsAddCreated = {
+  item?: PlaylistItemEntry
+  items?: PlaylistItemEntry[]
+  updated_at: string
+}
+type PlaylistItemsAddResponse = { detail: string } | PlaylistItemsAddCreated
+
+function playlistItemsAddCreated(result: PlaylistItemsAddResponse): result is PlaylistItemsAddCreated {
+  return typeof (result as PlaylistItemsAddCreated).updated_at === 'string'
+}
+
+function mergePlaylistAfterItemsAdd(id: number, added: PlaylistItemEntry[], updatedAt: string): PlaylistDetail | null {
+  const cached = playlistDetailCache.get(id)
+  if (!cached) return null
+  const seen = new Set(cached.items.map(it => it.id))
+  const items = [...cached.items]
+  for (const it of added) {
+    if (!seen.has(it.id)) {
+      seen.add(it.id)
+      items.push(it)
+    }
+  }
+  items.sort((a, b) => a.position - b.position || a.id - b.id)
+  return storePlaylistDetail(id, { ...cached, items, updated_at: updatedAt })
+}
+
+async function applyPlaylistItemsAddResponse(id: number, result: PlaylistItemsAddResponse): Promise<PlaylistDetail> {
+  if (!playlistItemsAddCreated(result)) {
+    return playlistDetailCache.get(id) ?? getPlaylist(id)
+  }
+  const added = result.item ? [result.item] : (result.items ?? [])
+  if (!added.length) {
+    const cached = playlistDetailCache.get(id)
+    if (cached) {
+      return storePlaylistDetail(id, { ...cached, updated_at: result.updated_at })
+    }
+    return getPlaylist(id)
+  }
+  return mergePlaylistAfterItemsAdd(id, added, result.updated_at) ?? getPlaylist(id)
+}
+
+export async function addSongsToPlaylist(id: number, songIds: number[]): Promise<PlaylistDetail> {
+  if (!songIds.length) return playlistDetailCache.get(id) ?? getPlaylist(id)
+  const unique = [...new Set(songIds)]
+  const result = await request<PlaylistItemsAddResponse>(`${LIBRARY_BASE}/playlists/${id}/items/`, {
     method: 'POST',
-    body: JSON.stringify({ song_id: songId }),
+    body: JSON.stringify({ song_ids: unique }),
   })
-  const stored = storePlaylistDetail(id, result)
-  if (IS_NATIVE_APP) void import('../store/useStore').then(({ useStore }) => useStore.getState().autoDownloadIfOffline(id, [songId])).catch(console.error)
+  const stored = await applyPlaylistItemsAddResponse(id, result)
+  if (IS_NATIVE_APP) void import('../store/useStore').then(({ useStore }) => useStore.getState().autoDownloadIfOffline(id, unique)).catch(console.error)
   return stored
 }
 
-/** Add any kind of entry (song, comp file, donor file, local file). Resolves
- *  to the updated detail, or to the cached one when the server says it was
- *  already there. */
+export async function addToPlaylist(id: number, songId: number): Promise<PlaylistDetail> {
+  return addSongsToPlaylist(id, [songId])
+}
+
 export async function addPlaylistEntry(id: number, entry: PlaylistEntryInput): Promise<PlaylistDetail> {
-  const result = await request<PlaylistDetail | { detail: string }>(`${LIBRARY_BASE}/playlists/${id}/items/`, {
+  const result = await request<PlaylistItemsAddResponse>(`${LIBRARY_BASE}/playlists/${id}/items/`, {
     method: 'POST',
     body: JSON.stringify(entry),
   })
-  if (!('items' in result)) return playlistDetailCache.get(id) ?? getPlaylist(id)
-  return storePlaylistDetail(id, result)
+  return applyPlaylistItemsAddResponse(id, result)
 }
 
 /** Remove one entry by its own id - the only way to remove a non-song entry. */
@@ -1062,7 +1149,14 @@ export async function removeFromPlaylist(id: number, songId: number): Promise<vo
 export type ProposalStatus = 'pending' | 'approved' | 'rejected' | 'reversed'
 export type CompProposalChangeType =
   | 'upload' | 'replace' | 'move' | 'delete' | 'create_folder'
-  | 'rename_folder' | 'move_folder' | 'delete_folder'
+  | 'rename_folder' | 'move_folder' | 'delete_folder' | 'retag'
+
+/** The tags a retag proposal can change; the same names POST /files/tags/ reads. */
+export const COMP_TAG_KEYS = ['title', 'artist', 'album', 'album_artist', 'genre', 'year', 'track', 'composer', 'comment'] as const
+export type CompTagKey = typeof COMP_TAG_KEYS[number]
+/** A retag's edits. Tags left out stay as they are, '' removes one, and
+ *  `cover: ''` removes the embedded cover (a new cover goes up as a file). */
+export type CompTagChanges = Partial<Record<CompTagKey | 'cover', string>>
 
 // Only the underscored ones need spelling out; everything else reads fine as
 // the raw enum. Lives here rather than in one of the review components because
@@ -1072,6 +1166,7 @@ const COMP_CHANGE_LABELS: Record<string, string> = {
   rename_folder: 'rename folder',
   move_folder: 'move folder',
   delete_folder: 'delete folder',
+  retag: 'edit tags',
 }
 
 export function compChangeTypeLabel(type: string): string {
@@ -1087,6 +1182,8 @@ export interface CompFileProposal {
   change_type: CompProposalChangeType
   staging_filename: string
   original_snapshot: Record<string, unknown>
+  /** retag only: the tags it writes ('' removes one). Absent on older servers. */
+  tag_changes?: CompTagChanges
   contributor_notes: string
   // Optional on the way in: rows cached before the field shipped lack it.
   is_new_leak?: boolean
@@ -1128,6 +1225,8 @@ export interface SongEditProposal {
   id: number
   editor_username: string
   editor_id: number
+  /** The comp channel it was filed for; null on the primary one. */
+  channel_slug?: string | null
   song: number | null
   song_public_id: number | null
   change_type: ProposalChangeType
@@ -1294,6 +1393,42 @@ export async function getMyProposals(
   return [first.page, ...rest].flat().filter((p) => !seen.has(p.id) && !!seen.add(p.id))
 }
 
+export interface ProposalStatusCounts {
+  total: number
+  pending: number
+  approved: number
+  rejected: number
+  reversed: number
+}
+
+export interface MyProposalsPage {
+  results: SongEditProposal[]
+  /** Rows matching the status/search filter, across every page. */
+  count: number
+  /** The whole list per status, whatever the filter. Null from a server that predates it. */
+  counts: ProposalStatusCounts | null
+}
+
+export const MY_PROPOSALS_PAGE_SIZE = 50
+
+// One page of your proposals, optionally narrowed by status or a search, for
+// lists that load more as the user scrolls instead of walking every page.
+export async function getMyProposalsPage(
+  channel: string | undefined,
+  opts: { offset?: number; status?: ProposalStatus; q?: string } = {},
+): Promise<MyProposalsPage> {
+  const url = new URL(myProposalsUrl(channel, opts.offset ?? 0))
+  url.searchParams.set('limit', String(MY_PROPOSALS_PAGE_SIZE))
+  if (opts.status) url.searchParams.set('status', opts.status)
+  if (opts.q) url.searchParams.set('q', opts.q)
+  const data = await request<SongEditProposal[] | { count?: number; counts?: ProposalStatusCounts; results?: SongEditProposal[] }>(
+    url.toString(), { method: 'GET' }, true, url.toString(),
+  )
+  if (Array.isArray(data)) return { results: data, count: data.length, counts: null }
+  const results = Array.isArray(data?.results) ? data.results : []
+  return { results, count: data?.count ?? results.length, counts: data?.counts ?? null }
+}
+
 /** One of your proposals in full, with proposed_data and original_snapshot. */
 export async function getProposal(id: number): Promise<SongEditProposal> {
   return request(`${ACCOUNT_BASE}/editor/proposals/${id}/`, { method: 'GET' })
@@ -1339,18 +1474,28 @@ export async function withdrawProposal(id: number): Promise<void> {
 
 // Withdraws a proposal and immediately re-creates it with the same data -
 // useful when a pending proposal is stuck/stale and needs a fresh review cycle.
-// Reads the full proposal before withdrawing: a list row is a summary, and
-// resubmitting it as-is would send an empty proposed_data.
+// Reads the full proposal first: a list row is a summary, and resubmitting it
+// as-is would send an empty proposed_data. The copy is made before the
+// withdrawal (the other way round, a failed create lost the proposal), and
+// filed for the same channel.
 export async function resubmitProposal(p: SongEditProposal): Promise<SongEditProposal> {
   const full = await withProposalData(p)
-  await withdrawProposal(p.id)
-  return createProposal({
+  const made = await createProposal({
     song: full.song,
     change_type: full.change_type,
     title: full.title,
     proposed_data: full.proposed_data,
     editor_notes: full.editor_notes,
+    channel: full.channel_slug ?? undefined,
   })
+  try {
+    await withdrawProposal(p.id)
+  } catch (e) {
+    // Not two copies under review: take the new one back too.
+    await withdrawProposal(made.id).catch(() => undefined)
+    throw e
+  }
+  return made
 }
 
 export async function getLeaderboard(): Promise<Array<{
@@ -1400,34 +1545,23 @@ export async function adminReviewProposal(id: number, payload: {
   })
 }
 
-// Reviews a batch of proposals with the same action. Proposals targeting the
-// same song stay sequential (oldest first - a later edit can build on fields
-// an earlier one touched); different songs run in parallel, capped so a big
-// batch doesn't flood the API. A per-item failure is swallowed so one bad row
-// doesn't stop the rest; onEach fires as each success lands.
+export interface ProposalBatchReview<T> {
+  batch_id: string | null
+  action: 'approve' | 'reject'
+  summary: Partial<Record<'approved' | 'rejected' | 'skipped' | 'failed' | 'not_run', number>>
+  results: { id: number; result: 'approved' | 'rejected' | 'skipped' | 'failed' | 'not_run'; proposal?: T; detail?: string; status_code?: number }[]
+}
+
+// Song batch responses omit revision details; merge them into existing rows.
 export async function adminReviewProposalsBatch(
-  proposals: SongEditProposal[],
+  ids: number[],
   action: 'approve' | 'reject',
-  channel: string | undefined,
-  onEach?: (updated: SongEditProposal) => void,
-  concurrency = 6,
-): Promise<void> {
-  const lanes = new Map<string, SongEditProposal[]>()
-  for (const p of [...proposals].sort((a, b) => a.id - b.id)) {
-    // New-song proposals have no target yet, so each gets its own lane.
-    const key = p.song != null ? `s${p.song}` : `p${p.id}`
-    const lane = lanes.get(key)
-    if (lane) lane.push(p); else lanes.set(key, [p])
-  }
-  const queue = [...lanes.values()]
-  const worker = async (): Promise<void> => {
-    for (let lane = queue.shift(); lane; lane = queue.shift()) {
-      for (const p of lane) {
-        try { onEach?.(await adminReviewProposal(p.id, { action, channel })) } catch {}
-      }
-    }
-  }
-  await Promise.all(Array.from({ length: Math.min(concurrency, queue.length) }, worker))
+  channel?: string,
+): Promise<ProposalBatchReview<Omit<SongEditProposal, 'original_proposed_data' | 'applied_data'>>> {
+  return request(`${ACCOUNT_BASE}/admin/proposals/batch/review/`, {
+    method: 'POST',
+    body: JSON.stringify({ ids, action, channel, stop_on_error: false }),
+  })
 }
 
 export async function adminReverseProposal(id: number, channel?: string): Promise<SongEditProposal> {
@@ -1545,9 +1679,6 @@ export async function deleteApiKey(id: string): Promise<void> {
   await request(`${ACCOUNT_BASE}/account/api-keys/${id}/`, { method: 'DELETE' })
 }
 
-// Same path as request(), minus the JSON Content-Type - the browser has to set
-// its own multipart boundary. Everything else (error parsing, offline cache
-// fallback) comes from apiClient like every other call in this module.
 // Comp-file contributions (proposals, the admin review queue, file history)
 // hang off routes that are newer than the rest of this module. Everything the
 // feature touches is gated on this one flag the way lib/newsApi gates `/news/`
@@ -1606,6 +1737,9 @@ function assertContributorApi(): void {
   if (!CONTRIBUTOR_ENABLED) throw new Error('Comp file contributions are not available yet')
 }
 
+// Same path as request(), minus the JSON Content-Type - the browser has to set
+// its own multipart boundary. Everything else (error parsing, offline cache
+// fallback) comes from apiClient like every other call in this module.
 async function multipartRequest<T>(url: string, form: FormData, method = 'POST'): Promise<T> {
   const headers: Record<string, string> = {}
   const token = getToken()
@@ -1623,6 +1757,58 @@ export async function getMyCompProposals(channel?: string): Promise<CompFileProp
   assertContributorApi()
   const url = myCompProposalsUrl(channel)
   return request(url, { method: 'GET' }, true, url)
+}
+
+/** One item of a contributor batch. Files go up first (stageCompFiles) and
+ *  are referenced by upload_id; retag items may share one cover upload. */
+export interface CompBatchItem {
+  change_type: CompProposalChangeType
+  file_path: string
+  destination_path?: string
+  upload_id?: string
+  /** retag only. */
+  tags?: CompTagChanges
+  contributor_notes?: string
+  is_new_leak?: boolean
+}
+
+export interface CompBatchSubmitted {
+  batch_id: string
+  count: number
+  auto_approved: number
+  pending: number
+  proposals: CompFileProposal[]
+  auto_approve_error?: { id: number; detail: string }
+}
+
+/** Submits many comp changes as one ordered batch. Validated as a whole: a 400
+ *  means nothing was submitted, and its `errors` name the bad items by index. */
+export async function submitCompProposalBatch(
+  items: CompBatchItem[],
+  opts: { channel?: string; contributorNotes?: string } = {},
+): Promise<CompBatchSubmitted> {
+  assertContributorApi()
+  const res = await request<CompBatchSubmitted>(`${ACCOUNT_BASE}/contributor/proposals/batch/`, {
+    method: 'POST',
+    body: JSON.stringify({ items, channel: opts.channel, contributor_notes: opts.contributorNotes ?? '' }),
+    // The 400 names bad items by index; say which file and why rather than
+    // just "3 of 40 items are invalid".
+    parseError: async (res) => {
+      try {
+        const body = await res.clone().json() as { errors?: { index: number; errors: Record<string, unknown> }[] }
+        const first = body.errors?.[0]
+        if (first) {
+          const value = first.errors.detail ?? Object.values(first.errors)[0]
+          const why = Array.isArray(value) ? String(value[0]) : String(value)
+          const more = body.errors!.length > 1 ? ` (and ${body.errors!.length - 1} more)` : ''
+          return `${items[first.index]?.file_path ?? `Item ${first.index + 1}`}: ${why}${more}`
+        }
+      } catch {}
+      return defaultParseError(res)
+    },
+  })
+  cacheDelete(myCompProposalsUrl(opts.channel))
+  return res
 }
 
 export async function createCompProposal(form: FormData): Promise<CompFileProposal> {
@@ -1706,6 +1892,18 @@ export async function adminReviewCompProposal(id: number, payload: {
   return request(`${ACCOUNT_BASE}/admin/comp-proposals/${id}/review/`, {
     method: 'POST',
     body: JSON.stringify(payload),
+  })
+}
+
+export async function adminReviewCompProposalsBatch(
+  ids: number[],
+  action: 'approve' | 'reject',
+  channel?: string,
+): Promise<ProposalBatchReview<CompFileProposal>> {
+  assertContributorApi()
+  return request(`${ACCOUNT_BASE}/admin/comp-proposals/batch/review/`, {
+    method: 'POST',
+    body: JSON.stringify({ ids, action, channel, stop_on_error: false }),
   })
 }
 

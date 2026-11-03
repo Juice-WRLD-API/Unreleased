@@ -197,10 +197,11 @@ export default function ShareLyricsModal({ title, artist, imageUrl, rawLyrics, o
     if (!rawLyrics || !isLrcFormat(rawLyrics)) return
     const synced = parseLrc(rawLyrics)
     const idx = getCurrentLineIndex(synced, getAudioCurrentTime() - useStore.getState().lyricsOffset)
-    if (idx < 0) return
-    const text = synced[idx]?.text
-    const flatIdx = text ? lines.indexOf(text) : -1
-    if (flatIdx < 0) return
+    if (idx < 0 || !synced[idx].text) return
+    // `lines` is the same parse less its empty lines, so count the ones before
+    // this - looking the text up found a repeated chorus line's first time.
+    const flatIdx = synced.slice(0, idx).filter(l => l.text).length
+    if (flatIdx >= lines.length) return
     const start = Math.max(0, flatIdx - 1)
     const end = Math.min(lines.length - 1, flatIdx + 1)
     setSelected(Array.from({ length: end - start + 1 }, (_, k) => start + k))
