@@ -7,13 +7,19 @@ import {
 import { formatDuration } from '../lib/format'
 import { bandLabel, useEqualizerPanelData } from '../hooks/useEqualizerPanelData'
 
+/** iOS switch, same as Settings' - the knob slides on transform. */
 function Toggle({ on, onClick }: { on: boolean; onClick: () => void }): JSX.Element {
   return (
     <button
+      role="switch"
+      aria-checked={on}
       onClick={onClick}
-      className={`relative w-11 h-6 rounded-full shrink-0 transition-colors appearance-none border-0 p-0 leading-none ${on ? 'bg-accent' : 'bg-[var(--surface-overlay)]'}`}
+      className={`relative w-[51px] h-[31px] rounded-full shrink-0 transition-colors duration-200 appearance-none border-0 p-0 leading-none ${on ? 'bg-accent' : 'bg-[var(--fill-strong)]'}`}
     >
-      <span className={`absolute inset-y-0.5 w-5 h-5 rounded-full bg-white transition-all ${on ? 'left-[22px]' : 'left-0.5'}`} />
+      <span
+        className="absolute top-0.5 left-0.5 w-[27px] h-[27px] rounded-full bg-white shadow-[0_3px_8px_rgb(0_0_0/0.15),0_3px_1px_rgb(0_0_0/0.06)] control-motion"
+        style={{ transform: on ? 'translateX(20px)' : 'none' }}
+      />
     </button>
   )
 }
@@ -42,13 +48,13 @@ function InlineSelect({ value, onChange, options, disabled }: {
         type="button"
         onClick={() => !disabled && setOpen(v => !v)}
         disabled={disabled}
-        className="flex items-center gap-1 pl-3 pr-2 py-1.5 rounded-lg bg-[var(--surface-overlay)] border border-[var(--border)] text-xs text-text-primary disabled:opacity-40 max-w-[160px]"
+        className="flex items-center gap-1 pl-3 pr-2 py-1.5 rounded-full bg-[var(--fill)] border border-transparent text-footnote text-text-primary disabled:opacity-40 max-w-[160px]"
       >
         <span className="truncate">{selected?.label ?? '—'}</span>
         <ChevronDown size={12} className={`shrink-0 text-text-muted transition-transform ${open ? 'rotate-180' : ''}`} />
       </button>
       {open && (
-        <div className="absolute right-0 top-full mt-1 min-w-[160px] max-h-52 overflow-y-auto rounded-lg border border-[var(--border)] bg-surface-raised shadow-2xl py-1">
+        <div className="absolute right-0 top-full mt-1 min-w-[160px] max-h-52 overflow-y-auto rounded-xl glass-thick py-1">
           {options.map(o => {
             const active = o.value === value
             return (
@@ -109,10 +115,10 @@ function BandFader({ value, onChange, disabled }: {
       onPointerMove={onPointerMove}
       onPointerUp={endDrag}
       onPointerCancel={endDrag}
-      className={`relative w-8 h-28 rounded-full bg-[var(--surface-overlay)] touch-none select-none ${disabled ? 'opacity-50' : ''}`}
+      className={`relative w-8 h-28 rounded-full bg-[var(--fill)] touch-none select-none ${disabled ? 'opacity-50' : ''}`}
     >
       {/* 0 dB center tick */}
-      <div className="absolute left-1.5 right-1.5 top-1/2 h-px -translate-y-1/2 bg-[var(--border)]" />
+      <div className="absolute left-1.5 right-1.5 top-1/2 h-px -translate-y-1/2 bg-[var(--separator)]" />
       {/* fill from center out to the current gain */}
       <div
         className="absolute left-1.5 right-1.5 rounded-full bg-accent/60 pointer-events-none"
@@ -120,7 +126,7 @@ function BandFader({ value, onChange, disabled }: {
       />
       {/* thumb */}
       <div
-        className="absolute left-1/2 w-6 h-6 rounded-full bg-white shadow-md border border-[var(--border)] pointer-events-none"
+        className="absolute left-1/2 w-6 h-6 rounded-full bg-white shadow-md border border-[var(--separator)] pointer-events-none"
         style={{ bottom: `${pct}%`, transform: 'translate(-50%, 50%)' }}
       />
     </div>
@@ -134,7 +140,7 @@ function SliderRow({ label, value, formatted, onReset, dirty, children }: {
 }): JSX.Element {
   return (
     <div className="flex items-center gap-3 px-5 py-1.5">
-      <span className="text-xs text-text-secondary w-16 shrink-0">{label}</span>
+      <span className="text-footnote text-text-primary w-16 shrink-0">{label}</span>
       {children}
       <span className="text-xs text-text-muted tabular-nums w-12 text-right">{formatted ?? value}</span>
       <button
@@ -178,7 +184,7 @@ function FxSliderRow({ label, value, min, max, step, onChange, reset, format, ti
   }
   return (
     <div className="flex items-center gap-3 px-4 py-1.5">
-      <span className="text-xs text-text-secondary w-24 shrink-0">{label}</span>
+      <span className="text-footnote text-text-primary w-24 shrink-0">{label}</span>
       <input
         type="range"
         min={log ? 0 : min} max={log ? LOG_STEPS : max} step={log ? 1 : step}
@@ -205,11 +211,11 @@ function FxSection({ title, sub, on, onToggle, children }: {
 }): JSX.Element {
   return (
     <>
-      <div className="border-t border-[var(--border)] mx-4" />
+      <div className="border-t border-[var(--separator)] mx-4" />
       <div className="flex items-center justify-between px-4 pt-2.5 pb-2.5">
         <div>
-          <p className="text-xs text-text-secondary">{title}</p>
-          <p className="text-[10px] text-text-muted">{sub}</p>
+          <p className="text-subhead text-text-primary">{title}</p>
+          <p className="text-caption1 text-text-muted">{sub}</p>
         </div>
         <Toggle on={on} onClick={onToggle} />
       </div>
@@ -287,7 +293,7 @@ export default function EqualizerPanel(): JSX.Element {
     <div className="select-none pb-1">
       {/* Header: enable toggle + reset-everything */}
       <div className="flex items-center justify-between px-5 pb-2">
-        <span className="text-xs text-text-secondary">Enabled</span>
+        <span className="text-subhead text-text-primary">Enabled</span>
         <div className="flex items-center gap-3">
           {(playbackSpeed !== 1 || pitchShift || (EFFECTS_SUPPORTED && (eqBalance !== 0 || eqMono || skipSilence || reverbEnabled || eqGains.some(g => g !== 0)))) && (
             <button
@@ -302,7 +308,7 @@ export default function EqualizerPanel(): JSX.Element {
                 }
                 setPlaybackSpeed(1); setPitchShift(false)
               }}
-              className="flex items-center gap-1 text-[11px] font-semibold text-text-muted active:text-accent transition-colors"
+              className="flex items-center gap-1 text-footnote font-semibold text-accent active:opacity-60 transition-colors"
             >
               <RotateCcw size={11} /> Reset all
             </button>
@@ -316,7 +322,7 @@ export default function EqualizerPanel(): JSX.Element {
           iOS - see platform IS_IOS). Speed, sleep timer, and community
           edits below don't use the chain and still work. */}
       {!EFFECTS_SUPPORTED && (
-        <p className="mx-5 mb-2 text-[11px] text-text-muted bg-[var(--surface-overlay)] border border-[var(--border)] rounded-lg px-3 py-2">
+        <p className="mx-5 mb-2 text-footnote text-text-muted bg-[var(--fill)] rounded-xl px-3 py-2">
           Equalizer & sound effects are off on iOS so music keeps playing when you leave the app.
         </p>
       )}
@@ -324,7 +330,7 @@ export default function EqualizerPanel(): JSX.Element {
         {/* Preset picker, plus saving the current bands as a named preset of
             your own (listed under the built-ins) and deleting one. */}
         <div className="flex items-center justify-between gap-3 px-5 pb-3">
-          <span className="text-xs text-text-secondary shrink-0">Preset</span>
+          <span className="text-subhead text-text-primary shrink-0">Preset</span>
           {presetName != null ? (
             <form onSubmit={(e) => { e.preventDefault(); savePreset() }} className="flex items-center gap-2 flex-1 min-w-0 justify-end">
               <input
@@ -333,13 +339,13 @@ export default function EqualizerPanel(): JSX.Element {
                 onChange={(e) => setPresetName(e.target.value)}
                 maxLength={USER_PRESET_NAME_MAX}
                 placeholder="Preset name"
-                className="flex-1 min-w-0 bg-[var(--surface-overlay)] text-text-primary text-xs rounded-lg px-2 py-1.5 border border-[var(--border)] outline-none focus:border-[var(--accent)]"
+                className="flex-1 min-w-0 bg-[var(--fill)] text-text-primary text-subhead rounded-full px-3 py-1.5 border border-transparent outline-none focus:border-[var(--accent)]"
               />
               <button
                 type="submit"
                 disabled={!presetName.trim()}
                 title="Save these bands as a preset"
-                className="px-3 py-1.5 rounded-lg text-xs font-medium bg-accent/15 text-accent active:bg-accent/25 disabled:opacity-40 transition-colors"
+                className="px-3.5 py-1.5 rounded-full text-footnote font-semibold bg-accent/15 text-accent active:bg-accent/25 disabled:opacity-40 transition-colors"
               >
                 Save
               </button>
@@ -389,11 +395,11 @@ export default function EqualizerPanel(): JSX.Element {
           the API endpoints for the rest don't exist yet, so the store list
           stays empty for now. */}
       <div className="px-5 pb-3">
-        <p className="text-[11px] font-semibold uppercase tracking-wider text-text-muted pb-1.5">Community edits</p>
+        <p className="text-footnote font-semibold text-text-secondary pb-1.5">Community edits</p>
         {instrumentalsSong && instrumentals == null ? (
-          <p className="text-[11px] text-text-muted px-1 py-2">Looking for instrumentals…</p>
+          <p className="text-footnote text-text-muted px-1 py-2">Looking for instrumentals…</p>
         ) : !instrumentals?.length && communityEdits.length === 0 ? (
-          <p className="text-[11px] text-text-muted bg-[var(--surface-overlay)] border border-[var(--border)] rounded-lg px-3 py-2">
+          <p className="text-footnote text-text-muted bg-[var(--fill)] rounded-xl px-3 py-2">
             {instrumentalsSong ? 'No instrumentals or edits for this song yet.' : 'Play a song to see its instrumentals and edits.'}
           </p>
         ) : (
@@ -404,11 +410,11 @@ export default function EqualizerPanel(): JSX.Element {
                 <button
                   key={inst.path}
                   onClick={() => playInstrumental(inst)}
-                  className={`w-full flex items-center gap-2 px-3 py-2 rounded-lg text-left bg-[var(--surface-overlay)] border transition-colors ${playing ? 'border-accent' : 'border-[var(--border)] active:border-accent'}`}
+                  className={`w-full flex items-center gap-2 px-3 py-2 rounded-xl text-left bg-[var(--fill)] border transition-colors ${playing ? 'border-accent' : 'border-transparent active:border-accent'}`}
                 >
                   <span className="flex-1 min-w-0">
-                    <span className={`block text-xs truncate ${playing ? 'text-accent font-semibold' : 'text-text-primary'}`}>{inst.name}</span>
-                    <span className="block text-[10px] text-text-muted truncate">Instrumental · {inst.folder} · {inst.era}</span>
+                    <span className={`block text-subhead truncate ${playing ? 'text-accent font-semibold' : 'text-text-primary'}`}>{inst.name}</span>
+                    <span className="block text-caption1 text-text-muted truncate">Instrumental · {inst.folder} · {inst.era}</span>
                   </span>
                   {inst.duration > 0 && <span className="text-[10px] text-text-muted tabular-nums shrink-0">{formatDuration(inst.duration)}</span>}
                 </button>
@@ -419,9 +425,9 @@ export default function EqualizerPanel(): JSX.Element {
                 key={edit.id}
                 onClick={() => playCommunityEdit(edit)}
                 title="Play this edit"
-                className="w-full flex items-baseline gap-2 px-3 py-2 rounded-lg text-left bg-[var(--surface-overlay)] border border-[var(--border)] active:border-accent transition-colors"
+                className="w-full flex items-baseline gap-2 px-3 py-2 rounded-xl text-left bg-[var(--fill)] border border-[var(--separator)] active:border-accent transition-colors"
               >
-                <span className="text-xs text-text-primary truncate">{edit.name}</span>
+                <span className="text-subhead text-text-primary truncate">{edit.name}</span>
                 {edit.author && <span className="text-[10px] text-text-muted truncate shrink-0">by {edit.author}</span>}
               </button>
             ))}
@@ -466,7 +472,7 @@ export default function EqualizerPanel(): JSX.Element {
         </div>
       </div>
 
-      <div className="border-t border-[var(--border)] mx-5" />
+      <div className="border-t border-[var(--separator)] mx-5" />
 
       {/* Balance */}
       <SliderRow label="Balance" formatted={balanceLabel} dirty={eqBalance !== 0} onReset={() => setEqBalance(0)}>
@@ -487,8 +493,8 @@ export default function EqualizerPanel(): JSX.Element {
       {/* Mono */}
       <div className="flex items-center justify-between px-5 py-2.5">
         <div>
-          <p className="text-xs text-text-secondary">Mono audio</p>
-          <p className="text-[10px] text-text-muted">Play both channels as one</p>
+          <p className="text-subhead text-text-primary">Mono audio</p>
+          <p className="text-caption1 text-text-muted">Play both channels as one</p>
         </div>
         <Toggle on={eqMono} onClick={() => setEqMono(!eqMono)} />
       </div>
@@ -511,8 +517,8 @@ export default function EqualizerPanel(): JSX.Element {
       {/* Skip silence */}
       <div className="flex items-center justify-between px-5 py-2.5">
         <div>
-          <p className="text-xs text-text-secondary">Skip silence</p>
-          <p className="text-[10px] text-text-muted">Jump over silent parts</p>
+          <p className="text-subhead text-text-primary">Skip silence</p>
+          <p className="text-caption1 text-text-muted">Jump over silent parts</p>
         </div>
         <Toggle on={skipSilence} onClick={() => setSkipSilence(!skipSilence)} />
       </div>
@@ -561,11 +567,11 @@ export default function EqualizerPanel(): JSX.Element {
           FM: a live stream has no meaningful playback rate. */}
       {!radioFmActive && (
         <>
-          <div className="border-t border-[var(--border)] mx-5" />
+          <div className="border-t border-[var(--separator)] mx-5" />
           {/* No on/off toggle here: 1x already *is* off. */}
           <div className="px-5 pt-2.5 pb-1">
-            <p className="text-xs text-text-secondary">Speed</p>
-            <p className="text-[10px] text-text-muted">Slow down or speed up playback</p>
+            <p className="text-subhead text-text-primary">Speed</p>
+            <p className="text-caption1 text-text-muted">Slow down or speed up playback</p>
           </div>
           <div className="pb-1">
             <SliderRow label="Rate" formatted={`${playbackSpeed.toFixed(2)}x`} dirty={playbackSpeed !== 1} onReset={() => setPlaybackSpeed(1)}>
@@ -578,8 +584,8 @@ export default function EqualizerPanel(): JSX.Element {
             </SliderRow>
             <div className="flex items-center justify-between px-5 py-1.5">
               <div>
-                <p className="text-xs text-text-secondary">Pitch shift</p>
-                <p className="text-[10px] text-text-muted">Pitch follows speed - slowed below 1x, nightcore above</p>
+                <p className="text-subhead text-text-primary">Pitch shift</p>
+                <p className="text-caption1 text-text-muted">Pitch follows speed - slowed below 1x, nightcore above</p>
               </div>
               <Toggle on={pitchShift} onClick={() => setPitchShift(!pitchShift)} />
             </div>
@@ -595,11 +601,11 @@ export default function EqualizerPanel(): JSX.Element {
           the classic single-button A-B repeat control. */}
       {!radioFmActive && (
         <>
-          <div className="border-t border-[var(--border)] mx-5" />
+          <div className="border-t border-[var(--separator)] mx-5" />
           <div className="flex items-center justify-between gap-3 px-5 py-2.5">
             <div className="min-w-0">
-              <p className="text-xs text-text-secondary">A-B loop</p>
-              <p className="text-[10px] text-text-muted truncate">
+              <p className="text-subhead text-text-primary">A-B loop</p>
+              <p className="text-caption1 text-text-muted truncate">
                 {abLoopStart == null
                   ? 'Repeat a portion of this song'
                   : abLoopEnd == null
@@ -610,7 +616,7 @@ export default function EqualizerPanel(): JSX.Element {
             <div className="flex items-center gap-1 shrink-0">
               <button
                 onClick={setAbLoopPoint}
-                className={`h-9 px-3.5 rounded-full text-xs font-medium transition-colors ${
+                className={`h-9 px-3.5 rounded-full text-footnote font-semibold transition-colors ${
                   abLoopEnd != null
                     ? 'bg-accent/15 text-accent active:bg-accent/25'
                     : 'bg-[var(--surface-overlay)] text-text-secondary active:text-text-primary'
@@ -634,11 +640,11 @@ export default function EqualizerPanel(): JSX.Element {
 
       {/* Prefer OG version - a playback preference rather than an effect, so
           it sits with the sleep timer / output group at the bottom. */}
-      <div className="border-t border-[var(--border)] mx-5" />
+      <div className="border-t border-[var(--separator)] mx-5" />
       <div className="flex items-center justify-between gap-3 px-5 py-2.5">
         <div className="min-w-0">
-          <p className="text-xs text-text-secondary">Prefer OG file</p>
-          <p className="text-[10px] text-text-muted">Play a song's OG version when it has one</p>
+          <p className="text-subhead text-text-primary">Prefer OG file</p>
+          <p className="text-caption1 text-text-muted">Play a song's OG version when it has one</p>
         </div>
         <Toggle on={preferOgVersion} onClick={() => setPreferOgVersion(!preferOgVersion)} />
       </div>
@@ -646,13 +652,13 @@ export default function EqualizerPanel(): JSX.Element {
       {/* Sleep timer */}
       <div className="flex items-center justify-between gap-3 px-5 py-2.5">
         <div className="min-w-0">
-          <p className="text-xs text-text-secondary">Sleep timer</p>
+          <p className="text-subhead text-text-primary">Sleep timer</p>
           {sleepTimerEnd ? (
             <p className="text-[10px] text-accent font-medium">
               {Math.max(0, Math.ceil((sleepTimerEnd - Date.now()) / 60000))} min left
             </p>
           ) : (
-            <p className="text-[10px] text-text-muted">Pause playback after a delay</p>
+            <p className="text-caption1 text-text-muted">Pause playback after a delay</p>
           )}
         </div>
         <div className="flex items-center gap-2 shrink-0">

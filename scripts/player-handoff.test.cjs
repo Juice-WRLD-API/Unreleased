@@ -56,26 +56,26 @@ function handoff({ spareSrc = 'next-url', readyState = 1, error = null } = {}) {
   }
   const env = {
     console: { warn() {}, error() {} }, HTMLMediaElement: { HAVE_METADATA: 1 },
-    useStore: { getState: () => state }, activeSlot: ref('A'), skipNextLoad: ref(false), volumeRef: ref(0.5),
+    useStore: { getState: () => state }, activeSlot: ref('A'), skipNextLoadUrl: ref(null), volumeRef: ref(0.5),
     getActive: () => slots[env.activeSlot.current], getNext: () => slots[env.activeSlot.current === 'A' ? 'B' : 'A'],
     resolvePlaybackUrl: () => 'next-url', handoffActive: () => true, applyRate() {},
     playSlot: (a, onRejected) => { calls.push(`play:${a.name}`); rejected = onRejected },
   }
-  const fn = run(block('  const handOffToSpare =', '  // iOS lets an <audio> element'), 'handOffToSpare', env)
+  const fn = run(block('  const handOffToSpare =', '  // Route both slots'), 'handOffToSpare', env)
   fn({ id: 'next' })
   return { env, slots, calls, reject: name => rejected({ name }) }
 }
 
 test('the song end hands playback to the spare slot when it already holds the next song', () => {
   const h = handoff()
-  assert.equal(h.env.activeSlot.current, 'B'); assert.equal(h.env.skipNextLoad.current, true)
+  assert.equal(h.env.activeSlot.current, 'B'); assert.equal(h.env.skipNextLoadUrl.current, 'next-url')
   assert.equal(h.slots.B.volume, 0.5); assert.deepEqual(h.calls, ['play:B'])
 })
 
 test('no handoff to a spare holding another song, nothing loaded yet, or a failed load', () => {
   for (const opts of [{ spareSrc: 'other-url' }, { spareSrc: null }, { readyState: 0 }, { error: { code: 2 } }]) {
     const h = handoff(opts)
-    assert.equal(h.env.activeSlot.current, 'A'); assert.equal(h.env.skipNextLoad.current, false); assert.deepEqual(h.calls, [])
+    assert.equal(h.env.activeSlot.current, 'A'); assert.equal(h.env.skipNextLoadUrl.current, null); assert.deepEqual(h.calls, [])
   }
 })
 
@@ -85,4 +85,84 @@ test('a refused handoff loads the song into the slot that just finished', () => 
   assert.deepEqual(h.calls, ['play:B', 'B:clear', 'B:load', 'play:A'])
   const paused = handoff(); paused.reject('AbortError')
   assert.equal(paused.env.activeSlot.current, 'B'); assert.deepEqual(paused.calls, ['play:B'])
+})
+
+test('native loop detection advances once per wrap, ignores source changes and explicit seeks', () => {
+  const env = { loopPositions: new WeakMap() }
+  const code = block('  const observeNativeLoop =', '  const [prevMute,')
+  const { observe, seek } = run(code, '({ observe: observeNativeLoop, seek: seekSlot })', env)
+  const audio = { src: 'a', currentTime: 179, loop: true }
+  assert.equal(observe(audio), false)
+  audio.currentTime = 0.2
+  assert.equal(observe(audio), true)
+  assert.equal(observe(audio), false)
+  audio.currentTime = 179; observe(audio)
+  seek(audio, 0)
+  assert.equal(observe(audio), false)
+  audio.currentTime = 179; observe(audio)
+  audio.src = 'b'; audio.currentTime = 0
+  assert.equal(observe(audio), false)
+  audio.currentTime = 179; observe(audio)
+  audio.loop = false; audio.currentTime = 0
+  assert.equal(observe(audio), false)
+})
+
+test('iOS starts the next source synchronously on the same element without a render or spare', () => {
+  const calls = []
+  const audio = { src: 'old', load: () => calls.push(['load', audio.src]), pause: () => calls.push('pause') }
+  const state = { repeat: 'none', queue: [], queueIndex: 0, currentTrack: { id: 'old' }, isPlaying: true }
+  const env = {
+    IS_IOS: true, useStore: { getState: () => state }, getActive: () => audio,
+    cfActive: ref(false), loopPositions: new WeakMap(), recoveryResumeAt: ref(179), volumeRef: ref(0.5),
+    nextTrack: () => { state.currentTrack = { id: 'next' }; return state.currentTrack },
+    resolvePlaybackUrl: () => 'next-url', applyRate() {}, playSlot: a => calls.push(['play', a.src]),
+    setIsPlaying: v => { state.isPlaying = v }, seekSlot: (a, t) => { a.currentTime = t },
+    handOffToSpare: () => assert.fail('iOS must reuse the unlocked element'),
+  }
+  const ended = run(block('  const onAudioEnded =', '  const restartCurrentTrack ='), 'onAudioEnded', env)
+  ended(audio)
+  assert.equal(audio.src, 'next-url')
+  assert.deepEqual(calls, [['load', 'next-url'], ['play', 'next-url']])
+  assert.equal(env.recoveryResumeAt.current, 0)
+  calls.length = 0
+  env.nextTrack = () => null
+  ended(audio)
+  assert.deepEqual(calls, ['pause'])
+  assert.equal(state.isPlaying, false)
+  calls.length = 0
+  state.repeat = 'one'; state.isPlaying = true
+  ended(audio)
+  assert.equal(audio.currentTime, 0)
+  assert.deepEqual(calls, [['play', 'next-url']])
+  calls.length = 0
+  state.isPlaying = false
+  ended(audio)
+  assert.deepEqual(calls, [])
+})
+
+test('iOS keeps native playback intent on the active slot while loading, and clears it when paused', () => {
+  const ast = ts.createSourceFile('Player.tsx', source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX)
+  const slots = []
+  function visit(node) {
+    if (ts.isJsxSelfClosingElement(node) && node.tagName.getText(ast) === 'audio') slots.push(node)
+    ts.forEachChild(node, visit)
+  }
+  visit(ast)
+  assert.equal(slots.length, 2)
+  const props = (node, state) => Object.fromEntries(['autoPlay', 'preload', 'loop'].map(name => {
+    const attr = node.attributes.properties.find(a => a.name?.getText(ast) === name)
+    return [name, attr ? vm.runInNewContext(attr.initializer.expression.getText(ast), state) : undefined]
+  }))
+  for (const active of ['A', 'B']) {
+    const state = { IS_IOS: true, isPlaying: true, crossfadeEnabled: false, activeSlot: ref(active) }
+    slots.forEach((node, i) => {
+      const p = props(node, state)
+      assert.equal(p.autoPlay, ['A', 'B'][i] === active, 'only the active slot may start as data arrives')
+      assert.equal(p.preload, 'auto', 'a background source change must not opt out of loading')
+      assert.equal(p.loop, true, 'retain native continuity at the track boundary')
+      assert.equal(props(node, { ...state, isPlaying: false }).autoPlay, false, 'paused loads must not autoplay')
+      assert.equal(props(node, { ...state, isPlaying: false }).preload, 'none', 'restoring a paused queue must not fetch audio')
+      assert.equal(props(node, { ...state, IS_IOS: false }).autoPlay, false, 'other platforms retain explicit playback')
+    })
+  }
 })

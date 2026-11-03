@@ -418,6 +418,10 @@ export function ModalOverlay({
   // pop-out: that's a real OS window, which opens and closes on its own.
   const rootRef = useRef<HTMLDivElement>(null)
   useOverlayMotion(rootRef, !floating)
+  // A drag that starts inside the panel (selecting text, a slider) and ends
+  // over the backdrop fires its click on the backdrop - only a press that
+  // began there too counts as clicking outside.
+  const pressedBackdrop = useRef(false)
 
   // Keeps this panel available as a snap target for everyone else, and drops
   // it once it's no longer explicitly positioned (never dragged, or closed).
@@ -502,7 +506,8 @@ export function ModalOverlay({
       <div
         ref={rootRef}
         className={`fixed inset-0 ${zIndexClassName} flex items-end md:items-center justify-center bg-black/60 backdrop-blur-sm p-0 md:px-4`}
-        onClick={(e) => { if (e.target === e.currentTarget) onClose() }}
+        onMouseDown={(e) => { pressedBackdrop.current = e.target === e.currentTarget }}
+        onClick={(e) => { if (e.target === e.currentTarget && pressedBackdrop.current) onClose() }}
         // Fades out (rather than translating) as the panel is dragged, so the
         // app behind is revealed cleanly instead of a dimmed rectangle just
         // sliding down with it and hovering above the panel.

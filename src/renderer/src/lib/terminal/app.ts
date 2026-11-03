@@ -11,7 +11,7 @@ import { getToken } from '../userApi'
 import { relativeTime } from '../../components/adminShared'
 import { termAccess } from './access'
 import { completeSongs } from './player'
-import { asJson, fail, oneLine, parseArgs, pickByName, table, type TermCommand } from './types'
+import { asJson, confirmAction, fail, oneLine, parseArgs, pickByName, table, type TermCommand } from './types'
 
 const st = (): ReturnType<typeof useStore.getState> => useStore.getState()
 
@@ -22,11 +22,11 @@ const VIEWS: Record<string, ViewType> = {
   home: 'home', tracker: 'api-tracker', songs: 'api-tracker', files: 'api-files', playlists: 'playlists', liked: 'liked',
   chat: 'chat', news: 'news', docs: 'docs', wrld: 'wrld', stats: 'stats', statistics: 'statistics', download: 'download',
   heardle: 'heardle', wordle: 'wordle', tierlist: 'tierlist', thanks: 'thanks', editor: 'editor', contributor: 'contributor',
-  albums: 'albums-admin',
+  albums: 'albums', 'albums-admin': 'albums-admin',
 }
 const SETTINGS_TABS: SettingsTab[] = ['account', 'appearance', 'preferences', 'playback', 'desktop', 'shortcuts', 'app', 'developer', 'feedback', 'about']
-const ADMIN_TABS: AdminTab[] = ['proposals', 'comp-proposals', 'comp-replace', 'applications', 'reports', 'feedback', 'users', 'stats', 'channels', 'eras', 'cdn-nodes', 'beta', 'lyrics', 'logs']
-const OPEN_TARGETS = [...Object.keys(VIEWS), 'settings', 'profile', 'admin', 'queue', 'eq', 'diagnostics', 'notifications', 'user', 'song']
+const ADMIN_TABS: AdminTab[] = ['proposals', 'comp-proposals', 'comp-replace', 'cover-art', 'applications', 'reports', 'feedback', 'users', 'stats', 'channels', 'news-channels', 'eras', 'cdn-nodes', 'beta', 'lyrics', 'logs']
+const OPEN_TARGETS = [...Object.keys(VIEWS), 'settings', 'profile', 'admin', 'queue', 'eq', 'diagnostics', 'identify', 'notifications', 'user', 'song']
 // `notifications` filters, by the names the notification area shows.
 const NOTIFY_KINDS: Record<string, NotificationKind> = { chat: 'chat', news: 'news', announcements: 'broadcast', app: 'app' }
 const NOTIFY_SUBS = ['ls', 'show', 'open', 'rm', 'read', 'clear']
@@ -41,7 +41,7 @@ const offered = (target: string): boolean => {
 export const APP_COMMANDS: TermCommand[] = [
   {
     name: 'open', aliases: ['go', 'goto'], group: 'Navigation',
-    get usage() { return `open <page> · open settings [tab] · ${offered('admin') ? 'open admin [tab] · ' : ''}open user <id> · open song <title> · open queue|eq|diagnostics|notifications` },
+    get usage() { return `open <page> · open settings [tab] · ${offered('admin') ? 'open admin [tab] · ' : ''}open user <id> · open song <title> · open queue|eq|diagnostics|identify|notifications` },
     description: 'Go to any page, as if you had clicked it. The terminal keeps its place for when you return (Ctrl+` or the Terminal button)',
     complete: (before, partial) => {
       const p = partial.toLowerCase()
@@ -55,7 +55,7 @@ export const APP_COMMANDS: TermCommand[] = [
       const [target = '', ...restWords] = args.trim().split(/\s+/)
       const rest = restWords.join(' ')
       const key = target.toLowerCase()
-      if (!key) fail(`usage: open <${Object.keys(VIEWS).filter(offered).join('|')}|settings|${offered('admin') ? 'admin|' : ''}profile|queue|eq|diagnostics|notifications>`)
+      if (!key) fail(`usage: open <${Object.keys(VIEWS).filter(offered).join('|')}|settings|${offered('admin') ? 'admin|' : ''}profile|queue|eq|diagnostics|identify|notifications>`)
       if (!offered(key)) fail(`no page "${target}" (try: open home)`)
       const s = st()
       if (key === 'settings') {
@@ -72,6 +72,7 @@ export const APP_COMMANDS: TermCommand[] = [
       if (key === 'profile') { s.openProfile(); return }
       if (key === 'queue') { s.setShowQueue(true); ctx.print('queue panel opened', 'ok'); return }
       if (key === 'eq') { s.setShowEqPanel(true); ctx.print('equalizer opened', 'ok'); return }
+      if (key === 'identify') { s.setShowRecognition(true); ctx.print('identify song opened', 'ok'); return }
       if (key === 'diagnostics' || key === 'diag') { s.setShowDiagnostics(true); ctx.print('diagnostics opened', 'ok'); return }
       if (key === 'notifications') { s.setShowNotifications(true); ctx.print('notification area opened', 'ok'); return }
       if (key === 'user') {
@@ -228,9 +229,9 @@ token show prints it in full · token copy puts it on the clipboard`)
     run: (_a, ctx) => { const n = useChatStore.getState().totalUnread(); ctx.print(n ? `${n} unread message${n === 1 ? '' : 's'}` : 'all caught up', n ? 'plain' : 'dim') },
   },
   {
-    name: 'logout', aliases: ['kms'], group: 'App', usage: 'logout', description: 'Sign out of your account',
-    run: async (_a, ctx) => {
-      if (!window.confirm('Sign out of your account?')) { ctx.print('cancelled', 'dim'); return }
+    name: 'logout', aliases: ['kms'], group: 'App', usage: 'logout [-y]', description: 'Sign out of your account',
+    run: async (args, ctx) => {
+      if (!confirmAction(ctx, 'Sign out of your account?', parseArgs(args).bool.has('y'))) return
       await st().logoutAccount()
       ctx.print('signed out', 'ok')
     },

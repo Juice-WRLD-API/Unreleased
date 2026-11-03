@@ -11,9 +11,22 @@ export interface Artist {
   bio?: string
 }
 
+/** The catalogue song at a track's path, as album reads return it (null when
+ *  no song has that path; absent on servers older than this field). */
+export interface AlbumTrackSong {
+  id: number
+  public_id: number | null
+  name: string
+  category: string
+  length: string
+  image_url: string | null
+}
+
 export interface AlbumSongEntry {
   order: number
   path: string
+  /** Read-only: writes only take {order, path}. */
+  song?: AlbumTrackSong | null
 }
 
 export interface Album {

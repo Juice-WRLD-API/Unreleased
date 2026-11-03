@@ -169,7 +169,7 @@ function OverviewTab() {
           <Endpoint method="GET" path="/library/playlists/{id}/" description="Get a personal playlist with tracks" />
           <Endpoint method="PATCH" path="/library/playlists/{id}/" description="Update name, description, cover, visibility, track order" />
           <Endpoint method="DELETE" path="/library/playlists/{id}/" description="Delete a personal playlist" />
-          <Endpoint method="POST" path="/library/playlists/{id}/items/" description="Add a song, comp file, donor file or local file to a playlist" />
+          <Endpoint method="POST" path="/library/playlists/{id}/items/" description="Add one entry or bulk catalogue songs (song_ids); returns the new item(s), not the full playlist" />
           <Endpoint method="DELETE" path="/library/playlists/{id}/items/{song_id}/" description="Remove a song from a playlist" />
           <Endpoint method="DELETE" path="/library/playlists/{id}/entries/{item_id}/" description="Remove any playlist entry by its id" />
           <Endpoint method="GET" path="/library/playlists/public/{id}/" description="Fetch a playlist marked public (no auth required)" />
@@ -709,7 +709,7 @@ function PlaylistsTab() {
             ['GET', '/library/playlists/{id}/', 'Get playlist with full track list'],
             ['PATCH', '/library/playlists/{id}/', 'Update name, description, cover, visibility, or reorder tracks'],
             ['DELETE', '/library/playlists/{id}/', 'Delete a playlist'],
-            ['POST', '/library/playlists/{id}/items/', <>Add an entry. Body <Code>{'{ "song_id": 123 }'}</Code> for a song, or a file entry (see Entry sources). Returns the updated playlist detail (201), or 200 with <Code>{'{ "detail": "Track already in playlist." }'}</Code> if it is already there (nothing changes)</>],
+            ['POST', '/library/playlists/{id}/items/', <>Add an entry. Body <Code>{'{ "song_id": 123 }'}</Code> for one song, <Code>{'{ "song_ids": [1, 2, 3] }'}</Code> to add many catalogue songs in one request, or a file entry (see Entry sources). Returns 201 with <Code>{'{ "item": {…}, "updated_at": "…" }'}</Code> (or <Code>items</Code> for bulk), or 200 with <Code>{'{ "detail": "Track already in playlist." }'}</Code> if that entry is already there</>],
             ['DELETE', '/library/playlists/{id}/items/{song_id}/', 'Remove a song entry by song id'],
             ['DELETE', '/library/playlists/{id}/entries/{item_id}/', <>Remove any entry by its own <Code>id</Code> (the only way to remove a file entry)</>],
           ]}

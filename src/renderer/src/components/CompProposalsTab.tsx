@@ -10,7 +10,7 @@ import { useStore } from '../store/useStore'
 import { getMediaType } from '../lib/fileTypes'
 import { formatBytes, formatDuration } from '../lib/format'
 import { useAuthedBlobUrl, useCompProposalsQueue } from '../hooks/useCompProposalsQueue'
-import { FOLDER_LEVEL_TYPES, DESTINATION_TYPES, compApproveBlockedReason } from '../lib/compProposalShared'
+import { FOLDER_LEVEL_TYPES, DESTINATION_TYPES, compApproveBlockedReason, compTagChangeRows } from '../lib/compProposalShared'
 import ProposalPropagationModal from './ProposalPropagationModal'
 
 /** One preview slot - a live comp/ path (plain <img>/<audio>/<video> against
@@ -88,7 +88,7 @@ export default function CompProposalsTab({ embedded = false, onChanged }: { embe
   const {
     status, setStatus, proposals, selected, setSelected, loading, actionId,
     reviewNotes, setReviewNotes, error, setError, loadError,
-    doReview, doReverse, downloadStaging, bulkApproving, doAcceptAll,
+    doReview, doReverse, downloadStaging, bulkApproving, doReviewAll,
   } = useCompProposalsQueue(activeChannel, onChanged, true)
   const [query, setQuery] = useState('')
   const [propagationId, setPropagationId] = useState<number | null>(null)
@@ -139,19 +139,17 @@ export default function CompProposalsTab({ embedded = false, onChanged }: { embe
   const p = selected
   const approveBlockedReason = compApproveBlockedReason(p, account)
 
-  // Every other pending proposal from the same contributor, minus anything
-  // this reviewer isn't allowed to approve (delete_folder gating) - scoped
-  // to the current status/search-independent `proposals` list so the count
-  // matches what "Accept all" would actually act on.
+  // Denial remains available for proposals this reviewer cannot approve.
   const pendingFromContributor = p
-    ? proposals.filter(x => x.contributor_username === p.contributor_username && x.status === 'pending' && !compApproveBlockedReason(x, account))
+    ? proposals.filter(x => x.contributor_id === p.contributor_id && x.status === 'pending')
     : []
+  const approvableFromContributor = pendingFromContributor.filter(x => !compApproveBlockedReason(x, account))
 
-  const doAcceptAllForContributor = (): void => {
-    const ids = pendingFromContributor.map(x => x.id)
+  const doReviewAllForContributor = (action: 'approve' | 'reject'): void => {
+    const ids = (action === 'approve' ? approvableFromContributor : pendingFromContributor).map(x => x.id)
     if (ids.length === 0) return
-    if (!confirm(`Approve all ${ids.length} pending comp proposal${ids.length !== 1 ? 's' : ''} from ${p!.contributor_username}?`)) return
-    doAcceptAll(ids)
+    if (!confirm(`${action === 'approve' ? 'Approve' : 'Deny'} all ${ids.length} pending comp proposal${ids.length !== 1 ? 's' : ''} from ${p!.contributor_username}?`)) return
+    void doReviewAll(ids, action)
   }
 
   return (
@@ -233,14 +231,14 @@ export default function CompProposalsTab({ embedded = false, onChanged }: { embe
                     )}
                   </div>
                 </div>
-                <div className="flex items-center gap-2 shrink-0">
+                <div className="flex items-center justify-end flex-wrap gap-2">
                   {p.staging_filename && p.status === 'pending' && (
                     <button onClick={() => downloadStaging(p)} className="px-3 py-1.5 rounded-lg text-xs text-text-muted hover:text-text-primary border border-[var(--border)] flex items-center gap-1.5">
                       <Download size={13} /> Staged file
                     </button>
                   )}
                   {p.status === 'pending' && (
-                    actionId === p.id || bulkApproving ? <Loader2 size={14} className="animate-spin text-text-muted" /> : (
+                    actionId !== null || bulkApproving ? <Loader2 size={14} className="animate-spin text-text-muted" /> : (
                       <>
                         <button onClick={() => doReview(p.id, 'reject')} className="px-3 py-1.5 rounded-lg bg-red-500/10 text-red-400 text-xs font-semibold flex items-center gap-1.5">
                           <XCircle size={13} /> Reject
@@ -250,9 +248,14 @@ export default function CompProposalsTab({ embedded = false, onChanged }: { embe
                             <CheckCircle size={13} /> Approve
                           </button>
                         )}
+                        {approvableFromContributor.length > 1 && (
+                          <button onClick={() => doReviewAllForContributor('approve')} className="px-3 py-1.5 rounded-lg bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 text-xs font-semibold flex items-center gap-1.5">
+                            <CheckCircle size={13} /> Accept all ({approvableFromContributor.length})
+                          </button>
+                        )}
                         {pendingFromContributor.length > 1 && (
-                          <button onClick={doAcceptAllForContributor} className="px-3 py-1.5 rounded-lg bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 text-xs font-semibold flex items-center gap-1.5">
-                            <CheckCircle size={13} /> Accept all ({pendingFromContributor.length})
+                          <button onClick={() => doReviewAllForContributor('reject')} className="px-3 py-1.5 rounded-lg bg-red-500/10 hover:bg-red-500/20 text-red-400 text-xs font-semibold flex items-center gap-1.5">
+                            <XCircle size={13} /> Deny all ({pendingFromContributor.length})
                           </button>
                         )}
                       </>
@@ -291,7 +294,7 @@ export default function CompProposalsTab({ embedded = false, onChanged }: { embe
                   <MediaPreview label="Current file" name={p.file_path} src={buildStreamUrl(p.file_path, activeChannel)} />
                   {p.staging_filename && (
                     <MediaPreview
-                      label="Proposed file"
+                      label={p.change_type === 'retag' ? 'Proposed cover' : 'Proposed file'}
                       name={p.staging_filename}
                       src={staged.src}
                       loading={p.status === 'pending' && staged.loading}
@@ -299,6 +302,22 @@ export default function CompProposalsTab({ embedded = false, onChanged }: { embe
                       bytes={staged.bytes}
                     />
                   )}
+                </div>
+              )}
+              {p.change_type === 'retag' && (
+                <div>
+                  <p className="text-[10px] font-bold uppercase tracking-wider text-text-muted mb-1">Tag changes</p>
+                  <table className="w-full text-xs">
+                    <tbody>
+                      {compTagChangeRows(p).map(r => (
+                        <tr key={r.key} className="border-b border-[var(--border)] last:border-0">
+                          <td className="py-1.5 pr-3 text-text-muted whitespace-nowrap align-top">{r.label}</td>
+                          <td className="py-1.5 pr-3 text-text-muted break-words align-top">{r.from || '—'}</td>
+                          <td className="py-1.5 text-text-primary break-words align-top">→ {r.to || <span className="text-red-400">removed</span>}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
                 </div>
               )}
               {p.contributor_notes && (

@@ -1,4 +1,4 @@
-import { useEffect } from 'react'
+import { useEffect, useRef } from 'react'
 import { registerBackHandler } from '../lib/backHandlers'
 
 // Android back closes this component, for the modals/menus whose open state
@@ -12,8 +12,14 @@ import { registerBackHandler } from '../lib/backHandlers'
 // `active` is for components that stay mounted and render null while closed -
 // without it they'd swallow a back press while invisible.
 export function useBackToClose(onClose: () => void, active = true): void {
+  // Through a ref, like useEscapeToClose: depending on `onClose` re-registered
+  // the handler whenever a caller passed a fresh arrow, which moved an outer
+  // layer above an inner one in the stack.
+  const onCloseRef = useRef(onClose)
+  onCloseRef.current = onClose
+
   useEffect(() => {
     if (!active) return
-    return registerBackHandler(() => { onClose(); return true })
-  }, [onClose, active])
+    return registerBackHandler(() => { onCloseRef.current(); return true })
+  }, [active])
 }

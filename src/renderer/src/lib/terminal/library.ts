@@ -9,14 +9,14 @@ import { listDonorFiles } from '../donorFilesApi'
 import { isDonorAudio } from '../donorPlayback'
 import { libraryTrackToTrack } from '../fileTypes'
 import type { Track } from '../../types'
-import { getSongById, getSongsByIds, songToTrack, type JWApiSong } from '../juicewrldApi'
+import { apiFileIdToRef, apiFileRefToTrack, getSongById, loadAllSongs, songToTrack, type JWApiSong } from '../juicewrldApi'
 import { completeSongs, rememberFind, songFromArg } from './player'
 import { DAY_EVENT_LABELS, dayHeadline, dayNote, dayQueue, eventsOnDay, hasAudio, loadDaySongs, yearsSince } from '../onThisDay'
 import { PLAYLIST_EDIT_SUBS, runPlaylistEdit } from './playlistEdit'
 import { pageRows } from './more'
-import { parseSearchQuery, matchesFieldFilters } from '../trackerSearch'
+import { parseSearchQuery, matchesFieldFilters, songsById } from '../trackerSearch'
 import { displaySongName } from '../songPrefs'
-import { asJson, fail, parseArgs, pickByName, type TermCommand } from './types'
+import { asJson, confirmAction, fail, parseArgs, pickByName, takeYes, type TermCommand } from './types'
 
 const st = (): ReturnType<typeof useStore.getState> => useStore.getState()
 
@@ -45,8 +45,9 @@ interface PlaylistRow { item: PlaylistItemEntry; track: Track; song: JWApiSong |
 async function playlistRows(id: number): Promise<{ name: string; rows: PlaylistRow[] }> {
   const detail = await getPlaylist(id)
   const ordered = [...detail.items].sort((a, b) => a.position - b.position)
-  const songs = await getSongsByIds(playlistSongIds(ordered))
-  const byId = new Map(songs.map((s) => [s.id, s]))
+  // The shared catalogue (one cached request), not a /songs/{id}/ per entry:
+  // a long playlist sent hundreds at once and filled the offline cache.
+  const byId = playlistSongIds(ordered).length ? songsById(await loadAllSongs()) : new Map<number, JWApiSong>()
   const tracks = playlistItemsToTracks(ordered)
   const rows = ordered.map((item, i): PlaylistRow => {
     const song = item.song ? byId.get(item.song.id) ?? null : null
@@ -220,9 +221,9 @@ export const LIBRARY_COMMANDS: TermCommand[] = [
   },
   {
     name: 'playlist', aliases: ['pl'], group: 'Library',
-    usage: 'playlist <play|shuffle|show|open> <name|N>  ·  show <name|N> -- <filter>  ·  create <name>  ·  delete <name|N>  ·  add|remove <name|N> -- <song | file <path> | myfile <name> | local <name>>  ·  remove <name|N> -- at <N>  ·  rename|describe <name|N> -- <text>  ·  public|private <name|N>  ·  move <name|N> -- <from> <to>  ·  cover <name|N|id:N> [-- show|set|rm]  ·  view <id>',
+    usage: 'playlist <play|shuffle|show|open> <name|N>  ·  show <name|N> -- <filter>  ·  create <name>  ·  delete <name|N> [-y]  ·  add|remove <name|N> -- <song | file <path> | myfile <name> | local <name>>  ·  remove <name|N> -- at <N>  ·  rename|describe <name|N> -- <text>  ·  public|private <name|N>  ·  move <name|N> -- <from> <to>  ·  cover <name|N|id:N> [-- show|set|rm]  ·  view <id>',
     covers: [
-      'userApi.getPlaylists', 'userApi.createPlaylist', 'userApi.deletePlaylist', 'userApi.addToPlaylist', 'userApi.removeFromPlaylist', 'userApi.getPlaylist',
+      'userApi.getPlaylists', 'userApi.createPlaylist', 'userApi.deletePlaylist', 'userApi.addToPlaylist', 'userApi.addSongsToPlaylist', 'userApi.removeFromPlaylist', 'userApi.getPlaylist',
       'userApi.addPlaylistEntry', 'userApi.removePlaylistEntry', 'userApi.reorderPlaylistItems',
       'userApi.renamePlaylist', 'userApi.updatePlaylist', 'userApi.uploadPlaylistCover', 'userApi.removePlaylistCover',
       'userApi.getPlaylistCover', 'userApi.getPublicPlaylist', 'userApi.getPublicPlaylistCover',
@@ -275,8 +276,9 @@ export const LIBRARY_COMMANDS: TermCommand[] = [
           return
         }
         case 'delete': case 'rm': {
-          const pl = await playlistFromArg(rest)
-          if (!window.confirm(`Delete the playlist "${pl.name}"? This can't be undone.`)) { ctx.print('cancelled', 'dim'); return }
+          const { text, yes } = takeYes(rest)
+          const pl = await playlistFromArg(text)
+          if (!confirmAction(ctx, `Delete the playlist "${pl.name}"? This can't be undone.`, yes)) return
           await deletePlaylist(pl.id)
           await st().refreshPlaylists()
           ctx.print(`deleted "${pl.name}"`, 'ok')
@@ -325,11 +327,15 @@ export const LIBRARY_COMMANDS: TermCommand[] = [
       const ids = st().likedTrackIds
       const songIds = ids.map(trackIdToSongId).filter((n): n is number => n != null)
       const other = ids.length - songIds.length
-      if (songIds.length === 0) { ctx.print(other ? `${other} liked file${other === 1 ? '' : 's'} (no library songs)` : 'no liked songs yet', 'dim'); return }
-      const songs = await getSongsByIds(songIds.slice(0, 200))
-      if (args.trim().toLowerCase() === 'play') {
-        st().playCollection(songs.map(songToTrack), null, null)
-        ctx.print(`▶ ${songs.length} liked song${songs.length === 1 ? '' : 's'}`, 'ok')
+      // Liked comp files, rebuilt with their comp like the Liked Songs page does.
+      const files = ids.map((id) => { const ref = apiFileIdToRef(id); return ref ? apiFileRefToTrack(ref) : null }).filter((t): t is Track => t != null)
+      const play = args.trim().toLowerCase() === 'play'
+      if (songIds.length === 0 && !(play && files.length)) { ctx.print(other ? `${other} liked file${other === 1 ? '' : 's'} (no library songs)` : 'no liked songs yet', 'dim'); return }
+      const byId = songIds.length ? songsById(await loadAllSongs()) : new Map<number, JWApiSong>()
+      const songs = songIds.map((id) => byId.get(id)).filter((s): s is JWApiSong => !!s)
+      if (play) {
+        st().playCollection([...songs.map(songToTrack), ...files], null, null)
+        ctx.print(`▶ ${songs.length + files.length} liked track${songs.length + files.length === 1 ? '' : 's'}`, 'ok')
         return
       }
       ctx.print(`${pageRows(songs.length, (i) => `${String(i + 1).padStart(3)}  ${displaySongName(songs[i])}`, 80)}${other ? `\n  + ${other} liked file${other === 1 ? '' : 's'}` : ''}`)

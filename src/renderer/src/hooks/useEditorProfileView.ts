@@ -12,7 +12,9 @@ import { accountDisplayName } from '../lib/format'
 import * as reportsApi from '../lib/reportsApi'
 import { fetchEraList } from '../lib/erasApi'
 import { fetchCdnStats } from '../lib/cdnAdminApi'
+import { adminCoverArtCounts } from '../lib/coverArtApi'
 import type { AdminTab } from './useAdminQueue'
+import { useCanManage } from './useChannelRoles'
 import { filterCompProposals, compProposalSearchText, type CompFilterTab } from '../components/CompProposalList'
 import { useStaffRoles } from './useStaffRoles'
 import { useMyProposals } from './useMyProposals'
@@ -31,6 +33,7 @@ export const PROPOSAL_FILTER_TABS: { key: ProposalFilterTab; label: string }[] =
 export interface AdminPreview {
   pendingProposals: number | null
   pendingComp: number | null
+  pendingCoverArt: number | null
   pendingApplications: number | null
   pendingReports: number | null
   totalUsers: number | null
@@ -81,8 +84,12 @@ export function useEditorProfileView(): {
   isManager: boolean
   canReviewReports: boolean
   canReviewStaff: boolean
-  proposals: ReturnType<typeof useMyProposals>['proposals']
+  canReviewCoverArt: boolean
+  totalProposals: number
   loadingProposals: boolean
+  loadingMoreProposals: boolean
+  hasMoreProposals: boolean
+  loadMoreProposals: () => void
   refreshing: boolean
   filter: ProposalFilterTab
   setFilter: ReturnType<typeof useMyProposals>['setFilter']
@@ -94,7 +101,7 @@ export function useEditorProfileView(): {
   handleDelete: ReturnType<typeof useMyProposals>['handleDelete']
   handleResubmit: ReturnType<typeof useMyProposals>['handleResubmit']
   handleReview: ReturnType<typeof useMyProposals>['handleReview']
-  reviewingId: number | null
+  reviewingId: ReadonlySet<number>
   /** Staff (admin, or manager of this channel) past the 2FA lock - gets
    *  approve/deny on their own pending proposals here. */
   canReviewProposals: boolean
@@ -221,9 +228,12 @@ export function useEditorProfileView(): {
   // channel shouldn't leave this tile visible (and then erroring) on a
   // channel they don't actually manage.
   const { isContributor, isAdmin, isManager, canReviewReports, canReviewStaff } = useStaffRoles(account, activeChannel, channels)
+  // Cover art isn't per channel: the server asks for a primary-channel manager.
+  const canReviewCoverArt = useCanManage()
 
   const {
-    proposals, loading: loadingProposals, refreshing,
+    totalProposals, loading: loadingProposals, refreshing,
+    loadingMore: loadingMoreProposals, hasMore: hasMoreProposals, loadMore: loadMoreProposals,
     filter, setFilter, search, setSearch, deletingId, resubmittingId,
     filteredProposals, handleDelete, handleResubmit, handleReview, reviewingId, tabCount,
   } = useMyProposals(activeChannel, refreshKey)
@@ -258,7 +268,7 @@ export function useEditorProfileView(): {
   // useAdminQueue: that hook only ever loads whichever tab is active inside
   // AdminPage, so pulling eight counts out of it here would mean cycling
   // through every tab just to populate a tile preview. Managers only ever see
-  // Song edits + Comp files in their own nav (see useAdminQueue's
+  // Song edits, Cover art and Comp files in their own nav (see useAdminQueue's
   // managerNavIds), so the admin-only sections (applications/users) are
   // skipped for them rather than fetched against endpoints that would 403.
   const [adminPreview, setAdminPreview] = useState<AdminPreview | null>(null)
@@ -275,7 +285,7 @@ export function useEditorProfileView(): {
     Promise.resolve().then(() => {
       if (cancelled) return
       const initial: AdminPreview = {
-        pendingProposals: null, pendingComp: null, pendingApplications: null, pendingReports: null,
+        pendingProposals: null, pendingComp: null, pendingCoverArt: null, pendingApplications: null, pendingReports: null,
         totalUsers: null, totalChannels: channelsRef.current.length, totalEras: null,
         pendingCdnNodes: null, totalPending: null, otpEnabled: isAdmin ? !!account?.otp_enabled : null,
         totalProposals: null, approvedProposals: null, approvalPct: null,
@@ -288,7 +298,8 @@ export function useEditorProfileView(): {
         preview = { ...preview, ...patch }
         preview.totalPending = preview.pendingProposals == null || preview.pendingComp == null
           || (isAdmin && (preview.pendingApplications == null || preview.pendingReports == null))
-          ? null : preview.pendingProposals + preview.pendingComp
+          || (canReviewCoverArt && preview.pendingCoverArt == null)
+          ? null : preview.pendingProposals + preview.pendingComp + (preview.pendingCoverArt ?? 0)
             + (preview.pendingApplications ?? 0) + (preview.pendingReports ?? 0)
         setAdminPreview(preview)
       }
@@ -301,6 +312,9 @@ export function useEditorProfileView(): {
           approvalPct: isAdmin ? (reviewed > 0 ? Math.round(counts.approved / reviewed * 100) : 0) : null })
       }).catch(() => {})
       void adminCompProposalCounts(activeChannel).then(counts => publish({ pendingComp: counts.pending })).catch(() => {})
+      if (canReviewCoverArt) {
+        void adminCoverArtCounts().then(counts => publish({ pendingCoverArt: counts.pending })).catch(() => {})
+      }
       if (isAdmin) {
         void adminListApplications('pending').then(apps => publish({ pendingApplications: apps.length })).catch(() => {})
         void reportsApi.listSongReports('pending').then(reps => publish({ pendingReports: reps.length })).catch(() => {})
@@ -313,7 +327,7 @@ export function useEditorProfileView(): {
     return () => { cancelled = true }
     // channels.length deliberately excluded - see channelsRef comment above.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [canReviewStaff, isAdmin, activeChannel, refreshKey, account?.otp_enabled])
+  }, [canReviewStaff, canReviewCoverArt, isAdmin, activeChannel, refreshKey, account?.otp_enabled])
 
   // Admins without 2FA get everything in the Admin tile hidden except the
   // 2FA box itself, so a compromised (password-only) admin account
@@ -345,8 +359,9 @@ export function useEditorProfileView(): {
     avatarUploading, avatarError, handleAvatarFile,
     refreshKey, setRefreshKey, showAddSong, setShowAddSong, openAdmin,
     proposalsView, setProposalsView, expandedProposalId, setExpandedProposalId, compSearch, setCompSearch,
-    isContributor, isAdmin, isManager, canReviewReports, canReviewStaff,
-    proposals, loadingProposals, refreshing, filter, setFilter, search, setSearch, deletingId, resubmittingId,
+    isContributor, isAdmin, isManager, canReviewReports, canReviewStaff, canReviewCoverArt,
+    totalProposals, loadingProposals, loadingMoreProposals, hasMoreProposals, loadMoreProposals,
+    refreshing, filter, setFilter, search, setSearch, deletingId, resubmittingId,
     filteredProposals, handleDelete, handleResubmit, handleReview, reviewingId, canReviewProposals, tabCount,
     leaderboard, loadingLeaderboard, myEntry,
     compProposals, loadingComp, compFilter, setCompFilter, withdrawingCompId, handleWithdrawComp,

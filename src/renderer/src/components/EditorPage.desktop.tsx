@@ -408,7 +408,7 @@ export default function EditorPage({ initialSongId = null }: {
     versionNum, setVersionNum, versionTitle, setVersionTitle,
     loadedTitle, linkedCount, versionSaveStatus, linkError, saveVersionInfo,
     titleSuggestions, showTitleSuggestions, setShowTitleSuggestions, handlePickTitleSuggestion,
-    base, current, patch, changedCount, alreadySubmitted,
+    base, current, patch, changedCount, alreadySubmitted, confirmDiscard,
   } = useEditorPageState(initialSongId)
   // 'full' = the card/left-rail layout, 'basic' = one flat stacked form with
   // every field on screen. Remembered across sessions (and shared with the
@@ -472,7 +472,7 @@ export default function EditorPage({ initialSongId = null }: {
       {/* Top bar */}
       <div className="shrink-0 flex items-center gap-3 px-5 py-3">
         <button
-          onClick={() => setActiveView(backView)}
+          onClick={() => { if (confirmDiscard()) setActiveView(backView) }}
           title="Back"
           className="p-1.5 -ml-1.5 rounded-lg text-text-muted hover:text-text-primary hover:bg-surface-overlay transition-colors shrink-0"
         >
@@ -569,16 +569,16 @@ export default function EditorPage({ initialSongId = null }: {
                     onChange={setCat} options={CATEGORIES}
                   />
                 </div>
-                <BasicRow label="Album" value={album} original={String(base.album || '')} onChange={setAlbum} suggest="album" />
+                <BasicRow rows={2} label="Album" value={album} original={String(base.album || '')} onChange={setAlbum} suggest="album" />
                 <BasicRow
                   label="Alternate titles (one per line)" value={altNames}
                   original={Array.isArray(base.track_titles) ? (base.track_titles as string[]).join('\n') : ''}
                   onChange={setAltNames} rows={3}
                 />
-                <BasicRow label="Credited artists" value={artists} original={String(base.credited_artists || '')} onChange={setArtists} suggest="credited_artists" />
+                <BasicRow rows={2} label="Credited artists" value={artists} original={String(base.credited_artists || '')} onChange={setArtists} suggest="credited_artists" />
                 <div className="grid grid-cols-2 gap-1.5">
-                  <BasicRow label="Producers" value={prod} original={String(base.producers || '')} onChange={setProd} suggest="producers" />
-                  <BasicRow label="Engineers" value={eng} original={String(base.engineers || '')} onChange={setEng} suggest="engineers" />
+                  <BasicRow rows={2} label="Producers" value={prod} original={String(base.producers || '')} onChange={setProd} suggest="producers" />
+                  <BasicRow rows={2} label="Engineers" value={eng} original={String(base.engineers || '')} onChange={setEng} suggest="engineers" />
                 </div>
                 <BasicRow label="Recording locations" value={loc} original={String(base.recording_locations || '')} onChange={setLoc} rows={2} suggest="recording_locations" />
                 <BasicRow label="Record dates" value={recDate} original={String(base.record_dates || '')} onChange={setRecDate} rows={2} dateInput />
@@ -730,7 +730,7 @@ export default function EditorPage({ initialSongId = null }: {
                     </button>
                   )}
                   <button
-                    onClick={closeSong}
+                    onClick={() => { if (confirmDiscard()) closeSong() }}
                     className="px-2.5 py-1.5 text-[11px] font-bold text-text-muted opacity-65 hover:opacity-100 transition-opacity">
                     Close
                   </button>
@@ -768,7 +768,7 @@ export default function EditorPage({ initialSongId = null }: {
                         {album && <p className="text-text-muted opacity-75 text-[11px] truncate mt-1">{album}</p>}
                       </div>
                       <button
-                        onClick={closeSong}
+                        onClick={() => { if (confirmDiscard()) closeSong() }}
                         className="flex items-center gap-1.5 text-[11px] text-text-muted opacity-60 hover:opacity-100 transition-colors">
                         <X size={11} /> Close
                       </button>
@@ -876,8 +876,8 @@ export default function EditorPage({ initialSongId = null }: {
                 <Card title="Identity" overflowVisible>
                   <FieldGrid>
                     <FieldRow label="Title"    value={name}     original={String(base.name || '')}    onChange={setName} />
-                    <FieldRow label="Artists"  value={artists}  original={String(base.credited_artists || '')} onChange={setArtists} suggest="credited_artists" />
-                    <FieldRow label="Album"    value={album}    original={String(base.album || '')}   onChange={setAlbum} suggest="album" />
+                    <TextareaRow rows={2} label="Artists"  value={artists}  original={String(base.credited_artists || '')} onChange={setArtists} suggest="credited_artists" />
+                    <TextareaRow rows={2} label="Album"    value={album}    original={String(base.album || '')}   onChange={setAlbum} suggest="album" />
                     <FieldRow label="Cover URL" value={imageUrl} original={String(base.image_url || '')} onChange={setImageUrl} placeholder="https://…" mono onBrowse={() => setPickingImage(true)} />
                     <FieldRow label="Length" value={songLength} original={String(base.length || '')}  onChange={setSongLength} placeholder="3:59" mono />
                     <FieldRow label="BPM"    value={bpm}        original={base.bpm != null ? String(base.bpm) : ''} onChange={setBpm} placeholder="140" mono />
@@ -960,8 +960,8 @@ export default function EditorPage({ initialSongId = null }: {
 
                 <Card title="Credits" overflowVisible>
                   <FieldGrid>
-                    <FieldRow label="Producers" value={prod} original={String(base.producers || '')} onChange={setProd} suggest="producers" />
-                    <FieldRow label="Engineers" value={eng}  original={String(base.engineers || '')} onChange={setEng} suggest="engineers" />
+                    <TextareaRow rows={2} label="Producers" value={prod} original={String(base.producers || '')} onChange={setProd} suggest="producers" />
+                    <TextareaRow rows={2} label="Engineers" value={eng}  original={String(base.engineers || '')} onChange={setEng} suggest="engineers" />
                   </FieldGrid>
                 </Card>
 
@@ -985,15 +985,15 @@ export default function EditorPage({ initialSongId = null }: {
                 {showMore && (
                   <Card title="Additional details" overflowVisible>
                     <FieldGrid>
-                      <FieldRow label="Location"   value={loc}              original={String(base.recording_locations || '')}   onChange={setLoc} placeholder="Studio / city" suggest="recording_locations" />
+                      <TextareaRow rows={2} label="Location"   value={loc}              original={String(base.recording_locations || '')}   onChange={setLoc} placeholder="Studio / city" suggest="recording_locations" />
                       <TextareaRow label="Leak type" value={leak} original={String(base.leak_type || '')} onChange={setLeak} rows={2} placeholder="HQ, LQ, snippet…" suggest="leak_type" span={2} />
-                      <FieldRow label="File names" value={fileNames}        original={String(base.file_names || '')}            onChange={setFileNames} />
-                      <FieldRow label="Instrumentals" value={instrumentals} original={String(base.instrumentals || '')}       onChange={setInstrumentals} placeholder="Instrumental versions available" />
-                      <FieldRow label="Inst. names" value={instrumentalNames} original={String(base.instrumental_names || '')} onChange={setInstrumentalNames} />
+                      <TextareaRow rows={2} label="File names" value={fileNames}        original={String(base.file_names || '')}            onChange={setFileNames} />
+                      <TextareaRow rows={2} label="Instrumentals" value={instrumentals} original={String(base.instrumentals || '')}       onChange={setInstrumentals} placeholder="Instrumental versions available" />
+                      <TextareaRow rows={2} label="Inst. names" value={instrumentalNames} original={String(base.instrumental_names || '')} onChange={setInstrumentalNames} />
                       {cat === 'recording_session' && (
                         <>
-                          <FieldRow label="Session titles" value={sessionTitles} original={String(base.session_titles || '')} onChange={setSessionTitles} />
-                          <FieldRow label="Session tracking" value={sessionTracking} original={String(base.session_tracking || '')} onChange={setSessionTracking} />
+                          <TextareaRow rows={2} label="Session titles" value={sessionTitles} original={String(base.session_titles || '')} onChange={setSessionTitles} />
+                          <TextareaRow rows={2} label="Session tracking" value={sessionTracking} original={String(base.session_tracking || '')} onChange={setSessionTracking} />
                         </>
                       )}
                       <TextareaRow label="Add. info" value={addInfo} original={String(base.additional_information || '')} onChange={setAddInfo} rows={3} full />
@@ -1029,7 +1029,7 @@ export default function EditorPage({ initialSongId = null }: {
                         const active = lyricsTab === tab
                         const dirty = tab === 'lyrics'
                           ? lyrics !== String(base.lyrics || '')
-                          : !!synced
+                          : synced !== String(base.synced_lyrics || '')
                         return (
                           <button key={tab} onClick={() => setLyricsTab(tab)}
                             className={`flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[11px] font-semibold transition-all ${
@@ -1074,7 +1074,7 @@ export default function EditorPage({ initialSongId = null }: {
                       rows={15} value={synced} onChange={e => setSynced(e.target.value)}
                       placeholder={"[00:00.00] Line one\n[00:05.20] Line two\n…"}
                       className={`w-full bg-surface-overlay/70 rounded-xl px-3.5 py-3 text-sm font-mono text-text-primary focus:outline-none resize-none placeholder:text-text-muted placeholder:opacity-25 border transition-colors ${
-                        synced ? 'border-accent/40' : 'border-[var(--border)] focus:border-accent/40'
+                        synced !== String(base.synced_lyrics || '') ? 'border-accent/40' : 'border-[var(--border)] focus:border-accent/40'
                       }`}
                     />
                   )}

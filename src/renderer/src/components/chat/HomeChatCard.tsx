@@ -2,6 +2,7 @@ import { useMemo } from 'react'
 import { ChevronRight, Hash, Lock, MessagesSquare } from 'lucide-react'
 import { splitForwardRef } from '../../lib/chatForwardRef'
 import { splitReplyRef } from '../../lib/chatReplyRef'
+import { shareSummaryText } from '../../lib/chatShare'
 import { useStorePick } from '../../store/useStore'
 import { conversationTitle, displayName, parseRoomKey, useChatStore } from '../../store/chatStore'
 import { shortcodesToGlyphs } from './emoji'
@@ -37,10 +38,11 @@ function useRows(limit: number): { rows: Row[]; totalUnread: number; ready: bool
         const key = `c:${c.id}`
         const last = lastMessage[key]
         if (!last) continue
+        const body = splitForwardRef(splitReplyRef(last.content).body).body
         rows.push({
           key, title: c.name, kind: 'channel', isPrivate: c.is_private, serverName: server.name,
           at: last.created_at, unread: unread[key] ?? 0, mention: (mentions[key] ?? 0) > 0,
-          preview: last.deleted_at ? 'Message deleted' : `${last.author.id === meId ? 'You' : displayName(last.author)}: ${shortcodesToGlyphs(splitForwardRef(splitReplyRef(last.content).body).body || (last.attachments.length ? 'sent an attachment' : ''))}`,
+          preview: last.deleted_at ? 'Message deleted' : `${last.author.id === meId ? 'You' : displayName(last.author)}: ${shareSummaryText(body) ?? shortcodesToGlyphs(body || (last.attachments.length ? 'sent an attachment' : ''))}`,
           avatarUser: last.author,
         })
       }
@@ -49,7 +51,8 @@ function useRows(limit: number): { rows: Row[]; totalUnread: number; ready: bool
       const key = `d:${conv.id}`
       const last = lastMessage[key]
       const p = last ? plain[last.id] : undefined
-      const text = p && 'text' in p ? shortcodesToGlyphs(splitForwardRef(splitReplyRef(p.text).body).body || p.text) : last?.attachments.length ? 'sent an attachment' : 'Encrypted message'
+      const plainBody = p && 'text' in p ? splitForwardRef(splitReplyRef(p.text).body).body : ''
+      const text = p && 'text' in p ? shareSummaryText(plainBody) ?? shortcodesToGlyphs(plainBody || p.text) : last?.attachments.length ? 'sent an attachment' : 'Encrypted message'
       const other = conv.participants.find((x) => x.user.id !== meId)?.user ?? null
       rows.push({
         key, title: conversationTitle(conv, meId), kind: 'conversation', isPrivate: true,

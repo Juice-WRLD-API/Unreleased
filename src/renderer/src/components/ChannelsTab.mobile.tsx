@@ -27,7 +27,7 @@ function CreatePanel({ onCreated, onClose }: { onCreated: () => void; onClose: (
   }
 
   return (
-    <div className="rounded-2xl border border-[var(--border)] bg-surface-raised/50 p-4 space-y-3 m-3">
+    <div className="rounded-2xl border border-[var(--separator)] bg-surface-raised/50 p-4 space-y-3 m-3">
       <div className="flex items-center gap-2">
         <p className="text-sm font-bold text-text-primary flex items-center gap-2 flex-1"><Plus size={14} /> New channel</p>
         <button onClick={onClose} title="Close" className="p-1 rounded text-text-muted active:text-text-primary"><X size={14} /></button>
@@ -36,13 +36,13 @@ function CreatePanel({ onCreated, onClose }: { onCreated: () => void; onClose: (
         value={name}
         onChange={(e) => setName(e.target.value)}
         placeholder="Channel name - e.g. Sessions Comp"
-        className="w-full rounded-xl border border-[var(--border)] bg-surface-overlay px-3 py-2 text-sm text-text-primary focus:outline-none focus:border-accent/40"
+        className="w-full rounded-xl border border-[var(--separator)] bg-surface-overlay px-3 py-2 text-sm text-text-primary focus:outline-none focus:border-accent/40"
       />
       <input
         value={description}
         onChange={(e) => setDescription(e.target.value)}
         placeholder="Description (optional)"
-        className="w-full rounded-xl border border-[var(--border)] bg-surface-overlay px-3 py-2 text-sm text-text-primary focus:outline-none focus:border-accent/40"
+        className="w-full rounded-xl border border-[var(--separator)] bg-surface-overlay px-3 py-2 text-sm text-text-primary focus:outline-none focus:border-accent/40"
       />
       {error && <p className="text-xs text-red-400 flex items-center gap-1.5"><AlertCircle size={12} />{error}</p>}
       <button
@@ -78,13 +78,13 @@ function EditPanel({ channel, onSaved, onClose }: { channel: Channel; onSaved: (
       <input
         value={name}
         onChange={(e) => setName(e.target.value)}
-        className="w-full rounded-xl border border-[var(--border)] bg-surface-overlay px-3 py-2 text-sm text-text-primary focus:outline-none focus:border-accent/40"
+        className="w-full rounded-xl border border-[var(--separator)] bg-surface-overlay px-3 py-2 text-sm text-text-primary focus:outline-none focus:border-accent/40"
       />
       <input
         value={description}
         onChange={(e) => setDescription(e.target.value)}
         placeholder="Description"
-        className="w-full rounded-xl border border-[var(--border)] bg-surface-overlay px-3 py-2 text-sm text-text-primary focus:outline-none focus:border-accent/40"
+        className="w-full rounded-xl border border-[var(--separator)] bg-surface-overlay px-3 py-2 text-sm text-text-primary focus:outline-none focus:border-accent/40"
       />
       {error && <p className="text-xs text-red-400 flex items-center gap-1.5"><AlertCircle size={12} />{error}</p>}
       <button
@@ -121,19 +121,19 @@ function ChannelDetail({ channel, users, onBack, onChanged }: {
 
   return (
     <div className="flex-1 flex flex-col h-full overflow-hidden">
-      <div className="shrink-0 flex items-center gap-1 px-2 py-1.5 border-b border-[var(--border)]">
-        <button onClick={onBack} title="Back" className="w-11 h-11 shrink-0 flex items-center justify-center rounded-full text-text-primary active:bg-surface-overlay transition-colors">
-          <ChevronLeft size={20} />
+      <div className="shrink-0 flex items-center gap-2 px-2 py-1.5 border-b border-[var(--separator)]">
+        <button onClick={onBack} title="Back" className="glass-button w-11 h-11 shrink-0 flex items-center justify-center rounded-full text-text-primary active:opacity-60 transition-opacity">
+          <ChevronLeft size={24} strokeWidth={2.25} className="-ml-0.5" />
         </button>
         <div className="flex-1 min-w-0">
-          <p className="text-[15px] font-bold text-text-primary truncate">{channel.name}</p>
+          <p className="text-headline text-text-primary truncate">{channel.name}</p>
           <p className="text-[11px] text-text-muted truncate">{channel.slug}{channel.description ? ` · ${channel.description}` : ''}</p>
         </div>
         {!channel.is_primary && (
           <>
             <button
               onClick={() => setEditing((e) => !e)}
-              className="w-9 h-9 shrink-0 flex items-center justify-center rounded-full text-text-muted active:bg-surface-overlay transition-colors"
+              className="w-9 h-9 shrink-0 flex items-center justify-center rounded-full text-text-muted active:bg-[var(--fill)] transition-colors"
               aria-label="Edit channel"
             ><Pencil size={15} /></button>
             <button
@@ -152,7 +152,7 @@ function ChannelDetail({ channel, users, onBack, onChanged }: {
         <EditPanel channel={channel} onClose={() => setEditing(false)} onSaved={onChanged} />
       )}
 
-      <div className="shrink-0 flex items-center justify-between px-4 py-2.5 border-b border-[var(--border)]">
+      <div className="shrink-0 flex items-center justify-between px-4 py-2.5 border-b border-[var(--separator)]">
         <p className="text-[11px] font-bold uppercase tracking-widest text-text-muted flex items-center gap-1.5">
           <Users size={12} /> Members
         </p>
@@ -166,7 +166,7 @@ function ChannelDetail({ channel, users, onBack, onChanged }: {
       </div>
 
       {error && (
-        <div className="mx-3 mt-2 flex items-start gap-2 px-3 py-2.5 rounded-xl bg-red-500/10 border border-red-500/20 text-red-400 text-xs shrink-0">
+        <div className="mx-3 mt-2 flex items-start gap-2 px-3 py-2.5 rounded-xl bg-red-500/10 text-red-500 text-footnote shrink-0">
           <AlertCircle size={13} className="shrink-0 mt-0.5" /> {error}
         </div>
       )}
@@ -178,7 +178,7 @@ function ChannelDetail({ channel, users, onBack, onChanged }: {
           <Empty label="No members yet" />
         ) : (
           members.map((m) => (
-            <div key={m.user_id} className="px-4 py-3 border-b border-[var(--border)]">
+            <div key={m.user_id} className="px-4 py-3 border-b border-[var(--separator)]">
               <div className="flex items-center gap-2 mb-2">
                 <p className="text-sm font-medium text-text-primary flex-1 truncate">{m.username}</p>
                 {busyUser === m.user_id && <Loader2 size={13} className="animate-spin text-text-muted" />}
@@ -194,7 +194,7 @@ function ChannelDetail({ channel, users, onBack, onChanged }: {
                       className={`px-2.5 py-1 rounded-md text-[10px] font-semibold border transition-colors flex items-center gap-1 ${
                         on
                           ? 'bg-accent/15 text-accent border-accent/30'
-                          : 'bg-surface-overlay text-text-muted border-[var(--border)] active:text-text-primary'
+                          : 'bg-surface-overlay text-text-muted border-[var(--separator)] active:text-text-primary'
                       }`}
                     >
                       {on && <Check size={10} />}{label}
@@ -251,7 +251,7 @@ export default function ChannelsTab(): JSX.Element {
 
   return (
     <div className="h-full flex flex-col overflow-hidden">
-      <div className="shrink-0 flex items-center justify-between px-4 py-2.5 border-b border-[var(--border)]">
+      <div className="shrink-0 flex items-center justify-between px-4 py-2.5 border-b border-[var(--separator)]">
         <p className="text-[11px] font-bold uppercase tracking-widest text-text-muted flex items-center gap-1.5">
           <Radio size={12} /> Channels
         </p>
@@ -271,7 +271,7 @@ export default function ChannelsTab(): JSX.Element {
           <button
             key={c.id}
             onClick={() => setSelectedId(c.id)}
-            className="w-full text-left px-4 py-3 border-b border-[var(--border)] active:bg-surface-raised transition-colors"
+            className="w-full text-left px-4 py-3 border-b border-[var(--separator)] active:bg-[var(--fill)] transition-colors"
           >
             <div className="flex items-center gap-2">
               <Radio size={13} className={c.is_active ? 'text-accent' : 'text-text-muted'} />

@@ -23,7 +23,11 @@ const LS_COLLAPSED = 'sidebar:collapsed'
 const LS_PLAYLISTS_EXPANDED = 'sidebar:playlistsExpanded'
 
 export default function Sidebar(): JSX.Element {
-  const { activeView, setActiveView, openProfile, openOwnPublicProfile, openSettings, setShowDiagnostics, developerMode, account, setShowUserAuth, playlists, setPendingPlaylistId, sidebarPosition, navStyle, navOrder, setNavOrder, navVisibility, setNavItemVisible, navControlOrder, navControlVisibility, setNavControlVisible, uploads, showUploadManager, setShowUploadManager } = useStorePick('activeView', 'setActiveView', 'openProfile', 'openOwnPublicProfile', 'openSettings', 'setShowDiagnostics', 'developerMode', 'account', 'setShowUserAuth', 'playlists', 'setPendingPlaylistId', 'sidebarPosition', 'navStyle', 'navOrder', 'setNavOrder', 'navVisibility', 'setNavItemVisible', 'navControlOrder', 'navControlVisibility', 'setNavControlVisible', 'uploads', 'showUploadManager', 'setShowUploadManager')
+  const { activeView, setActiveView, openProfile, openOwnPublicProfile, openSettings, setShowDiagnostics, developerMode, account, setShowUserAuth, playlists, setPendingPlaylistId, sidebarPosition, navStyle, navOrder, setNavOrder, navVisibility, setNavItemVisible, navControlOrder, navControlVisibility, setNavControlVisible, showUploadManager, setShowUploadManager } = useStorePick('activeView', 'setActiveView', 'openProfile', 'openOwnPublicProfile', 'openSettings', 'setShowDiagnostics', 'developerMode', 'account', 'setShowUserAuth', 'playlists', 'setPendingPlaylistId', 'sidebarPosition', 'navStyle', 'navOrder', 'setNavOrder', 'navVisibility', 'setNavItemVisible', 'navControlOrder', 'navControlVisibility', 'setNavControlVisible', 'showUploadManager', 'setShowUploadManager')
+  // Counts, not the list: every progress tick replaces `uploads`, and the
+  // whole menu re-rendered with it.
+  const hasUploads = useStore((s) => s.uploads.length > 0)
+  const activeUploadCount = useStore((s) => s.uploads.reduce((n, u) => (u.state === 'downloading' ? n + 1 : n), 0))
   const { showNotifications, setShowNotifications } = useStorePick('showNotifications', 'setShowNotifications')
   const unreadNotifications = useUnreadNotificationCount()
 
@@ -155,7 +159,7 @@ export default function Sidebar(): JSX.Element {
   // Foot-of-menu controls (Profile, Log out, Diagnostics, Settings) -
   // ordered and filtered to what's both available and toggled on in Settings.
   // Log in and the collapse toggle are rendered separately (never hideable).
-  const controlCtx = { account: !!account, isElectron: false, developerMode, hasUploads: uploads.length > 0 }
+  const controlCtx = { account: !!account, isElectron: false, developerMode, hasUploads }
   const controls = orderedNavControls(navControlOrder).filter((c) => isNavControlVisible(c, navControlVisibility, controlCtx))
 
   const rowCls = 'flex items-center w-full py-2 rounded text-sm font-medium text-text-secondary hover:text-text-primary hover:bg-surface-raised transition-colors gap-3 px-3'
@@ -163,7 +167,6 @@ export default function Sidebar(): JSX.Element {
   const labelCls = `truncate transition-opacity duration-200 ${collapsed ? 'opacity-0 pointer-events-none' : 'opacity-100'}`
 
   // Full-width control row for the vertical (left/right) side menu.
-  const activeUploadCount = uploads.filter((u) => u.state === 'downloading').length
 
   const renderControl = (id: NavControlId): JSX.Element | null => {
     switch (id) {

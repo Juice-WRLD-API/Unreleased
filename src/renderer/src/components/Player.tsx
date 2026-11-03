@@ -1,5 +1,6 @@
-import { useEffect, useRef, useState, useCallback, Suspense } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState, useCallback, Suspense } from 'react'
 import { createPortal } from 'react-dom'
+import { create } from 'zustand'
 import {
   Play,
   Pause,
@@ -53,6 +54,7 @@ import PlaybackNotice from './PlaybackNotice'
 import { ensureDonorCover } from '../lib/donorCoverArt'
 import { readArt } from '../lib/localLibrary'
 import { showAppToast } from '../lib/appToast'
+import { runLog } from '../lib/runLog'
 import { CoverFade, LikePop, SwapIcon, TrackSwap } from './PlayerMotion'
 import { PopLayer } from './PopLayer'
 
@@ -94,27 +96,54 @@ function fillSessionArtist(trackId: string, streamUrl: string | undefined): void
 // the server, which comes back. 'playable': the file downloads fine now in a
 // type this browser plays. 'broken': a 4xx, or a type it can't play - that
 // won't come back.
+// `reason` finishes the stop toast ("couldn't be played (reason)"); `detail`
+// goes to the run log.
 type SourceVerdict = 'down' | 'playable' | 'broken'
+interface SourceProbe { verdict: SourceVerdict; reason: string; detail: string }
 // A probe that hasn't answered by now counts as no answer: a request on a
 // dropped connection can hang for minutes instead of failing.
 const PROBE_TIMEOUT_MS = 10000
-async function probeSource(url: string): Promise<SourceVerdict> {
-  if (!/^https?:/.test(url)) return 'broken'
+async function probeSource(url: string): Promise<SourceProbe> {
+  if (!/^https?:/.test(url)) {
+    return { verdict: 'broken', reason: "the player couldn't open them", detail: `no way to check a ${url.split(':')[0] || 'blank'} source` }
+  }
   const ctrl = new AbortController()
   const timer = window.setTimeout(() => ctrl.abort(), PROBE_TIMEOUT_MS)
   try {
     const res = await fetch(url, { headers: { Range: 'bytes=0-1' }, cache: 'no-store', signal: ctrl.signal })
     void res.body?.cancel().catch(() => {})
-    if (res.status >= 500 || res.status === 429) return 'down'
-    if (!res.ok) return 'broken'
+    if (res.status >= 500 || res.status === 429) return { verdict: 'down', reason: `the server is having trouble: HTTP ${res.status}`, detail: `HTTP ${res.status}` }
+    if (!res.ok) return { verdict: 'broken', reason: `the server refused them: HTTP ${res.status}`, detail: `HTTP ${res.status}` }
     const type = res.headers.get('Content-Type')?.split(';')[0].trim() ?? ''
-    return !!type && document.createElement('audio').canPlayType(type) !== '' ? 'playable' : 'broken'
-  } catch {
-    return 'down'
+    if (!type || document.createElement('audio').canPlayType(type) === '') {
+      return {
+        verdict: 'broken',
+        reason: `the server didn't send audio: ${type || 'no type'}`,
+        detail: `HTTP ${res.status} ${type || 'no Content-Type'}`,
+      }
+    }
+    return { verdict: 'playable', reason: "they couldn't be decoded", detail: `HTTP ${res.status} ${type}` }
+  } catch (e) {
+    const detail = ctrl.signal.aborted ? `no answer in ${PROBE_TIMEOUT_MS / 1000}s` : String(e)
+    return { verdict: 'down', reason: "the server couldn't be reached", detail }
   } finally {
     clearTimeout(timer)
   }
 }
+
+// For the run log: what a media element failed on, in words.
+function describeMediaError(err: MediaError | null): string {
+  if (!err) return 'no media error'
+  const kind = ['', 'aborted', 'network', 'decode', 'unsupported source'][err.code] ?? 'unknown'
+  return `MediaError ${err.code} (${kind})${err.message ? `: ${err.message}` : ''}`
+}
+
+function describeSource(url: string): string {
+  return url.startsWith('blob:') ? 'blob' : url || '(none)'
+}
+
+// Hotkey actions that keep firing while their key is held down.
+const REPEATABLE_HOTKEYS = new Set(['seek-forward', 'seek-backward', 'volume-up', 'volume-down', 'speed-up', 'speed-down'])
 
 // How long the pause-fade ramps volume when "smooth fade when pausing" is on.
 const PAUSE_FADE_MS = 400
@@ -160,6 +189,10 @@ export function seekAudio(t: number): void { _seek?.(t) }
 // queue directly.
 export function runPlayerCommand(cmd: 'next' | 'previous'): void { _transport?.[cmd]() }
 export function getAudioDuration(): number { return _getAudioDuration?.() ?? 0 }
+// "Loading" = the app wants to play but the active slot isn't producing sound
+// yet (fetching, buffering or seeking). Lives outside the Player so WRLD's
+// scrubber can show the same sweep as the bars here.
+export const usePlayerLoading = create<{ on: boolean }>(() => ({ on: false }))
 // Live audio.currentTime, not the Zustand-stored value (which only updates on
 // the native 'timeupdate' event, ~4x/sec) - used to drive smooth per-frame
 // synced-lyrics highlighting instead of choppy ~250ms jumps.
@@ -180,6 +213,13 @@ export function invalidateLyricsCache(songId: number): void { lyricsCache.delete
 // pre-update `currentTrackFull` state.
 let lyricsFetchInFlight: number | null = null
 
+// `audio.src` reads back the browser-normalized URL, so a raw string with
+// spaces or non-ASCII characters never compares equal to what was assigned.
+function sameMediaSrc(current: string, wanted: string): boolean {
+  if (current === wanted) return true
+  try { return new URL(wanted, window.location.href).href === current } catch { return false }
+}
+
 // Playback position (progress / currentTime) changes ~4x/sec. Reading it in the
 // Player body re-rendered the entire (huge) component on every tick, so the
 // parts that actually display it subscribe on their own.
@@ -193,10 +233,53 @@ function ElapsedTime(): JSX.Element {
   return <>{formatDuration(currentTime)}</>
 }
 
+// 999 FM's elapsed time, ticking locally between WS updates. Same reasoning as
+// above: a 500ms tick in the Player body re-rendered all of it twice a second
+// for as long as FM played, so only the parts that show it tick.
+function useFmElapsedMs(): number {
+  const active = useStore((s) => s.radioFmActive)
+  const elapsed = useStore((s) => s.radioFmNowPlaying?.elapsed_ms)
+  const [ms, setMs] = useState(0)
+  const base = useRef({ elapsed: 0, at: 0 })
+  const tick = useRef<ReturnType<typeof setInterval> | null>(null)
+  // Keyed on elapsed_ms rather than the whole now-playing object: that object is
+  // replaced on every metadata broadcast, which tore the interval down and
+  // rebuilt it faster than its own 500ms tick, so the bar sat still.
+  useEffect(() => {
+    if (!active || !elapsed) {
+      if (tick.current) { clearInterval(tick.current); tick.current = null }
+      setMs(0)
+      return
+    }
+    base.current = { elapsed, at: Date.now() }
+    setMs(elapsed)
+    if (!tick.current) {
+      tick.current = setInterval(() => setMs(base.current.elapsed + (Date.now() - base.current.at)), 500)
+    }
+  }, [active, elapsed])
+  useEffect(() => () => { if (tick.current) { clearInterval(tick.current); tick.current = null } }, [])
+  return ms
+}
+
+function useFmProgress(): number {
+  const elapsed = useFmElapsedMs()
+  const duration = useStore((s) => s.radioFmNowPlaying?.duration_ms ?? 0)
+  return duration > 0 ? Math.min(elapsed / duration, 1) : 0
+}
+
+function FmProgressFill({ className }: { className: string }): JSX.Element {
+  const progress = useFmProgress()
+  return <div className={className} style={{ width: `${progress * 100}%` }} />
+}
+
+function FmElapsedTime(): JSX.Element {
+  const elapsed = useFmElapsedMs()
+  return <>{formatDuration(Math.floor(elapsed / 1000))}</>
+}
+
 interface SeekRangeProps {
   seekDrag: number | null
   radioFmActive: boolean
-  fmProgress: number
   disabled: boolean
   onMouseDown?: () => void
   onTouchStart?: () => void
@@ -205,8 +288,9 @@ interface SeekRangeProps {
   onTouchEnd?: () => void
   onKeyUp?: () => void
 }
-function SeekRange({ seekDrag, radioFmActive, fmProgress, ...rest }: SeekRangeProps): JSX.Element {
+function SeekRange({ seekDrag, radioFmActive, ...rest }: SeekRangeProps): JSX.Element {
   const progress = useStore((s) => s.progress)
+  const fmProgress = useFmProgress()
   const v = radioFmActive ? fmProgress : (seekDrag !== null ? seekDrag : progress)
   return (
     <input
@@ -251,6 +335,7 @@ export default function Player(): JSX.Element {
     setCurrentTrackFull,
     toggleShuffle,
     toggleRepeat,
+    setRepeat,
     nextTrack,
     prevTrack,
     setShowNowPlaying,
@@ -261,7 +346,7 @@ export default function Player(): JSX.Element {
     setPlayerCollapsed,
     queue,
     queueIndex,
-    crossfadeEnabled,
+    crossfadeEnabled: requestedCrossfade,
     crossfadeDuration,
     sleepTimerEnd,
     setSleepTimer,
@@ -273,8 +358,11 @@ export default function Player(): JSX.Element {
     toggleLike,
     setActiveView,
     activeView,
-    playNext, account, setPendingEditorSongId } = useStorePick('currentTrack', 'currentTrackFull', 'isPlaying', 'volume', 'shuffle', 'repeat', 'setIsPlaying', 'setVolume', 'setProgress', 'setCurrentTime', 'setCurrentTrackFull', 'toggleShuffle', 'toggleRepeat', 'nextTrack', 'prevTrack', 'setShowNowPlaying', 'showNowPlaying', 'showQueue', 'setShowQueue', 'playerCollapsed', 'setPlayerCollapsed', 'queue', 'queueIndex', 'crossfadeEnabled', 'crossfadeDuration', 'sleepTimerEnd', 'setSleepTimer', 'audioOutput', 'setAudioOutput', 'playbackSpeed', 'setPlaybackSpeed', 'likedTrackIds', 'toggleLike', 'setActiveView', 'activeView', 'playNext', 'account', 'setPendingEditorSongId')
+    playNext, account, setPendingEditorSongId } = useStorePick('currentTrack', 'currentTrackFull', 'isPlaying', 'volume', 'shuffle', 'repeat', 'setIsPlaying', 'setVolume', 'setProgress', 'setCurrentTime', 'setCurrentTrackFull', 'toggleShuffle', 'toggleRepeat', 'setRepeat', 'nextTrack', 'prevTrack', 'setShowNowPlaying', 'showNowPlaying', 'showQueue', 'setShowQueue', 'playerCollapsed', 'setPlayerCollapsed', 'queue', 'queueIndex', 'crossfadeEnabled', 'crossfadeDuration', 'sleepTimerEnd', 'setSleepTimer', 'audioOutput', 'setAudioOutput', 'playbackSpeed', 'setPlaybackSpeed', 'likedTrackIds', 'toggleLike', 'setActiveView', 'activeView', 'playNext', 'account', 'setPendingEditorSongId')
   const canEditSong = useCanEdit()
+  // iOS ignores element volume and suspends RAF while locked, so its two-slot
+  // fade cannot provide a reliable background transition.
+  const crossfadeEnabled = requestedCrossfade && !IS_IOS
 
   const [showContextMenu, setShowContextMenu] = useState(false)
   // Cursor position for a right-click-spawned menu. null → menu was opened via
@@ -311,13 +399,14 @@ export default function Player(): JSX.Element {
   // partway through a playlist until some setting was toggled.
   const handleLoadedMetadata = (e: React.SyntheticEvent<HTMLAudioElement>): void => {
     const audio = e.currentTarget
+    loopPositions.delete(audio)
     applyRate(audio)
     if (audio === getActive() && resumeTrackId.current) {
       const state = useStore.getState()
       if (state.currentTrack?.id === resumeTrackId.current) {
         const duration = Number.isFinite(audio.duration) ? audio.duration : state.currentTrack.duration
         const time = duration > 0 ? Math.min(state.currentTime, Math.max(0, duration - 0.1)) : state.currentTime
-        try { audio.currentTime = time } catch { return }
+        try { seekSlot(audio, time) } catch { return }
         recoveryResumeAt.current = time
         setCurrentTime(time)
         if (duration > 0) setProgress(time / duration)
@@ -331,32 +420,8 @@ export default function Player(): JSX.Element {
   }
 
 
-  // FM elapsed time - ticks locally between WS updates
-  const [fmElapsedMs, setFmElapsedMs] = useState(0)
-  const fmBaseRef = useRef<{ elapsed: number; at: number }>({ elapsed: 0, at: 0 })
-  const fmTickRef = useRef<ReturnType<typeof setInterval> | null>(null)
-  const fmElapsed = radioFmNowPlaying?.elapsed_ms
-  // Keyed on elapsed_ms rather than the whole now-playing object: that object is
-  // replaced on every metadata broadcast, which tore the interval down and
-  // rebuilt it faster than its own 500ms tick, so the bar sat still.
-  useEffect(() => {
-    if (!radioFmActive || !fmElapsed) {
-      if (fmTickRef.current) { clearInterval(fmTickRef.current); fmTickRef.current = null }
-      setFmElapsedMs(0)
-      return
-    }
-    fmBaseRef.current = { elapsed: fmElapsed, at: Date.now() }
-    setFmElapsedMs(fmElapsed)
-    if (!fmTickRef.current) {
-      fmTickRef.current = setInterval(() => {
-        const { elapsed, at } = fmBaseRef.current
-        setFmElapsedMs(elapsed + (Date.now() - at))
-      }, 500)
-    }
-  }, [radioFmActive, fmElapsed])
-  useEffect(() => () => { if (fmTickRef.current) clearInterval(fmTickRef.current) }, [])
+  // FM elapsed time ticks in FmElapsedTime / FmProgressFill / SeekRange.
   const fmDurationMs = radioFmNowPlaying?.duration_ms ?? 0
-  const fmProgress = fmDurationMs > 0 ? Math.min(fmElapsedMs / fmDurationMs, 1) : 0
   // Global infoSongId (not local state) so the info panel survives switching
   // to another tab, which unmounts this view.
   const openSongInfo = (): void => {
@@ -377,6 +442,17 @@ export default function Player(): JSX.Element {
   const slotA = useRef<HTMLAudioElement>(null)
   const slotB = useRef<HTMLAudioElement>(null)
   const activeSlot = useRef<'A' | 'B'>('A')
+  const loopPositions = useRef(new WeakMap<HTMLAudioElement, { src: string; time: number }>()).current
+  const observeNativeLoop = (audio: HTMLAudioElement): boolean => {
+    const previous = loopPositions.get(audio)
+    loopPositions.set(audio, { src: audio.src, time: audio.currentTime })
+    return !!(audio.loop && previous?.src === audio.src && audio.currentTime < previous.time)
+  }
+  // Explicit seeks must not look like the browser wrapping a native loop.
+  const seekSlot = (audio: HTMLAudioElement, time: number): void => {
+    loopPositions.delete(audio)
+    audio.currentTime = time
+  }
 
   const [prevMute, setPrevMute] = useState(0.8)
 
@@ -392,11 +468,17 @@ export default function Player(): JSX.Element {
 
   // Crossfade state (all refs - no re-renders needed)
   const cfActive     = useRef(false)
+  const cfSourceIdx  = useRef(-1)
+  const cfSourceUrl  = useRef<string | null>(null)
   const cfTargetIdx  = useRef(-1)
+  const cfTargetUrl  = useRef<string | null>(null)
   const cfIsRadio    = useRef(false)
+  const cfAttempt    = useRef(0)
   const cfOutRaf     = useRef<number | null>(null)
   const cfInRaf      = useRef<number | null>(null)
-  const skipNextLoad = useRef(false)
+  // URL-scoped handoff marker. A boolean can go stale when a crossfade target
+  // has the same track id and therefore does not trigger the load effect.
+  const skipNextLoadUrl = useRef<string | null>(null)
 
   // Pause-fade ramp ("smooth fade when pausing" setting)
   const pauseFadeRaf = useRef<number | null>(null)
@@ -434,6 +516,34 @@ export default function Player(): JSX.Element {
     activeSlot.current === 'A' ? slotA.current : slotB.current
   const getNext = (): HTMLAudioElement | null =>
     activeSlot.current === 'A' ? slotB.current : slotA.current
+
+  // Shown only after a short delay so cached and offline songs that start at
+  // once never flash it.
+  const audioLoading = usePlayerLoading((s) => s.on)
+  const loadingTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const isAudioLoading = (): boolean => {
+    const s = useStore.getState()
+    const a = getActive()
+    if (!a || !s.isPlaying || !s.currentTrack || s.radioFmActive) return false
+    return a.paused || a.seeking || a.readyState < HTMLMediaElement.HAVE_FUTURE_DATA
+  }
+  const syncAudioLoading = (): void => {
+    if (!isAudioLoading()) {
+      if (loadingTimer.current) { clearTimeout(loadingTimer.current); loadingTimer.current = null }
+      usePlayerLoading.setState({ on: false })
+      return
+    }
+    if (loadingTimer.current) return
+    loadingTimer.current = setTimeout(() => {
+      loadingTimer.current = null
+      usePlayerLoading.setState({ on: isAudioLoading() })
+    }, 300)
+  }
+  const onSlotLoadingEvent = (e: React.SyntheticEvent<HTMLAudioElement>): void => {
+    if (e.currentTarget === getActive()) syncAudioLoading()
+  }
+  useEffect(() => { syncAudioLoading() }, [isPlaying, currentTrack?.id, radioFmActive])
+  useEffect(() => () => { if (loadingTimer.current) clearTimeout(loadingTimer.current) }, [])
 
   // Tracks each slot's in-flight play() promise. With preload="none" the
   // element only starts fetching once play() is called, so pausing right
@@ -474,19 +584,50 @@ export default function Player(): JSX.Element {
   }
 
   const cancelCF = (): void => {
+    cfAttempt.current++
     if (cfOutRaf.current != null) { cancelAnimationFrame(cfOutRaf.current); cfOutRaf.current = null }
     if (cfInRaf.current  != null) { cancelAnimationFrame(cfInRaf.current);  cfInRaf.current  = null }
     if (cfActive.current) {
       const na = getNext()
-      if (na) { na.pause(); na.src = ''; na.volume = 0 }
+      if (na) {
+        na.pause()
+        na.removeAttribute('src')
+        na.load()
+        na.volume = 0
+      }
       cfActive.current = false
+      cfSourceIdx.current = -1
+      cfSourceUrl.current = null
       cfTargetIdx.current = -1
+      cfTargetUrl.current = null
       cfIsRadio.current = false
     }
     // Restore current audio to proper volume
     const a = getActive()
     if (a) a.volume = volumeRef.current
   }
+
+  // A crossfade preloads audio for a particular source/target pair. Queue
+  // appends and lazy insertion behind that pair are harmless, but a jump or
+  // reorder that changes either position must cancel synchronously so the
+  // audible track and displayed metadata cannot diverge.
+  useLayoutEffect(() => {
+    if (!cfActive.current || cfIsRadio.current) return
+    const source = queue[cfSourceIdx.current]
+    const target = queue[cfTargetIdx.current]
+    const sequentialNext = queueIndex + 1
+    const expectedTargetIdx = repeat === 'one'
+      ? queueIndex
+      : sequentialNext < queue.length
+        ? sequentialNext
+        : repeat === 'all' ? 0 : -1
+    const pairChanged =
+      queueIndex !== cfSourceIdx.current ||
+      cfTargetIdx.current !== expectedTargetIdx ||
+      !source || resolvePlaybackUrl(source) !== cfSourceUrl.current ||
+      !target || resolvePlaybackUrl(target) !== cfTargetUrl.current
+    if (pairChanged) cancelCF()
+  }, [queue, queueIndex, repeat])
 
   // Compute what the next queue index would be (mirrors store's nextTrack logic,
   // without advancing). Shuffle included: the store pre-shuffles the upcoming
@@ -539,13 +680,35 @@ export default function Player(): JSX.Element {
     }
     const url = resolvePlaybackUrl(nextTrackData)
     const na = getNext()
-    if (!na || na.src === url) return
+    if (!na) return
+    if (sameMediaSrc(na.src, url)) {
+      if (
+        na.readyState === HTMLMediaElement.HAVE_NOTHING &&
+        na.networkState !== HTMLMediaElement.NETWORK_LOADING &&
+        !na.error
+      ) na.load()
+      return
+    }
     na.src = url
     na.load()
     // Preloaded slots inherit the current rate too - the loadedmetadata
     // handler re-asserts it once this load settles.
     applyRate(na)
-  }, [queueIndex, queue.length, isPlaying, repeat, canCrossfade, radioMode, currentTrackReady])
+  }, [queue, queueIndex, isPlaying, repeat, canCrossfade, radioMode, currentTrackReady])
+
+  // Crossfade is the only reason to keep a speculative second media request.
+  // Turning it off aborts that one inactive target while leaving pauses alone,
+  // so resuming playback does not download the same next song again.
+  useEffect(() => {
+    if (canCrossfade) return
+    cancelCF()
+    const na = getNext()
+    if (!na) return
+    na.pause()
+    na.removeAttribute('src')
+    na.load()
+    na.volume = 0
+  }, [canCrossfade])
 
   // ── Mobile handoff ─────────────────────────────────────────────────────────
   // Without crossfade, the next song normally starts by loading it into the
@@ -556,7 +719,7 @@ export default function Player(): JSX.Element {
   // opened again. So on mobile the next song loads into the spare slot during
   // the last stretch of this one, and playback hands over to it the moment
   // this one ends, from data that's already there.
-  const handoffActive = (): boolean => IS_MOBILE && !useStore.getState().crossfadeEnabled
+  const handoffActive = (): boolean => IS_MOBILE && !IS_IOS && !useStore.getState().crossfadeEnabled
 
   // The song nextTrack() will move to, when that's knowable ahead of time.
   const upcomingTrack = (): Track | null => {
@@ -584,7 +747,7 @@ export default function Player(): JSX.Element {
 
   // Moves playback onto the spare slot if it already holds `next`. Called
   // between nextTrack() and the render it causes, so the load effect finds
-  // skipNextLoad set and leaves the slots alone.
+  // skipNextLoadUrl set and leaves the slots alone.
   const handOffToSpare = (next: Track): void => {
     const spare = getNext()
     const finished = getActive()
@@ -592,15 +755,13 @@ export default function Player(): JSX.Element {
     if (!spare || !finished || !url || !handoffActive() || spare.getAttribute('src') !== url
       || spare.error || spare.readyState < HTMLMediaElement.HAVE_METADATA) return
     activeSlot.current = activeSlot.current === 'A' ? 'B' : 'A'
-    skipNextLoad.current = true
+    skipNextLoadUrl.current = url
     spare.volume = volumeRef.current
     applyRate(spare)
     playSlot(spare, (err) => {
       const name = (err as DOMException | null)?.name
       if (name !== 'NotAllowedError') { if (name !== 'AbortError') console.error(err); return }
-      // iOS refusing an element no tap has unlocked (see the unlock effect
-      // below). Start the song in the slot that just finished instead, the
-      // way it would have gone without a handoff.
+      // An element-specific autoplay refusal: fall back to the active slot.
       if (getActive() !== spare || useStore.getState().currentTrack?.id !== next.id) return
       console.warn('Handoff to the preloaded slot was refused - loading the next song the usual way')
       activeSlot.current = activeSlot.current === 'A' ? 'B' : 'A'
@@ -612,34 +773,6 @@ export default function Player(): JSX.Element {
       if (useStore.getState().isPlaying) playSlot(finished)
     })
   }
-
-  // iOS lets an <audio> element play without a tap only once a tap has
-  // played it - per element, not per page. Taps only ever play the active
-  // slot, so a handoff to the spare would be refused. Unlock the spare on the
-  // user's taps instead: play() and straight back to pause() while it's
-  // empty, which makes no sound. Only while nothing is playing, so it can't
-  // disturb a song - the first tap of a session (the one that starts the
-  // music, if nothing before it) is enough, and it lasts the session.
-  useEffect(() => {
-    if (!IS_IOS) return
-    const unlocked = new WeakSet<HTMLAudioElement>()
-    const unlock = (): void => {
-      const spare = getNext()
-      if (!spare || unlocked.has(spare) || spare.getAttribute('src') || getActive()?.paused === false) return
-      // An emptied slot (src="") carries an error that makes play() refuse
-      // before the tap counts; reloading with no source clears it.
-      if (spare.error) { spare.removeAttribute('src'); spare.load() }
-      const p = spare.play()
-      spare.pause()
-      p.then(() => unlocked.add(spare), (err: DOMException) => { if (err?.name !== 'NotAllowedError') unlocked.add(spare) })
-    }
-    document.addEventListener('touchend', unlock, true)
-    document.addEventListener('click', unlock, true)
-    return () => {
-      document.removeEventListener('touchend', unlock, true)
-      document.removeEventListener('click', unlock, true)
-    }
-  }, [])
 
   // Route both slots through the shared Web Audio effects chain (EQ, balance,
   // mono, silence detection). Elements keep their own volume/rate handling.
@@ -682,7 +815,7 @@ export default function Player(): JSX.Element {
       // can throw while its source is in an error/reload state.
       recoveryResumeAt.current = target
       audio.volume = volumeRef.current
-      try { audio.currentTime = target } catch { /* recovery will apply it once seekable */ }
+      try { seekSlot(audio, target) } catch { /* recovery will apply it once seekable */ }
       setCurrentTime(target)
       if (audio.duration) setProgress(target / audio.duration)
     }
@@ -759,13 +892,14 @@ export default function Player(): JSX.Element {
     const audio = getActive()
     if (resumeTrackId.current !== currentTrack?.id) resumeTrackId.current = null
     if (!audio || !currentTrack) return
+    const fileUrl = resolvePlaybackUrl(currentTrack)
     fillSessionArtist(currentTrack.id, currentTrack.streamUrl)
 
-    if (skipNextLoad.current) {
+    if (skipNextLoadUrl.current === fileUrl) {
       // Crossfade or the mobile handoff just swapped - audio already playing
       // on active slot, and it was the preload target this same track just
       // finished loading as.
-      skipNextLoad.current = false
+      skipNextLoadUrl.current = null
       audio.volume = volumeRef.current
       // This slot was loaded by the crossfade preload, which never ran the
       // rate setup below - apply it now or the faded-in track plays at 1x.
@@ -773,6 +907,9 @@ export default function Player(): JSX.Element {
       setCurrentTrackReady(true)
       return
     }
+    // A same-id crossfade can leave the marker unconsumed. It must never skip
+    // a later, genuinely different source change.
+    skipNextLoadUrl.current = null
 
     if (isDonorStreamUrl(currentTrack.streamUrl) && !cachedDonorUrl(currentTrack.streamUrl)) {
       const trackId = currentTrack.id
@@ -791,6 +928,8 @@ export default function Player(): JSX.Element {
         a.src = url
         a.volume = volumeRef.current
         applyRate(a)
+        // Through playSlot like every other play: it wakes the effects graph
+        // and lets a quick pause wait for this play() to settle.
         if (s.isPlaying) playSlot(a)
       }).catch((err) => {
         console.error('Could not load donor file', err)
@@ -805,7 +944,6 @@ export default function Player(): JSX.Element {
       return
     }
 
-    const fileUrl = resolvePlaybackUrl(currentTrack)
     // Reassigning `.src` restarts the fetch even when the URL is unchanged -
     // guard against a redundant re-run of this effect (e.g. React StrictMode's
     // deliberate double-invoke in dev) firing a second network request for
@@ -1033,7 +1171,7 @@ export default function Player(): JSX.Element {
         // enough to know the length; seeking then silently no-ops, and the
         // stall detector picks that up as another round.
         if (latestResumeAt > 0 && isFinite(a.duration) && latestResumeAt < a.duration) {
-          try { a.currentTime = latestResumeAt } catch { /* not seekable yet */ }
+          try { seekSlot(a, latestResumeAt) } catch { /* not seekable yet */ }
         }
         applyRate(a)
         a.volume = volumeRef.current
@@ -1045,7 +1183,7 @@ export default function Player(): JSX.Element {
       recoveryLoading.current = { audio: a, generation }
       a.src = url
       a.load()
-      // The slots are preload="none", so load() on its own fetches nothing -
+      // With preload="none", load() on its own fetches nothing -
       // not even the metadata onReady waits for (WebKit holds the load until
       // play()). Every reload then sat idle until the watchdog's next tick
       // happened to call play(), and a phone with its screen off may never
@@ -1086,32 +1224,35 @@ export default function Player(): JSX.Element {
       recoveryProbe.current = probe
       const trackId = track.id
       const generation = recoveryGeneration.current
-      void probeSource(url).then((verdict) => {
+      void probeSource(url).then((result) => {
         if (recoveryProbe.current !== probe) return
         recoveryProbe.current = null
         const s = useStore.getState()
         // Paused, skipped or crossfaded away while the server answered.
         if (getActive() !== audio || !s.isPlaying || s.currentTrack?.id !== trackId
           || recoveryGeneration.current !== generation || cfActive.current || recoveryTimer.current != null) return
-        if (verdict === 'down' && Date.now() - recoveryStartedAt.current < RECOVERY_WINDOW_MS) {
-          console.warn(`Playback ${reason} - server unreachable, retrying "${track.title}" in ${SLOW_RETRY_MS / 1000}s`)
+        if (result.verdict === 'down' && Date.now() - recoveryStartedAt.current < RECOVERY_WINDOW_MS) {
+          runLog('playback', `${reason} on "${track.title}" (${trackId}), ${result.detail} - retrying in ${SLOW_RETRY_MS / 1000}s`)
           scheduleReload(audio, trackId, url, SLOW_RETRY_MS)
           return
         }
         if (recoveryLoading.current?.audio === audio) recoveryLoading.current = null
-        if (verdict === 'down') {
+        if (result.verdict === 'down') {
           // Still no connection. Stop pretending - a paused player the user
           // can tap is far better than a play button that lies.
-          console.error(`Playback recovery gave up on "${track.title}" after ${RECOVERY_WINDOW_MS / 60000} minutes unreachable (${reason})`)
-          showAppToast(`Couldn't play "${track.title}"`)
+          runLog('playback', `gave up on "${track.title}" (${trackId}) after ${RECOVERY_WINDOW_MS / 60000} minutes (${reason}), ${result.detail}`)
+          showAppToast(`Couldn't play "${track.title}" (${result.reason})`)
           setIsPlaying(false)
           return
         }
         // The server answers fine, so it's this file that won't play through
         // (cut short, or broken at this point). Stopping the whole queue on it
         // is the wrong call - move on, as with any other unplayable song.
-        console.error(`Playback recovery gave up on "${track.title}" after ${MAX_RECOVERY_ATTEMPTS} attempts (${reason}) - skipping it`)
-        skipUnplayableTrack()
+        const why = result.verdict === 'broken' ? result.reason
+          : reason === 'stalled' ? (lastProgressTime.current === 0 ? 'they never started playing' : 'playback kept stalling')
+          : reason === 'play-rejected' ? "the player wouldn't start them"
+          : 'they kept failing to load'
+        skipUnplayableTrack(why, `${reason} after ${MAX_RECOVERY_ATTEMPTS} reloads, ${describeMediaError(audio.error)}, ${describeSource(url)}, probe ${result.verdict}: ${result.detail}`)
       })
       return
     }
@@ -1123,21 +1264,26 @@ export default function Player(): JSX.Element {
     // This ref is authoritative: the element can retain an obsolete non-zero
     // currentTime when a user seek/restart throws during an error state.
     const resumeAt = recoveryResumeAt.current
-    console.warn(`Playback ${reason} - reloading "${track.title}" at ${resumeAt.toFixed(1)}s (attempt ${attempt + 1}/${MAX_RECOVERY_ATTEMPTS})`)
+    runLog('playback', `${reason} on "${track.title}" (${track.id}) - reloading at ${resumeAt.toFixed(1)}s (attempt ${attempt + 1}/${MAX_RECOVERY_ATTEMPTS})`)
     scheduleReload(audio, track.id, url, Math.min(1000 * 2 ** attempt, 8000))
   }
 
   // A source the browser can't play at all - a 404, a codec it doesn't
   // support - will never come back on retry, and stopping dead in the middle
   // of a queue is the same complaint from the user's side. Move past it.
-  const skipUnplayableTrack = (): void => {
+  // `reason` finishes the stop toast; `detail` is for the run log.
+  const skipUnplayableTrack = (reason: string, detail: string): void => {
+    const track = useStore.getState().currentTrack
+    const label = track ? `"${track.title}" (${track.id})` : 'the current track'
     if (consecutiveSkips.current >= MAX_CONSECUTIVE_SKIPS) {
-      console.error('Too many unplayable tracks in a row - stopping playback')
-      showAppToast("Stopped: several songs in a row couldn't be played")
+      const count = consecutiveSkips.current + 1
+      runLog('playback', `stopping after ${count} unplayable songs in a row, the last ${label}: ${detail}`)
+      showAppToast(`Stopped: ${count} songs in a row couldn't be played (${reason})`)
       setIsPlaying(false)
       return
     }
     consecutiveSkips.current++
+    runLog('playback', `skipping ${label}, ${consecutiveSkips.current} in a row: ${detail}`)
     if (!nextTrack()) setIsPlaying(false)
   }
 
@@ -1153,27 +1299,36 @@ export default function Player(): JSX.Element {
   const handleAudioError = (audio: HTMLAudioElement, slot: string): void => {
     // The inactive slot gets its src blanked by cancelCF(), which fires an
     // error of its own, and a preload dying is harmless either way.
-    if (audio !== getActive()) return
     const err = audio.error
     if (!err || err.code === MediaError.MEDIA_ERR_ABORTED) return
     // A failed recovery load may never produce loadedmetadata, so its
     // timeupdate quarantine must be released by the terminal error instead.
     if (recoveryLoading.current?.audio === audio) recoveryLoading.current = null
-    console.error(`Audio error (${slot}): code ${err.code}`, err.message)
-    if (!useStore.getState().isPlaying) return
+    if (audio !== getActive()) {
+      if (cfActive.current && audio === getNext()) cancelCF()
+      return
+    }
+    const src = audio.currentSrc || audio.src
+    const { currentTrack: track, isPlaying: playing } = useStore.getState()
+    runLog('playback', `error on "${track?.title}" (${track?.id}) in ${slot}: ${describeMediaError(err)}, ${describeSource(src)}`)
+    if (!playing) return
     // Unsupported before a single frame played = the file itself is the
     // problem, or the server errored on the first request (see probeSource) -
     // retry that, skip the rest. Mid-song it means the connection died, which
     // is recoverable.
     if (err.code === MediaError.MEDIA_ERR_SRC_NOT_SUPPORTED && lastProgressTime.current === 0) {
-      const trackId = useStore.getState().currentTrack?.id
-      void probeSource(audio.currentSrc || audio.src).then((verdict) => {
+      const trackId = track?.id
+      void probeSource(src).then((result) => {
         // Moved on while the server answered: skipped, paused, or a reload
         // already cleared the error.
         if (audio !== getActive() || !audio.error || !useStore.getState().isPlaying
           || useStore.getState().currentTrack?.id !== trackId) return
-        if (verdict !== 'broken') recoverPlayback('server error')
-        else skipUnplayableTrack()
+        if (result.verdict !== 'broken') {
+          runLog('playback', `"${track?.title}" (${trackId}) failed to open, ${result.detail} - retrying`)
+          recoverPlayback('server error')
+        } else {
+          skipUnplayableTrack(result.reason, `${describeMediaError(err)}, ${describeSource(src)}, probe ${result.verdict}: ${result.detail}`)
+        }
       })
       return
     }
@@ -1261,7 +1416,13 @@ export default function Player(): JSX.Element {
       if (!audio) return
       if (audio.ended) { onAudioEnded(audio); return }
       if (audio.error) { recoverPlayback('error'); return }
-      if (audio.paused) { playSlot(audio, () => recoverPlayback('play-rejected')); return }
+      if (audio.paused) {
+        playSlot(audio, (e) => {
+          runLog('playback', `play() refused on "${useStore.getState().currentTrack?.title}": ${String(e)}`)
+          recoverPlayback('play-rejected')
+        })
+        return
+      }
       // Background WebViews throttle timeupdate even while audio is healthy.
       if (document.hidden) { lastProgressAt.current = Date.now(); return }
       // Playing on paper, but the clock isn't moving. Very common on mobile:
@@ -1380,7 +1541,7 @@ export default function Player(): JSX.Element {
           const cap = dur > 0 ? dur - endGuard : audio.currentTime + JUMP_S
           const nextPosition = Math.min(audio.currentTime + JUMP_S, cap)
           recoveryResumeAt.current = nextPosition
-          try { audio.currentTime = nextPosition } catch { reset(); return }
+          try { seekSlot(audio, nextPosition) } catch { reset(); return }
         }
       } else {
         if (silenceJumpStart.current != null) {
@@ -1392,7 +1553,7 @@ export default function Player(): JSX.Element {
           if (back > silenceJumpStart.current) {
             recoveryResumeAt.current = back
             try {
-              audio.currentTime = back
+              seekSlot(audio, back)
               const rate = Math.max(0.25, s.playbackSpeed)
               skipCooldownUntil.current = performance.now() + (JUMP_S / rate) * 1000 + 500
             } catch { reset(); return }
@@ -1524,6 +1685,7 @@ export default function Player(): JSX.Element {
     // before loadedmetadata. That is transport noise, not a user seek or real
     // playback progress, so keep both the UI and recovery intent unchanged.
     if (recoveryLoading.current?.audio === audio || resumeTrackId.current === useStore.getState().currentTrack?.id) return
+    const looped = IS_IOS && observeNativeLoop(audio)
 
     // Liveness signal for the stall detector. Compared for *any* change, not
     // just forward motion, so a seek backwards doesn't look like a frozen
@@ -1566,9 +1728,20 @@ export default function Player(): JSX.Element {
     const abLooping = abLoopStart != null && abLoopEnd != null
     if (abLooping && audio.currentTime >= abLoopEnd!) {
       recoveryResumeAt.current = abLoopStart!
-      audio.currentTime = abLoopStart!
+      seekSlot(audio, abLoopStart!)
       setCurrentTime(abLoopStart!)
       if (dur > 0) setProgress(abLoopStart! / dur)
+      return
+    }
+
+    // Native looping keeps iOS's media session alive at EOF, even if JS is
+    // briefly suspended. Advance on the wrap using the same unlocked element;
+    // never wait for React's next render to start the next source.
+    // A delayed timeupdate can replay a little of the outgoing intro before
+    // the switch. This is a background-continuity workaround, not gapless audio.
+    if (looped && !abLooping) {
+      if (useStore.getState().repeat === 'one') return // already restarted natively
+      onAudioEnded(audio)
       return
     }
 
@@ -1607,6 +1780,18 @@ export default function Player(): JSX.Element {
         // skipping the crossfade falls back to a normal advance at track end.
         const nextReady = !isDonorStreamUrl(nextTrackData?.streamUrl) || !!cachedDonorUrl(nextTrackData.streamUrl)
         if (na && nextTrackData && nextReady) {
+          const url = resolvePlaybackUrl(nextTrackData)
+          // Never manufacture silence while a remote target is still cold.
+          // Keep the outgoing song at full volume and retry on the next native
+          // timeupdate; if readiness never arrives, normal ended handling owns
+          // the handoff and recovery path.
+          if (!sameMediaSrc(na.src, url)) { na.src = url; na.load(); return }
+          if (na.ended) {
+            try { na.currentTime = 0 } catch { /* wait for a seekable frame */ }
+            return
+          }
+          if (na.error || na.readyState < HTMLMediaElement.HAVE_FUTURE_DATA) return
+
           // Entering a healthy crossfade supersedes any delayed reload of the
           // outgoing slot. Invalidate both its timer and metadata callback.
           recoveryGeneration.current++
@@ -1614,14 +1799,17 @@ export default function Player(): JSX.Element {
           clearRecoveryTimer()
           cfActive.current = true
           cfIsRadio.current = isRadio
+          cfSourceIdx.current = useStore.getState().queueIndex
+          cfSourceUrl.current = currentTrack ? resolvePlaybackUrl(currentTrack) : null
           cfTargetIdx.current = nextIdx
-
-          const url = resolvePlaybackUrl(nextTrackData)
-          // Only reassign src if not already preloaded
-          if (na.src !== url) na.src = url
+          cfTargetUrl.current = url
+          const attempt = ++cfAttempt.current
           na.volume = 0
           applyRate(na)
-          na.play().catch(console.error)
+          na.play().catch((error) => {
+            console.error(error)
+            if (cfAttempt.current === attempt && cfActive.current && getNext() === na) cancelCF()
+          })
 
           // Fade OUT active audio
           const startVol  = audio.volume
@@ -1678,8 +1866,12 @@ export default function Player(): JSX.Element {
       cfActive.current = false
 
       const targetIdx = cfTargetIdx.current
+      const targetUrl = cfTargetUrl.current
       const wasRadio  = cfIsRadio.current
+      cfSourceIdx.current = -1
+      cfSourceUrl.current = null
       cfTargetIdx.current = -1
+      cfTargetUrl.current = null
       cfIsRadio.current   = false
 
       // Ensure incoming track is at full volume
@@ -1690,8 +1882,8 @@ export default function Player(): JSX.Element {
       activeSlot.current = activeSlot.current === 'A' ? 'B' : 'A'
       recoveryResumeAt.current = na?.currentTime ?? 0
 
-      // Tell the load useEffect to skip (audio already playing)
-      skipNextLoad.current = true
+      // Tell the load effect exactly which already-playing URL it may skip.
+      skipNextLoadUrl.current = targetUrl
 
       // Preserve a pause that raced in right at the crossfade boundary -
       // don't let the queue-advance forcibly resume playback. Since the
@@ -1737,12 +1929,13 @@ export default function Player(): JSX.Element {
     if (repeat === 'one') {
       const a = getActive()
       recoveryResumeAt.current = 0
-      if (a) { try { a.currentTime = 0 } catch {}; a.volume = volumeRef.current; playSlot(a) }
+      if (a) { try { seekSlot(a, 0) } catch {}; a.volume = volumeRef.current; playSlot(a) }
       return
     }
     const prevId = currentTrack?.id
     const next = nextTrack()
     if (!next) {
+      if (IS_IOS) audio.pause()
       setIsPlaying(false)
       return
     }
@@ -1750,10 +1943,25 @@ export default function Player(): JSX.Element {
       // Same track (single song in queue with repeat-all, or only one option)
       const a = getActive()
       recoveryResumeAt.current = 0
-      if (a) { try { a.currentTime = 0 } catch {}; a.volume = volumeRef.current; playSlot(a) }
+      if (a) { try { seekSlot(a, 0) } catch {}; a.volume = volumeRef.current; playSlot(a) }
       return
     }
-    handOffToSpare(next)
+    if (IS_IOS) {
+      loopPositions.delete(audio)
+      const url = resolvePlaybackUrl(next)
+      if (!url) { audio.pause(); return } // donor download is handled by the load effect
+      audio.src = url
+      // Reset the old resource before requesting playback of the new one.
+      // Keep load/play together in the native event: background React effects
+      // and watchdog timers may not run until the phone is unlocked.
+      audio.load()
+      recoveryResumeAt.current = 0
+      audio.volume = volumeRef.current
+      applyRate(audio)
+      playSlot(audio)
+    } else {
+      handOffToSpare(next)
+    }
   }
 
   const restartCurrentTrack = (shouldPlay = isPlaying): void => {
@@ -1761,7 +1969,7 @@ export default function Player(): JSX.Element {
     cancelCF()
     recoveryResumeAt.current = 0
     if (audio) {
-      try { audio.currentTime = 0 } catch { /* recovery will restart at zero */ }
+      try { seekSlot(audio, 0) } catch { /* recovery will restart at zero */ }
       audio.volume = volumeRef.current
       if (shouldPlay) playSlot(audio)
     }
@@ -1771,23 +1979,23 @@ export default function Player(): JSX.Element {
 
   const handlePrev = (): void => {
     const audio = getActive()
-    // When on repeat-one, skip back = restart the same song (mirrors handleNext).
-    // Radio keeps its played songs in `queue` as history, so it falls through
-    // to the normal "restart if >3s in, otherwise previous song" logic below.
-    if (repeat === 'one' && !radioMode) {
-      restartCurrentTrack()
-      return
-    }
+    // Restart if more than 3s in, otherwise go back a song, looped or not.
+    // Restarting lands back under 3s, so a second press (or one just after a
+    // loop comes round) is what reaches the song before.
     if (audio && getAudioCurrentTime() > 3) {
       restartCurrentTrack()
       return
     }
-    // There is no earlier queue entry to load. Restart in place and preserve
-    // pause state instead of asking prevTrack() to select index zero again.
+    // At the top of the queue prevTrack() only moves when repeat-all wrapped
+    // round (back to the last song of the previous pass). Otherwise restart in
+    // place and preserve pause state.
     if (queueIndex <= 0) {
-      restartCurrentTrack()
+      cancelCF()
+      if (!prevTrack()) restartCurrentTrack()
       return
     }
+    // The loop belonged to the song being left, as in handleNext.
+    if (repeat === 'one' && !radioMode) setRepeat('all')
     cancelCF()
     const previousId = currentTrack?.id
     const previous = prevTrack()
@@ -1799,12 +2007,12 @@ export default function Player(): JSX.Element {
 
   const handleNext = (): void => {
     cancelCF()
-    // Radio owns its own generated-next-track flow, even if repeat-one was
-    // persisted from a normal queue session.
-    if (repeat === 'one' && !radioMode) {
-      restartCurrentTrack()
-      return
-    }
+    // Skipping off a looped song moves on to the next one, like Spotify: the
+    // loop belonged to that song, so repeat-one drops to repeat-all (nextTrack
+    // would otherwise pick the same index again). Radio owns its own
+    // generated-next-track flow, even if repeat-one was persisted from a
+    // normal queue session.
+    if (repeat === 'one' && !radioMode) setRepeat('all')
     const previousId = currentTrack?.id
     const next = nextTrack()
     // Nothing left to skip to (radio returns null too, but only while its
@@ -1931,6 +2139,9 @@ export default function Player(): JSX.Element {
       const fn = hotkeyActionsRef.current[id]
       if (!fn) return
       e.preventDefault()
+      // A held key repeats. That's wanted for stepping (seek, volume, speed),
+      // but a held Space or L flipped play/pause or the like on and off.
+      if (e.repeat && !REPEATABLE_HOTKEYS.has(id)) return
       fn()
     }
     document.addEventListener('keydown', handler)
@@ -1966,7 +2177,7 @@ export default function Player(): JSX.Element {
       cancelCF()
       const time = seekDrag * dur
       recoveryResumeAt.current = time
-      try { audio.currentTime = time } catch { /* recovery will apply it once seekable */ }
+      try { seekSlot(audio, time) } catch { /* recovery will apply it once seekable */ }
       audio.volume = volumeRef.current
       applyRate(audio)
       setCurrentTime(time)
@@ -2069,29 +2280,48 @@ export default function Player(): JSX.Element {
       {/* crossOrigin: required for the Web Audio effects chain - without CORS
           clearance createMediaElementSource outputs pure silence. The API and
           the local-media:// protocol both send Access-Control-Allow-Origin. */}
+      {/* On iOS, retain native autoplay intent while the next source buffers.
+          Only the active slot may autoplay; a paused/restored queue must not
+          start fetching or playing on its own. Explicit play() still runs. */}
       <audio
         ref={slotA}
-        preload="none"
+        loop={IS_IOS}
+        autoPlay={IS_IOS && isPlaying && activeSlot.current === 'A'}
+        preload={crossfadeEnabled || (IS_IOS && isPlaying) ? 'auto' : 'none'}
         crossOrigin="anonymous"
         onLoadedMetadata={handleLoadedMetadata}
         onTimeUpdate={handleTimeUpdate}
         onEnded={handleEnded}
-        onPause={(e) => handleAudioPause(e.currentTarget)}
-        onPlaying={(e) => handleAudioPlaying(e.currentTarget)}
+        onPause={(e) => { handleAudioPause(e.currentTarget); onSlotLoadingEvent(e) }}
+        onPlaying={(e) => { handleAudioPlaying(e.currentTarget); onSlotLoadingEvent(e) }}
         onProgress={(e) => handleAudioProgress(e.currentTarget)}
-        onError={(e) => handleAudioError(e.currentTarget, 'slotA')}
+        onError={(e) => { handleAudioError(e.currentTarget, 'slotA'); onSlotLoadingEvent(e) }}
+        onPlay={onSlotLoadingEvent}
+        onWaiting={onSlotLoadingEvent}
+        onSeeking={onSlotLoadingEvent}
+        onSeeked={onSlotLoadingEvent}
+        onCanPlay={onSlotLoadingEvent}
+        onEmptied={onSlotLoadingEvent}
       />
       <audio
         ref={slotB}
-        preload="none"
+        loop={IS_IOS}
+        autoPlay={IS_IOS && isPlaying && activeSlot.current === 'B'}
+        preload={crossfadeEnabled || (IS_IOS && isPlaying) ? 'auto' : 'none'}
         crossOrigin="anonymous"
         onLoadedMetadata={handleLoadedMetadata}
         onTimeUpdate={handleTimeUpdate}
         onEnded={handleEnded}
-        onPause={(e) => handleAudioPause(e.currentTarget)}
-        onPlaying={(e) => handleAudioPlaying(e.currentTarget)}
+        onPause={(e) => { handleAudioPause(e.currentTarget); onSlotLoadingEvent(e) }}
+        onPlaying={(e) => { handleAudioPlaying(e.currentTarget); onSlotLoadingEvent(e) }}
         onProgress={(e) => handleAudioProgress(e.currentTarget)}
-        onError={(e) => handleAudioError(e.currentTarget, 'slotB')}
+        onError={(e) => { handleAudioError(e.currentTarget, 'slotB'); onSlotLoadingEvent(e) }}
+        onPlay={onSlotLoadingEvent}
+        onWaiting={onSlotLoadingEvent}
+        onSeeking={onSlotLoadingEvent}
+        onSeeked={onSlotLoadingEvent}
+        onCanPlay={onSlotLoadingEvent}
+        onEmptied={onSlotLoadingEvent}
       />
 
       {/* Equalizer - outside the WRLD-page conditional below so the hotkey and
@@ -2128,25 +2358,94 @@ export default function Player(): JSX.Element {
       {/* Stays mounted on WRLD too: mobile WRLD is a sheet over the whole
           shell (see App.tsx), so this bar just sits underneath it, already in
           place when WRLD is dragged down - same as BottomNav. */}
-      {/* No safe-area-inset-bottom padding here: the BottomNav sits directly
-          below this bar and already reserves the home-indicator space for the
-          whole stack. Adding it here too (it reads ~0 in Safari, where the URL
-          bar occupies the inset, but the real ~34px once installed as a
-          standalone PWA) injected a dead gap between the player and the nav. */}
-      <div className="app-player md:hidden bg-surface border-t border-[var(--border)] shrink-0" onContextMenu={(e) => { e.preventDefault(); if (currentTrack) setShowContextMenu(v => !v) }}>
-        {/* Thin progress bar */}
+      {/* A floating glass capsule parked just above the nav bar, out of the
+          layout like the bar itself, so the page scrolls beneath both. Placed
+          off --nav-h (the bar's real height, never zeroed while WRLD covers
+          it), so it doesn't jump as WRLD's curtain drag reveals it. 56px in
+          px rather than rem: BottomNav reserves exactly that much room for it
+          (MINI_PLAYER_SLOT). Play/pause and next only, as plain glyphs -
+          shuffle, repeat and previous live on Now Playing. */}
+      <div
+        className="app-player md:hidden fixed left-4 right-4 z-20 h-[56px] glass rounded-full overflow-hidden"
+        style={{ bottom: 'calc(var(--nav-h, 0px) + 8px)' }}
+        onContextMenu={(e) => { e.preventDefault(); if (currentTrack) setShowContextMenu(v => !v) }}
+      >
+        {/* Track row - whole row opens WRLD, not just the cover; the
+            transport buttons stopPropagation so tapping them doesn't also
+            navigate. */}
+        <div className="flex items-center h-full pl-2 pr-1.5 gap-3" {...clickable(() => setActiveView('wrld'))}>
+          <div className="w-10 h-10 rounded-lg bg-[var(--fill)] shrink-0 overflow-hidden">
+            {radioFmActive ? (
+              radioFmMatchedSong?.imageUrl
+                ? <CoverFade src={radioFmMatchedSong.imageUrl} />
+                : <div className="w-full h-full bg-gradient-to-br from-red-900/70 to-black flex items-center justify-center"><Radio size={16} className="text-red-400 opacity-80" /></div>
+            ) : (!coverArtError && (currentTrackFull?.albumArt ?? currentTrack?.imageUrl)) ? (
+              // Crossfades per cover - the old art fades straight out, so it
+              // never stays painted next to the new title while the new one
+              // loads.
+              <CoverFade src={smallCoverUrl(currentTrackFull?.albumArt ?? currentTrack?.imageUrl) ?? ''} onError={() => setCoverArtError(true)} />
+            ) : (
+              <div className="w-full h-full flex items-center justify-center text-text-muted">
+                <svg viewBox="0 0 24 24" fill="currentColor" className="w-5 h-5">
+                  <path d="M12 3v10.55c-.59-.34-1.27-.55-2-.55-2.21 0-4 1.79-4 4s1.79 4 4 4 4-1.79 4-4V7h4V3h-6z" />
+                </svg>
+              </div>
+            )}
+          </div>
+          <TrackSwap swapKey={swapKey} order={swapOrder} className="flex-1 min-w-0">
+            <p
+              className="text-subhead font-semibold text-text-primary truncate"
+              title={radioFmActive && radioFmNowPlaying ? radioFmNowPlaying.title : (currentTrack?.title || undefined)}
+            >
+              {radioFmActive && radioFmNowPlaying
+                ? radioFmNowPlaying.title
+                : (currentTrack?.title || 'Not Playing')}
+            </p>
+            {(radioFmActive ? radioFmNowPlaying?.artist : currentTrack?.artist) && (
+              <p className="text-footnote text-text-secondary truncate">
+                {radioFmActive ? radioFmNowPlaying?.artist : currentTrack?.artist}
+              </p>
+            )}
+          </TrackSwap>
+          <div className="flex items-center shrink-0" onClick={(e) => e.stopPropagation()}>
+            <button
+              onClick={() => setIsPlaying(!isPlaying)}
+              disabled={!currentTrack || radioFmActive}
+              title={isPlaying ? 'Pause' : 'Play'}
+              aria-label={isPlaying ? 'Pause' : 'Play'}
+              className="w-11 h-11 rounded-full flex items-center justify-center text-text-primary active:bg-[var(--fill)] transition-colors disabled:opacity-30"
+            >
+              <SwapIcon swapKey={isPlaying}>
+                {isPlaying
+                  ? <Pause size={24} fill="currentColor" strokeWidth={0} />
+                  : <Play size={24} fill="currentColor" strokeWidth={0} className="ml-0.5" />}
+              </SwapIcon>
+            </button>
+            <button
+              onClick={handleNext}
+              disabled={radioFmActive}
+              title="Next"
+              aria-label="Next"
+              className="w-11 h-11 rounded-full flex items-center justify-center text-text-primary active:bg-[var(--fill)] transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
+            >
+              <SkipForward size={24} fill="currentColor" strokeWidth={0} />
+            </button>
+          </div>
+        </div>
+        {/* Progress, as a hairline along the bottom of the capsule, inset
+            clear of its rounded ends. */}
         {radioFmActive ? (
-          <div className="h-[2px] bg-red-900/40 relative">
-            <div className="h-full bg-red-400 absolute left-0 top-0 transition-none" style={{ width: `${fmProgress * 100}%` }} />
+          <div className="absolute left-6 right-6 bottom-[3px] h-[2px] rounded-full bg-red-900/40 overflow-hidden pointer-events-none">
+            <FmProgressFill className="h-full bg-red-400 absolute left-0 top-0 transition-none" />
           </div>
         ) : (
-        // Seekable. The visible line is 2px but the hit area is padded taller
-        // (py-2 -my-2) so it's grabbable on touch, and touch-none stops the
-        // browser from treating a horizontal drag as a scroll. Commits on
-        // release via seekToPercent(last) rather than the seekDrag state, so a
-        // stale closure in the document listeners can't seek to the wrong spot.
+        // Seekable. The visible line is 2px but the hit area is taller so
+        // it's grabbable on touch, and touch-none stops the browser from
+        // treating a horizontal drag as a scroll. Commits on release via
+        // seekToPercent(last) rather than the seekDrag state, so a stale
+        // closure in the document listeners can't seek to the wrong spot.
         <div
-          className="relative py-2 -my-2 cursor-pointer touch-none"
+          className="absolute left-6 right-6 bottom-0 h-2.5 cursor-pointer touch-none"
           onMouseDown={e => {
             const rect = e.currentTarget.getBoundingClientRect()
             const pctAt = (x: number): number => Math.max(0, Math.min(1, (x - rect.left) / rect.width))
@@ -2167,88 +2466,26 @@ export default function Player(): JSX.Element {
             let last = pctAt(e.touches[0].clientX)
             setSeekDrag(last)
             const onMove = (ev: TouchEvent): void => { last = pctAt(ev.touches[0].clientX); setSeekDrag(last) }
-            const onEnd = (): void => {
+            const detach = (): void => {
               document.removeEventListener('touchmove', onMove)
               document.removeEventListener('touchend', onEnd)
-              seekToPercent(last); setSeekDrag(null)
+              document.removeEventListener('touchcancel', onCancel)
             }
+            const onEnd = (): void => { detach(); seekToPercent(last); setSeekDrag(null) }
+            // A cancelled touch (system gesture, incoming call) never sends
+            // touchend - without this the bar stayed frozen on the drag.
+            const onCancel = (): void => { detach(); setSeekDrag(null) }
             document.addEventListener('touchmove', onMove, { passive: true })
             document.addEventListener('touchend', onEnd)
+            document.addEventListener('touchcancel', onCancel)
           }}
         >
-          <div className="h-[2px] bg-surface-overlay relative">
-            <ProgressFill seekDrag={seekDrag} className="h-full bg-accent absolute left-0 top-0 transition-none" />
+          <div className="absolute inset-x-0 bottom-[3px] h-[2px] rounded-full bg-[var(--fill)] overflow-hidden">
+            <ProgressFill seekDrag={seekDrag} className="h-full bg-text-primary absolute left-0 top-0 transition-none" />
+            <span className={`player-loading player-loading--text ${audioLoading ? 'on' : ''}`} />
           </div>
         </div>
         )}
-        {/* Track row - whole row opens WRLD, not just the cover; the
-            transport buttons stopPropagation so tapping them doesn't also
-            navigate. */}
-        <div className="flex items-center px-3 py-2 gap-3 h-14" {...clickable(() => setActiveView('wrld'))}>
-          <div className="w-10 h-10 rounded bg-surface-overlay shrink-0 overflow-hidden">
-            {radioFmActive ? (
-              radioFmMatchedSong?.imageUrl
-                ? <CoverFade src={radioFmMatchedSong.imageUrl} />
-                : <div className="w-full h-full bg-gradient-to-br from-red-900/70 to-black flex items-center justify-center"><Radio size={16} className="text-red-400 opacity-80" /></div>
-            ) : (!coverArtError && (currentTrackFull?.albumArt ?? currentTrack?.imageUrl)) ? (
-              // Crossfades per cover - the old art fades straight out, so it
-              // never stays painted next to the new title while the new one
-              // loads.
-              <CoverFade src={smallCoverUrl(currentTrackFull?.albumArt ?? currentTrack?.imageUrl) ?? ''} onError={() => setCoverArtError(true)} />
-            ) : (
-              <div className="w-full h-full flex items-center justify-center text-text-muted">
-                <svg viewBox="0 0 24 24" fill="currentColor" className="w-5 h-5">
-                  <path d="M12 3v10.55c-.59-.34-1.27-.55-2-.55-2.21 0-4 1.79-4 4s1.79 4 4 4 4-1.79 4-4V7h4V3h-6z" />
-                </svg>
-              </div>
-            )}
-          </div>
-          <TrackSwap swapKey={swapKey} order={swapOrder} className="flex-1 min-w-0">
-            <p
-              className="text-sm font-medium text-text-primary truncate"
-              title={radioFmActive && radioFmNowPlaying ? radioFmNowPlaying.title : (currentTrack?.title || undefined)}
-            >
-              {radioFmActive && radioFmNowPlaying
-                ? radioFmNowPlaying.title
-                : (currentTrack?.title || 'Not playing')}
-            </p>
-            <p className="text-xs text-text-muted truncate">
-              {radioFmActive && radioFmNowPlaying
-                ? radioFmNowPlaying.artist
-                : (currentTrack?.artist || '')}
-            </p>
-          </TrackSwap>
-          <div className="flex items-center gap-0.5 shrink-0" onClick={(e) => e.stopPropagation()}>
-            {!radioFmActive && (
-              <button onClick={toggleShuffle} title={shuffleTitle} className={`p-1.5 transition-colors ${shuffle ? 'text-accent' : 'text-text-secondary hover:text-text-primary'}`}>
-                <Shuffle size={15} />
-              </button>
-            )}
-            <button onClick={handlePrev} disabled={radioFmActive} title="Previous" className="p-2 text-text-secondary hover:text-text-primary transition-colors disabled:opacity-30 disabled:cursor-not-allowed">
-              <SkipBack size={18} fill="currentColor" />
-            </button>
-            <button
-              onClick={() => setIsPlaying(!isPlaying)}
-              disabled={!currentTrack || radioFmActive}
-              title={isPlaying ? 'Pause' : 'Play'}
-              className="w-9 h-9 rounded-full bg-white flex items-center justify-center hover:scale-105 active:scale-95 transition-transform disabled:opacity-30"
-            >
-              <SwapIcon swapKey={isPlaying}>
-                {isPlaying
-                  ? <Pause size={16} fill="#000" className="text-black" />
-                  : <Play  size={16} fill="#000" className="text-black ml-0.5" />}
-              </SwapIcon>
-            </button>
-            <button onClick={handleNext} disabled={radioFmActive} title="Next" className="p-2 text-text-secondary hover:text-text-primary transition-colors disabled:opacity-30 disabled:cursor-not-allowed">
-              <SkipForward size={18} fill="currentColor" />
-            </button>
-            {!radioFmActive && (
-              <button onClick={toggleRepeat} title={repeatTitle} className={`p-1.5 transition-colors ${repeat !== 'none' ? 'text-accent' : 'text-text-secondary hover:text-text-primary'}`}>
-                {repeat === 'one' ? <Repeat1 size={15} /> : <Repeat size={15} />}
-              </button>
-            )}
-          </div>
-        </div>
       </div>
 
       {/* ── Desktop player ── */}
@@ -2261,11 +2498,12 @@ export default function Player(): JSX.Element {
           {/* Thin progress line along the top edge */}
           {radioFmActive ? (
             <div className="absolute top-0 left-0 right-0 h-[2px] bg-red-900/40">
-              <div className="h-full bg-red-400" style={{ width: `${fmProgress * 100}%` }} />
+              <FmProgressFill className="h-full bg-red-400" />
             </div>
           ) : (
             <div className="absolute top-0 left-0 right-0 h-[2px] bg-surface-overlay">
               <ProgressFill seekDrag={seekDrag} className="h-full bg-accent" />
+              <span className={`player-loading ${audioLoading ? 'on' : ''}`} />
             </div>
           )}
           <button
@@ -2290,7 +2528,7 @@ export default function Player(): JSX.Element {
           </TrackSwap>
           <span className="text-text-muted text-xs tabular-nums shrink-0">
             {radioFmActive
-              ? `${formatDuration(Math.floor(fmElapsedMs / 1000))} / ${formatDuration(Math.floor(fmDurationMs / 1000))}`
+              ? <><FmElapsedTime /> / {formatDuration(Math.floor(fmDurationMs / 1000))}</>
               : <><ElapsedTime /> / {formatDuration(duration)}</>}
           </span>
           <button
@@ -2448,12 +2686,12 @@ export default function Player(): JSX.Element {
           <div className="flex items-center gap-2 w-full max-w-xl">
             <span className="text-text-muted text-xs w-10 text-right tabular-nums">
               {radioFmActive
-                ? formatDuration(Math.floor(fmElapsedMs / 1000))
+                ? <FmElapsedTime />
                 : <ElapsedTime />}
             </span>
-            <div className="flex-1 progress-track">
+            <div className="flex-1 progress-track relative">
               <SeekRange
-                seekDrag={seekDrag} radioFmActive={radioFmActive} fmProgress={fmProgress}
+                seekDrag={seekDrag} radioFmActive={radioFmActive}
                 onMouseDown={radioFmActive ? undefined : handleSeekMouseDown}
                 onTouchStart={radioFmActive ? undefined : handleSeekMouseDown}
                 onChange={handleSeekChange}
@@ -2462,6 +2700,7 @@ export default function Player(): JSX.Element {
                 onKeyUp={radioFmActive ? undefined : handleSeekCommit}
                 disabled={!currentTrack}
               />
+              <span className={`player-loading player-loading--range ${audioLoading ? 'on' : ''}`} />
             </div>
             <span className="text-text-muted text-xs w-10 tabular-nums">
               {radioFmActive ? formatDuration(Math.floor(fmDurationMs / 1000)) : formatDuration(duration)}

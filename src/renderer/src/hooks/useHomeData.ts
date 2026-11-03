@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { useStorePick } from '../store/useStore'
+import { useStore, useStorePick } from '../store/useStore'
 import { loadRecentTracks } from '../lib/recentTracks'
 import { filterListeningPlaysByDays } from '../lib/listeningPlays'
 import { allTimePrefs } from '../lib/listeningStats'
@@ -18,12 +18,17 @@ import type { Album } from '../lib/albumsApi'
 import type { PlaylistSummary } from '../lib/userApi'
 import type { Track, ViewType } from '../types'
 
+/** Set to false to hide the Albums tile on Home and skip its /albums/ fetch. */
+export const HOME_ALBUMS_SHOWN: boolean = true
+
 export interface HomeAlbumCard {
   key: string
   title: string
   subtitle: string
   cover: string | undefined
+  /** Opens the album's page. */
   open: () => void
+  play: () => void
 }
 
 // A daily puzzle (streak + played-today) vs. Tier List, which is a standing
@@ -118,6 +123,7 @@ export function useHomeData() {
   const [albums, setAlbums] = useState<Album[]>([])
   const [albumSongIndex, setAlbumSongIndex] = useState<Map<string, JWApiSong>>(new Map())
   useEffect(() => {
+    if (!HOME_ALBUMS_SHOWN) return
     albumsApi.fetchAlbums()
       .then((list) => {
         setAlbums([...list].sort((a, b) => (b.release_date ?? '').localeCompare(a.release_date ?? '')))
@@ -139,7 +145,8 @@ export function useHomeData() {
       title: album.title,
       subtitle: album.release_date ? album.release_date.slice(0, 4) : (album.artist?.name ?? ''),
       cover: albumsApi.albumCoverUrl(album, albumSongIndex, songPrefs),
-      open: () => {
+      open: () => { useStore.getState().setAlbumsSelectedId(album.id); setActiveView('albums') },
+      play: () => {
         const queue = tracks
           .map((t) => albumSongIndex.get(t.path))
           .filter((s): s is JWApiSong => !!s)
@@ -147,7 +154,7 @@ export function useHomeData() {
         if (queue.length > 0) playTrack(queue[0], queue)
       },
     }
-  }), [albums, albumSongIndex, songPrefs, playTrack])
+  }), [albums, albumSongIndex, songPrefs, playTrack, setActiveView])
 
   const games = useMemo((): GameCard[] => {
     const heardle = loadHeardleStats('daily')

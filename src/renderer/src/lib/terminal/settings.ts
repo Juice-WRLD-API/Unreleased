@@ -19,6 +19,7 @@ import { LOOKS } from '../../desktop/light/looks'
 import { NOTIFICATION_SOUNDS, getNotificationSoundId, playNotificationSound, setNotificationSoundId } from '../notifications'
 import { updatePrivacySettings } from '../userApi'
 import type { AudioFx } from '../audioEffects'
+import { IS_IOS } from '../platform'
 import { debugRecordingCount, debugRecordingStartedAt, discardDebugRecording, getDebugAnonymousPref, isDebugRecording, isDebugRecordingAnonymous, setDebugAnonymousPref, startDebugRecording, stopAndDownloadDebugRecording } from '../debugRecorder'
 import { describeEntry, describeLog, formatOffset, isProblem, openDebugLogBlob, openDebugLogFile, type DebugLog } from '../debugLog'
 import { asJson, fail, oneLine, parseArgs, parseBool, pickByName, type TermCommand, type TermCtx } from './types'
@@ -105,7 +106,8 @@ const SETTINGS: Setting[] = [
   num('speed', 'Playback speed', 0.5, 2, () => st().playbackSpeed, (v) => st().setPlaybackSpeed(v), 'x'),
   bool('crossfade', 'Crossfade between tracks', () => st().crossfadeEnabled, (v) => st().setCrossfade(v, st().crossfadeDuration)),
   num('crossfade-seconds', 'Crossfade length', 1, 12, () => st().crossfadeDuration, (v) => st().setCrossfade(st().crossfadeEnabled, v), 's'),
-  bool('pause-fade', 'Fade out on pause', () => st().pauseFadeEnabled, (v) => st().setPauseFade(v)),
+  // Not offered on iOS: Safari ignores <audio>.volume, so the fade can't run.
+  ...(IS_IOS ? [] : [bool('pause-fade', 'Fade out on pause', () => st().pauseFadeEnabled, (v) => st().setPauseFade(v))]),
   bool('remember-queue', 'Restore the queue, current track and position on this device (paused)', () => st().rememberQueue, (v) => st().setRememberQueue(v)),
   bool('skip-silence', 'Skip silence', () => st().skipSilence, (v) => st().setSkipSilence(v)),
   bool('eq', 'Equalizer on', () => st().eqEnabled, (v) => st().setEqEnabled(v)),
@@ -146,7 +148,7 @@ const SETTINGS: Setting[] = [
   choice('viz-boost', 'Visualizer input boost', pills('off', 'auto', '2', '4', '8'), () => vz().vizBoost, (v) => vz().setVizBoost(v as Boost)),
   choice('viz-cycle', 'Switch visualizer automatically', pills('off', 'track', 'album'), () => vz().vizCycle, (v) => vz().setVizCycle(v as VizCycle)),
   bool('wrld-widgets', 'WRLD shows the desktop player, playlist and clock instead of its own player', () => vz().wrldWidgets, (v) => vz().setWrldWidgets(v)),
-  bool('viz-artwork', 'Visualizer uses colours from the artwork', () => vz().vizUseArtwork, (v) => vz().setVizUseArtwork(v)),
+  bool('viz-artwork', 'WRLD background and visualizer use colours from the artwork', () => vz().vizUseArtwork, (v) => vz().setVizUseArtwork(v)),
   choice('audio-output', 'Audio output device (default = system)', () => [{ value: 'default', label: 'system default' }, ...audioDevices.map((d) => ({ value: d.deviceId, label: d.label || `Device ${d.deviceId.slice(0, 6)}` }))], () => st().audioOutput || 'default', (v) => st().setAudioOutput(v === 'default' ? '' : v)),
   choice('notification-sound', 'Sound for chat and news notifications', () => NOTIFICATION_SOUNDS.map((x) => ({ value: x.id, label: x.label })), () => getNotificationSoundId(), (v) => { setNotificationSoundId(v); playNotificationSound(v) }),
   bool('lastfm', 'Last.fm scrobbling (connect it in Settings first)', () => st().lastfmEnabled, (v) => { if (!st().lastfmUser) fail('connect Last.fm in Settings > Playback first'); st().setLastfmEnabled(v) }),
@@ -309,6 +311,7 @@ const FONT_VERBS = ['import', 'add', 'remove']
 export const SETTINGS_COMMANDS: TermCommand[] = [
   {
     name: 'fonts', aliases: ['font'], group: 'Settings', usage: 'fonts [import | add <installed font name> | remove <font>]',
+    covers: ['fonts.addFontFile', 'fonts.removeCustomFont', 'fontActions.deleteFont'],
     description: 'List the fonts you can pick, add your own - import a .ttf/.otf/.woff/.woff2 file or use one installed on this computer - or remove one (same as Settings > Appearance > Custom fonts). Pick it with "set font" / "set lyrics-font"',
     complete: (before, partial) => {
       const p = partial.toLowerCase()
@@ -340,6 +343,7 @@ export const SETTINGS_COMMANDS: TermCommand[] = [
       }
       if (verb === 'remove' || verb === 'rm') {
         const q = rest.join(' ')
+        if (!q) fail('usage: fonts remove <font>')
         const custom = allFonts().filter((f) => f.custom)
         const font = custom.find((f) => f.id.toLowerCase() === q.toLowerCase()) ?? pickByName(custom, (f) => f.name, q) ?? fail(`no custom font "${q}" (fonts lists them)`)
         await deleteFont(font.id)
@@ -418,6 +422,7 @@ export const SETTINGS_COMMANDS: TermCommand[] = [
   },
   {
     name: 'debuglog', aliases: ['debug-log', 'record'], group: 'Settings', usage: 'debuglog [start [--anon|--no-anon]|stop [--view]|discard|open [--all] [--json]|anon [on|off]]',
+    covers: ['debugLog.openDebugLogFile', 'debugLog.openDebugLogBlob'],
     description: 'Record console messages and network requests, then save them to a file to send us; open reads a saved log back - prints its summary and problems (--all: every event) and shows it in the viewer. Anonymous mode (anon on, or start --anon) leaves out device details and scrubs your username, email, IP and folder paths (same as Settings > About > Record debug log / Open log / Anonymous)',
     complete: (before, partial) => {
       const p = partial.toLowerCase()

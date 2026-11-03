@@ -298,20 +298,21 @@ export default function SearchPanel({ room, onClose, onNavigate }: {
 
   return (
     <aside className="w-full md:w-[380px] shrink-0 min-h-0 flex flex-col border-l border-[var(--border)] bg-surface">
-      <header className="h-14 shrink-0 flex items-center gap-2 px-4 border-b border-[var(--border)]">
+      <header className="h-14 shrink-0 flex items-center gap-2 px-4 border-b border-[var(--separator)]">
         <div className="flex-1 min-w-0">
-          <h3 className="text-sm font-bold text-text-primary">Search</h3>
-          <p className="text-[11px] text-text-muted truncate">
+          <h3 className="text-headline md:text-sm md:font-bold md:tracking-normal text-text-primary">Search</h3>
+          <p className="text-footnote md:text-[11px] md:tracking-normal text-text-muted truncate">
             {targets.length === 0 ? 'Nothing to search yet' : targets.length === 1 ? targets[0].label : `${targets.length} chats`}
             {scope === 'all' || (scope === 'space' && room?.kind === 'conversation') ? ' · includes encrypted DMs' : ''}
           </p>
         </div>
-        <IconButton label="Close search" onClick={onClose}><X size={17} /></IconButton>
+        <IconButton label="Close search" className="hidden md:flex" onClick={onClose}><X size={17} /></IconButton>
+        <button onClick={onClose} className="md:hidden h-11 px-1 text-body font-semibold text-accent active:opacity-60">Done</button>
       </header>
 
-      <div className="shrink-0 px-3 pt-3 pb-2 space-y-2 border-b border-[var(--border)]">
+      <div className="shrink-0 px-4 md:px-3 pt-3 pb-2 space-y-2 border-b border-[var(--separator)]">
         <div className="relative">
-          <div className="flex items-center gap-2 rounded-xl border border-[var(--border)] bg-surface-raised px-3 h-10 focus-within:border-accent/70 focus-within:ring-2 focus-within:ring-accent/20 transition-shadow">
+          <div className="flex items-center gap-2 rounded-full md:rounded-xl border border-transparent md:border-[var(--border)] bg-[var(--fill)] md:bg-surface-raised px-3 h-9 md:h-10 focus-within:border-accent/70 focus-within:ring-2 focus-within:ring-accent/20 transition-shadow">
             {indexing ? <Loader2 size={15} className="shrink-0 animate-spin text-accent" /> : <Search size={15} className="shrink-0 text-text-muted" />}
             <input
               ref={input}
@@ -325,7 +326,7 @@ export default function SearchPanel({ room, onClose, onNavigate }: {
               spellCheck={false}
               autoComplete="off"
               aria-label="Search messages"
-              className="flex-1 min-w-0 bg-transparent text-sm text-text-primary placeholder:text-text-muted outline-none"
+              className="flex-1 min-w-0 bg-transparent text-body md:text-sm md:tracking-normal text-text-primary placeholder:text-text-muted outline-none"
             />
             {query && (
               <button onClick={() => setAndFocus('')} aria-label="Clear search" className="shrink-0 text-text-muted hover:text-text-primary"><X size={15} /></button>
@@ -457,7 +458,7 @@ export default function SearchPanel({ room, onClose, onNavigate }: {
             {recent.length > 0 && (
               <section>
                 <div className="flex items-center mb-1.5">
-                  <h4 className="text-[10px] font-bold uppercase tracking-wider text-text-muted">Recent</h4>
+                  <h4 className="text-footnote font-semibold text-text-secondary md:text-[10px] md:font-bold md:uppercase md:tracking-wider md:text-text-muted">Recent</h4>
                   <button onClick={() => { clearRecent(); setRecent([]) }} className="ml-auto text-[10px] text-text-muted hover:text-text-primary">Clear</button>
                 </div>
                 <div className="flex flex-wrap gap-1.5">
@@ -470,7 +471,7 @@ export default function SearchPanel({ room, onClose, onNavigate }: {
               </section>
             )}
             <section>
-              <h4 className="text-[10px] font-bold uppercase tracking-wider text-text-muted mb-1.5">Filters</h4>
+              <h4 className="text-footnote font-semibold text-text-secondary md:text-[10px] md:font-bold md:uppercase md:tracking-wider md:text-text-muted mb-1.5">Filters</h4>
               <div className="space-y-1">
                 {FILTER_HELP.map((h) => (
                   <button

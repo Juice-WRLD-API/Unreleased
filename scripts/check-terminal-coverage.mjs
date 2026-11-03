@@ -35,6 +35,7 @@ const NOT_APPLICABLE = {
   'heardleMatchApi.connectMatchSocket': 'live websocket; the REST queue calls are covered',
   // Same request as another function that is covered.
   'userApi.setPlaylistCoverBase64': 'same PATCH as uploadPlaylistCover (drag-drop path)',
+  'juicewrldApi.fetchFileText': 'the terminal file tools (ignored module terminalFiles) read with it: nano',
   // Whole modules (`module.*`).
   'lastfm.*': 'Last.fm is a third-party service, not the site API',
   'gifApi.*': 'Tenor/Giphy are third-party services, not the site API',
@@ -47,6 +48,7 @@ const NOT_APPLICABLE = {
   'desktopBridge.*': 'answers the desktop widgets with searchSongs, userApi.getFavorites/getPlaylist and /songs/?era=, all reachable (search, liked, playlist, find)',
   'donorImageCache.*': 'caches donorFilesApi.fetchDonorFileBlob (donor get)',
   'donorCoverArt.*': 'caches donorFilesApi.fetchDonorFileBlob (donor get)',
+  'coverArtImages.*': 'caches coverArtApi.fetchCoverArtImage (coverart image)',
   'heardleMatchApi.*': 'live versus match runs over a websocket; the REST queue calls are covered by daily versus',
   'notificationSocket.*': 'live notification websocket, not a request/response call',
   // Loaders and wrappers over endpoints that have their own command.
@@ -83,6 +85,7 @@ const STRAY_OK = {
   'components/DownloadAppView.tsx': 'GitHub releases, not the app API',
   'components/chat/AttachmentView.tsx': 'fetches an already-resolved media URL',
   'components/MediaLightbox.tsx': 'fetches an already-resolved media URL',
+  'components/Player.tsx': '2-byte Range probe of the source already playing, not an endpoint',
   'components/ShareLyricsModal.tsx': 'comment only',
   'components/ApiFilesView.desktop.tsx': 'file download; terminal `get` covers it',
   'components/PlaylistsView.desktop.tsx': 'cover/image blob fetch, not an endpoint of its own',

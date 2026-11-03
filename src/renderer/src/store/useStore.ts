@@ -5,6 +5,8 @@ import { clearDonorPlaybackCache } from '../lib/donorPlayback'
 import { clearDonorImageCache } from '../lib/donorImageCache'
 import { clearDecryptedAttachments } from '../lib/chatAttachmentCache'
 import { clearDonorCoverCache } from '../lib/donorCoverArt'
+import { clearCoverArtImageCache } from '../lib/coverArtImages'
+import type { CoverArtTarget } from '../lib/coverArtApi'
 import { APP_VERSION } from '../lib/appVersion'
 import { ls } from '../lib/persist'
 import * as userApi from '../lib/userApi'
@@ -217,6 +219,7 @@ interface AppState {
   /** Desktop Settings modal. Mobile widths still use the 'settings' view. */
   showSettings: boolean
   showDiagnostics: boolean
+  showRecognition: boolean
   showQueue: boolean
   // The bottom nav's overflow sheet - its trigger button lives on Home now,
   // not in the nav bar itself, so the open/close state has to live somewhere
@@ -449,6 +452,10 @@ interface AppState {
   // The open "Synced lyrics" dialog (null = closed) and the song it was
   // opened on. See components/LyricsGenModal.
   lyricsGenModal: LyricsGenTarget | null
+
+  // The song the "Submit cover art" dialog is open for (null = closed). See
+  // components/CoverArtSubmitModal.
+  coverArtModal: CoverArtTarget | null
   // Whether ErrorBoundary auto-submits a crash report the moment it catches
   // an error, through the same feedback pipeline (submitFeedback) the manual
   // "Report this error" button uses. On by default; Settings can turn it off
@@ -499,6 +506,10 @@ interface AppState {
   playlistsSelectedId: number | null
   playlistsSelectedLocalId: string | null
 
+  // The album open on the Albums page, kept here for the same reason as
+  // playlistsSelectedId: switching tabs remounts the view.
+  albumsSelectedId: number | null
+
   // The open playlist's track sort - same "lives in the store, not local
   // state" reasoning as playlistsSelectedId above: without this, tabbing
   // away from Playlists and back would silently drop the sort back to
@@ -524,7 +535,10 @@ interface AppState {
   // Holds the full objects the caller already had rather than ids, so the
   // dialog can show "same across all"/"mixed" per field without re-fetching.
   // See BulkEditModal.
-  bulkEdit: { kind: 'api'; songs: JWApiSong[] } | null
+  bulkEdit:
+    | { kind: 'api'; songs: JWApiSong[] }
+    | { kind: 'comp'; files: { path: string; name: string }[]; channel: string }
+    | null
 
 
   // Library (Electron only)
@@ -620,6 +634,7 @@ interface AppActions {
   playCommunityEdit: (edit: CommunityEdit) => void
 
   setActiveView: (view: ViewType) => void
+  navigateHistory: (direction: 'back' | 'forward') => void
   /** Sets which section the standalone admin console should show, and - when
    *  it's the active view - updates the address bar to that section's own
    *  deep-link path (via replaceState, not pushState: switching sections
@@ -655,6 +670,7 @@ interface AppActions {
    *  clicks in chat messages and member lists. */
   openPublicProfile: (userId: number) => void
   setShowDiagnostics: (show: boolean) => void
+  setShowRecognition: (show: boolean) => void
   setShowQueue: (show: boolean) => void
   setShowMoreNav: (show: boolean) => void
   setShowEqPanel: (show: boolean) => void
@@ -864,6 +880,7 @@ interface AppActions {
   setPendingPlaylistId: (id: number | null) => void
   setPlaylistsSelectedId: (id: number | null) => void
   setPlaylistsSelectedLocalId: (id: string | null) => void
+  setAlbumsSelectedId: (id: number | null) => void
   setPlaylistsSort: (sort: { field: string; dir: 'asc' | 'desc' }) => void
   setPlaylistsOpenFolderId: (id: string | null) => void
 
@@ -874,10 +891,16 @@ interface AppActions {
   // "Edit" on a multi-song selection - opens the bulk editor dialog, which
   // submits one update proposal per song.
   openBulkEditor: (songs: JWApiSong[]) => void
+  // "Edit tags" on comp files in the Files tab - same dialog, submitting one
+  // batch of retag proposals.
+  openBulkFileEditor: (files: { path: string; name: string }[], channel: string) => void
   closeBulkEditor: () => void
   /** Opens / closes the "Synced lyrics" dialog (hand sync, and Whisper for donors), optionally on a song. */
   openLyricsGen: (target?: LyricsGenTarget) => void
   closeLyricsGen: () => void
+  /** Opens / closes the "Submit cover art" dialog for a song. */
+  openCoverArtSubmit: (target?: CoverArtTarget) => void
+  closeCoverArtSubmit: () => void
 
 
   setLibraryTracks: (tracks: LibraryTrack[]) => void
@@ -1064,6 +1087,19 @@ let _reportsFlushing = false
 const PATH_PARAM_VIEWS: ViewType[] = ['track', 'shared-playlist', 'public-profile']
 const lastPathParamUrl: Partial<Record<ViewType, string>> = {}
 
+// View history for the mouse back/forward buttons. The desktop build skips URL
+// routing (file://), so browser history can't carry this.
+const NAV_HISTORY_MAX = 50
+const navBack: ViewType[] = []
+const navForward: ViewType[] = []
+let navReplaying = false
+function recordNav(from: ViewType): void {
+  if (navReplaying) return
+  if (navBack[navBack.length - 1] !== from) navBack.push(from)
+  if (navBack.length > NAV_HISTORY_MAX) navBack.shift()
+  navForward.length = 0
+}
+
 const PROFILE_PUSH_DEBOUNCE_MS = 1500
 let _profilePushTimer: ReturnType<typeof setTimeout> | null = null
 let _profilePushDirty = { songPrefs: false, listeningPlays: false, folders: false, userSettings: false }
@@ -1211,6 +1247,15 @@ setActiveChannelCache(ls.get<string>('activeChannel') || '')
 // Pop-outs are an Electron feature; the web build never has one.
 export const IS_FLOAT_WINDOW = false
 
+// The speed lands on every <audio> as playbackRate. A synced profile value of
+// null (JSON's NaN) would set it to 0 - every song sits at 0:00 until the
+// stall check gives up and skips it - and anything else out of Chromium's
+// range throws where the rate is applied. Anything unusable plays at 1x.
+function safeSpeed(raw: unknown): number {
+  const n = typeof raw === 'number' ? raw : Number(raw)
+  return Number.isFinite(n) && n >= 0.25 && n <= 4 ? n : 1
+}
+
 export const useStore = create<AppStore>((set, get, store) => ({
   // ── Queue slice (all queue + playback logic) ───────────────────────────────
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -1222,7 +1267,7 @@ export const useStore = create<AppStore>((set, get, store) => ({
   // ── Playback extras ───────────────────────────────────────────────────────
   currentTrackFull: null,
   volume: ls.get<number>('volume') ?? 0.8,
-  playbackSpeed: ls.get<number>('playbackSpeed') ?? 1,
+  playbackSpeed: safeSpeed(ls.get<number>('playbackSpeed')),
   lyricsOffset: ls.get<number>('lyricsOffset') ?? 0,
 
   setCurrentTrackFull: (full) => {
@@ -1233,7 +1278,7 @@ export const useStore = create<AppStore>((set, get, store) => ({
     }
   },
   setVolume: (volume) => { set({ volume }); ls.set('volume', volume) },
-  setPlaybackSpeed: (speed) => { set({ playbackSpeed: speed }); ls.set('playbackSpeed', speed); get()._scheduleProfilePush(['userSettings']) },
+  setPlaybackSpeed: (raw) => { const speed = safeSpeed(raw); set({ playbackSpeed: speed }); ls.set('playbackSpeed', speed); get()._scheduleProfilePush(['userSettings']) },
   setLyricsOffset: (offset) => { set({ lyricsOffset: offset }); ls.set('lyricsOffset', offset) },
 
   // ── Equalizer / audio effects ─────────────────────────────────────────────
@@ -1381,6 +1426,7 @@ export const useStore = create<AppStore>((set, get, store) => ({
   settingsTab: null,
   showSettings: typeof window !== 'undefined' && window.location.pathname === '/settings' && !isMobileViewport(),
   showDiagnostics: false,
+  showRecognition: false,
   showQueue: false,
   showMoreNav: false,
   showEqPanel: false,
@@ -1433,6 +1479,7 @@ export const useStore = create<AppStore>((set, get, store) => ({
     // Already there: skip, so a repeat call can't stack duplicate history
     // entries or churn subscribers that key off previousView.
     if (get().activeView === view) return
+    recordNav(get().activeView)
     const paths: Partial<Record<ViewType, string>> = {
       library: '/library',
       'home': '/home',
@@ -1446,6 +1493,7 @@ export const useStore = create<AppStore>((set, get, store) => ({
       'albums-admin': '/albums-admin',
       'liked': '/liked',
       'playlists': '/playlists',
+      'albums': '/albums',
       'docs': '/docs',
       'wrld': '/wrld',
       'news': '/news',
@@ -1467,6 +1515,7 @@ export const useStore = create<AppStore>((set, get, store) => ({
     // instead of always resetting to the base /admin.
     const selectedPlaylistId = get().playlistsSelectedId
     const activeAdminTab = get().activeAdminTab
+    const selectedAlbumId = get().albumsSelectedId
     // Views whose identity lives in the URL path itself (/track/<id>,
     // /shared/<id>, /u/<id>) have no fixed entry above - remember the URL
     // they were left at so coming back (closing Settings, collapsing WRLD)
@@ -1475,11 +1524,26 @@ export const useStore = create<AppStore>((set, get, store) => ({
     if (PATH_PARAM_VIEWS.includes(current)) lastPathParamUrl[current] = window.location.pathname
     const path = view === 'playlists' && selectedPlaylistId != null
       ? `/playlists?id=${selectedPlaylistId}`
+      : view === 'albums' && selectedAlbumId != null
+        ? `/albums?id=${selectedAlbumId}`
       : view === 'admin' && activeAdminTab
         ? ADMIN_TAB_PATHS[activeAdminTab] ?? '/admin'
         : paths[view] ?? lastPathParamUrl[view] ?? '/tracker'
     window.history.pushState({ view }, '', path)
     set((s) => ({ activeView: view, previousView: view === s.activeView ? s.previousView : s.activeView }))
+  },
+  navigateHistory: (direction) => {
+    const from = direction === 'back' ? navBack : navForward
+    const to = direction === 'back' ? navForward : navBack
+    const target = from.pop()
+    if (!target) return
+    const current = get().activeView
+    to.push(current)
+    navReplaying = true
+    try {
+      if (target === 'public-profile') get().openPublicProfile(Number(lastPathParamUrl['public-profile']?.match(/\/u\/(\d+)/)?.[1]) || get().account?.id || 0)
+      else get().setActiveView(target)
+    } finally { navReplaying = false }
   },
   setActiveAdminTab: (tab) => {
     set({ activeAdminTab: tab })
@@ -1564,10 +1628,12 @@ export const useStore = create<AppStore>((set, get, store) => ({
     // e.g. navigating there from someone else's page) so the view re-reads
     // the new path.
     const path = `/u/${userId}`
+    if (get().activeView !== 'public-profile') recordNav(get().activeView)
     if (path !== window.location.pathname) window.history.pushState({ view: 'public-profile' }, '', path)
     set((s) => ({ activeView: 'public-profile', previousView: s.activeView === 'public-profile' ? s.previousView : s.activeView }))
   },
   setShowDiagnostics: (showDiagnostics) => set({ showDiagnostics }),
+  setShowRecognition: (showRecognition) => set({ showRecognition }),
   setShowQueue: (showQueue) => set({ showQueue }),
   setShowMoreNav: (showMoreNav) => set({ showMoreNav }),
   setShowEqPanel: (showEqPanel) => set({ showEqPanel }),
@@ -1853,8 +1919,9 @@ export const useStore = create<AppStore>((set, get, store) => ({
         const op = wasLiked ? userApi.removeFavorite(songId) : userApi.addFavorite(songId)
         op.catch(() => {
           const current = get().likedTrackIds
+          // A second click may already have put it back - don't list it twice.
           const reverted = wasLiked
-            ? [...current, trackId]
+            ? (current.includes(trackId) ? current : [...current, trackId])
             : current.filter((id) => id !== trackId)
           set({ likedTrackIds: reverted })
           ls.set('likedTrackIds', reverted)
@@ -2454,6 +2521,14 @@ export const useStore = create<AppStore>((set, get, store) => ({
     if (path !== window.location.pathname + window.location.search) window.history.pushState({}, '', path)
   },
   setPlaylistsSelectedLocalId: (id) => set({ playlistsSelectedLocalId: id }),
+  albumsSelectedId: null,
+  setAlbumsSelectedId: (id) => {
+    set({ albumsSelectedId: id })
+    // /albums?id=<id>, like Playlists, so the address bar can be shared.
+    if (window.location.pathname !== '/albums') return
+    const path = id != null ? `/albums?id=${id}` : '/albums'
+    if (path !== window.location.pathname + window.location.search) window.history.pushState({}, '', path)
+  },
   playlistsOpenFolderId: null,
   setPlaylistsOpenFolderId: (id) => set({ playlistsOpenFolderId: id }),
 
@@ -2607,6 +2682,7 @@ export const useStore = create<AppStore>((set, get, store) => ({
     ls.set('donorPlaylists', [])
     clearDonorPlaybackCache()
     clearDonorImageCache()
+    clearCoverArtImageCache()
     clearDecryptedAttachments()
     clearDonorCoverCache()
     // Overrides stay on this device after signing out, the same way likes do -
@@ -2727,6 +2803,7 @@ export const useStore = create<AppStore>((set, get, store) => ({
   pendingEditProposal: null,
   bulkEdit: null,
   openBulkEditor: (songs) => set({ bulkEdit: songs.length ? { kind: 'api', songs } : null }),
+  openBulkFileEditor: (files, channel) => set({ bulkEdit: files.length ? { kind: 'comp', files, channel } : null }),
   closeBulkEditor: () => set({ bulkEdit: null }),
   lyricsGenModal: null,
   openLyricsGen: (target = {}) => {
@@ -2734,6 +2811,9 @@ export const useStore = create<AppStore>((set, get, store) => ({
     set({ lyricsGenModal: target })
   },
   closeLyricsGen: () => set({ lyricsGenModal: null }),
+  coverArtModal: null,
+  openCoverArtSubmit: (target) => set({ coverArtModal: target ?? { songId: null, songName: '' } }),
+  closeCoverArtSubmit: () => set({ coverArtModal: null }),
   setPendingCompProposal: (pendingCompProposal) => set({ pendingCompProposal }),
   setPendingEditorSongId: (pendingEditorSongId) => set({ pendingEditorSongId }),
   openSongEditor: (songId) => {
@@ -3457,6 +3537,11 @@ export const useStore = create<AppStore>((set, get, store) => ({
   showNotifications: false,
   setShowNotifications: (show) => set(show ? { showNotifications: true, showUploadManager: false } : { showNotifications: false }),
 }))
+
+userApi.onPlaylistGone((id) => {
+  const { playlists } = useStore.getState()
+  if (playlists.some(p => p.id === id)) useStore.setState({ playlists: playlists.filter(p => p.id !== id) })
+})
 
 // Notification-socket tickets wait for a confirmed account, not just a stored token.
 useStore.subscribe((s, prev) => {

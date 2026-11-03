@@ -515,6 +515,14 @@ export default function DownloadAppView(): JSX.Element {
               </button>
             ) : null}
           </div>
+
+          <p className="mt-6 text-center text-sm text-text-muted">
+            Thank you to{' '}
+            <a href="https://ibaila.app" target="_blank" rel="noopener noreferrer" className="text-accent hover:underline">
+              ibaila.app
+            </a>
+            {' '}for some of the designs.
+          </p>
         </div>
 
         {/* ── Why the desktop app ── */}
@@ -625,8 +633,7 @@ export default function DownloadAppView(): JSX.Element {
           </div>
         )}
 
-        {/* ── Footer ── */}
-        <div className="mt-14 pt-6 border-t border-[var(--border)] flex flex-col sm:flex-row items-center justify-between gap-3">
+        <div className="mt-6 pt-6 border-t border-[var(--border)] flex flex-col sm:flex-row items-center justify-between gap-3">
           <p className="text-text-muted text-xs">
             Free & open source · Fan-made project, not affiliated with any label.
           </p>

@@ -1,9 +1,9 @@
 import { useRef, useState } from 'react'
-import { ChevronRight, Play, ListMusic, Gamepad2, Flame, Music2, Disc3, User, Newspaper, Radio, Heart, Search, MoreHorizontal, Album, Music, Wrench, MicVocal } from 'lucide-react'
+import { ChevronRight, Play, ListMusic, Gamepad2, Flame, Music2, Disc3, User, Newspaper, Radio, Heart, Search, MoreHorizontal, Album, Music, Wrench, MicVocal, AudioLines, ImagePlus } from 'lucide-react'
 import { AlbumArtThumbnail } from './AlbumArtThumbnail'
 import { ProgressiveCover } from './ProgressiveCover'
 import { Tile } from './Tile'
-import { useHomeData, type GameCard, type HomePlaylistCard, type HomeAlbumCard } from '../hooks/useHomeData'
+import { useHomeData, HOME_ALBUMS_SHOWN, type GameCard, type HomePlaylistCard, type HomeAlbumCard } from '../hooks/useHomeData'
 import { useElementSize } from '../hooks/useElementSize'
 import { useStore, useStorePick } from '../store/useStore'
 import { useCanEdit } from '../hooks/useChannelRoles'
@@ -169,21 +169,29 @@ function AlbumsTile({ albums, onAll, span }: {
     <Tile title="Albums" icon={<Album size={15} />} action={{ label: 'All', onClick: onAll }} span={span}>
       <CoverGrid cols={cols} bodyRef={bodyRef}>
         {albums.slice(0, count).map((a) => (
-          <button key={a.key} onClick={a.open} className="group text-left min-w-0">
-            <div className="relative aspect-square rounded-lg overflow-hidden bg-surface-raised mb-1.5 flex items-center justify-center">
-              {a.cover ? (
-                <img src={a.cover} alt={a.title} className="w-full h-full object-cover" />
-              ) : (
-                <Music size={20} className="text-text-muted" />
-              )}
-              <span className="absolute inset-0 bg-black/25 opacity-0 group-hover:opacity-100 transition-opacity" />
-              <span className="absolute bottom-1.5 right-1.5 w-8 h-8 rounded-full bg-accent text-black flex items-center justify-center opacity-0 translate-y-1 group-hover:opacity-100 group-hover:translate-y-0 transition-all">
+          <div key={a.key} className="group text-left min-w-0">
+            <div className="relative aspect-square rounded-lg overflow-hidden bg-surface-raised mb-1.5">
+              <button onClick={a.open} aria-label={a.title} className="absolute inset-0 flex items-center justify-center">
+                {a.cover ? (
+                  <img src={a.cover} alt={a.title} className="w-full h-full object-cover" />
+                ) : (
+                  <Music size={20} className="text-text-muted" />
+                )}
+              </button>
+              <span className="pointer-events-none absolute inset-0 bg-black/25 opacity-0 group-hover:opacity-100 transition-opacity" />
+              <button
+                onClick={a.play}
+                aria-label={`Play ${a.title}`}
+                className="absolute bottom-1.5 right-1.5 w-8 h-8 rounded-full bg-accent text-black flex items-center justify-center opacity-0 translate-y-1 group-hover:opacity-100 group-hover:translate-y-0 focus-visible:opacity-100 transition-all"
+              >
                 <Play size={13} className="ml-0.5" fill="currentColor" />
-              </span>
+              </button>
             </div>
-            <p className="text-text-primary text-xs leading-snug truncate group-hover:text-accent transition-colors">{a.title}</p>
-            <p className="text-text-muted text-[11px] truncate mt-0.5">{a.subtitle}</p>
-          </button>
+            <button onClick={a.open} className="block w-full text-left">
+              <p className="text-text-primary text-xs leading-snug truncate group-hover:text-accent transition-colors">{a.title}</p>
+              <p className="text-text-muted text-[11px] truncate mt-0.5">{a.subtitle}</p>
+            </button>
+          </div>
         ))}
       </CoverGrid>
     </Tile>
@@ -386,8 +394,7 @@ export default function HomeViewDesktop(): JSX.Element {
   const showOnThisDay = showSection('onthisday')
   const showNews = showSection('news') && newsItems.length > 0
   const showPlaylists = showSection('playlists')
-  // TEMP: albums hidden on the home page
-  const showAlbums = false && showSection('albums') && albumRow.length > 0
+  const showAlbums = HOME_ALBUMS_SHOWN && showSection('albums') && albumRow.length > 0
   const showRadio = showSection('radio')
   const showLiked = showSection('liked') && likedTrackIds.length > 0
   const showGames = showSection('games')
@@ -399,6 +406,18 @@ export default function HomeViewDesktop(): JSX.Element {
     title: 'Synced lyrics',
     subtitle: "Time a song's lyrics by the line or the word",
     onClick: () => useStore.getState().openLyricsGen(),
+  }, {
+    id: 'identify',
+    icon: <AudioLines size={18} className="text-accent" />,
+    title: 'Identify song',
+    subtitle: 'Name a song from the mic, this device or a file',
+    onClick: () => useStore.getState().setShowRecognition(true),
+  }, {
+    id: 'cover-art',
+    icon: <ImagePlus size={18} className="text-accent" />,
+    title: 'Submit cover art',
+    subtitle: 'Send in better art for any song',
+    onClick: () => useStore.getState().openCoverArtSubmit(),
   }]
   const showTools = showSection('tools')
 
@@ -521,7 +540,7 @@ export default function HomeViewDesktop(): JSX.Element {
                 {showAlbums && (
                   <AlbumsTile
                     albums={albumRow}
-                    onAll={() => setActiveView('wrld')}
+                    onAll={() => setActiveView('albums')}
                     span="shrink-0"
                   />
                 )}

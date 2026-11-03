@@ -67,7 +67,12 @@ export default function ChatViewDesktop(): JSX.Element {
 
   const serverId = active?.kind === 'channel' ? activeServerId : null
   const showThread = !!active && threadRootId !== null
-  const sideOpen = showThread || panel !== null
+  // A panel left open from another room type (Members from a channel, Info
+  // from a DM) has nothing to show here and would leave an empty strip.
+  const panelFits = panel === 'search' || panel === 'pins'
+    || (panel === 'members' && serverId !== null)
+    || (panel === 'info' && active?.kind === 'conversation')
+  const sideOpen = !!active && (showThread || panelFits)
   const sideClassName = compact
     ? 'flex h-full absolute inset-y-0 right-0 z-30 shadow-2xl'
     : 'flex h-full'

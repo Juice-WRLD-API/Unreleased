@@ -25,7 +25,7 @@ export function useMyCompProposals(
   const [loading, setLoading] = useState(false)
   const [filter, setFilter] = useState<CompFilterTab>('all')
   const [withdrawingId, setWithdrawingId] = useState<number | null>(null)
-  const [reviewingId, setReviewingId] = useState<number | null>(null)
+  const [reviewingId, setReviewingId] = useState<ReadonlySet<number>>(new Set())
 
   useStrictModeSafeEffect((isCancelled) => {
     if (!enabled) return
@@ -52,12 +52,12 @@ export function useMyCompProposals(
   // endpoint as the admin Comp queue; the returned row replaces the local one
   // so the status chip flips without a refetch.
   const handleReview = async (p: CompFileProposal, action: 'approve' | 'reject'): Promise<void> => {
-    setReviewingId(p.id)
+    setReviewingId(s => new Set(s).add(p.id))
     try {
       const updated = await adminReviewCompProposal(p.id, { action, channel: activeChannel })
       setCompProposals(prev => prev.map(x => x.id === p.id ? updated : x))
     } catch (e) { console.error('comp review failed:', e); showAppToast(`Couldn't ${action} the proposal`) }
-    finally { setReviewingId(null) }
+    finally { setReviewingId(s => { const n = new Set(s); n.delete(p.id); return n }) }
   }
 
   return { compProposals, loading, filter, setFilter, withdrawingId, handleWithdraw, reviewingId, handleReview }

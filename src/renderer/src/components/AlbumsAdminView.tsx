@@ -1,9 +1,9 @@
 import { useEffect, useState, useRef, useCallback, useMemo } from 'react'
 import {
   Plus, Trash2, Save, Check, X, Search, Loader2, ChevronLeft, ChevronUp, ChevronDown,
-  Music, Shield, AlertCircle, FolderSearch,
+  Music, Shield, AlertCircle, FolderSearch, Play,
 } from 'lucide-react'
-import { apiFetch, buildImageUrl, loadAllSongs, toSiteRelativeImageUrl } from '../lib/juicewrldApi'
+import { apiFetch, buildImageUrl, loadAllSongs, songToTrack, toSiteRelativeImageUrl } from '../lib/juicewrldApi'
 import type { JWApiSong } from '../lib/juicewrldApi'
 import * as albumsApi from '../lib/albumsApi'
 import type { Album, Artist, AlbumSongEntry } from '../lib/albumsApi'
@@ -271,6 +271,19 @@ function AlbumDetail({ album, artists, pathIndex, onBack, onSaved, onDeleted }: 
   const coverUrl = adminCoverUrl(cover.trim(), songs, pathIndex)
   useEffect(() => { setImgError(false) }, [coverUrl])
 
+  // Plays the tracklist as it stands on screen, unsaved edits included. Tracks
+  // whose path no catalogue song has are skipped.
+  const { playTrack, playCollection, currentTrack } = useStorePick('playTrack', 'playCollection', 'currentTrack')
+  const rowTracks = useMemo(() => songs.map(s => {
+    const song = pathIndex.get(s.path)
+    return song ? songToTrack(song) : null
+  }), [songs, pathIndex])
+  const playable = useMemo(() => rowTracks.filter((t): t is NonNullable<typeof t> => t !== null), [rowTracks])
+  const playFrom = (i: number): void => {
+    const track = rowTracks[i]
+    if (track) playTrack(track, playable)
+  }
+
   const moveSong = (i: number, dir: -1 | 1): void => {
     const j = i + dir
     if (j < 0 || j >= songs.length) return
@@ -417,6 +430,19 @@ function AlbumDetail({ album, artists, pathIndex, onBack, onSaved, onDeleted }: 
 
         {/* Track list */}
         <div className="px-6 md:px-8 pb-10">
+          <div className="flex items-center gap-3 px-3 pb-4">
+            <button
+              onClick={() => playCollection(playable)}
+              disabled={playable.length === 0}
+              className="flex items-center gap-1.5 px-4 py-2 rounded-full bg-[var(--accent)] text-white text-sm font-semibold hover:opacity-90 transition-opacity disabled:opacity-40"
+            >
+              <Play size={14} fill="currentColor" /> Play
+            </button>
+            <span className="text-xs text-[var(--text-muted)]">
+              {songs.length} {songs.length === 1 ? 'track' : 'tracks'}
+              {playable.length < songs.length && pathIndex.size > 0 ? ` · ${songs.length - playable.length} not in the catalogue` : ''}
+            </span>
+          </div>
           <div className="flex items-center gap-4 px-3 pb-2 mb-1 border-b border-[var(--border)]">
             <span className="w-6 text-right text-xs font-semibold text-[var(--text-muted)] uppercase tracking-wider">#</span>
             <span className="flex-1 text-xs font-semibold text-[var(--text-muted)] uppercase tracking-wider">Title</span>
@@ -424,20 +450,38 @@ function AlbumDetail({ album, artists, pathIndex, onBack, onSaved, onDeleted }: 
           </div>
 
           <div className="flex flex-col">
-            {songs.map((s, i) => (
+            {songs.map((s, i) => {
+              const track = rowTracks[i]
+              const active = !!track && currentTrack?.id === track.id
+              return (
               <div key={`${s.path}-${i}`} className="group/row flex items-center gap-4 px-3 py-2 rounded-xl hover:bg-[var(--surface-overlay)] transition-colors">
-                <span className="w-6 text-right text-sm text-[var(--text-muted)] tabular-nums shrink-0">{i + 1}</span>
-                <div className="flex-1 min-w-0">
-                  <p className="text-sm text-[var(--text-primary)] truncate">{trackLabel(s.path, pathIndex.get(s.path))}</p>
-                  {!pathIndex.get(s.path) && <p className="text-[10px] text-[var(--text-muted)] truncate font-mono">{s.path}</p>}
-                </div>
+                <button
+                  onClick={() => playFrom(i)}
+                  disabled={!track}
+                  title={track ? 'Play from here' : undefined}
+                  className="flex-1 min-w-0 flex items-center gap-4 text-left disabled:cursor-default"
+                >
+                  <span className="w-6 shrink-0 flex items-center justify-end text-sm tabular-nums">
+                    {active
+                      ? <Play size={12} className="text-[var(--accent)]" fill="currentColor" />
+                      : <>
+                          <span className={`text-[var(--text-muted)] ${track ? 'group-hover/row:hidden' : ''}`}>{i + 1}</span>
+                          {track && <Play size={12} className="text-[var(--text-primary)] hidden group-hover/row:block" fill="currentColor" />}
+                        </>}
+                  </span>
+                  <div className="flex-1 min-w-0">
+                    <p className={`text-sm truncate ${active ? 'text-[var(--accent)] font-semibold' : 'text-[var(--text-primary)]'}`}>{trackLabel(s.path, pathIndex.get(s.path))}</p>
+                    {!pathIndex.get(s.path) && <p className="text-[10px] text-[var(--text-muted)] truncate font-mono">{s.path}</p>}
+                  </div>
+                </button>
                 <div className="flex items-center gap-0.5 shrink-0 opacity-0 group-hover/row:opacity-100 transition-opacity">
                   <button onClick={() => moveSong(i, -1)} disabled={i === 0} className="w-6 h-6 rounded-md text-[var(--text-muted)] hover:text-[var(--text-primary)] flex items-center justify-center disabled:opacity-30"><ChevronUp size={13} /></button>
                   <button onClick={() => moveSong(i, 1)} disabled={i === songs.length - 1} className="w-6 h-6 rounded-md text-[var(--text-muted)] hover:text-[var(--text-primary)] flex items-center justify-center disabled:opacity-30"><ChevronDown size={13} /></button>
                   <button onClick={() => removeSong(i)} className="w-6 h-6 rounded-md text-[var(--text-muted)] hover:text-red-400 hover:bg-red-400/10 flex items-center justify-center"><X size={13} /></button>
                 </div>
               </div>
-            ))}
+              )
+            })}
           </div>
 
           {addingSong ? (

@@ -134,7 +134,10 @@ export default function FilePickerModal({ kind = 'image', songTitle, altTitles =
   const [searchLoading, setSearchLoading] = useState(!!initialQuery)
   const isSearching = debouncedSearch.trim().length > 0
 
+  // A slower listing (a folder or comp clicked away from) mustn't land over a newer one.
+  const navigateId = useRef(0)
   const navigate = useCallback(async (path: string, pushHistory = true, resetSearch = true) => {
+    const id = ++navigateId.current
     if (resetSearch) { setSearch(''); setDebouncedSearch('') }
     // Cached listing, else the channel's file index if search already loaded it.
     const peeked = apiPeek<JWApiBrowseResponse>('/files/browse/', browseParams(path))
@@ -150,13 +153,14 @@ export default function FilePickerModal({ kind = 'image', songTitle, altTitles =
     }
     try {
       const data = await apiFetch<JWApiBrowseResponse>('/files/browse/', browseParams(path))
+      if (id !== navigateId.current) return
       if (pushHistory) setHistory((h) => [...h, currentPath])
       setCurrentPath(path)
       setEntries(parseBrowseEntries(data))
     } catch (err) {
-      if (!cached && resetSearch) setError(errorMessage(err, 'Failed to load'))
+      if (id === navigateId.current && !cached && resetSearch) setError(errorMessage(err, 'Failed to load'))
     } finally {
-      if (resetSearch) setLoading(false)
+      if (id === navigateId.current) setLoading(false)
     }
   }, [currentPath, browseParams, activeChannel])
 
@@ -458,6 +462,8 @@ export default function FilePickerModal({ kind = 'image', songTitle, altTitles =
                             // select is still the full-size one.
                             src={smallCoverUrl(buildStreamUrl(entry.path, activeChannel))}
                             alt=""
+                            loading="lazy"
+                            decoding="async"
                             className="w-full h-full object-cover"
                             onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = 'none' }}
                           />

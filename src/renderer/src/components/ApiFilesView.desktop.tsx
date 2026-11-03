@@ -3,10 +3,10 @@ import { useState, useEffect, useMemo, useRef } from 'react'
 import {
   Folder, Music2, ChevronRight, ArrowLeft, Home, Play, Loader2,
   FolderOpen, HardDrive, LayoutList, LayoutGrid, ImageIcon, Video,
-  Download, ArrowUpDown, ArrowUp, ArrowDown, Link, Check, Info, ListPlus, Heart,
+  Download, ArrowUpDown, ArrowUp, ArrowDown, Link, Check, Info, ListEnd, ListPlus, Heart,
   X, Pencil, PackageOpen, CheckSquare2, Square, Search,
-  Filter, MoreHorizontal, Clipboard, Plus, ListMusic, Replace, Trash2,
-  FileText, FolderInput, CornerLeftUp, RefreshCw, FolderPlus, Upload, Sparkles, FolderSearch,
+  Filter, MoreHorizontal, Clipboard, Plus, ListMusic, Replace, Trash2, Tags,
+  FileText, FolderInput, CornerLeftUp, RefreshCw, FolderPlus, FilePlus, Upload, Sparkles, FolderSearch,
 } from 'lucide-react'
 import { useStore, useStorePick } from '../store/useStore'
 import * as userApi from '../lib/userApi'
@@ -15,6 +15,7 @@ import { useTrackChannel } from '../hooks/useTrackChannel'
 import {
   apiFetch,
   buildStreamUrl,
+  fetchFileText,
   buildCoverArtUrl,
   smallCoverUrl,
   apiFileTrackId,
@@ -106,6 +107,10 @@ function ApiCoverThumb({ path, size = 36 }: { path: string; size?: number }): JS
     <img
       src={buildCoverArtUrl(path, true, activeChannel)}
       alt=""
+      // The listing isn't windowed, so a big folder would otherwise request
+      // every row's cover at once.
+      loading="lazy"
+      decoding="async"
       className="rounded object-cover"
       style={{ width: size, height: size }}
       onError={() => setErrored(true)}
@@ -130,6 +135,8 @@ function ApiImageThumb({ path, size = 36 }: { path: string; size?: number }): JS
       // degraded copy. The lightbox still opens the original.
       src={smallCoverUrl(buildStreamUrl(path, activeChannel))}
       alt=""
+      loading="lazy"
+      decoding="async"
       className="rounded object-cover"
       style={{ width: size, height: size }}
       onError={() => setErrored(true)}
@@ -137,8 +144,8 @@ function ApiImageThumb({ path, size = 36 }: { path: string; size?: number }): JS
   )
 }
 
-export default function ApiFilesView(): JSX.Element {
-  const { playTrack, addToQueue, apiFilesPath, setApiFilesPath, apiFilesLastPath, setApiFilesLastPath, account, setActiveView, setPendingCompProposal, likedTrackIds, toggleLike, playlists, refreshPlaylists, setShowUserAuth, channels, activeChannel, setActiveChannel, loadChannels } = useStorePick('playTrack', 'addToQueue', 'apiFilesPath', 'setApiFilesPath', 'apiFilesLastPath', 'setApiFilesLastPath', 'account', 'setActiveView', 'setPendingCompProposal', 'likedTrackIds', 'toggleLike', 'playlists', 'refreshPlaylists', 'setShowUserAuth', 'channels', 'activeChannel', 'setActiveChannel', 'loadChannels')
+export default function ApiFilesView({ embedded = false }: { embedded?: boolean }): JSX.Element {
+  const { playTrack, playNext, addToQueue, apiFilesPath, setApiFilesPath, apiFilesLastPath, setApiFilesLastPath, account, setActiveView, setPendingCompProposal, likedTrackIds, toggleLike, playlists, refreshPlaylists, setShowUserAuth, channels, activeChannel, setActiveChannel, loadChannels, openBulkFileEditor } = useStorePick('playTrack', 'playNext', 'addToQueue', 'apiFilesPath', 'setApiFilesPath', 'apiFilesLastPath', 'setApiFilesLastPath', 'account', 'setActiveView', 'setPendingCompProposal', 'likedTrackIds', 'toggleLike', 'playlists', 'refreshPlaylists', 'setShowUserAuth', 'channels', 'activeChannel', 'setActiveChannel', 'loadChannels', 'openBulkFileEditor')
   const isPrimary = isPrimaryChannelSlug(channels, activeChannel)
   const { trackChannel, channelsReady, resolveTrackChannel } = useTrackChannel()
   // Bails rather than guessing: writing an id built from an unknown channel is
@@ -172,7 +179,7 @@ export default function ApiFilesView(): JSX.Element {
     searchLoading, isSearching, searchInFolder, setSearchInFolder,
   } = useApiFilesBrowse({
     activeChannel, setActiveChannel, channels, loadChannels,
-    apiFilesPath, setApiFilesPath, apiFilesLastPath, setApiFilesLastPath,
+    apiFilesPath, setApiFilesPath, apiFilesLastPath, setApiFilesLastPath, embedded,
   })
   const [jumpOpen, setJumpOpen] = useState(false)
   // Resting the mouse on a folder for a moment fetches its listing ahead of
@@ -209,7 +216,6 @@ export default function ApiFilesView(): JSX.Element {
   // null = looked up, no match.
   const { trackerMatches, resolveTrackerMatch } = useTrackerMatches()
   const { playlistDoneId, addToPlaylist, resetPlaylistDone } = useAddFileToPlaylist()
-  const { playing, handlePlay } = usePlayFileEntry(entries, playTrack)
   const { lightboxItems, lightboxIndex, setLightboxIndex, openLightbox } = useFileLightbox({ entries, searchResults, isSearching, activeChannel })
 
   // Closing/reopening the menu clears the "added" tick so it never shows
@@ -252,10 +258,11 @@ export default function ApiFilesView(): JSX.Element {
   }
 
   const openSongInfo = async (entry: JWApiFileEntry): Promise<void> => {
-    const match = await findSongByFilename(entry.name)
+    // The menu only offers this once the match is resolved; same lookup.
+    const id = trackerMatches.get(entry.path) ?? (await findSongByFilename(entry.name))?.id
     // Global infoSongId (not local state) so the info panel survives
     // switching to another tab, which unmounts this view.
-    if (match) useStore.getState().setInfoSongId(match.id)
+    if (id != null) useStore.getState().setInfoSongId(id)
   }
 
   const openContextMenu = (entry: JWApiFileEntry, x: number, y: number): void => {
@@ -301,13 +308,10 @@ export default function ApiFilesView(): JSX.Element {
       name: entry.name,
       onDownload: () => handleDownload(entry),
       load: async () => {
-        const res = await fetch(buildStreamUrl(entry.path, activeChannel))
-        if (!res.ok) throw new Error(`Couldn't load this file (HTTP ${res.status})`)
-        const buf = await res.arrayBuffer()
-        const truncated = buf.byteLength > TEXT_VIEW_MAX
-        const bytes = new Uint8Array(truncated ? buf.slice(0, TEXT_VIEW_MAX) : buf)
-        if (bytes.subarray(0, 8000).includes(0)) throw new Error('This looks like a binary file')
-        return { text: new TextDecoder('utf-8').decode(bytes), truncated }
+        const file = await fetchFileText(entry.path, activeChannel, TEXT_VIEW_MAX)
+        if (!file.ok) throw new Error(`Couldn't load this file (HTTP ${file.status})`)
+        if (file.binary) throw new Error('This looks like a binary file')
+        return { text: file.text, truncated: file.truncated }
       },
     })
   }
@@ -332,6 +336,9 @@ export default function ApiFilesView(): JSX.Element {
     () => sortEntries(isSearching ? searchResults : entries, sortBy, sortDir),
     [isSearching, searchResults, entries, sortBy, sortDir]
   )
+
+  // The queue follows the order on screen, not the server's alphabetical one.
+  const { playing, handlePlay } = usePlayFileEntry(sortedEntries, playTrack)
 
   // Type filter - folders stay visible regardless of filter so navigation
   // still works; only files are matched against the selected media type.
@@ -369,6 +376,11 @@ export default function ApiFilesView(): JSX.Element {
     setCtxMenu(null)
   }
   const toggleSelect = (path: string): void => toggle(path, path)
+  // The selected audio files, for Edit tags.
+  const selectedAudioFiles = (): { path: string; name: string }[] =>
+    filteredEntries
+      .filter((e) => selectedPaths.has(e.path) && e.type === 'file' && getMediaType(e.name) === 'audio')
+      .map((e) => ({ path: e.path, name: e.name }))
   // Mouse press-and-hold - the desktop equivalent of the touch long-press
   // above, as a second way into select mode alongside Ctrl/Cmd+click.
   const mouseLongPress = useLongPress()
@@ -583,11 +595,13 @@ export default function ApiFilesView(): JSX.Element {
     <>
       <div className="flex-1 flex flex-col min-h-0 overflow-hidden">
         {/* Header */}
-        <div className="px-5 pb-3 shrink-0 pt-5">
+        <div className={`px-5 pb-3 shrink-0 ${embedded ? 'pt-0' : 'pt-5'}`}>
           <div className="flex items-center flex-wrap gap-x-4 gap-y-2 mb-3">
             <div className="flex items-center gap-2.5 min-w-0">
-              <HardDrive size={18} className="text-text-muted shrink-0" />
-              <h1 className="text-text-primary text-xl font-bold shrink-0">API Files</h1>
+              {!embedded && <>
+                <HardDrive size={18} className="text-text-muted shrink-0" />
+                <h1 className="text-text-primary text-xl font-bold shrink-0">API Files</h1>
+              </>}
               {channelDescription && (
                 <p className="text-text-muted text-sm truncate max-w-xl">{channelDescription}</p>
               )}
@@ -996,7 +1010,7 @@ export default function ApiFilesView(): JSX.Element {
                         <Folder size={40} className={`transition-colors ${isSelected ? 'text-accent' : 'text-text-secondary group-hover:text-accent'}`} />
                       ) : mt === 'audio' ? (
                         <>
-                          <ProgressiveCover src={buildCoverArtUrl(entry.path, false, activeChannel)} className="w-full h-full object-cover"
+                          <ProgressiveCover lazy src={buildCoverArtUrl(entry.path, false, activeChannel)} className="w-full h-full object-cover"
                             onError={(e) => { (e.target as HTMLImageElement).style.display = 'none' }} />
                           {!selectMode && (
                             <div className="absolute inset-0 flex items-center justify-center bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none">
@@ -1008,7 +1022,7 @@ export default function ApiFilesView(): JSX.Element {
                         </>
                       ) : mt === 'image' ? (
                         <>
-                          <ProgressiveCover src={buildStreamUrl(entry.path, activeChannel)} alt={entry.name} className="w-full h-full object-cover"
+                          <ProgressiveCover lazy src={buildStreamUrl(entry.path, activeChannel)} alt={entry.name} className="w-full h-full object-cover"
                             onError={(e) => { (e.target as HTMLImageElement).style.display = 'none' }} />
                           {!selectMode && (
                             <div className="absolute inset-0 bg-black/30 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
@@ -1108,6 +1122,17 @@ export default function ApiFilesView(): JSX.Element {
             >
               Clear
             </button>
+            {/* Tag edits go up as one batch of retag proposals; only audio
+                files carry tags, so folders and the rest are left out. */}
+            {canPropose && (
+              <button
+                onClick={() => openBulkFileEditor(selectedAudioFiles(), activeChannel)}
+                disabled={selectedAudioFiles().length === 0}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium border border-[var(--border)] text-text-secondary hover:text-text-primary hover:border-accent/40 disabled:opacity-50 transition-colors"
+              >
+                <Tags size={13} /> Edit tags
+              </button>
+            )}
             {/* Deletion only: a replace swaps one file's body for another,
                 which has no meaning across a selection. Directories are
                 dropped - proposals target files. */}
@@ -1252,6 +1277,11 @@ export default function ApiFilesView(): JSX.Element {
             items={[
               isAudio && { icon: Play, label: 'Play', onSelect: () => handlePlay(entry) },
               isAudio && {
+                icon: ListEnd,
+                label: 'Play next',
+                onSelect: async () => { playNext(fileToTrack(entry, (await resolveTrackChannel()) ?? activeChannel)) },
+              },
+              isAudio && {
                 icon: ListPlus,
                 label: 'Add to queue',
                 onSelect: async () => { addToQueue(fileToTrack(entry, (await resolveTrackChannel()) ?? activeChannel)) },
@@ -1313,6 +1343,15 @@ export default function ApiFilesView(): JSX.Element {
               // Contributor actions - proposals target a file, so directories
               // are excluded. Both land on the contributor page prefilled.
               canPropose && !isDir && 'divider',
+              // On a selected row this edits the whole selection's audio.
+              canPropose && isAudio && {
+                icon: Tags,
+                label: selectedPaths.has(entry.path) && selectedPaths.size > 1 ? 'Edit tags of selection…' : 'Edit tags…',
+                onSelect: () => {
+                  const files = selectedPaths.has(entry.path) ? selectedAudioFiles() : [{ path: entry.path, name: entry.name }]
+                  openBulkFileEditor(files, activeChannel)
+                },
+              },
               canPropose && !isDir && {
                 icon: Replace,
                 label: 'Propose replacement',
@@ -1350,19 +1389,26 @@ export default function ApiFilesView(): JSX.Element {
           items={[
             { icon: RefreshCw, label: 'Refresh', onSelect: () => navigate(currentPath, false) },
             canPropose && 'divider',
-            canPropose && { icon: Upload, label: 'Upload files', onSelect: () => openUploadPicker(currentPath, 'files') },
-            canPropose && { icon: FolderInput, label: 'Upload folder', onSelect: () => openUploadPicker(currentPath, 'folder') },
-            // The Contributor page is still where an upload gets notes or a
-            // rename before it's proposed.
             canPropose && {
-              icon: FileText,
-              label: 'Upload with notes…',
-              onSelect: () => {
-                setPendingCompProposal({ paths: [currentPath], changeType: 'upload' })
-                setActiveView('contributor')
-              },
+              icon: FilePlus,
+              label: 'New',
+              children: [
+                { icon: FolderPlus, label: 'Folder', onSelect: () => setNewFolderPrompt('') },
+                'divider' as const,
+                { icon: Upload, label: 'Upload files', onSelect: () => openUploadPicker(currentPath, 'files') },
+                { icon: FolderInput, label: 'Upload folder', onSelect: () => openUploadPicker(currentPath, 'folder') },
+                // The Contributor page is still where an upload gets notes or a
+                // rename before it's proposed.
+                {
+                  icon: FileText,
+                  label: 'Upload with notes…',
+                  onSelect: () => {
+                    setPendingCompProposal({ paths: [currentPath], changeType: 'upload' })
+                    setActiveView('contributor')
+                  },
+                },
+              ],
             },
-            canPropose && { icon: FolderPlus, label: 'New folder', onSelect: () => setNewFolderPrompt('') },
           ]}
         />
       )}

@@ -89,8 +89,7 @@ export function ModeTile({ mode, status, size = 36 }: { mode: LyricsGenMode; sta
   )
 }
 
-/** What a job's text downloads as by default, and every format it has. */
-export const defaultOutput = (mode: LyricsGenMode): LyricsOutput => (mode === 'plain' ? 'txt' : mode === 'synced' ? 'lrc' : 'enhanced_lrc')
+/** Every format a job's text downloads as, the usual one first. */
 export const outputsFor = (mode: LyricsGenMode): LyricsOutput[] => (mode === 'plain' ? ['txt'] : mode === 'synced' ? ['lrc', 'txt'] : ['enhanced_lrc', 'lrc', 'txt'])
 export const OUTPUT_LABEL: Record<LyricsOutput, string> = { txt: 'Text (.txt)', lrc: 'Line LRC (.lrc)', enhanced_lrc: 'Word LRC (.words.lrc)' }
 

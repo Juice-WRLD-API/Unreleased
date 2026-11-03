@@ -12,13 +12,15 @@ const DonorFiles = lazyView(() => import('./DonorFiles'))
 // Donors get a second location beside the comp channels: their own cloud
 // storage. It's a separate store with its own routes, so it swaps in as its
 // own page rather than being threaded through the channel file browser.
-export default function ApiFilesView(): JSX.Element {
+// `embedded`: shown as the Tracker's Files tab, under the Tracker's own
+// title, so the channel browser drops its page title.
+export default function ApiFilesView({ embedded = false }: { embedded?: boolean }): JSX.Element {
   const isMobile = useIsMobile()
   const isDonor = useStore((s) => !!s.account?.is_donor)
   const [mine, setMine] = useState(false)
   const contentRef = useRef<HTMLDivElement>(null)
   useContentMotion(contentRef, mine ? 'mine' : 'channels')
-  const browser = <ChannelBrowser />
+  const browser = <ChannelBrowser embedded={embedded} />
   if (!isDonor) return browser
 
   return (

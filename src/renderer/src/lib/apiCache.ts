@@ -7,6 +7,7 @@
 
 const PREFIX = 'unreleased:apicache:'
 const MAX_ENTRIES = 300
+const EVICT_SLACK = 20
 // localStorage's ~10MB origin quota is counted in UTF-16 code units, so a
 // single value bigger than this can never realistically be stored alongside
 // the rest of the cache. Notably the bulk catalog (/songs/?all=true) is
@@ -31,15 +32,20 @@ function cacheKeys(): string[] {
   return keys
 }
 
+// cacheSet writes `{"data":…,"ts":N}`, so the timestamp is at the end and can
+// be read without parsing an entry that may run to megabytes.
+function entryTs(raw: string | null): number {
+  const m = raw ? /"ts":(\d+)\}$/.exec(raw) : null
+  if (m) return Number(m[1])
+  try {
+    return (JSON.parse(raw as string) as CacheEntry<unknown>).ts || 0
+  } catch {
+    return 0
+  }
+}
+
 function evictOldest(count: number): void {
-  const entries = cacheKeys().map((k) => {
-    try {
-      const { ts } = JSON.parse(localStorage.getItem(k) as string) as CacheEntry<unknown>
-      return { k, ts }
-    } catch {
-      return { k, ts: 0 }
-    }
-  })
+  const entries = cacheKeys().map((k) => ({ k, ts: entryTs(localStorage.getItem(k)) }))
   entries.sort((a, b) => a.ts - b.ts)
   for (const { k } of entries.slice(0, count)) localStorage.removeItem(k)
 }
@@ -76,8 +82,10 @@ export function cacheSet<T>(key: string, data: T): void {
     evictOldest(Math.max(20, Math.floor(cacheKeys().length / 3)))
     try { localStorage.setItem(PREFIX + key, raw) } catch {}
   }
+  // Trim a little below the cap, so a burst of new keys (a page of song
+  // lookups) doesn't run a full sweep on every write.
   const keys = cacheKeys()
-  if (keys.length > MAX_ENTRIES) evictOldest(keys.length - MAX_ENTRIES)
+  if (keys.length > MAX_ENTRIES) evictOldest(keys.length - MAX_ENTRIES + EVICT_SLACK)
 }
 
 export function cacheDelete(key: string): void {

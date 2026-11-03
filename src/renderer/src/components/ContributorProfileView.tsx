@@ -159,7 +159,7 @@ export default function ContributorProfileView(): JSX.Element {
           {/* Stats */}
           <Tile title="Stats" icon={<Trophy size={13} />} span="col-span-2 sm:col-span-2">
             <div className="flex-1 flex flex-col justify-center gap-1.5">
-              <p className="text-[10px] font-bold uppercase tracking-widest text-text-muted">
+              <p className="text-footnote font-semibold text-text-secondary md:text-[10px] md:font-bold md:uppercase md:tracking-widest md:text-text-muted">
                 {approvedCount} approved
               </p>
             </div>

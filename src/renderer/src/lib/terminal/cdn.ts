@@ -4,7 +4,7 @@ import {
   DEFAULT_TRUST_SCORE, deleteCdnNode, fetchCdnNodes, fetchCdnStats, fetchNodeEvents, updateCdnNode, wasAutoDisabled,
   type CdnAdminNode, type CdnNodeEventType,
 } from '../cdnAdminApi'
-import { fail, parseArgs, profileLink, type TermCommand, type TermCtx } from './types'
+import { confirmAction, fail, parseArgs, profileLink, type TermCommand, type TermCtx } from './types'
 
 // The Admin page's CDN nodes tab (lib/cdnAdminApi.ts on the site): the roster
 // of volunteer nodes, approvals and CDN-wide stats under /cdn/admin/. Nodes
@@ -60,7 +60,7 @@ function describeNode(n: CdnNode, latest?: number): string {
   ].join('\n')
 }
 
-async function act(action: Action, n: CdnNode, ctx: TermCtx): Promise<void> {
+async function act(action: Action, n: CdnNode, ctx: TermCtx, yes: boolean): Promise<void> {
   const name = n.name || n.node_id
   switch (action) {
     case 'approve':
@@ -84,7 +84,7 @@ async function act(action: Action, n: CdnNode, ctx: TermCtx): Promise<void> {
       // The site's "Restore node": back on and approved, trust and violations reset.
       await updateCdnNode(n.node_id, { is_approved: true, is_active: true, trust_score: DEFAULT_TRUST_SCORE, hash_violations: 0 }); break
     case 'delete':
-      if (!window.confirm(`Permanently delete ${name}? Its file list, history and API key go with it.`)) { ctx.print('cancelled', 'dim'); return }
+      if (!confirmAction(ctx, `Permanently delete ${name}? Its file list, history and API key go with it.`, yes)) return
       await deleteCdnNode(n.node_id)
       ctx.print(`deleted ${name}`, 'ok')
       return
@@ -96,7 +96,7 @@ export const CDN_COMMANDS: TermCommand[] = [
   {
     name: 'cdn', group: 'Admin',
     covers: ['cdnAdminApi.fetchNodeEvents'],
-    usage: 'cdn events <node> [--page N] [--type registered,violation]  ·  cdn [<node>]  ·  cdn approve|revoke|enable|disable|reset|restore|delete <node>',
+    usage: 'cdn events <node> [--page N] [--type registered,violation]  ·  cdn [<node>]  ·  cdn approve|revoke|enable|disable|reset|restore|delete <node> [-y]',
     description: 'The CDN node roster and stats; one node in full; or approve, revoke, enable, disable, reset trust, restore or delete a node (a node is its id, the start of it, or its name)',
     complete: (before, partial) => (before.length === 0 ? ['events', ...ACTIONS].filter((s) => s.startsWith(partial.toLowerCase())) : []),
     run: async (args, ctx) => {
@@ -118,12 +118,12 @@ export const CDN_COMMANDS: TermCommand[] = [
         ].join('\n'))
         return
       }
-      const words = args.trim().split(/\s+/).filter(Boolean)
+      const words = args.trim().split(/\s+/).filter((w) => w && w.toLowerCase() !== '-y')
       const first = words[0]?.toLowerCase()
       if (first && (ACTIONS as readonly string[]).includes(first)) {
         words.shift()
         const nodes = await fetchCdnNodes()
-        await act(first as Action, pick(nodes, words.join(' ')), ctx)
+        await act(first as Action, pick(nodes, words.join(' ')), ctx, parsed.bool.has('y'))
         return
       }
       const [stats, nodes] = await Promise.all([fetchCdnStats(), fetchCdnNodes()])

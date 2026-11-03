@@ -293,6 +293,8 @@ export function createLyricsJob(
   body.append('file', file)
   for (const [k, v] of Object.entries(requestFields(req))) body.append(k, v)
   return new Promise((resolve, reject) => {
+    // A listener added to an already-aborted signal never fires.
+    if (signal?.aborted) { reject(new DOMException('Aborted', 'AbortError')); return }
     const xhr = new XMLHttpRequest()
     xhr.open('POST', `${BASE}/jobs/`)
     for (const [k, v] of Object.entries(authHeaders(getToken()))) xhr.setRequestHeader(k, v)

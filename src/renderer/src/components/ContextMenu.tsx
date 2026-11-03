@@ -24,7 +24,8 @@ import { Sheet, SheetItem, SheetDivider } from './mobile/Sheet'
 export interface ContextMenuItem {
   label: string
   icon?: ElementType
-  /** Runs after the menu closes (unless `keepOpen`). Omit when `children`/`panel` is set. */
+  /** Runs after the menu closes (unless `keepOpen`). With `children`/`panel` it
+   *  runs when the row is clicked while its flyout is already open (desktop). */
   onSelect?: () => void
   danger?: boolean
   disabled?: boolean
@@ -452,7 +453,9 @@ function ItemList({ entries, containerRef, depth, cfg, onLeave, focusFirst }: {
               column={column}
               open={openSub === i}
               refCb={(el) => { rowRefs.current[i] = el }}
-              onClick={() => (hasNext(it) ? (setViaKey(false), setOpenSub(v => (v === i ? null : i))) : cfg.select(it))}
+              onClick={() => (hasNext(it)
+                ? (it.onSelect && openSub === i ? cfg.select(it) : (setViaKey(false), setOpenSub(v => (v === i ? null : i))))
+                : cfg.select(it))}
             />
           ))}
       </div>

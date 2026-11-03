@@ -3,9 +3,6 @@ export default {
   content: ['./src/renderer/src/**/*.{js,ts,jsx,tsx}', './src/renderer/index.html'],
   darkMode: 'class',
   theme: {
-    // This bundle is the iOS app: keep the mobile shell on tablets and
-    // in landscape too. Small responsive grids may still use `sm:`.
-    screens: { sm: '640px', md: '100000px', lg: '100001px', xl: '100002px', '2xl': '100003px' },
     extend: {
       colors: {
         surface: {
@@ -27,10 +24,24 @@ export default {
         }
       },
       fontFamily: {
-        // Resolves to the user's chosen app font (lib/fonts.ts), written onto
-        // <html> by useThemeEffects. index.css seeds the same system stack as
-        // the :root default, so first paint matches the old hardcoded value.
-        sans: 'var(--font-app)'
+        sans: ['-apple-system', 'BlinkMacSystemFont', 'Segoe UI', 'sans-serif']
+      },
+      // iOS text styles for the mobile layouts (SF Pro's own tracking per
+      // size). In rem so the App text size setting scales them, which the
+      // arbitrary text-[Npx] sizes they replace never did. A font-* class
+      // still overrides the weight: Tailwind emits font weights after sizes.
+      fontSize: {
+        'large-title': ['2.125rem', { lineHeight: '2.5625rem', letterSpacing: '0.012em', fontWeight: '700' }],
+        title1: ['1.75rem', { lineHeight: '2.125rem', letterSpacing: '0.013em', fontWeight: '700' }],
+        title2: ['1.375rem', { lineHeight: '1.75rem', letterSpacing: '-0.012em', fontWeight: '700' }],
+        title3: ['1.25rem', { lineHeight: '1.5625rem', letterSpacing: '-0.022em', fontWeight: '600' }],
+        headline: ['1.0625rem', { lineHeight: '1.375rem', letterSpacing: '-0.025em', fontWeight: '600' }],
+        body: ['1.0625rem', { lineHeight: '1.375rem', letterSpacing: '-0.025em' }],
+        callout: ['1rem', { lineHeight: '1.3125rem', letterSpacing: '-0.02em' }],
+        subhead: ['0.9375rem', { lineHeight: '1.25rem', letterSpacing: '-0.015em' }],
+        footnote: ['0.8125rem', { lineHeight: '1.125rem', letterSpacing: '-0.006em' }],
+        caption1: ['0.75rem', { lineHeight: '1rem', letterSpacing: '0' }],
+        caption2: ['0.6875rem', { lineHeight: '0.8125rem', letterSpacing: '0.006em' }],
       }
     }
   },

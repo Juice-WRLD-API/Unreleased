@@ -254,11 +254,24 @@ export class EdgeLight {
     this.feed = feed
     this.renderer = new EdgeRenderer(canvas)
     canvas.addEventListener('webglcontextlost', this.onLost)
+    canvas.addEventListener('webglcontextrestored', this.onRestored)
   }
 
   onLost = (event: Event): void => {
     event.preventDefault()
     this.stopLoop()
+  }
+
+  /** The context back (a GPU reset, the PC waking): every program and texture went with the old one, so build them again. */
+  onRestored = (): void => {
+    if (this.disposed) return
+    try {
+      this.renderer = new EdgeRenderer(this.canvas)
+    } catch (e) {
+      console.warn('[light] could not rebuild after the context came back', e)
+      return
+    }
+    this.wake()
   }
 
   get now(): number { return (performance.now() - this.t0) / 1000 }
@@ -320,6 +333,7 @@ export class EdgeLight {
     this.disposed = true
     this.stopLoop()
     this.canvas.removeEventListener('webglcontextlost', this.onLost)
+    this.canvas.removeEventListener('webglcontextrestored', this.onRestored)
     this.renderer.dispose()
   }
 }

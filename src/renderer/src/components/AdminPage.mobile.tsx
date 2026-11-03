@@ -8,7 +8,7 @@ import {
 } from 'lucide-react'
 import { useStore, useStorePick } from '../store/useStore'
 import { displayName } from '../store/chatStore'
-import { discordHandle } from '../lib/format'
+import { discordHandle, errorMessage } from '../lib/format'
 import * as userApi from '../lib/userApi'
 import type { EditorApplication, SongEditProposal, AdminUser, ProposalStatus } from '../lib/userApi'
 import { apiFetch, songToTrack } from '../lib/juicewrldApi'
@@ -20,13 +20,16 @@ import {
 import ReportsTab from './ReportsTab.mobile'
 import FeedbackTab from './FeedbackTab'
 import CompProposalsTab from './CompProposalsTab.mobile'
+import CoverArtTab from './CoverArtTab'
 import ChannelsTab from './ChannelsTab.mobile'
+import NewsChannelsTab from './NewsChannelsTab'
 import EraTab from './EraTab.mobile'
 import CdnNodesTab from './CdnNodesTab.mobile'
 import LogsTab from './LogsTab'
 import LyricsGenAdminTab from './LyricsGenAdminTab'
 import { useBackToClose } from '../hooks/useBackToClose'
 import { useStaffRoles } from '../hooks/useStaffRoles'
+import { useCanManage } from '../hooks/useChannelRoles'
 import { useAdminQueue, type AdminTab } from '../hooks/useAdminQueue'
 import { useOtpGate } from '../hooks/useOtpGate'
 import { useVisitedTabs } from '../hooks/useVisitedTabs'
@@ -39,6 +42,7 @@ import RoleBadges from './RoleBadges'
 import { showAppToast } from '../lib/appToast'
 import ThemedSelect from './ThemedSelect'
 import ThemedCheckbox from './ThemedCheckbox'
+import { BackButton, BarButton } from './mobile/NavBar'
 import { useContentMotion } from '../hooks/useContentMotion'
 
 type Tab = AdminTab
@@ -75,6 +79,8 @@ export default function AdminPage({ embedded = false, initialTab, onExit }: {
   // channel, not "any channel" - see useChannelRoles.
   const { isAdmin, isManager, canReviewStaff } = useStaffRoles(account, activeChannel, channels)
   const managerOnly  = isManager && !isAdmin
+  // Cover art isn't per channel: the server asks for a primary-channel manager.
+  const canReviewCoverArt = useCanManage()
   const otpEnabled = !!account?.otp_enabled
 
   const {
@@ -89,6 +95,7 @@ export default function AdminPage({ embedded = false, initialTab, onExit }: {
     feedbackFilter, setFeedbackFilter,
     feedback,
     refresh,
+    refreshCoverArtCount,
     nav,
   } = useAdminQueue({
     canLoad: isAdmin,
@@ -100,8 +107,10 @@ export default function AdminPage({ embedded = false, initialTab, onExit }: {
     // page refresh) - managerOnly flips from false to true once it lands,
     // and the tab set at mount time (still 'proposals') would otherwise
     // strand a manager on a tab their nav bar no longer offers a button for.
+    // Cover art stays when it's in that nav (see useAdminQueue).
     forceTab: { when: managerOnly, tab: 'comp-proposals' },
-    managerNavIds: ['comp-proposals'],
+    managerNavIds: ['cover-art', 'comp-proposals'],
+    canReviewCoverArt,
   })
 
   // No more overview grid - every section already has its own deep link
@@ -128,9 +137,9 @@ export default function AdminPage({ embedded = false, initialTab, onExit }: {
 
   if (!canReviewStaff) return (
     <div className="flex-1 flex flex-col items-center justify-center gap-3 text-center">
-      <Shield size={28} className="text-text-muted" />
-      <p className="text-text-primary font-semibold text-sm">Admins only</p>
-      <button onClick={() => setActiveView('api-tracker')} className="text-xs text-accent active:underline">Go back</button>
+      <Shield size={32} strokeWidth={1.75} className="text-text-muted" />
+      <p className="text-headline text-text-primary">Admins only</p>
+      <button onClick={() => setActiveView('api-tracker')} className="text-body text-accent active:opacity-60">Go back</button>
     </div>
   )
 
@@ -145,45 +154,40 @@ export default function AdminPage({ embedded = false, initialTab, onExit }: {
   return (
     <div className="flex-1 flex flex-col h-full overflow-hidden">
       {/* Header */}
+      {/* iOS nav bar: back on the left, the section's name centered, refresh
+          on the right (an empty slot keeps the title centered without it). */}
       <div className={`shrink-0 ${embedded ? 'px-3 pt-1' : 'px-2 pt-1'}`}>
-        <div className="flex items-center gap-1">
+        <div className="flex items-center gap-2">
           {embedded && onExit ? (
-            <button onClick={onExit} title="Back"
-              className="w-10 h-10 shrink-0 flex items-center justify-center rounded-full text-text-primary active:bg-surface-overlay transition-colors">
-              <ChevronLeft size={20} />
-            </button>
+            <BackButton onClick={onExit} />
           ) : !embedded ? (
-            <button onClick={() => setActiveView('api-tracker')}
-              className="w-11 h-11 shrink-0 flex items-center justify-center rounded-full text-text-primary active:bg-surface-overlay transition-colors">
-              <ChevronLeft size={20} />
-            </button>
-          ) : null}
-          <div className="flex-1 min-w-0 pl-1.5">
-            <h1 className="text-text-primary text-[17px] font-bold leading-tight truncate">{activeNavItem?.label ?? (managerOnly ? 'Manager' : 'Admin')}</h1>
-            {!embedded && account?.discord_username && <p className="text-text-muted text-xs truncate">{account.discord_username}</p>}
+            <BackButton onClick={() => setActiveView('api-tracker')} />
+          ) : <span className="w-11 shrink-0" />}
+          <div className="flex-1 min-w-0 text-center">
+            <h1 className="text-headline text-text-primary truncate">{activeNavItem?.label ?? (managerOnly ? 'Manager' : 'Admin')}</h1>
+            {!embedded && account?.discord_username && <p className="text-caption1 text-text-secondary truncate">{account.discord_username}</p>}
           </div>
           {/* A tab's data loads once per visit (see the sig comment in
               useAdminQueue) rather than refetching every time it's reselected -
               this is the explicit way back to fresh data instead. */}
-          {tab !== 'comp-proposals' && tab !== 'channels' && tab !== 'eras' && tab !== 'cdn-nodes' && tab !== 'lyrics' && tab !== 'logs' && (
-            <button onClick={() => refresh()} disabled={loading} title="Refresh"
-              className="w-11 h-11 shrink-0 flex items-center justify-center rounded-full text-accent active:bg-surface-overlay transition-colors disabled:opacity-40">
-              <RefreshCw size={14} className={loading ? 'animate-spin' : ''} />
-            </button>
-          )}
+          {tab !== 'cover-art' && tab !== 'comp-proposals' && tab !== 'channels' && tab !== 'news-channels' && tab !== 'eras' && tab !== 'cdn-nodes' && tab !== 'lyrics' && tab !== 'logs' ? (
+            <BarButton label="Refresh" onClick={() => { if (!loading) refresh() }}>
+              <RefreshCw size={18} className={loading ? 'animate-spin opacity-60' : ''} />
+            </BarButton>
+          ) : <span className="w-11 shrink-0" />}
         </div>
       </div>
 
       {nav.length > 1 && (
-        <div className="shrink-0 flex items-center gap-1 overflow-x-auto px-2 pb-1.5 scrollbar-none">
+        <div className="shrink-0 flex items-center gap-2 overflow-x-auto px-4 pt-2 pb-2.5 scrollbar-none">
           {nav.map(item => (
             <button key={item.id} onClick={() => switchTab(item.id)}
-              className={`shrink-0 flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold transition-colors ${
-                tab === item.id ? 'bg-accent/15 text-accent' : 'text-text-muted active:bg-surface-overlay'
+              className={`shrink-0 flex items-center gap-1.5 h-8 px-3.5 rounded-full text-subhead font-medium transition-colors ${
+                tab === item.id ? 'bg-text-primary text-surface' : 'bg-[var(--fill)] text-text-primary active:bg-[var(--fill-strong)]'
               }`}>
               {item.label}
               {!!item.badge && (
-                <span className="text-[9px] font-bold px-1 min-w-[14px] text-center rounded-full bg-accent/20 text-accent">{item.badge}</span>
+                <span className="text-caption2 font-bold px-1.5 min-w-[18px] h-[18px] flex items-center justify-center rounded-full bg-accent text-white tabular-nums">{item.badge}</span>
               )}
             </button>
           ))}
@@ -191,7 +195,7 @@ export default function AdminPage({ embedded = false, initialTab, onExit }: {
       )}
 
       {error && (
-        <div className="mx-3 mb-2 flex items-start gap-2 px-3 py-2.5 rounded-xl bg-red-500/10 border border-red-500/20 text-red-400 text-xs shrink-0">
+        <div className="mx-4 mb-2 flex items-start gap-2 px-3 py-2.5 rounded-xl bg-red-500/10 text-red-500 text-footnote shrink-0">
           <AlertCircle size={13} className="shrink-0 mt-0.5" /> {error}
         </div>
       )}
@@ -210,7 +214,22 @@ export default function AdminPage({ embedded = false, initialTab, onExit }: {
         )}
         {visited.has('proposals') && (
           <div className={tab === 'proposals' ? 'h-full' : 'hidden'}>
-            <ProposalsTab proposals={proposals} status={propStatus} setStatus={setPropStatus} onChanged={() => refresh()} channel={activeChannel} />
+            <ProposalsTab
+              proposals={proposals}
+              status={propStatus}
+              setStatus={setPropStatus}
+              onChanged={() => refresh()}
+              onReviewed={(updated) => setProposals(prev => {
+                const next = prev.map(p => p.id === updated.id ? updated : p)
+                return propStatus && updated.status !== propStatus ? next.filter(p => p.id !== updated.id) : next
+              })}
+              channel={activeChannel}
+            />
+          </div>
+        )}
+        {visited.has('cover-art') && canReviewCoverArt && (
+          <div className={tab === 'cover-art' ? 'h-full' : 'hidden'}>
+            <CoverArtTab stacked onCountsChanged={refreshCoverArtCount} />
           </div>
         )}
         {visited.has('comp-proposals') && (
@@ -220,7 +239,10 @@ export default function AdminPage({ embedded = false, initialTab, onExit }: {
         )}
         {visited.has('applications') && (
           <div className={tab === 'applications' ? 'h-full' : 'hidden'}>
-            <ApplicationsTab applications={applications} onChanged={() => refresh()} />
+            <ApplicationsTab
+              applications={applications}
+              onReviewed={(updated) => setApplications(prev => prev.map(a => a.id === updated.id ? updated : a))}
+            />
           </div>
         )}
         {visited.has('reports') && (
@@ -235,7 +257,7 @@ export default function AdminPage({ embedded = false, initialTab, onExit }: {
         )}
         {visited.has('users') && (
           <div className={tab === 'users' ? 'h-full' : 'hidden'}>
-            <UsersTab users={users} onChanged={() => refresh()} currentUserId={account?.id} />
+            <UsersTab users={users} setUsers={setUsers} currentUserId={account?.id} />
           </div>
         )}
         {visited.has('stats') && (
@@ -246,6 +268,11 @@ export default function AdminPage({ embedded = false, initialTab, onExit }: {
         {visited.has('channels') && (
           <div className={tab === 'channels' ? 'h-full' : 'hidden'}>
             <ChannelsTab />
+          </div>
+        )}
+        {visited.has('news-channels') && (
+          <div className={tab === 'news-channels' ? 'h-full' : 'hidden'}>
+            <NewsChannelsTab />
           </div>
         )}
         {visited.has('eras') && (
@@ -290,19 +317,19 @@ function RevisePanel({ proposal, onClose, onDone, channel }: {
   return (
     <div className="flex-1 flex flex-col h-full overflow-hidden bg-[var(--surface)]">
       {/* Panel header */}
-      <div className="shrink-0 flex items-center gap-1 px-2 py-1.5 border-b border-[var(--border)]">
-        <button onClick={onClose} title="Back" className="w-11 h-11 shrink-0 flex items-center justify-center rounded-full text-text-primary active:bg-surface-overlay transition-colors">
-          <ChevronLeft size={20} />
+      <div className="shrink-0 flex items-center gap-2 px-2 py-1.5 border-b border-[var(--separator)]">
+        <button onClick={onClose} title="Back" className="glass-button w-11 h-11 shrink-0 flex items-center justify-center rounded-full text-text-primary active:opacity-60 transition-opacity">
+          <ChevronLeft size={24} strokeWidth={2.25} className="-ml-0.5" />
         </button>
         <Pencil size={14} className="text-accent shrink-0" />
-        <span className="text-text-primary text-[15px] font-bold flex-1 min-w-0 truncate">Revise proposal</span>
+        <span className="text-text-primary text-headline flex-1 min-w-0 truncate">Revise proposal</span>
       </div>
 
       <div className="flex-1 overflow-y-auto p-4 space-y-3">
         {/* Field editors */}
         {Object.entries(fields).map(([key, val]) => (
-          <div key={key} className="rounded-xl border border-[var(--border)] overflow-hidden">
-            <div className="flex items-center gap-2 px-3 py-1.5 bg-[var(--surface-raised)] border-b border-[var(--border)]">
+          <div key={key} className="rounded-xl bg-[var(--grouped)] overflow-hidden">
+            <div className="flex items-center gap-2 px-3 py-1.5 bg-[var(--surface-raised)] border-b border-[var(--separator)]">
               <span className="font-mono text-[10px] text-text-muted flex-1">{key.replace(/_/g, ' ')}</span>
               <button onClick={() => removeField(key)} className="text-[10px] text-red-400 active:text-red-300 transition-colors">
                 remove
@@ -327,7 +354,7 @@ function RevisePanel({ proposal, onClose, onDone, channel }: {
         ))}
 
         {/* Add field */}
-        <div className="rounded-xl border border-dashed border-[var(--border)] overflow-hidden">
+        <div className="rounded-xl border border-dashed border-[var(--separator)] overflow-hidden">
           <div className="flex items-center gap-2 px-3 py-1.5 bg-[var(--surface-raised)]">
             <Plus size={11} className="text-text-muted" />
             <span className="text-[10px] text-text-muted font-semibold">Add field</span>
@@ -342,7 +369,7 @@ function RevisePanel({ proposal, onClose, onDone, channel }: {
                 // Also allow snapshot fields not in the predefined list
                 ...Object.keys(snap).filter(k => !ALL_SONG_FIELDS.includes(k) && !(k in fields)),
               ].map(k => ({ value: k, label: k.replace(/_/g, ' ') }))}
-              className="flex-1 min-w-0 bg-[var(--surface)] text-text-primary text-xs px-2 py-1.5 rounded-lg border border-[var(--border)] focus:outline-none focus:border-accent/40"
+              className="flex-1 min-w-0 bg-[var(--surface)] text-text-primary text-xs px-2 py-1.5 rounded-lg border border-[var(--separator)] focus:outline-none focus:border-accent/40"
             />
             <button
               onClick={() => addField(addKey)}
@@ -355,7 +382,7 @@ function RevisePanel({ proposal, onClose, onDone, channel }: {
         </div>
 
         {/* Review note */}
-        <div className="rounded-xl border border-[var(--border)] overflow-hidden">
+        <div className="rounded-xl bg-[var(--grouped)] overflow-hidden">
           <div className="flex items-center gap-2 px-3 py-1.5 bg-[var(--surface-raised)]">
             <MessageSquare size={11} className="text-text-muted" />
             <span className="text-[10px] text-text-muted font-semibold">Review note (optional)</span>
@@ -370,21 +397,21 @@ function RevisePanel({ proposal, onClose, onDone, channel }: {
         </div>
 
         {err && (
-          <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-red-500/10 text-red-400 text-xs border border-red-500/20">
+          <div className="flex items-center gap-2 px-3 py-2 rounded-xl bg-red-500/10 text-red-500 text-footnote">
             <AlertCircle size={12} />{err}
           </div>
         )}
       </div>
 
       {/* Footer */}
-      <div className="shrink-0 flex items-center gap-2 p-3 border-t border-[var(--border)]">
-        <button onClick={onClose} className="h-11 px-4 rounded-xl text-sm text-text-muted active:bg-surface-overlay transition-colors">
+      <div className="shrink-0 flex items-center gap-2 p-3 border-t border-[var(--separator)]">
+        <button onClick={onClose} className="h-11 px-4 rounded-full text-body text-accent active:opacity-60 transition-colors">
           Cancel
         </button>
         <button
           onClick={submit}
           disabled={saving || Object.keys(fields).length === 0}
-          className="flex-1 h-11 rounded-xl bg-accent active:bg-accent/90 text-[var(--bg)] text-sm font-semibold transition-colors disabled:opacity-50 flex items-center justify-center gap-1.5"
+          className="flex-1 h-11 rounded-full bg-accent active:opacity-80 text-white text-headline transition-colors disabled:opacity-50 flex items-center justify-center gap-1.5"
         >
           {saving ? <Loader2 size={14} className="animate-spin" /> : <Check size={14} />}
           Save revision
@@ -416,8 +443,8 @@ const ProposalRow = memo(function ProposalRow({ item, showUserHeader, pendingCou
   return (
     <div>
       {showUserHeader && (
-        <div className="flex items-center gap-2 px-3 py-1.5 bg-surface-overlay sticky top-0 z-[1]">
-          <span className="flex-1 min-w-0 truncate text-[10px] font-bold uppercase tracking-wider text-text-muted">
+        <div className="flex items-center gap-2 px-3 py-1.5 bg-surface sticky top-0 z-[1]">
+          <span className="flex-1 min-w-0 truncate text-footnote font-semibold text-text-secondary">
             {item.editor_username}
           </span>
           {pendingCount > 1 && (
@@ -437,7 +464,7 @@ const ProposalRow = memo(function ProposalRow({ item, showUserHeader, pendingCou
         </div>
       )}
       <button onClick={() => onSelect(item)}
-        className={`w-full text-left px-3 py-3 border-b border-[var(--border)] border-l-2 ${ss.border} transition-colors active:bg-surface-raised`}>
+        className={`w-full text-left px-3 py-3 border-b border-[var(--separator)] border-l-2 ${ss.border} transition-colors active:bg-[var(--fill)]`}>
         <div className="flex items-center gap-1.5 mb-1">
           <StatusChip status={item.status} />
           <span className="text-[10px] text-text-muted bg-surface-raised px-1.5 py-0.5 rounded font-medium">
@@ -449,10 +476,10 @@ const ProposalRow = memo(function ProposalRow({ item, showUserHeader, pendingCou
             </span>
           )}
         </div>
-        <p className="text-sm font-semibold truncate leading-snug mb-0.5 text-text-primary">
+        <p className="text-body font-semibold truncate mb-0.5 text-text-primary">
           {item.title || `Proposal #${item.id}`}
         </p>
-        <p className="text-xs text-text-muted truncate">
+        <p className="text-footnote text-text-muted truncate">
           {item.editor_username} · {relativeTime(item.created_at)}
         </p>
       </button>
@@ -460,11 +487,12 @@ const ProposalRow = memo(function ProposalRow({ item, showUserHeader, pendingCou
   )
 })
 
-function ProposalsTab({ proposals, status, setStatus, onChanged, channel }: {
+function ProposalsTab({ proposals, status, setStatus, onChanged, onReviewed, channel }: {
   proposals: SongEditProposal[]
   status: ProposalStatus | ''
   setStatus: (s: ProposalStatus | '') => void
   onChanged: () => void
+  onReviewed: (updated: SongEditProposal) => void
   channel?: string
 }): JSX.Element {
   const [actionId,    setActionId]    = useState<number | null>(null)
@@ -483,15 +511,26 @@ function ProposalsTab({ proposals, status, setStatus, onChanged, channel }: {
 
   const doReview = async (id: number, action: 'approve' | 'reject') => {
     setActionId(id)
-    try { await userApi.adminReviewProposal(id, { action, review_notes: notes[id] || '', channel }); dropCache(id); setArchive(null); onChanged(); setSelected(null) }
-    catch { showAppToast(`Couldn't ${action} the proposal`) } finally { setActionId(null) }
+    try {
+      const updated = await userApi.adminReviewProposal(id, { action, review_notes: notes[id] || '', channel })
+      dropCache(id); setArchive(null)
+      // The endpoint hands back the updated row, so apply it in place instead
+      // of refetching the whole queue (which also covered the list with the
+      // loading overlay and collapsed "Show more").
+      onReviewed(updated); setSelected(null)
+    }
+    catch (e) { showAppToast(errorMessage(e, `Couldn't ${action} the proposal`)) } finally { setActionId(null) }
   }
 
   const doReverse = async (id: number) => {
     if (!confirm('Reverse this approval?')) return
     setActionId(id)
-    try { await userApi.adminReverseProposal(id, channel); dropCache(id); setArchive(null); onChanged(); setSelected(null) }
-    catch { showAppToast("Couldn't reverse the proposal") } finally { setActionId(null) }
+    try {
+      const updated = await userApi.adminReverseProposal(id, channel)
+      dropCache(id); setArchive(null)
+      onReviewed(updated); setSelected(null)
+    }
+    catch (e) { showAppToast(errorMessage(e, "Couldn't reverse the proposal")) } finally { setActionId(null) }
   }
 
   // Keyed off the full list so the group header's count and "Accept all"
@@ -504,18 +543,25 @@ function ProposalsTab({ proposals, status, setStatus, onChanged, channel }: {
     return m
   }, [proposals])
 
-  // Reviews every pending proposal from one editor - parallel across songs,
-  // in order within a song (see adminReviewProposalsBatch). Fired from the
-  // list view, so there's no detail selection to reconcile afterward - just
-  // a single refetch once the batch settles.
+  // Reviews every pending proposal from one editor in one backend request.
   const doReviewAllForUser = async (editorId: number, action: 'approve' | 'reject') => {
     const pending = proposals.filter(x => x.editor_id === editorId && x.status === 'pending')
     if (pending.length === 0) return
     if (!confirm(`${action === 'approve' ? 'Approve' : 'Deny'} all ${pending.length} pending proposal${pending.length !== 1 ? 's' : ''} from ${pending[0].editor_username} (#${editorId})?`)) return
     setAcceptingAllUser(editorId)
     try {
-      await userApi.adminReviewProposalsBatch(pending, action, channel, (updated) => dropCache(updated.id))
-      setArchive(null)
+      const result = await userApi.adminReviewProposalsBatch(pending.map(p => p.id), action, channel)
+      for (const row of result.results) {
+        const original = pending.find(p => p.id === row.id)
+        if (!row.proposal || !original) continue
+        dropCache(row.id); setArchive(null)
+        onReviewed({ ...original, ...row.proposal })
+      }
+      const failed = result.results.filter(row => row.result === 'failed' || row.result === 'not_run')
+      if (failed.length) showAppToast(`${failed.length} proposals weren't reviewed. ${failed[0].detail ?? 'Try again.'}`)
+      onChanged()
+    } catch (e) {
+      showAppToast(errorMessage(e, `Couldn't ${action} the proposals`))
       onChanged()
     } finally {
       setAcceptingAllUser(null)
@@ -565,18 +611,18 @@ function ProposalsTab({ proposals, status, setStatus, onChanged, channel }: {
   if (p) return (
     <div className="flex-1 flex flex-col h-full overflow-hidden">
       {/* Detail header */}
-      <div className="shrink-0 flex items-center gap-1 px-2 py-1.5 border-b border-[var(--border)]">
+      <div className="shrink-0 flex items-center gap-2 px-2 py-1.5 border-b border-[var(--separator)]">
         <button onClick={() => setSelected(null)}
-          className="w-11 h-11 shrink-0 flex items-center justify-center rounded-full text-text-primary active:bg-surface-overlay transition-colors">
-          <ChevronLeft size={20} />
+          className="glass-button w-11 h-11 shrink-0 flex items-center justify-center rounded-full text-text-primary active:opacity-60 transition-opacity">
+          <ChevronLeft size={24} strokeWidth={2.25} className="-ml-0.5" />
         </button>
-        <h2 className="flex-1 min-w-0 truncate text-text-primary text-[15px] font-bold">{p.title || `Proposal #${p.id}`}</h2>
+        <h2 className="flex-1 min-w-0 truncate text-text-primary text-headline">{p.title || `Proposal #${p.id}`}</h2>
         {/* Hearing the song is just as useful when auditing something already
             approved or reversed, so this isn't gated to pending. */}
         {p.song != null && (
           <button onClick={() => playProposalSong(p.song as number)} disabled={loadingSongId != null}
             aria-label="Play this song"
-            className="w-9 h-9 shrink-0 flex items-center justify-center rounded-full text-text-secondary active:bg-surface-overlay transition-colors disabled:opacity-40">
+            className="w-9 h-9 shrink-0 flex items-center justify-center rounded-full text-text-secondary active:bg-[var(--fill)] transition-colors disabled:opacity-40">
             {loadingSongId === p.song ? <Loader2 size={15} className="animate-spin" /> : <Play size={15} />}
           </button>
         )}
@@ -616,13 +662,13 @@ function ProposalsTab({ proposals, status, setStatus, onChanged, channel }: {
           {(p.editor_notes || p.review_notes) && (
             <div className="flex flex-col gap-2">
               {p.editor_notes && (
-                <div className="flex items-start gap-1.5 px-3 py-2 bg-surface-overlay rounded-lg text-xs text-text-muted italic border border-[var(--border)]">
+                <div className="flex items-start gap-1.5 px-3 py-2 bg-[var(--fill)] rounded-xl text-footnote text-text-secondary italic">
                   <MessageSquare size={11} className="text-text-muted shrink-0 mt-0.5" />
                   {p.editor_notes}
                 </div>
               )}
               {p.review_notes && (
-                <div className="flex items-start gap-1.5 px-3 py-2 bg-surface-overlay rounded-lg text-xs text-text-muted italic border border-[var(--border)]">
+                <div className="flex items-start gap-1.5 px-3 py-2 bg-[var(--fill)] rounded-xl text-footnote text-text-secondary italic">
                   <Check size={11} className="text-text-muted shrink-0 mt-0.5" />
                   {p.review_notes}
                 </div>
@@ -636,7 +682,7 @@ function ProposalsTab({ proposals, status, setStatus, onChanged, channel }: {
               value={notes[p.id] || ''}
               onChange={e => setNotes(n => ({ ...n, [p.id]: e.target.value }))}
               placeholder="Add review note (optional)…"
-              className="w-full bg-surface-overlay border border-[var(--border)] rounded-lg px-3 py-2.5 text-text-primary text-sm focus:outline-none focus:border-accent/40"
+              className="w-full bg-[var(--fill)] border border-transparent rounded-xl px-3.5 py-2.5 text-text-primary text-sm focus:outline-none focus:border-accent/40"
             />
           )}
         </div>
@@ -648,7 +694,7 @@ function ProposalsTab({ proposals, status, setStatus, onChanged, channel }: {
             moving the selection, which would fight the status filter (a
             rejected proposal isn't in a Pending list). */}
         {historyOpen && p.song != null && (
-          <div className="border-y border-[var(--border)] bg-[var(--surface)]">
+          <div className="border-y border-[var(--separator)] bg-[var(--surface)]">
             {archiveLoading && (
               <div className="flex justify-center py-4"><Loader2 size={14} className="animate-spin text-text-muted" /></div>
             )}
@@ -666,9 +712,9 @@ function ProposalsTab({ proposals, status, setStatus, onChanged, channel }: {
               const isViewing = row.id === p.id
               const open = expandedPast === row.id
               return (
-                <div key={row.id} className="border-b border-[var(--border)] last:border-b-0">
+                <div key={row.id} className="border-b border-[var(--separator)] last:border-b-0">
                   <button onClick={() => setExpandedPast(open ? null : row.id)}
-                    className={`w-full flex items-center gap-2 px-4 py-2.5 text-left transition-colors ${isViewing ? 'bg-accent/5' : 'active:bg-surface-raised'}`}>
+                    className={`w-full flex items-center gap-2 px-4 py-2.5 text-left transition-colors ${isViewing ? 'bg-accent/5' : 'active:bg-[var(--fill)]'}`}>
                     <StatusChip status={row.status} />
                     <span className="text-[11px] text-text-primary truncate flex-1 min-w-0">
                       {row.title || `Proposal #${row.id}`}
@@ -678,7 +724,7 @@ function ProposalsTab({ proposals, status, setStatus, onChanged, channel }: {
                     {open ? <ChevronUp size={11} className="text-text-muted shrink-0" /> : <ChevronDown size={11} className="text-text-muted shrink-0" />}
                   </button>
                   {open && (
-                    <div className="bg-[var(--surface-raised)] border-t border-[var(--border)]">
+                    <div className="bg-[var(--surface-raised)] border-t border-[var(--separator)]">
                       {row.review_notes && (
                         <p className="px-4 pt-3 text-[11px] text-text-muted italic">
                           {row.reviewer_username ? `${row.reviewer_username}: ` : ''}{row.review_notes}
@@ -698,27 +744,27 @@ function ProposalsTab({ proposals, status, setStatus, onChanged, channel }: {
       </div>
 
       {/* Actions */}
-      <div className="shrink-0 p-3 border-t border-[var(--border)] flex items-center gap-2">
-        {actionId === p.id ? (
+      <div className="shrink-0 p-3 border-t border-[var(--separator)] flex items-center gap-2">
+        {actionId !== null || acceptingAllUser !== null ? (
           <div className="flex-1 flex justify-center py-2.5"><Loader2 size={16} className="animate-spin text-text-muted" /></div>
         ) : p.status === 'pending' ? (
           <>
             <button onClick={() => setRevising(true)}
-              className="h-11 px-3.5 rounded-xl bg-[var(--surface-overlay)] active:bg-[var(--surface-raised)] text-text-secondary text-sm font-semibold transition-colors flex items-center gap-1.5">
+              className="h-11 px-4 rounded-full bg-[var(--fill)] active:bg-[var(--fill-strong)] text-text-primary text-headline transition-colors flex items-center gap-1.5">
               <Pencil size={14} /> Revise
             </button>
             <button onClick={() => doReview(p.id, 'reject')}
-              className="flex-1 h-11 rounded-xl bg-red-500/10 active:bg-red-500/20 text-red-400 text-sm font-semibold transition-colors flex items-center justify-center gap-1.5">
+              className="flex-1 h-11 rounded-full bg-red-500/10 active:bg-red-500/20 text-red-500 text-headline transition-colors flex items-center justify-center gap-1.5">
               <XCircle size={15} /> Reject
             </button>
             <button onClick={() => doReview(p.id, 'approve')}
-              className="flex-1 h-11 rounded-xl bg-emerald-500/15 active:bg-emerald-500/25 text-emerald-400 text-sm font-semibold transition-colors flex items-center justify-center gap-1.5">
+              className="flex-1 h-11 rounded-full bg-emerald-500/15 active:bg-emerald-500/25 text-emerald-500 text-headline transition-colors flex items-center justify-center gap-1.5">
               <CheckCircle size={15} /> Approve
             </button>
           </>
         ) : p.status === 'approved' ? (
-          <button onClick={() => doReverse(p.id)} disabled={actionId === p.id}
-            className="w-full h-11 rounded-xl text-sm text-text-muted active:text-amber-400 active:bg-amber-500/10 transition-colors flex items-center justify-center gap-1.5 disabled:opacity-40">
+          <button onClick={() => doReverse(p.id)} disabled={actionId !== null || acceptingAllUser !== null}
+            className="w-full h-11 rounded-full bg-[var(--fill)] text-headline text-amber-500 active:bg-[var(--fill-strong)] transition-colors flex items-center justify-center gap-1.5 disabled:opacity-40">
             <RotateCcw size={15} /> Reverse
           </button>
         ) : null}
@@ -729,13 +775,13 @@ function ProposalsTab({ proposals, status, setStatus, onChanged, channel }: {
   return (
     <div className="flex-1 flex flex-col h-full overflow-hidden">
       {/* Filter bar */}
-      <div className="shrink-0 flex flex-col gap-2 px-3 py-2.5 border-b border-[var(--border)]">
+      <div className="shrink-0 flex flex-col gap-2 px-3 py-2.5 border-b border-[var(--separator)]">
         <div className="flex items-center gap-2">
           <div className="flex gap-2 overflow-x-auto scrollbar-none">
             {FILTERS.map(f => (
               <button key={f.id || 'all'} onClick={() => setStatus(f.id)}
-                className={`shrink-0 px-3 py-1.5 rounded-full text-xs font-medium transition-colors ${
-                  status === f.id ? 'bg-accent/15 text-accent' : 'text-text-muted active:bg-surface-overlay'
+                className={`shrink-0 h-8 px-3.5 rounded-full text-subhead font-medium transition-colors ${
+                  status === f.id ? 'bg-text-primary text-surface' : 'bg-[var(--fill)] text-text-primary active:bg-[var(--fill-strong)]'
                 }`}>{f.label}
               </button>
             ))}
@@ -743,8 +789,8 @@ function ProposalsTab({ proposals, status, setStatus, onChanged, channel }: {
           <div className="ml-auto flex gap-1 shrink-0">
             {SORTS.map(s => (
               <button key={s.id} onClick={() => setSortBy(s.id)}
-                className={`px-2.5 py-1.5 rounded-full text-[11px] font-medium transition-colors ${
-                  sortBy === s.id ? 'bg-accent/15 text-accent' : 'text-text-muted active:bg-surface-overlay'
+                className={`h-8 px-3 rounded-full text-footnote font-medium transition-colors ${
+                  sortBy === s.id ? 'bg-text-primary text-surface' : 'bg-[var(--fill)] text-text-primary active:bg-[var(--fill-strong)]'
                 }`}>{s.label}
               </button>
             ))}
@@ -764,7 +810,7 @@ function ProposalsTab({ proposals, status, setStatus, onChanged, channel }: {
             item={item}
             showUserHeader={sortBy === 'user' && (idx === 0 || pageOf[idx - 1].editor_id !== item.editor_id)}
             pendingCount={pendingByUser.get(item.editor_id) ?? 0}
-            accepting={acceptingAllUser === item.editor_id}
+            accepting={acceptingAllUser !== null || actionId !== null}
             onSelect={setSelected}
             onAcceptAll={(id) => doReviewAllForUser(id, 'approve')}
             onRejectAll={(id) => doReviewAllForUser(id, 'reject')}
@@ -772,7 +818,7 @@ function ProposalsTab({ proposals, status, setStatus, onChanged, channel }: {
         ))}
         {remaining > 0 && (
           <button onClick={() => setShown(s => s + PROPOSAL_PAGE)}
-            className="w-full px-3 py-3 text-[11px] font-semibold text-accent active:bg-surface-raised transition-colors">
+            className="w-full px-3 py-3 text-subhead font-semibold text-accent active:bg-[var(--fill)] transition-colors">
             Show {Math.min(remaining, PROPOSAL_PAGE)} more · {remaining} left
           </button>
         )}
@@ -783,15 +829,19 @@ function ProposalsTab({ proposals, status, setStatus, onChanged, channel }: {
 
 // ── Applications (master-detail) ──────────────────────────────────────────────
 
-function ApplicationsTab({ applications, onChanged }: { applications: EditorApplication[]; onChanged: () => void }): JSX.Element {
+function ApplicationsTab({ applications, onReviewed }: { applications: EditorApplication[]; onReviewed: (updated: EditorApplication) => void }): JSX.Element {
   const [actionId, setActionId] = useState<number | null>(null)
   const [notes,    setNotes]    = useState<Record<number, string>>({})
   const [selected, setSelected] = useState<EditorApplication | null>(null)
 
   const doReview = async (id: number, action: 'approve' | 'reject') => {
     setActionId(id)
-    try { await userApi.adminReviewApplication(id, { action, review_notes: notes[id] || '' }); onChanged(); setSelected(null) }
-    catch { showAppToast(`Couldn't ${action} the application`) } finally { setActionId(null) }
+    try {
+      const updated = await userApi.adminReviewApplication(id, { action, review_notes: notes[id] || '' })
+      // Applied in place, same as ProposalsTab's doReview - no full refetch.
+      onReviewed(updated); setSelected(null)
+    }
+    catch (e) { showAppToast(errorMessage(e, `Couldn't ${action} the application`)) } finally { setActionId(null) }
   }
 
   const pending  = applications.filter(a => a.status === 'pending')
@@ -802,12 +852,12 @@ function ApplicationsTab({ applications, onChanged }: { applications: EditorAppl
 
   if (a) return (
     <div className="flex-1 flex flex-col h-full overflow-hidden">
-      <div className="shrink-0 flex items-center gap-1 px-2 py-1.5 border-b border-[var(--border)]">
+      <div className="shrink-0 flex items-center gap-2 px-2 py-1.5 border-b border-[var(--separator)]">
         <button onClick={() => setSelected(null)}
-          className="w-11 h-11 shrink-0 flex items-center justify-center rounded-full text-text-primary active:bg-surface-overlay transition-colors">
-          <ChevronLeft size={20} />
+          className="glass-button w-11 h-11 shrink-0 flex items-center justify-center rounded-full text-text-primary active:opacity-60 transition-opacity">
+          <ChevronLeft size={24} strokeWidth={2.25} className="-ml-0.5" />
         </button>
-        <h2 className="flex-1 min-w-0 truncate text-text-primary text-[15px] font-bold">{displayName(a)}</h2>
+        <h2 className="flex-1 min-w-0 truncate text-text-primary text-headline">{displayName(a)}</h2>
         <StatusChip status={a.status} />
       </div>
 
@@ -830,30 +880,30 @@ function ApplicationsTab({ applications, onChanged }: { applications: EditorAppl
 
         {a.status === 'pending' && (
           <label className="space-y-2 block">
-            <span className="text-[10px] font-bold uppercase tracking-widest text-text-muted">Review note</span>
+            <span className="text-footnote font-semibold text-text-secondary">Review note</span>
             <textarea
               value={notes[a.id] || ''}
               onChange={e => setNotes(n => ({ ...n, [a.id]: e.target.value }))}
               placeholder="Optional note for the applicant…"
               rows={3}
-              className="w-full bg-surface-overlay border border-[var(--border)] rounded-xl px-3 py-2.5 text-text-primary text-sm resize-none focus:outline-none focus:border-accent/40"
+              className="w-full bg-[var(--fill)] border border-transparent rounded-xl px-3.5 py-2.5 text-text-primary text-sm resize-none focus:outline-none focus:border-accent/40"
             />
           </label>
         )}
       </div>
 
       {a.status === 'pending' && (
-        <div className="shrink-0 p-3 border-t border-[var(--border)] flex items-center gap-2">
+        <div className="shrink-0 p-3 border-t border-[var(--separator)] flex items-center gap-2">
           {actionId === a.id ? (
             <div className="flex-1 flex justify-center py-2.5"><Loader2 size={16} className="animate-spin text-text-muted" /></div>
           ) : (
             <>
               <button onClick={() => doReview(a.id, 'reject')}
-                className="flex-1 h-11 rounded-xl bg-red-500/10 active:bg-red-500/20 text-red-400 text-sm font-semibold transition-colors flex items-center justify-center gap-1.5">
+                className="flex-1 h-11 rounded-full bg-red-500/10 active:bg-red-500/20 text-red-500 text-headline transition-colors flex items-center justify-center gap-1.5">
                 <XCircle size={15} /> Reject
               </button>
               <button onClick={() => doReview(a.id, 'approve')}
-                className="flex-1 h-11 rounded-xl bg-emerald-500/15 active:bg-emerald-500/25 text-emerald-400 text-sm font-semibold transition-colors flex items-center justify-center gap-1.5">
+                className="flex-1 h-11 rounded-full bg-emerald-500/15 active:bg-emerald-500/25 text-emerald-500 text-headline transition-colors flex items-center justify-center gap-1.5">
                 <CheckCircle size={15} /> Approve
               </button>
             </>
@@ -869,17 +919,17 @@ function ApplicationsTab({ applications, onChanged }: { applications: EditorAppl
         {applications.length === 0 && <Empty label="No applications" />}
         {pending.length > 0 && (
           <div className="px-3 pt-3 pb-1">
-            <p className="text-[10px] font-bold uppercase tracking-widest text-text-muted">Pending · {pending.length}</p>
+            <p className="text-footnote font-semibold text-text-secondary">Pending · {pending.length}</p>
           </div>
         )}
         {pending.map(item => (
           <button key={item.id} onClick={() => setSelected(item)}
-            className="w-full text-left px-3 py-3 border-b border-[var(--border)] border-l-2 border-l-amber-500/60 transition-colors text-text-primary active:bg-surface-raised">
+            className="w-full text-left px-3 py-3 border-b border-[var(--separator)] border-l-2 border-l-amber-500/60 transition-colors text-text-primary active:bg-[var(--fill)]">
             <div className="flex items-center gap-2.5">
               <Avatar src={item.discord_avatar} name={displayName(item)} size={9} />
               <div className="min-w-0 flex-1">
-                <p className="text-text-primary text-sm font-semibold truncate">{displayName(item)}</p>
-                <p className="text-text-muted text-xs truncate">{item.application_type} · {item.discord_username} · {relativeTime(item.created_at)}</p>
+                <p className="text-text-primary text-body font-semibold truncate">{displayName(item)}</p>
+                <p className="text-text-muted text-footnote truncate">{item.application_type} · {item.discord_username} · {relativeTime(item.created_at)}</p>
               </div>
             </div>
           </button>
@@ -887,16 +937,16 @@ function ApplicationsTab({ applications, onChanged }: { applications: EditorAppl
 
         {reviewed.length > 0 && (
           <div className="px-3 pt-3 pb-1">
-            <p className="text-[10px] font-bold uppercase tracking-widest text-text-muted">Reviewed</p>
+            <p className="text-footnote font-semibold text-text-secondary">Reviewed</p>
           </div>
         )}
         {reviewed.map(item => (
           <button key={item.id} onClick={() => setSelected(item)}
-            className={`w-full text-left px-3 py-3 border-b border-[var(--border)] border-l-2 ${STATUS_STYLE[item.status]?.border ?? 'border-l-transparent'} transition-colors text-text-primary opacity-60 active:bg-surface-raised active:opacity-100`}>
+            className={`w-full text-left px-3 py-3 border-b border-[var(--separator)] border-l-2 ${STATUS_STYLE[item.status]?.border ?? 'border-l-transparent'} transition-colors text-text-primary opacity-60 active:bg-[var(--fill)] active:opacity-100`}>
             <div className="flex items-center gap-2.5">
               <Avatar src={item.discord_avatar} name={displayName(item)} size={8} />
               <div className="min-w-0 flex-1">
-                <p className="text-text-primary text-sm font-medium truncate">{displayName(item)}</p>
+                <p className="text-text-primary text-body truncate">{displayName(item)}</p>
                 <p className="text-text-muted text-xs">{item.status} · {shortDate(item.reviewed_at)}</p>
               </div>
             </div>
@@ -909,8 +959,8 @@ function ApplicationsTab({ applications, onChanged }: { applications: EditorAppl
 
 // ── Users ─────────────────────────────────────────────────────────────────────
 
-function UsersTab({ users, onChanged, currentUserId }: { users: AdminUser[]; onChanged: () => void; currentUserId?: number }): JSX.Element {
-  const { actionId, filter, setFilter, search, setSearch, filters: FILTERS, visible, doUpdate, canAct } = useAdminUsersList(users, currentUserId, onChanged)
+function UsersTab({ users, setUsers, currentUserId }: { users: AdminUser[]; setUsers: React.Dispatch<React.SetStateAction<AdminUser[]>>; currentUserId?: number }): JSX.Element {
+  const { filter, setFilter, search, setSearch, filters: FILTERS, visible, doUpdate, canAct } = useAdminUsersList(users, setUsers, currentUserId)
   // Collapsed-by-default accordion instead of always-expanded cards - one
   // row open at a time, mirroring the desktop master/detail split adapted to
   // a single column.
@@ -919,12 +969,12 @@ function UsersTab({ users, onChanged, currentUserId }: { users: AdminUser[]; onC
   return (
     <div className="h-full flex flex-col overflow-hidden">
       {/* Toolbar */}
-      <div className="shrink-0 flex flex-col gap-2 px-3 py-2.5 border-b border-[var(--border)]">
+      <div className="shrink-0 flex flex-col gap-2 px-3 py-2.5 border-b border-[var(--separator)]">
         <div className="flex gap-2 overflow-x-auto scrollbar-none">
           {FILTERS.map(f => (
             <button key={f.id} onClick={() => setFilter(f.id)}
-              className={`shrink-0 flex items-center gap-1.5 h-9 px-3 rounded-full text-xs font-medium transition-colors ${
-                filter === f.id ? 'bg-accent/15 text-accent' : 'text-text-muted active:bg-surface-overlay'
+              className={`shrink-0 flex items-center gap-1.5 h-8 px-3.5 rounded-full text-subhead font-medium transition-colors ${
+                filter === f.id ? 'bg-text-primary text-surface' : 'bg-[var(--fill)] text-text-primary active:bg-[var(--fill-strong)]'
               }`}>
               {f.label}
               <span className={`text-[10px] px-1 rounded-full ${filter === f.id ? 'bg-accent/20' : 'bg-surface-raised'}`}>{f.count}</span>
@@ -935,17 +985,17 @@ function UsersTab({ users, onChanged, currentUserId }: { users: AdminUser[]; onC
       </div>
 
       {/* Rows */}
-      <div className="flex-1 overflow-y-auto divide-y divide-[var(--border)]">
+      <div className="flex-1 overflow-y-auto divide-y divide-[var(--separator)]">
         {visible.length === 0 && <Empty label="No users" />}
         {visible.map(u => {
           const isOpen = expandedId === u.user_id
           return (
             <div key={u.user_id}>
-              <button className="w-full flex items-center gap-3 px-3 py-3 text-left active:bg-surface-raised"
+              <button className="w-full flex items-center gap-3 px-3 py-3 text-left active:bg-[var(--fill)]"
                 onClick={() => setExpandedId(isOpen ? null : u.user_id)}>
                 <Avatar src={u.discord_avatar} name={discordHandle(u)} size={9} />
                 <div className="min-w-0 flex-1">
-                  <p className="text-text-primary text-sm font-medium truncate flex items-center gap-1.5">
+                  <p className="text-text-primary text-body truncate flex items-center gap-1.5">
                     {discordHandle(u)}
                     {u.user_id === currentUserId && <span className="text-[10px] text-text-muted italic font-normal shrink-0">you</span>}
                   </p>
@@ -980,13 +1030,11 @@ function UsersTab({ users, onChanged, currentUserId }: { users: AdminUser[]; onC
                     </div>
                   )}
 
-                  {actionId === u.user_id ? (
-                    <div className="flex justify-center py-1"><Loader2 size={14} className="animate-spin text-text-muted" /></div>
-                  ) : canAct(u) ? (
+                  {canAct(u) ? (
                     <>
                       {(u.role === 'editor' || u.contributor_enabled) && (
                         <div className="space-y-1.5">
-                          <p className="text-[10px] font-bold uppercase tracking-widest text-text-muted">Auto-approve</p>
+                          <p className="text-footnote font-semibold text-text-secondary">Auto-approve</p>
                           {u.role === 'editor' && (
                             <label className="flex items-center justify-between gap-2 text-sm text-text-secondary">
                               Song edit proposals
@@ -1005,7 +1053,7 @@ function UsersTab({ users, onChanged, currentUserId }: { users: AdminUser[]; onC
                       )}
 
                       <div className="space-y-1.5 mb-3">
-                        <p className="text-[10px] font-bold uppercase tracking-widest text-text-muted">Roles</p>
+                        <p className="text-footnote font-semibold text-text-secondary">Roles</p>
                         {([
                           ['Editor', u.role === 'editor', (on: boolean) => ({ role: on ? 'editor' : 'applicant' } as const)],
                           ['Contributor', !!u.contributor_enabled, (on: boolean) => ({ contributor_enabled: on })],
@@ -1021,7 +1069,7 @@ function UsersTab({ users, onChanged, currentUserId }: { users: AdminUser[]; onC
                       </div>
                       <div className="grid grid-cols-2 gap-2">
                         <button onClick={() => doUpdate(u.user_id, { is_active: !u.is_active })}
-                          className="col-span-2 h-9 rounded-lg text-xs font-semibold text-text-secondary bg-surface-overlay active:bg-surface-raised transition-colors">
+                          className="col-span-2 h-11 rounded-full text-subhead font-semibold text-text-primary bg-[var(--fill)] active:bg-[var(--fill-strong)] transition-colors">
                           {u.is_active ? 'Disable account' : 'Enable account'}
                         </button>
                       </div>
@@ -1064,9 +1112,9 @@ function StatsTab({ applications, proposals, users }: {
     <div className="h-full overflow-y-auto p-4">
       <div className="grid grid-cols-2 gap-2.5 mb-6">
         {metrics.map(m => (
-          <div key={m.label} className="bg-surface-overlay border border-[var(--border)] rounded-xl p-3.5">
+          <div key={m.label} className="bg-[var(--grouped)] rounded-[20px] p-3.5">
             <div className={`mb-2 ${m.color}`}>{m.icon}</div>
-            <p className={`text-2xl font-black leading-none ${m.color}`}>{m.value}</p>
+            <p className={`text-title1 leading-none ${m.color}`}>{m.value}</p>
             <p className="text-text-muted text-[11px] mt-2">{m.label}</p>
           </div>
         ))}
@@ -1074,10 +1122,10 @@ function StatsTab({ applications, proposals, users }: {
 
       {topEditors.length > 0 && (
         <div>
-          <p className="text-[10px] font-bold uppercase tracking-widest text-text-muted mb-3">Top editors by approvals</p>
+          <p className="text-footnote font-semibold text-text-secondary mb-3">Top editors by approvals</p>
           <div className="grid grid-cols-1 gap-2">
             {topEditors.map((u, i) => (
-              <div key={u.user_id} className="flex items-center gap-3 px-4 py-3 bg-surface-overlay border border-[var(--border)] rounded-xl">
+              <div key={u.user_id} className="flex items-center gap-3 px-4 py-3 bg-surface-overlay border border-[var(--separator)] rounded-xl">
                 <span className={`text-sm font-black w-6 text-center shrink-0 ${i === 0 ? 'text-yellow-400' : i === 1 ? 'text-slate-400' : i === 2 ? 'text-amber-700' : 'text-text-muted'}`}>
                   {i + 1}
                 </span>
@@ -1121,7 +1169,7 @@ function OtpSetupPanel({ onEnabled }: { onEnabled: () => Promise<void> }): JSX.E
       {setup.otp_secret && (
         <div>
           <p className="text-text-muted text-[10px] mb-1.5">Manual entry:</p>
-          <code className="block bg-surface-overlay border border-[var(--border)] rounded-xl px-3 py-2.5 text-text-primary text-xs font-mono break-all">{setup.otp_secret}</code>
+          <code className="block bg-[var(--fill)] border border-transparent rounded-xl px-3.5 py-2.5 text-text-primary text-xs font-mono break-all">{setup.otp_secret}</code>
         </div>
       )}
       <label className="block">
@@ -1129,11 +1177,11 @@ function OtpSetupPanel({ onEnabled }: { onEnabled: () => Promise<void> }): JSX.E
         <input type="text" inputMode="numeric" value={code}
           onChange={e => setCode(e.target.value)}
           onKeyDown={e => e.key === 'Enter' && confirm()} placeholder="123456"
-          className="w-full bg-surface-overlay border border-[var(--border)] rounded-xl px-4 py-2.5 text-text-primary text-base focus:outline-none focus:border-accent/50 font-mono tracking-[0.5em] text-center"
+          className="w-full bg-surface-overlay border border-[var(--separator)] rounded-xl px-4 py-2.5 text-text-primary text-base focus:outline-none focus:border-accent/50 font-mono tracking-[0.5em] text-center"
         />
       </label>
       {error && (
-        <div className="flex items-start gap-2 px-3 py-2.5 rounded-xl bg-red-500/10 border border-red-500/20 text-red-400 text-xs">
+        <div className="flex items-start gap-2 px-3 py-2.5 rounded-xl bg-red-500/10 text-red-500 text-footnote">
           <AlertCircle size={13} className="shrink-0 mt-0.5" /> {error}
         </div>
       )}

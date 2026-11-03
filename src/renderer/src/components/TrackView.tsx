@@ -54,10 +54,10 @@ export default function TrackView(): JSX.Element {
     return (
       <div className="flex-1 flex flex-col items-center justify-center gap-3 text-text-muted">
         <Music2 size={40} className="opacity-20" />
-        <p className="text-sm">Track not found.</p>
+        <p className="text-subhead md:text-sm md:tracking-normal">Track not found.</p>
         <button
           onClick={() => setActiveView('api-tracker')}
-          className="flex items-center gap-1.5 text-text-muted hover:text-text-primary text-sm transition-colors mt-1"
+          className="flex items-center gap-1.5 text-accent md:text-text-muted hover:text-text-primary text-body md:text-sm md:tracking-normal max-md:active:opacity-60 transition-colors mt-1"
         >
           <ChevronLeft size={15} /> Back to app
         </button>
@@ -81,29 +81,29 @@ export default function TrackView(): JSX.Element {
     } catch {}
   }
 
-  const btnSecondary = 'flex-1 flex items-center justify-center gap-2 px-4 py-2.5 rounded-full bg-surface-overlay text-text-primary text-sm font-semibold hover:bg-surface-highest transition-colors'
+  const btnSecondary = 'flex-1 flex items-center justify-center gap-2 px-4 h-11 md:h-auto md:py-2.5 rounded-full bg-[var(--fill)] md:bg-surface-overlay text-text-primary text-subhead md:text-sm md:tracking-normal font-semibold hover:bg-surface-highest max-md:active:bg-[var(--fill-strong)] transition-colors'
 
   return (
     <div className="flex-1 flex flex-col items-center justify-center min-h-0 overflow-y-auto px-4 py-8">
       <div className="w-full max-w-sm">
         <button
           onClick={() => setActiveView('api-tracker')}
-          className="flex items-center gap-1.5 text-text-muted hover:text-text-primary text-sm transition-colors mb-3"
+          className="flex items-center gap-1.5 text-accent md:text-text-muted hover:text-text-primary text-body md:text-sm md:tracking-normal max-md:active:opacity-60 transition-colors mb-3"
         >
           <ChevronLeft size={15} /> Back to app
         </button>
 
-        <div className="rounded-2xl border border-[var(--border)] bg-surface-raised p-5 shadow-2xl">
+        <div className="rounded-[28px] md:rounded-2xl md:border md:border-[var(--border)] bg-[var(--grouped)] md:bg-surface-raised p-5 md:shadow-2xl">
           <div className="aspect-square w-full rounded-xl overflow-hidden bg-surface-overlay mb-4">
             <AlbumArtThumbnail track={track} fill res={512} className="w-full h-full" />
           </div>
 
-          <p className="text-text-muted text-[11px] uppercase tracking-widest font-semibold mb-1">{categoryLabel}</p>
-          <h1 className="text-text-primary text-xl font-bold truncate" title={track.title}>{track.title}</h1>
-          <p className="text-text-muted text-sm truncate">{track.artist}{song.era?.name ? ` · ${song.era.name}` : ''}{duration !== '0:00' ? ` · ${duration}` : ''}</p>
+          <p className="text-footnote font-semibold text-accent md:text-text-muted md:text-[11px] md:uppercase md:tracking-widest mb-1">{categoryLabel}</p>
+          <h1 className="text-title2 md:text-xl md:font-bold md:tracking-normal text-text-primary truncate" title={track.title}>{track.title}</h1>
+          <p className="text-subhead md:text-sm md:tracking-normal text-text-secondary md:text-text-muted truncate">{track.artist}{song.era?.name ? ` · ${song.era.name}` : ''}{duration !== '0:00' ? ` · ${duration}` : ''}</p>
 
           {(song.album || song.producers || song.engineers) && (
-            <div className="mt-3 pt-3 border-t border-[var(--border)] space-y-1 text-xs">
+            <div className="mt-3 pt-3 border-t border-[var(--separator)] md:border-[var(--border)] space-y-1 text-footnote md:text-xs md:tracking-normal">
               {song.album && <p className="truncate"><span className="text-text-muted">Album: </span><span className="text-text-primary">{song.album}</span></p>}
               {song.producers && <p className="truncate"><span className="text-text-muted">Producers: </span><span className="text-text-primary">{song.producers}</span></p>}
               {song.engineers && <p className="truncate"><span className="text-text-muted">Engineers: </span><span className="text-text-primary">{song.engineers}</span></p>}
@@ -114,7 +114,7 @@ export default function TrackView(): JSX.Element {
             {canPlay && (
               <button
                 onClick={() => playTrack(track, [track])}
-                className="flex items-center justify-center gap-2 px-6 py-3 rounded-full bg-accent text-black text-sm font-bold hover:scale-[1.02] active:scale-95 transition-transform shadow-lg"
+                className="flex items-center justify-center gap-2 px-6 h-12 md:h-auto md:py-3 rounded-full bg-accent text-black text-headline md:text-sm md:font-bold md:tracking-normal hover:scale-[1.02] active:scale-95 transition-transform md:shadow-lg"
               >
                 <Play size={17} fill="currentColor" /> Play
               </button>
