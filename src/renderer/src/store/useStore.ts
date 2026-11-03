@@ -296,6 +296,9 @@ interface AppState {
   // Ramp volume down briefly on pause (and back up on resume) instead of
   // cutting the audio off instantly.
   pauseFadeEnabled: boolean
+  // Pause when the output device disconnects mid-song and play again when it
+  // is back (Player.tsx, lib/outputDisconnect). Device-local, like audioOutput.
+  pauseOnDisconnect: boolean
   sleepTimerEnd: number | null
   audioOutput: string
   accentColor: string
@@ -718,6 +721,7 @@ interface AppActions {
 
   setCrossfade: (enabled: boolean, duration: number) => void
   setPauseFade: (enabled: boolean) => void
+  setPauseOnDisconnect: (enabled: boolean) => void
   setSleepTimer: (endTimestamp: number | null) => void
   setAudioOutput: (deviceId: string) => void
   setAccentColor: (color: string) => void
@@ -1849,6 +1853,7 @@ export const useStore = create<AppStore>((set, get, store) => ({
   crossfadeEnabled: ls.get<boolean>('crossfadeEnabled') ?? false,
   crossfadeDuration: ls.get<number>('crossfadeDuration') ?? 5,
   pauseFadeEnabled: ls.get<boolean>('pauseFadeEnabled') ?? false,
+  pauseOnDisconnect: ls.get<boolean>('pauseOnDisconnect') ?? true,
   sleepTimerEnd: null,
   audioOutput: ls.get<string>('audioOutput') ?? '',
   accentColor: ls.get<string>('accentColor') ?? '#1db954',
@@ -1891,6 +1896,7 @@ export const useStore = create<AppStore>((set, get, store) => ({
     get()._scheduleProfilePush(['userSettings'])
   },
   setPauseFade: (enabled) => { set({ pauseFadeEnabled: enabled }); ls.set('pauseFadeEnabled', enabled); get()._scheduleProfilePush(['userSettings']) },
+  setPauseOnDisconnect: (enabled) => { set({ pauseOnDisconnect: enabled }); ls.set('pauseOnDisconnect', enabled) },
   setSleepTimer: (sleepTimerEnd) => set({ sleepTimerEnd }),
   setAudioOutput: (deviceId) => { set({ audioOutput: deviceId }); ls.set('audioOutput', deviceId) },
   setPreferOgVersion: (enabled) => { set({ preferOgVersion: enabled }); ls.set('preferOgVersion', enabled); get()._scheduleProfilePush(['userSettings']) },

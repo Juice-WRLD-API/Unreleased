@@ -47,6 +47,7 @@ import { cachedDonorUrl, donorFileIdFromTrackId, ensureDonorUrl, isDonorStreamUr
 import { isSessionEditPlaceholder } from '../lib/sessionEditLinksMirror'
 import { SessionEditNotFoundError, peekSessionEditFile } from '../lib/sessionEditsApi'
 import { showPlaybackNotice } from '../lib/playbackNotice'
+import { EMPTY_OUTPUT_WATCH, nextOutputWatch } from '../lib/outputDisconnect'
 import { showQueueEndedToast } from '../lib/queueEndedToast'
 import PlaybackNotice from './PlaybackNotice'
 import { ensureDonorCover } from '../lib/donorCoverArt'
@@ -1608,6 +1609,50 @@ export default function Player(): JSX.Element {
     }
     apply()
   }, [audioOutput])
+
+  // Headphones or Bluetooth disconnecting mid-song: pause, and play again once
+  // that device is the output again (lib/outputDisconnect).
+  useEffect(() => {
+    const media = navigator.mediaDevices
+    if (!media?.enumerateDevices) return
+    let watch = EMPTY_OUTPUT_WATCH
+    let seq = 0
+    const check = async (): Promise<void> => {
+      const mine = ++seq
+      let devices: MediaDeviceInfo[]
+      try { devices = await media.enumerateDevices() } catch { return }
+      if (mine !== seq) return
+      const s = useStore.getState()
+      const step = nextOutputWatch(watch, devices.filter((d) => d.kind === 'audiooutput'), s.audioOutput, s.isPlaying)
+      watch = step.watch
+      if (!s.pauseOnDisconnect) {
+        watch = { ...watch, lost: null, lostLabel: '' }
+        return
+      }
+      if (step.action === 'pause') {
+        s.setIsPlaying(false)
+        showPlaybackNotice(`Paused: ${watch.lostLabel || 'audio device'} disconnected`)
+      } else if (step.action === 'resume') {
+        s.setIsPlaying(true)
+      }
+    }
+    void check()
+    media.addEventListener('devicechange', check)
+    // A new pick, or the user starting a song again, ends the wait.
+    const unsubscribe = useStore.subscribe((state, prev) => {
+      if (state.audioOutput !== prev.audioOutput) {
+        watch = { ...watch, lost: null, lostLabel: '' }
+        void check()
+      } else if (watch.lost && state.isPlaying && !prev.isPlaying) {
+        watch = { ...watch, lost: null, lostLabel: '' }
+      }
+    })
+    return () => {
+      seq++
+      media.removeEventListener('devicechange', check)
+      unsubscribe()
+    }
+  }, [])
 
   // Credits a play once the track has actually been listened to, rather than
   // the moment it starts — skipping through a queue or letting a crossfade

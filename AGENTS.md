@@ -1,6 +1,6 @@
 # Agent guide: Juice WRLD API and Unreleased
 
-**Version 1.50** · updated 2026-11-02. Bump the version and date whenever you
+**Version 1.51** · updated 2026-11-03. Bump the version and date whenever you
 change this file (minor for fixes and additions, major for rewrites).
 
 **Keep this file current.** If you find something in the docs or this file that
@@ -340,6 +340,20 @@ native plugins in `android/app/src/main/java/com/juicewrldapi/player` (SAF
 library, offline storage, Downloads, APK self-update). iOS: build in Xcode
 (`ios/App/App.xcodeproj`). Releases use `android-v*` / `ios-v*` tags, always
 marked pre-release.
+
+Bluetooth on Android: `PlaybackService` pauses on `AUDIO_BECOMING_NOISY` and,
+when that pause cut off a playing song, plays again once a Bluetooth output
+connects (Settings → Playback → Resume when Bluetooth connects, terminal
+`set bluetooth-resume`; stored in native SharedPreferences too). It
+works only because the foreground service keeps the process alive while
+paused. iOS suspends a paused app and browsers can't see Bluetooth, so
+neither can do this; there, resuming relies on the car sending Play to the
+lock-screen controls (the Web MediaSession `play` handler). Desktop (`app`)
+does its own version from `devicechange`: Settings → Playback → Pause when
+headphones disconnect (`set pause-on-disconnect`), logic in
+`lib/outputDisconnect.ts`. It needs real device ids, which Chromium only
+gives a page with microphone permission (Electron's check handler allows the
+main window), so it is a no-op on the website.
 
 **CDN node**: read `jwa-cdn-node/AGENTS.md`. Server side is
 `backend/cdn/` and `docs/16-distributed-cdn-api.md`.

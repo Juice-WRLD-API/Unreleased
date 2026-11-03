@@ -25,7 +25,7 @@ const SYNC_KEYS = [
   'lastfmUser', 'lastfmEnabled',
   'popoutWindows',
   'hotkeyBindings', 'hotkeySeekSeconds', 'globalHotkeysEnabled',
-  'playbackSpeed', 'lyricsOffset', 'audioOutput', 'sleepTimerEnd',
+  'playbackSpeed', 'lyricsOffset', 'audioOutput', 'pauseOnDisconnect', 'sleepTimerEnd',
   // Full equalizer/effects state, so the EQ pop-out window's controls drive
   // the main window's audio chain (only the main window owns audio elements).
   'eqEnabled', 'eqGains', 'eqPreset', 'eqBalance', 'eqMono', 'eqBoost', 'audioFx', 'eqUserPresets', 'skipSilence',

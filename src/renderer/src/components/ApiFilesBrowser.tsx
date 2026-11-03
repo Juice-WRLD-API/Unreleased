@@ -236,7 +236,6 @@ export default function ApiFilesBrowser({ embedded = false }: { embedded?: boole
     onPointerLeave: () => { if (folderHoverTimer.current) clearTimeout(folderHoverTimer.current) },
   }
   useEffect(() => () => { if (folderHoverTimer.current) clearTimeout(folderHoverTimer.current) }, [])
-  const { playing, handlePlay } = usePlayFileEntry(entries, playTrack)
   const [downloading, setDownloading] = useState<string | null>(null)
   const [textFile, setTextFile] = useState<TextFileSource | null>(null)
   const { lightboxItems, setLightboxItems, lightboxIndex, setLightboxIndex, openLightbox } = useFileLightbox({ entries, searchResults, isSearching, activeChannel })
@@ -409,7 +408,7 @@ export default function ApiFilesBrowser({ embedded = false }: { embedded?: boole
 
   const handleLocalPlay = (entry: { name: string; path: string }): void => {
     const track = localFileToTrack(entry)
-    const queue = localEntries
+    const queue = sortedEntries
       .filter(e => e.type === 'file' && getMediaType(e.name) === 'audio')
       .map(localFileToTrack)
     playTrack(track, queue.length > 0 ? queue : [track])
@@ -596,6 +595,9 @@ export default function ApiFilesBrowser({ embedded = false }: { embedded?: boole
     () => sortEntries(localMode ? localEntries : isSearching ? searchResults : entries, sortBy, sortDir),
     [localMode, localEntries, isSearching, searchResults, entries, sortBy, sortDir]
   )
+
+  // The queue follows the order on screen, not the server's alphabetical one.
+  const { playing, handlePlay } = usePlayFileEntry(sortedEntries, playTrack)
 
   // Type filter — folders stay visible regardless of filter so navigation
   // still works; only files are matched against the selected media type.

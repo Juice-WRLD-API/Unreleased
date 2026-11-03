@@ -1,5 +1,6 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
-import { ChevronLeft, Play, Shuffle, MoreHorizontal, Music, ListEnd, ListPlus, Loader2 } from 'lucide-react'
+import { ChevronLeft, Play, Shuffle, MoreHorizontal, Music, ListEnd, ListPlus, ListMusic, Plus, Loader2 } from 'lucide-react'
+import { addSongsInBackground } from '../lib/optimisticPlaylist'
 import { useStore, useStorePick } from '../store/useStore'
 import * as albumsApi from '../lib/albumsApi'
 import type { Album, AlbumSongEntry } from '../lib/albumsApi'
@@ -120,8 +121,8 @@ function Shelf({ title, albums, coverOf, onOpen, onPlay }: {
 }
 
 export default function AlbumsView(): JSX.Element {
-  const { albumsSelectedId: selectedId, setAlbumsSelectedId: setSelectedId, songPrefs, currentTrack, isPlaying, playTrack, shufflePlay, playNext, addToQueue, setActiveView, previousView } =
-    useStorePick('albumsSelectedId', 'setAlbumsSelectedId', 'songPrefs', 'currentTrack', 'isPlaying', 'playTrack', 'shufflePlay', 'playNext', 'addToQueue', 'setActiveView', 'previousView')
+  const { albumsSelectedId: selectedId, setAlbumsSelectedId: setSelectedId, songPrefs, currentTrack, isPlaying, playTrack, shufflePlay, playNext, addToQueue, setActiveView, previousView, playlists, account, refreshPlaylists, setShowUserAuth } =
+    useStorePick('albumsSelectedId', 'setAlbumsSelectedId', 'songPrefs', 'currentTrack', 'isPlaying', 'playTrack', 'shufflePlay', 'playNext', 'addToQueue', 'setActiveView', 'previousView', 'playlists', 'account', 'refreshPlaylists', 'setShowUserAuth')
   const canEdit = useCanEdit()
   const [albums, setAlbums] = useState<Album[] | null>(null)
   const [error, setError] = useState(false)
@@ -178,6 +179,8 @@ export default function AlbumsView(): JSX.Element {
   })
 
   const tracksOf = (a: Album): Track[] => rowsOf(a).flatMap((r) => (r.song ? [songToTrack(r.song)] : []))
+
+  const songIdsOf = (a: Album): number[] => rowsOf(a).flatMap((r) => (r.songId != null ? [r.songId] : []))
 
   const playAlbum = (a: Album, startAt = 0): void => {
     const queue = tracksOf(a)
@@ -347,6 +350,23 @@ export default function AlbumsView(): JSX.Element {
             items={[
               { label: 'Play Next', icon: ListPlus, onSelect: () => { [...tracksOf(a)].reverse().forEach((t) => playNext(t)) } },
               { label: 'Add to Queue', icon: ListEnd, onSelect: () => { tracksOf(a).forEach((t) => addToQueue(t)) } },
+              {
+                label: 'Add to Playlist',
+                icon: Plus,
+                onOpen: () => { if (account) void refreshPlaylists() },
+                children: account
+                  ? playlists.map((p) => ({ label: p.name, icon: ListMusic, onSelect: () => { void addSongsInBackground(p.id, songIdsOf(a)) } }))
+                  : [],
+                childrenEmpty: account ? 'No playlists yet.' : undefined,
+                childrenFooter: !account ? (
+                  <div className="p-1">
+                    <p className="text-xs text-text-muted mb-2">Log in to save to playlists.</p>
+                    <button onClick={() => { setShowUserAuth(true); setAlbumMenu(null) }} className="w-full py-1.5 rounded-lg bg-accent/15 text-accent text-xs font-semibold">
+                      Log in
+                    </button>
+                  </div>
+                ) : undefined,
+              },
             ]}
           />
         )}
