@@ -591,6 +591,7 @@ export default function ShareLyricsModal({ title, artist, imageUrl, rawLyrics, o
                     value={customTextColor}
                     onChange={(hex) => { setCustomTextColor(hex); setTextColor('custom') }}
                     title="Custom color"
+                    pipette
                     className={`w-6 h-6 rounded-full border-2 transition-transform ${
                       textColor === 'custom' ? 'scale-110 border-text-primary' : 'border-transparent hover:scale-105'
                     }`}

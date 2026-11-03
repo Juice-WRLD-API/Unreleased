@@ -2094,6 +2094,8 @@ export default function Player(): JSX.Element {
     'next-lyric-style': () => desktopActions.stepLyricStyle(1),
     'wrld-widgets':     () => { const v = useVizStore.getState(); v.setWrldWidgets(!v.wrldWidgets) },
     'focus-search':     () => {
+      // The open view gets first claim (e.g. a playlist's collapsed track search).
+      if (!window.dispatchEvent(new Event('app:focus-search', { cancelable: true }))) return
       const input = document.querySelector<HTMLInputElement>('input[placeholder*="Search" i]')
       input?.focus()
       input?.select()
