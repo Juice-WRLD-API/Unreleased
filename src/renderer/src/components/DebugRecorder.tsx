@@ -12,30 +12,76 @@ import {
 } from '../lib/debugRecorder'
 import { openDebugLogBlob, openDebugLogFile } from '../lib/debugLog'
 import { showAppToast } from '../lib/appToast'
+import { broadcastDebugState, onRemoteDebugState, registerDebugBridge, sendDebugToggle, type RemoteDebugState } from '../lib/windowSync'
+import { IS_FLOAT_WINDOW } from '../store/useStore'
 import { Toggle } from './SettingsRow'
 
+// A pop-out (Settings opens as one by default) makes almost no requests of its
+// own, so it records the main window instead: its button sends the toggle
+// there and shows the state the main window reports back.
+const REMOTE = IS_FLOAT_WINDOW && !!(window as unknown as { electron?: unknown }).electron
+let remoteState: RemoteDebugState = { recording: false, anonymous: false, startedAt: 0, count: 0 }
+const remoteListeners = new Set<() => void>()
+
+function localState(): RemoteDebugState {
+  const recording = isDebugRecording()
+  return { recording, anonymous: isDebugRecordingAnonymous(), startedAt: debugRecordingStartedAt(), count: recording ? debugRecordingCount() : 0 }
+}
+
+/** Main window: report the recorder's state to pop-outs - at once on a start or
+ *  stop, at most once a second for the event count. Pop-out: listen for it. */
+export function initDebugRecorderSync(): void {
+  if (REMOTE) {
+    onRemoteDebugState((state) => {
+      remoteState = state
+      for (const l of remoteListeners) l()
+    })
+    return
+  }
+  registerDebugBridge({ toggle: toggleDebugRecording, state: localState })
+  let wasRecording = isDebugRecording()
+  let pending: ReturnType<typeof setTimeout> | null = null
+  subscribeDebugRecorder(() => {
+    const recording = isDebugRecording()
+    if (recording !== wasRecording) {
+      wasRecording = recording
+      if (pending) { clearTimeout(pending); pending = null }
+      broadcastDebugState(localState())
+    } else if (recording && !pending) {
+      pending = setTimeout(() => { pending = null; broadcastDebugState(localState()) }, 1000)
+    }
+  })
+}
+
 export function useDebugRecorder(): { recording: boolean; anonymous: boolean; anonymousPref: boolean; elapsed: number; count: number } {
-  const [recording, setRecording] = useState(isDebugRecording)
-  const [anonymous, setAnonymous] = useState(isDebugRecordingAnonymous)
+  const read = (): RemoteDebugState => (REMOTE ? remoteState : localState())
+  const [state, setState] = useState(read)
   const [anonymousPref, setAnonymousPref] = useState(getDebugAnonymousPref)
   const [, tick] = useState(0)
   // Listeners fire on every captured entry; only the on/off flips re-render.
-  useEffect(() => subscribeDebugRecorder(() => {
-    setRecording(isDebugRecording())
-    setAnonymous(isDebugRecordingAnonymous())
-    setAnonymousPref(getDebugAnonymousPref())
-  }), [])
+  useEffect(() => {
+    const update = (): void => {
+      const next = read()
+      setState((prev) => (prev.recording === next.recording && prev.anonymous === next.anonymous && prev.startedAt === next.startedAt ? prev : next))
+      setAnonymousPref(getDebugAnonymousPref())
+    }
+    const off = subscribeDebugRecorder(update)
+    remoteListeners.add(update)
+    return () => { off(); remoteListeners.delete(update) }
+  }, [])
+  const { recording } = state
   useEffect(() => {
     if (!recording) return
     const id = setInterval(() => tick(n => n + 1), 1000)
     return () => clearInterval(id)
   }, [recording])
+  const live = read()
   return {
     recording,
-    anonymous,
+    anonymous: state.anonymous,
     anonymousPref,
-    elapsed: recording ? Math.max(0, Math.floor((Date.now() - debugRecordingStartedAt()) / 1000)) : 0,
-    count: recording ? debugRecordingCount() : 0,
+    elapsed: recording ? Math.max(0, Math.floor((Date.now() - state.startedAt) / 1000)) : 0,
+    count: recording ? live.count : 0,
   }
 }
 
@@ -60,6 +106,7 @@ export function formatElapsed(sec: number): string {
 }
 
 export function toggleDebugRecording(): void {
+  if (REMOTE) { sendDebugToggle(); return }
   if (!isDebugRecording()) { startDebugRecording(); return }
   const { blob, filename, count } = stopAndDownloadDebugRecording()
   showAppToast(`Debug log saved (${count} events)`, {

@@ -1,4 +1,5 @@
 import { PopLayer } from './PopLayer'
+import { Pipette } from 'lucide-react'
 import { useEffect, useRef, useState, type CSSProperties, type KeyboardEvent, type PointerEvent, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 import { useAnchoredPopover } from './anchoredPopover'
@@ -41,6 +42,13 @@ function hsvToHex({ h, s, v }: Hsv): string {
   return '#' + [f(5), f(3), f(1)].map(c => Math.round(c * 255).toString(16).padStart(2, '0')).join('')
 }
 const clamp01 = (n: number): number => Math.max(0, Math.min(1, n))
+// Dark ink on light swatches, white on dark ones (relative luminance).
+function inkFor(hex: string): string {
+  const n = parseInt(hex.slice(1), 16)
+  const lin = (c: number): number => { c /= 255; return c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4 }
+  const l = 0.2126 * lin(n >> 16) + 0.7152 * lin((n >> 8) & 255) + 0.0722 * lin(n & 255)
+  return l > 0.4 ? 'rgba(0,0,0,0.7)' : '#fff'
+}
 
 function Panel({ value, onChange, onClose }: { value: string; onChange: (hex: string) => void; onClose: () => void }): JSX.Element {
   const [hsv, setHsv] = useState<Hsv>(() => hexToHsv(value))
@@ -163,7 +171,7 @@ function Panel({ value, onChange, onClose }: { value: string; onChange: (hex: st
 }
 
 export default function ThemedColorPicker({
-  value, onChange, className = '', style, title, disabled = false, children,
+  value, onChange, className = '', style, title, disabled = false, pipette = false, children,
 }: {
   /** A hex color; anything unparseable shows as grey. */
   value: string
@@ -174,6 +182,8 @@ export default function ThemedColorPicker({
   style?: CSSProperties
   title?: string
   disabled?: boolean
+  /** Show a pipette glyph on the swatch, so it reads as a picker next to preset swatches. */
+  pipette?: boolean
   children?: ReactNode
 }): JSX.Element {
   const triggerRef = useRef<HTMLButtonElement>(null)
@@ -193,9 +203,10 @@ export default function ThemedColorPicker({
         onClick={() => (pop.open ? pop.hide() : pop.show())}
         aria-haspopup="dialog"
         aria-expanded={pop.open}
-        className={`shrink-0 cursor-pointer disabled:cursor-default shadow-[inset_0_0_0_1px_rgba(255,255,255,0.12)] ${className}`}
+        className={`shrink-0 cursor-pointer disabled:cursor-default shadow-[inset_0_0_0_1px_rgba(255,255,255,0.12)] ${pipette ? 'inline-flex items-center justify-center' : ''} ${className}`}
         style={{ background: hex, WebkitAppRegion: 'no-drag', ...style } as CSSProperties}
       >
+        {pipette && <Pipette size={13} strokeWidth={2.25} color={inkFor(hex)} aria-hidden />}
         {children}
       </button>
 

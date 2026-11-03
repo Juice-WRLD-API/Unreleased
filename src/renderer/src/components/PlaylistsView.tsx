@@ -645,6 +645,7 @@ export default function PlaylistsView(): JSX.Element {
   const fieldSearch = useSongFieldSearch(search)
   const [searchOpen, setSearchOpen] = useState(false)
   const searchInputRef = useRef<HTMLInputElement>(null)
+  const searchToggleRef = useRef<HTMLButtonElement>(null)
 
   // Compact view — the normal list, but one row per SONG: every version of a
   // song the playlist holds collapses into its first entry, and a song with
@@ -1090,6 +1091,19 @@ export default function PlaylistsView(): JSX.Element {
   useEffect(() => {
     if (searchOpen) searchInputRef.current?.focus()
   }, [searchOpen])
+
+  // Ctrl+F (focus-search) lands on this playlist's track search while one is
+  // open, expanding it from the icon if needed.
+  useEffect(() => {
+    const h = (e: Event): void => {
+      const input = searchInputRef.current
+      if (!input && !searchToggleRef.current) return
+      e.preventDefault()
+      if (input) { input.focus(); input.select() } else setSearchOpen(true)
+    }
+    window.addEventListener('app:focus-search', h)
+    return () => window.removeEventListener('app:focus-search', h)
+  }, [])
 
   // Auto-open playlist from URL params (e.g. /playlists?id=123&view=shared)
   useEffect(() => {
@@ -2754,6 +2768,7 @@ export default function PlaylistsView(): JSX.Element {
                   </>
                 ) : (
                   <button
+                    ref={searchToggleRef}
                     onClick={() => setSearchOpen(true)}
                     className="flex items-center justify-center w-9 h-9 rounded-xl text-text-muted hover:text-text-primary bg-surface-overlay transition-colors"
                     title="Search tracks"

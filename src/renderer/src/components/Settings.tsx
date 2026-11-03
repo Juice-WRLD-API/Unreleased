@@ -275,6 +275,7 @@ function LyricColorRow({ label, presets, value, fallback, onChange }: {
         }}
         className="w-6 h-6 rounded-full"
         title="Custom color"
+        pipette
       />
     </div>
   )
@@ -1503,6 +1504,7 @@ export default function Settings({ floating = false }: { floating?: boolean }): 
                       }}
                       className="w-7 h-7 rounded-full"
                       title="Custom color"
+                      pipette
                     />
                   </div>
                 </div>

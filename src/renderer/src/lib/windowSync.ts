@@ -107,6 +107,42 @@ type SyncMessage =
   // cheap to ship, and without it the main window's Library wouldn't show the
   // new file until its next rescan.
   | { type: 'library-add'; track: LibraryTrack }
+  // The debug recorder patches fetch/console per window, so a recording started
+  // in the Settings pop-out only ever saw the pop-out (an empty log). Pop-outs
+  // ask the main window to start/stop instead, and it reports its state back.
+  | { type: 'debug-toggle' }
+  | { type: 'debug-state'; state: RemoteDebugState }
+
+export interface RemoteDebugState {
+  recording: boolean
+  anonymous: boolean
+  startedAt: number
+  count: number
+}
+
+// Main window: runs the toggle and reports state. Pop-out: receives state.
+let debugBridge: { toggle: () => void; state: () => RemoteDebugState } | null = null
+let debugStateListener: ((state: RemoteDebugState) => void) | null = null
+
+export function registerDebugBridge(bridge: { toggle: () => void; state: () => RemoteDebugState }): void {
+  debugBridge = bridge
+}
+
+export function onRemoteDebugState(fn: (state: RemoteDebugState) => void): void {
+  debugStateListener = fn
+}
+
+export function sendDebugToggle(): void {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const el = (window as any).electron
+  el?.windowSyncSend?.({ type: 'debug-toggle' })
+}
+
+export function broadcastDebugState(state: RemoteDebugState): void {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const el = (window as any).electron
+  el?.windowSyncSend?.({ type: 'debug-state', state })
+}
 
 // Playback commands from pop-outs land here — the main window's Player
 // registers its dispatch table (the same one the tray menu uses) so remote
@@ -185,6 +221,11 @@ export function initWindowSync(isFloat: boolean): void {
       // Pop-outs boot with localStorage-persisted values only; the main
       // window answers with the live session state (account, update status…).
       if (!isFloat) el.windowSyncSend({ type: 'snapshot', payload: snapshot() })
+      if (!isFloat && debugBridge) broadcastDebugState(debugBridge.state())
+    } else if (msg.type === 'debug-toggle') {
+      if (!isFloat) debugBridge?.toggle()
+    } else if (msg.type === 'debug-state') {
+      if (isFloat) debugStateListener?.(msg.state)
     } else if (msg.type === 'command') {
       if (!isFloat) playerCommandHandler?.(msg.cmd, msg.arg)
     } else if (msg.type === 'navigate') {

@@ -2129,6 +2129,8 @@ export default function Player(): JSX.Element {
     'toggle-queue':     () => { const s = useStore.getState(); s.setShowQueue(!s.showQueue) },
     'open-terminal':    () => { const s = useStore.getState(); s.setActiveView(s.activeView === 'terminal' ? (s.previousView ?? 'home') : 'terminal') },
     'focus-search':     () => {
+      // The open view gets first claim (e.g. a playlist's collapsed track search).
+      if (!window.dispatchEvent(new Event('app:focus-search', { cancelable: true }))) return
       const input = document.querySelector<HTMLInputElement>('input[placeholder*="Search" i]')
       input?.focus()
       input?.select()

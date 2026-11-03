@@ -8,6 +8,7 @@ import { initWindowSync } from './lib/windowSync'
 import { initDesktopBridge } from './lib/desktopBridge'
 import { installTranslateDomGuard } from './lib/translateDomGuard'
 import { installDebugRecorder } from './lib/debugRecorder'
+import { initDebugRecorderSync } from './components/DebugRecorder'
 import { installHoverScrollTruncated } from './lib/hoverScrollTruncated'
 import { installImageFade } from './lib/imageFade'
 
@@ -22,7 +23,7 @@ installImageFade()
 // Electron window — main and pop-outs — joins the store-sync channel.
 const floatView = new URLSearchParams(window.location.search).get('float')
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-if ((window as any).electron) initWindowSync(!!floatView)
+if ((window as any).electron) { initWindowSync(!!floatView); initDebugRecorderSync() }
 // Desktop (Windows): only the main window drives the light and the desktop widgets.
 if (!floatView) initDesktopBridge()
 declare global {
