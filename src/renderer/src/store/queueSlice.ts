@@ -636,10 +636,30 @@ export const createQueueSlice: StateCreator<any, [], [], QueueSlice> = (set, get
 
   // ── prevTrack ──────────────────────────────────────────────────────────────
   prevTrack: () => {
-    const { queue, queueIndex } = get()
+    const { queue, queueIndex, repeat, shuffle, radioMode, playHistory } = get()
     if (queue.length === 0) return null
 
-    const prevIdx = Math.max(0, queueIndex - 1)
+    if (queueIndex <= 0) {
+      // Repeat-all came round to the top (a shuffled wrap even reshuffles to
+      // index 0), so the song before this one is the last of the previous
+      // pass, which only playHistory still knows.
+      const last = playHistory[0]
+      const at = !radioMode && repeat === 'all' && last ? queue.findIndex((t: Track) => t.id === last.id) : -1
+      if (at <= 0) return null
+      if (shuffle) {
+        // Pull it in front of the current song so Next carries on with this
+        // pass instead of jumping to wherever the reshuffle put it.
+        const track = queue[at]
+        set({ queue: [track, ...queue.filter((_: Track, i: number) => i !== at)], queueIndex: 0, currentTrack: track, currentTrackFull: null, isPlaying: true, progress: 0, currentTime: 0 })
+        return track
+      }
+      if (at !== queue.length - 1) return null
+      const track = queue[at]
+      set({ queueIndex: at, currentTrack: track, currentTrackFull: null, isPlaying: true, progress: 0, currentTime: 0 })
+      return track
+    }
+
+    const prevIdx = queueIndex - 1
     const track = queue[prevIdx]
     set({ queueIndex: prevIdx, currentTrack: track, currentTrackFull: fullFor(track), isPlaying: true, progress: 0, currentTime: 0 })
     get()._maybeSwapToPreferredVersion(track)

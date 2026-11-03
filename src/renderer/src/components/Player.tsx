@@ -1973,10 +1973,12 @@ export default function Player(): JSX.Element {
       restartCurrentTrack()
       return
     }
-    // There is no earlier queue entry to load. Restart in place and preserve
-    // pause state instead of asking prevTrack() to select index zero again.
+    // At the top of the queue prevTrack() only moves when repeat-all wrapped
+    // round (back to the last song of the previous pass). Otherwise restart in
+    // place and preserve pause state.
     if (queueIndex <= 0) {
-      restartCurrentTrack()
+      cancelCF()
+      if (!prevTrack()) restartCurrentTrack()
       return
     }
     // The loop belonged to the song being left, as in handleNext.
