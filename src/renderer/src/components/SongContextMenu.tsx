@@ -302,6 +302,10 @@ export default function SongContextMenu({
   const canShareToChat = hasChatAccess(account) && hasValidSong && !!track.streamUrl && !isDonorStreamUrl(track.streamUrl)
   // Any signed-in account can send in cover art; a manager reviews it.
   const canSubmitCover = hasValidSong && !!account
+  // A file with no catalogue song (a session file from Files) links the way
+  // Files' Copy link does: its stream URL. Donor and local files aren't public.
+  const fileLink = !hasValidSong && !isLocalOnly && !!track.path && !isDonorStreamUrl(track.streamUrl) ? track.streamUrl : undefined
+  const canCopyLink = hasValidSong || !!fileLink
   const hasShareRows = !!(canShareToChat || onShareLyrics || canSyncLyrics)
   // Sharing, lyrics, cover art and reporting share one flyout, so the top
   // level stays short. A lone row is shown flat rather than as a submenu of one.
@@ -332,9 +336,10 @@ export default function SongContextMenu({
   ] satisfies ContextMenuEntry[]).filter((r): r is Exclude<typeof r, false | undefined | null> => !!r)
 
   const handleCopyLink = async (): Promise<void> => {
-    if (!hasValidSong) return
+    const url = hasValidSong ? trackShareUrl(songId) : fileLink
+    if (!url) return
     try {
-      await navigator.clipboard.writeText(trackShareUrl(songId))
+      await navigator.clipboard.writeText(url)
       setLinkCopied(true)
       setTimeout(() => setLinkCopied(false), 2500)
     } catch {}
@@ -445,7 +450,7 @@ export default function SongContextMenu({
         },
         moreRows.length > 1 && { icon: Ellipsis, label: 'More', children: moreRows },
         moreRows.length === 1 && moreRows[0],
-        hasValidSong && { icon: linkCopied ? Check : Link2, label: linkCopied ? 'Link copied' : 'Copy link', keepOpen: true, onSelect: handleCopyLink },
+        canCopyLink && { icon: linkCopied ? Check : Link2, label: linkCopied ? 'Link copied' : 'Copy link', keepOpen: true, onSelect: handleCopyLink },
         onShowInFiles && !!track.path && { icon: Folder, label: 'Show in Files', onSelect: onShowInFiles },
         canEdit && hasValidSong && { icon: Pencil, label: 'Edit', onSelect: () => useStore.getState().openSongEditor(songId as number) },
         onToggleLike && { icon: liked ? HeartFilled : Heart, label: liked ? 'Unlike' : 'Like', active: liked, onSelect: onToggleLike },

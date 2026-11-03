@@ -246,7 +246,6 @@ export default function ApiFilesView({ embedded = false }: { embedded?: boolean 
   // undefined = not looked up yet, null = looked up, no match.
   const { trackerMatches, resolveTrackerMatch } = useTrackerMatches()
   const { playlistDoneId, addToPlaylist, resetPlaylistDone } = useAddFileToPlaylist()
-  const { playing, handlePlay } = usePlayFileEntry(entries, playTrack)
   const { lightboxItems, lightboxIndex, setLightboxIndex, openLightbox } = useFileLightbox({ entries, searchResults, isSearching, activeChannel })
   const { zipStatus, zipProgress, resetZip, downloadZip, downloadFolder } = useApiFilesZip({
     activeChannel,
@@ -394,6 +393,9 @@ export default function ApiFilesView({ embedded = false }: { embedded?: boolean 
     () => sortEntries(isSearching ? searchResults : entries, sortBy, sortDir),
     [isSearching, searchResults, entries, sortBy, sortDir]
   )
+
+  // The queue follows the order on screen, not the server's alphabetical one.
+  const { playing, handlePlay } = usePlayFileEntry(sortedEntries, playTrack)
 
   // Type filter - folders stay visible regardless of filter so navigation
   // still works; only files are matched against the selected media type.
