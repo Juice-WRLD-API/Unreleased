@@ -49,9 +49,10 @@ async function coverFrom(url: string | undefined): Promise<Mp3Cover | undefined>
 }
 
 /** What to embed for this download, or null when nothing should be. */
-export async function embedForDownload(songId: number | null | undefined, path: string): Promise<DownloadEmbed | null> {
+export async function embedForDownload(songId: number | null | undefined, path: string, tagged?: boolean): Promise<DownloadEmbed | null> {
   if (songId == null || !/\.mp3$/i.test(path)) return null
-  if (!useStore.getState().embedSongInfoOnDownload) return null
+  // `tagged` overrides the setting for this one download.
+  if (!(tagged ?? useStore.getState().embedSongInfoOnDownload)) return null
   let song: JWApiSong
   try {
     song = await getSongById(songId)

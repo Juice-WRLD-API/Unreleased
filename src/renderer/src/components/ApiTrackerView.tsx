@@ -1964,12 +1964,6 @@ export default function ApiTrackerView(): JSX.Element {
   useEffect(() => { safeSetLS(LS_TRACKER_ORDER_DIR, orderDir) }, [orderDir])
 
   const [recentlyAddedMap, setRecentlyAddedMap] = useState<Map<string, string> | null>(null)
-  useEffect(() => {
-    if (orderField !== 'date_added') return
-    let cancelled = false
-    loadRecentlyAddedMap().then((m) => { if (!cancelled) setRecentlyAddedMap(m) }).catch(console.error)
-    return () => { cancelled = true }
-  }, [orderField])
 
   const linkSessionEdit = useCallback((s: JWApiSong): JWApiSong => {
     if (s.category !== 'recording_session') return s
@@ -2009,12 +2003,22 @@ export default function ApiTrackerView(): JSX.Element {
   // the query the server sees (searchall has no per-field concept) and
   // applied client-side instead - see the song-list fetch effect below.
   const parsedSearch = useMemo(() => parseSearchQuery(debouncedSearch), [debouncedSearch])
+  // A `sort:` token in the search wins over the header sort while it's there
+  // (the saved header choice is left alone).
+  const activeOrderField: OrderField | null = parsedSearch.sort?.field ?? orderField
+  const activeOrderDir = parsedSearch.sort?.dir ?? orderDir
+  useEffect(() => {
+    if (activeOrderField !== 'date_added') return
+    let cancelled = false
+    loadRecentlyAddedMap().then((m) => { if (!cancelled) setRecentlyAddedMap(m) }).catch(console.error)
+    return () => { cancelled = true }
+  }, [activeOrderField])
   // ?omit= for the song-list fetch below: drop whatever display fields the
   // current view/layout and field filters don't read.
   const bulkOmit = useTrackerOmit([
     ...(viewMode === 'grid' ? GRID_API_FIELDS : apiFieldsFor(viewMode === 'list' ? listColumns : detailFields)),
     ...filterApiFields(parsedSearch.filters),
-    ...(orderField === 'date_leaked' ? ['date_leaked'] : []),
+    ...(activeOrderField === 'date_leaked' ? ['date_leaked'] : []),
   ])
   // Sets rather than single values so "Search Settings" can filter by more
   // than one category/era at once (OR'd within each dimension, AND'd across
@@ -2339,21 +2343,22 @@ export default function ApiTrackerView(): JSX.Element {
 
   // Only the title sort reads the prefs, so other sorts don't re-run on every
   // playcount bump.
-  const namePrefs = orderField === 'name' ? songPrefs : null
+  const namePrefs = activeOrderField === 'name' ? songPrefs : null
   // Client-side sort applied over accumulated songs (sort mode only)
   const sortedSongs = useMemo(() => {
     const linked = songs.map(linkSessionEdit)
-    if (!orderField) return linked
-    const base = orderField === 'date_added'
+    if (!activeOrderField) return linked
+    const orderDir = activeOrderDir
+    const base = activeOrderField === 'date_added'
       ? (recentlyAddedMap ? linked.filter((s) => recentlyAddedMap.has(s.path)) : [])
       : linked
-    if (orderField === 'date_leaked') {
+    if (activeOrderField === 'date_leaked') {
       const t = new Map(base.map((s) => [s.id, dateSortValue(s.date_leaked)]))
       return [...base].sort((a, b) => compareDates(t.get(a.id) ?? null, t.get(b.id) ?? null, orderDir))
     }
     return [...base].sort((a, b) => {
       let av: string | number, bv: string | number
-      switch (orderField) {
+      switch (activeOrderField) {
         case 'name':
           av = (namePrefs?.[a.id]?.name || a.name).toLowerCase()
           bv = (namePrefs?.[b.id]?.name || b.name).toLowerCase()
@@ -2381,7 +2386,7 @@ export default function ApiTrackerView(): JSX.Element {
       const cmp = typeof av === 'number' ? av - (bv as number) : (av as string).localeCompare(bv as string)
       return orderDir === 'desc' ? -cmp : cmp
     })
-  }, [songs, orderField, orderDir, recentlyAddedMap, linkSessionEdit, namePrefs])
+  }, [songs, activeOrderField, activeOrderDir, recentlyAddedMap, linkSessionEdit, namePrefs])
 
   // fetchAllCompactGroups is independent of the search box (it has to fetch
   // every group app-wide regardless), so the search query has to be applied
@@ -3380,15 +3385,15 @@ export default function ApiTrackerView(): JSX.Element {
                   </>
                 ) : (
                   <>
-                    <SortBtn field="name" label="Title" className="flex-1" orderField={orderField} orderDir={orderDir} onClick={handleSort} />
+                    <SortBtn field="name" label="Title" className="flex-1" orderField={activeOrderField} orderDir={activeOrderDir} onClick={handleSort} />
                     {/* User-chosen columns - see ListColumnHeader. */}
                     {listColumns.map((key, i) => (
                       <ListColumnHeader
                         key={key}
                         field={key}
                         index={i}
-                        orderField={orderField}
-                        orderDir={orderDir}
+                        orderField={activeOrderField}
+                        orderDir={activeOrderDir}
                         onSort={handleSort}
                         onMenu={openListFieldMenu}
                       />
@@ -3440,7 +3445,7 @@ export default function ApiTrackerView(): JSX.Element {
                 selected={selected}
                 onToggleSelect={toggleSelect}
               />
-            ) : (loading || (orderField === 'date_added' && !recentlyAddedMap)) && sortedSongs.length === 0 ? (
+            ) : (loading || (activeOrderField === 'date_added' && !recentlyAddedMap)) && sortedSongs.length === 0 ? (
               <div className="flex items-center justify-center h-40 gap-2 text-text-muted">
                 <Loader2 size={18} className="animate-spin" />
                 <span className="text-sm">Loading…</span>

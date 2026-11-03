@@ -2,7 +2,7 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react
 import { createPortal } from 'react-dom'
 import { PopLayer } from './PopLayer'
 import { Info } from 'lucide-react'
-import { SEARCH_FIELD_HELP } from '../lib/trackerSearch'
+import { SEARCH_FIELD_HELP, SORT_HELP_KEYS } from '../lib/trackerSearch'
 import { FILE_SEARCH_HELP } from '../lib/fileSearch'
 
 const CODE = 'text-text-secondary bg-surface-overlay px-1 py-0.5 rounded'
@@ -87,6 +87,9 @@ export default function SearchHelpPopover({ onClose, kind = 'songs' }: { onClose
               Combine with plain words and multiple fields - matches are case-insensitive substrings, all filters must match.
               An optional <code className={CODE}>&</code> between
               fields is just for readability, e.g. <code className={CODE}>artists:"Juice WRLD" &amp; category:unreleased</code>.
+              In the Tracker, <code className={CODE}>sort:length</code> orders the list by that column
+              (<code className={CODE}>sort:-length</code> or <code className={CODE}>sort:length:desc</code> reverses it).
+              Columns: {SORT_HELP_KEYS.join(', ')}.
             </p>
           )}
           <div className="grid grid-cols-1 gap-1">

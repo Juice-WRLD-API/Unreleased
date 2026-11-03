@@ -95,7 +95,7 @@ interface Props {
 }
 
 /** Saves the song's file. Also the desktop player's song menu (lib/desktopBridge). */
-export function downloadTrack(track: Track, songId: number | null): void {
+export function downloadTrack(track: Track, songId: number | null, tagged?: boolean): void {
   // Donor files need the auth header, so hand them to the blob path instead.
   if (isDonorStreamUrl(track.streamUrl)) {
     void ensureDonorUrl(track.streamUrl).then((url) => {
@@ -114,7 +114,7 @@ export function downloadTrack(track: Track, songId: number | null): void {
   // resolveSessionEditSource) - rebuilding from track.path alone would drop
   // that for a session-edit-linked recording_session song on a non-primary
   // channel.
-  void downloadFileSmart(track.path, `${track.title}.mp3`, track.streamUrl ?? buildStreamUrl(track.path), undefined, songId)
+  void downloadFileSmart(track.path, `${track.title}.mp3`, track.streamUrl ?? buildStreamUrl(track.path), undefined, songId, tagged)
 }
 
 /** Where the track's file sits in Files: a comp file's own folder and channel,
@@ -500,47 +500,57 @@ export default function SongContextMenu({
         showSessionLink && { icon: FileAudio2, label: 'Link session file…', onSelect: onLinkSessionFile },
         showSessionLink && !!hasSessionLinkOverride && !!onClearSessionLink && { icon: X, label: 'Clear manual link', onSelect: onClearSessionLink },
         canDownload && 'divider',
-        canDownload && { icon: Download, label: 'Download', onSelect: () => downloadTrack(track, state.songId) },
-        canDownload && !!el && hasValidSong && {
-          icon: addedToLib ? Check : HardDrive,
-          label: addedToLib ? 'Added to library' : addingToLib ? 'Adding...' : 'Add to library',
-          loading: addingToLib,
-          keepOpen: true,
-          onSelect: async () => {
-            if (addingToLib || addedToLib) return
-            setAddingToLib(true)
-            try {
-              // The track's own stream URL carries the API server setting and
-              // the channel (a session edit can live in another comp).
-              const url = track.streamUrl?.startsWith('http') ? track.streamUrl : buildStreamUrl(track.path)
-              const result = await el.downloadToLibrary({
-                url, songName: track.title, artist: track.artist, songPath: track.path,
-              })
-              if (!result?.error) {
-                if (result?.track) addLibraryTrack(result.track)
-                setAddedToLib(true)
-              } else showAppToast(`Couldn't add to library: ${result.error}`)
-            } catch (e) {
-              showAppToast(`Couldn't add to library: ${(e as Error).message}`)
-            } finally { setAddingToLib(false) }
-          },
-        },
-        canDownload && !!el && hasValidSong && !offlineTracks[track.id] && {
-          icon: CircleArrowDown,
-          label: downloadingOffline ? 'Downloading…' : 'Download offline',
-          loading: downloadingOffline,
-          keepOpen: true,
-          onSelect: async () => {
-            if (downloadingOffline || songId == null) return
-            setDownloadingOffline(true)
-            try { await downloadTrackOffline(songId) } finally { setDownloadingOffline(false) }
-          },
-        },
-        canDownload && !!offlineTracks[track.id] && {
-          icon: CircleArrowDownFilled,
-          label: 'Remove download',
-          danger: true,
-          onSelect: () => removeOfflineTrack(track.id),
+        // Clicking "Download" itself (its flyout is already open under the
+        // pointer) saves the file as the "Add song info to downloads" setting says.
+        canDownload && {
+          icon: Download,
+          label: 'Download',
+          onSelect: () => downloadTrack(track, state.songId),
+          children: [
+            { icon: Download, label: 'Download tagged', onSelect: () => downloadTrack(track, state.songId, true) },
+            { icon: Download, label: 'Download untagged', onSelect: () => downloadTrack(track, state.songId, false) },
+            !!el && hasValidSong && {
+              icon: addedToLib ? Check : HardDrive,
+              label: addedToLib ? 'Added to library' : addingToLib ? 'Adding...' : 'Add to library',
+              loading: addingToLib,
+              keepOpen: true,
+              onSelect: async () => {
+                if (addingToLib || addedToLib) return
+                setAddingToLib(true)
+                try {
+                  // The track's own stream URL carries the API server setting and
+                  // the channel (a session edit can live in another comp).
+                  const url = track.streamUrl?.startsWith('http') ? track.streamUrl : buildStreamUrl(track.path)
+                  const result = await el.downloadToLibrary({
+                    url, songName: track.title, artist: track.artist, songPath: track.path,
+                  })
+                  if (!result?.error) {
+                    if (result?.track) addLibraryTrack(result.track)
+                    setAddedToLib(true)
+                  } else showAppToast(`Couldn't add to library: ${result.error}`)
+                } catch (e) {
+                  showAppToast(`Couldn't add to library: ${(e as Error).message}`)
+                } finally { setAddingToLib(false) }
+              },
+            },
+            !!el && hasValidSong && !offlineTracks[track.id] && {
+              icon: CircleArrowDown,
+              label: downloadingOffline ? 'Downloading…' : 'Download offline',
+              loading: downloadingOffline,
+              keepOpen: true,
+              onSelect: async () => {
+                if (downloadingOffline || songId == null) return
+                setDownloadingOffline(true)
+                try { await downloadTrackOffline(songId) } finally { setDownloadingOffline(false) }
+              },
+            },
+            !!offlineTracks[track.id] && {
+              icon: CircleArrowDownFilled,
+              label: 'Remove download',
+              danger: true,
+              onSelect: () => removeOfflineTrack(track.id),
+            },
+          ],
         },
         removeAction && 'divider',
         removeAction && { icon: Trash2, label: removeAction.label, danger: true, onSelect: removeAction.onClick },

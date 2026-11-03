@@ -32,7 +32,7 @@ import { SearchHelpButton } from './SearchHelpPopover'
 import { Track, LocalPlaylist, LibraryTrack, FollowedPlaylist } from '../types'
 import { AlbumArtThumbnail } from './AlbumArtThumbnail'
 import { ProgressiveCover } from './ProgressiveCover'
-import { getSongById, JWApiSong, playlistCoverUrl, smallCoverUrl, resolveTitleToSong, CATEGORY_LABELS, CATEGORY_COLORS, apiFileIdToPath, apiFilePathToTrack, resolveSessionEditSource } from '../lib/juicewrldApi'
+import { getSongById, JWApiSong, playlistCoverUrl, smallCoverUrl, resolveTitleToSong, CATEGORY_LABELS, CATEGORY_COLORS, apiFileIdToRef, apiFileRefToTrack, resolveSessionEditSource } from '../lib/juicewrldApi'
 import { toFileUrl, libraryTrackToTrack as libTrackToTrack } from '../lib/fileTypes'
 import { formatDuration, formatTotalDuration } from '../lib/format'
 import LikedSongsView from './LikedSongsView'
@@ -1043,7 +1043,9 @@ export default function PlaylistsView(): JSX.Element {
       const localLiked = new Set(likedTrackIds)
       const localTracks = libraryTracks.filter(t => localLiked.has(t.id)).map(libTrackToTrack)
       const fileTracks = likedTrackIds
-        .map(id => { const path = apiFileIdToPath(id); return path ? apiFilePathToTrack(path) : null })
+        // The ref keeps the comp: a Redemptionz or Legacy file rebuilt from its
+        // path alone streams against the primary tree and 404s.
+        .map(id => { const ref = apiFileIdToRef(id); return ref ? apiFileRefToTrack(ref) : null })
         .filter((t): t is Track => t != null)
       if (!account) { setExpandedTracks([...localTracks, ...fileTracks]); setExpandedLoading(false); return undefined }
       // Cached favorites first (refreshed below), never the previous panel's tracks.

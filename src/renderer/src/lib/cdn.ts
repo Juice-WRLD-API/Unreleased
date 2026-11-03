@@ -236,9 +236,11 @@ export async function downloadFileSmart(
   streamUrl: string,
   onProgress?: (p: CdnDownloadProgress) => void,
   /** The song this file is, for the "Add song info to downloads" setting. */
-  songId?: number | null
+  songId?: number | null,
+  /** Forces tagged (true) or untagged (false), whatever the setting says. */
+  tagged?: boolean
 ): Promise<boolean> {
-  const embedPromise = embedForDownload(songId, path)
+  const embedPromise = embedForDownload(songId, path, tagged)
   const result = await cdnService.tryDownload(path, onProgress)
   const embed = await embedPromise
   let blob = result?.blob ?? null
