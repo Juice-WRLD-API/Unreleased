@@ -15,13 +15,18 @@ page links the desktop, Android and iOS builds.
 
 **Listening**
 - **Home**: a dashboard whose sections you can show or hide: recently played
-  (synced across devices), playlists, albums, 999 FM, news, games and your
-  listening stats.
+  (synced across devices), playlists, an albums shelf, 999 FM, news, games and
+  your listening stats.
+- **Albums**: official albums, EPs and mixtapes as a cover grid and an album
+  page (Play, Shuffle, a numbered tracklist). Home's shelf opens the same page.
+  Editing an album is a separate staff screen.
 - **Tracker**: search and filter the whole API song catalogue, with
   field-qualified search such as `artists:"Juice WRLD"`. You choose which
   fields show in the list and in the detail panel, and drag to reorder them.
+  A Files tab in Tracker browses the archive without leaving the catalogue.
 - **Files**: browse the API's file archive, with previews, a text and `.lrc`
-  viewer, and ZIP downloads built in the browser.
+  viewer, ZIP downloads built in the browser, and tag edits on audio files
+  (proposed for review, not written immediately).
 - **Playlists**: folders, custom covers, share links, following someone
   else's playlist live, and JSON/M3U export.
 - **Player**: a queue with history, search and reshuffle, radio/shuffle mode,
