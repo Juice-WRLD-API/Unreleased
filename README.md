@@ -19,20 +19,35 @@ is the Electron desktop build.
 
 Installed builds update themselves in the background.
 
+The macOS app is not signed yet. If Gatekeeper says it is damaged, the copy
+was signed on the build machine and that signature does not count on yours.
+Clear the quarantine flag and re-sign it locally (use `~/Applications/...` if
+that is where you dragged it), then right-click the app and choose Open:
+
+```bash
+xattr -cr /Applications/Unreleased.app
+codesign --force --deep --sign - /Applications/Unreleased.app
+```
+
 ---
 
 ## What's in it
 
 **Listening**
 - **Home**: a dashboard of sections you can show or hide: recently played
-  (synced across devices), playlists, albums, 999 FM, news, games and your
-  listening stats.
+  (synced across devices), playlists, an albums shelf, 999 FM, news, games and
+  your listening stats.
+- **Albums**: official albums, EPs and mixtapes as a cover grid and an album
+  page (Play, Shuffle, a numbered tracklist). Home's shelf opens the same page.
+  Editing an album is a separate staff screen.
 - **Tracker**: search and filter the whole API song catalogue by era, category
   and metadata. You choose which fields show in the list and in the detail
   panel, and drag to reorder them. Songs with several versions let you switch
-  between them or hide ones you don't want.
+  between them or hide ones you don't want. A Files tab in Tracker browses the
+  archive without leaving the catalogue.
 - **Files**: browse the API's file archive directly, with previews, a text and
-  `.lrc` viewer, multi-select, and bulk ZIP downloads.
+  `.lrc` viewer, multi-select, bulk ZIP downloads, and tag edits on audio files
+  (proposed for review, not written immediately).
 - **Library** (desktop only): scan local folders, edit ID3 tags and embedded
   art, and convert between audio formats with ffmpeg.
 - **Playlists**: folders, custom covers and descriptions, drag to reorder,

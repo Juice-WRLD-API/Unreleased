@@ -67,28 +67,47 @@ function request<T>(url: string, options: RequestInit = {}): Promise<T> {
 }
 
 // The docs for these list endpoints promise a bare array, but the live API
-// actually paginates /artists/ and /albums/ (the standard DRF
-// {count,next,previous,results} envelope) - documented behavior has drifted
-// from the real API before, so unwrap defensively instead of trusting either
-// shape blindly.
-function unwrapList<T>(data: T[] | { results: T[] }): T[] {
-  return Array.isArray(data) ? data : (data?.results ?? [])
+// paginates /artists/ and /albums/ ({count, next, previous, results}, 20 per
+// page). `next` is http://, so walk the page number on our own base instead
+// of following that URL. A bare array (older servers) is the whole list.
+const MAX_LIST_PAGES = 10
+
+type Paged<T> = T[] | { results?: T[]; next?: string | null }
+
+async function collectPages<T>(load: (page: number) => Promise<Paged<T>>): Promise<T[]> {
+  const all: T[] = []
+  for (let page = 1; page <= MAX_LIST_PAGES; page++) {
+    let data: Paged<T>
+    try {
+      data = await load(page)
+    } catch (error) {
+      if (page === 1) throw error
+      return all
+    }
+    if (Array.isArray(data)) return data
+    all.push(...(data?.results ?? []))
+    if (!data?.next) return all
+  }
+  return all
 }
 
 // ── Public (no auth) ─────────────────────────────────────────────────────────
 
 export async function fetchArtists(): Promise<Artist[]> {
-  return unwrapList(await apiFetch<Artist[] | { results: Artist[] }>('/artists/'))
+  return collectPages((page) => apiFetch<Paged<Artist>>('/artists/', page === 1 ? {} : { page }))
 }
 
 export async function fetchAlbums(): Promise<Album[]> {
-  return unwrapList(await apiFetch<Album[] | { results: Album[] }>('/albums/'))
+  return collectPages((page) => apiFetch<Paged<Album>>('/albums/', page === 1 ? {} : { page }))
 }
 
 // ── Admin (Token + is_administrator + OTP) ───────────────────────────────────
 
 export async function adminFetchAlbums(): Promise<Album[]> {
-  return unwrapList(await request<Album[] | { results: Album[] }>(`${ACCOUNT_BASE}/admin/albums/`, { method: 'GET' }))
+  return collectPages((page) => request<Paged<Album>>(
+    page === 1 ? `${ACCOUNT_BASE}/admin/albums/` : `${ACCOUNT_BASE}/admin/albums/?page=${page}`,
+    { method: 'GET' },
+  ))
 }
 
 export interface AlbumWritePayload {

@@ -13,7 +13,7 @@ import { LibraryTrack } from '../types'
 // yt-dlp + ffmpeg are fetched on demand (see main.js "On-demand tool
 // binaries"), so the first open may show a one-time download gate.
 
-type FormatId = 'mp3' | 'm4a' | 'opus' | 'ogg' | 'flac' | 'wav'
+type FormatId = 'mp3' | 'm4a' | 'alac' | 'opus' | 'ogg' | 'flac' | 'wav'
 
 interface FormatOption {
   id: FormatId
@@ -25,6 +25,7 @@ interface FormatOption {
 const FORMATS: FormatOption[] = [
   { id: 'mp3',  label: 'MP3',  blurb: 'Universal, small files', lossy: true },
   { id: 'm4a',  label: 'M4A',  blurb: 'AAC — efficient',        lossy: true },
+  { id: 'alac', label: 'ALAC', blurb: 'Apple Lossless',         lossy: false },
   { id: 'opus', label: 'Opus', blurb: 'Best quality per KB',    lossy: true },
   { id: 'flac', label: 'FLAC', blurb: 'Lossless',              lossy: false },
 ]

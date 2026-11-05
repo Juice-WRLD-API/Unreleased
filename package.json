@@ -111,6 +111,7 @@
       "!**/Thumbs.db"
     ],
     "mac": {
+      "identity": null,
       "icon": "resources/icon-512.png",
       "category": "public.app-category.music",
       "entitlements": "resources/entitlements.mac.plist",

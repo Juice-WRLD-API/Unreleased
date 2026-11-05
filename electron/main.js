@@ -13,6 +13,26 @@ const { registerPasskeyIpc } = require('./passkey')
 const { canRequestMicrophone, canCaptureSystemAudio, canUseFileSystem } = require('./microphonePermission')
 const { createLaunchGate } = require('./launchUpdate')
 const { resolveTypedPath } = require('./localPaths')
+const { isAlacContainerExt } = require('./alac')
+const { createAlacPlayback, liveBody } = require('./alacPlayback')
+
+// One playback cache for the process. A plain play uses ffmpeg if it is
+// already installed; prepare-playback downloads it the first time a file
+// actually needs ALAC and the binary is missing.
+let alacPlaybackInstance
+function alacPlayback() {
+  if (!alacPlaybackInstance) {
+    alacPlaybackInstance = createAlacPlayback({
+      cacheDir: () => path.join(app.getPath('userData'), 'playback-cache'),
+      ffmpegPath: () => resolveFfmpegPath(),
+      downloadFfmpeg: async () => {
+        await downloadTool('ffmpeg', () => {})
+        return resolveFfmpegPath()
+      },
+    })
+  }
+  return alacPlaybackInstance
+}
 
 // Response() only accepts web ReadableStreams, not Node streams
 const webStreamFromNode = (stream) => Readable.toWeb(stream)
@@ -2073,7 +2093,7 @@ ipcMain.handle('discord-rpc-clear-activity', () => {
 
 // ── IPC: library management ───────────────────────────────────────────────────
 
-const AUDIO_EXTS = new Set(['.mp3', '.flac', '.aac', '.m4a', '.ogg', '.opus', '.wav', '.wma', '.aiff', '.ape', '.wv'])
+const AUDIO_EXTS = new Set(['.mp3', '.flac', '.aac', '.m4a', '.ogg', '.opus', '.wav', '.wma', '.aiff', '.ape', '.wv', '.alac'])
 
 const libraryDataPath = path.join(app.getPath('userData'), 'library-data.json')
 const localPlaylistsPath = path.join(app.getPath('userData'), 'local-playlists.json')
@@ -3424,6 +3444,7 @@ const VORBIS_QUALITY = { '320k': 9, '256k': 8, '192k': 6, '128k': 4 }
 const CONVERT_FORMATS = {
   mp3:  { ext: 'mp3',  cover: true,  codec: (br) => ['-c:a', 'libmp3lame', '-b:a', br] },
   m4a:  { ext: 'm4a',  cover: true,  codec: (br) => ['-c:a', 'aac', '-b:a', br] },
+  alac: { ext: 'm4a',  cover: true,  codec: ()   => ['-c:a', 'alac'] },
   flac: { ext: 'flac', cover: true,  codec: ()   => ['-c:a', 'flac'] },
   wav:  { ext: 'wav',  cover: false, codec: ()   => ['-c:a', 'pcm_s16le'] },
   ogg:  { ext: 'ogg',  cover: false, codec: (br) => ['-c:a', 'libvorbis', '-q:a', String(VORBIS_QUALITY[br] ?? 6)] },
@@ -3444,6 +3465,18 @@ function uniqueConvertPath(dir, base, ext, srcPath) {
   }
   return candidate
 }
+
+// Remote ALAC (and a local file played before ffmpeg was installed) is
+// transcoded to a cached FLAC. The renderer then points the audio element at
+// that file. Not ALAC resolves {}.
+ipcMain.handle('prepare-playback', async (_event, { url } = {}) => {
+  if (!url || typeof url !== 'string') return {}
+  try {
+    return await alacPlayback().prepare(url)
+  } catch (e) {
+    return { error: e.message || 'Could not prepare this file' }
+  }
+})
 
 ipcMain.handle('convert-audio', async (event, { id, filePath, format, bitrate, stripMetadata }) => {
   const spec = CONVERT_FORMATS[format]
@@ -3582,6 +3615,7 @@ ipcMain.handle('convert-audio', async (event, { id, filePath, format, bitrate, s
 const YT_AUDIO_FORMATS = {
   mp3:  { fmt: 'mp3',    ext: 'mp3',  lossy: true },
   m4a:  { fmt: 'm4a',    ext: 'm4a',  lossy: true },
+  alac: { fmt: 'alac',   ext: 'm4a',  lossy: false },
   opus: { fmt: 'opus',   ext: 'opus', lossy: true },
   ogg:  { fmt: 'vorbis', ext: 'ogg',  lossy: true },
   flac: { fmt: 'flac',   ext: 'flac', lossy: false },
@@ -4107,6 +4141,9 @@ function launchApp(checkedForUpdates) {
   if (isSmokeTest) return
   startDesktop()
   createTray()
+  discordRpc.setOnConnected(() => {
+    if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('discord-rpc-connected')
+  })
   discordRpc.setEnabled(appSettings.discordRpcEnabled !== false)
 
   if (!isDev) {
@@ -4259,10 +4296,44 @@ app.whenReady().then(() => {
     if (isDev) return origin === 'http://localhost:3018' ? origin : null
     return origin === 'null' || origin === null ? 'null' : null
   }
-  protocol.handle('local-media', (request) => {
+  protocol.handle('local-media', async (request) => {
     try {
-      const filePath = new URL(request.url).searchParams.get('p')
-      if (!filePath) return new Response('Missing path', { status: 400 })
+      const requestedPath = new URL(request.url).searchParams.get('p')
+      if (!requestedPath) return new Response('Missing path', { status: 400 })
+
+      // CORS header on every response, including the ALAC transcode below:
+      // <audio> loads with crossOrigin="anonymous". Scoped to the app origin.
+      const corsOrigin = mediaCorsOrigin(request)
+      const corsHeaders = corsOrigin ? { 'Access-Control-Allow-Origin': corsOrigin } : {}
+      const withCors = (headers) => ({ ...headers, ...corsHeaders })
+
+      // ALAC (often inside .m4a, same container as AAC) does not decode in
+      // Chromium. Serve a cached FLAC instead, tailing it while ffmpeg is
+      // still writing so the song starts before the transcode finishes.
+      const playback = alacPlayback()
+      let filePath = requestedPath
+      let forcedMime = null
+      if (playback.inCache(filePath) && !fs.existsSync(filePath + '.ok')) {
+        const job = playback.jobs.get(filePath)
+        if (!job) return new Response('Not ready', { status: 404, headers: corsHeaders })
+        const body = await liveBody(filePath, job, request.headers.get('range'))
+        // Same cast as the range responses below: tsc's DOM BodyInit and Node's
+        // web stream type disagree, and the handler already returns those streams.
+        const stream = /** @type {any} */ (webStreamFromNode(body.stream))
+        return new Response(stream, { status: body.status, headers: withCors(body.headers) })
+      }
+      if (isAlacContainerExt(path.extname(filePath))) {
+        const started = await playback.startLocal(filePath)
+        if (started?.live) {
+          const body = await liveBody(started.live, started.job, request.headers.get('range'))
+          const stream = /** @type {any} */ (webStreamFromNode(body.stream))
+          return new Response(stream, { status: body.status, headers: withCors(body.headers) })
+        }
+        if (started?.ready) {
+          filePath = started.path
+          forcedMime = 'audio/flac'
+        }
+      }
 
       // Serve Range requests ourselves: net.fetch on a file:// URL ignores the
       // Range header entirely, so every seek got the whole file back as a 200
@@ -4274,20 +4345,15 @@ app.whenReady().then(() => {
         '.mp3': 'audio/mpeg', '.flac': 'audio/flac', '.wav': 'audio/wav',
         '.m4a': 'audio/mp4', '.ogg': 'audio/ogg', '.aac': 'audio/aac',
         '.opus': 'audio/ogg', '.wma': 'audio/x-ms-wma', '.aiff': 'audio/aiff',
-        '.aif': 'audio/aiff', '.caf': 'audio/x-caf',
+        '.aif': 'audio/aiff', '.caf': 'audio/x-caf', '.alac': 'audio/mp4',
         '.mp4': 'video/mp4', '.mov': 'video/quicktime', '.webm': 'video/webm',
         '.m4v': 'video/mp4', '.mkv': 'video/x-matroska',
         '.jpg': 'image/jpeg', // offline cover snapshots (offline-covers/)
       }
-      const mime = mimeByExt[path.extname(filePath).toLowerCase()] || 'application/octet-stream'
+      const mime = forcedMime || mimeByExt[path.extname(filePath).toLowerCase()] || 'application/octet-stream'
 
-      // CORS header on every response: the renderer's <audio> elements load
-      // with crossOrigin="anonymous" so the Web Audio equalizer chain can
-      // process them — without this header, CORS-mode loads fail and local
-      // files won't play at all. Scoped to the app's own origin (see
-      // mediaCorsOrigin) rather than '*'.
-      const corsOrigin = mediaCorsOrigin(request)
-      const corsHeaders = corsOrigin ? { 'Access-Control-Allow-Origin': corsOrigin } : {}
+      // corsHeaders is set above: <audio> loads with crossOrigin="anonymous",
+      // and without this header those loads fail.
       const rangeHeader = request.headers.get('range')
       const match = rangeHeader && /bytes=(\d*)-(\d*)/.exec(rangeHeader)
       if (match && (match[1] || match[2])) {

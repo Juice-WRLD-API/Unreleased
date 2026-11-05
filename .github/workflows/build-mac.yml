@@ -6,12 +6,13 @@ name: Build macOS release
 # builds the mac side on a macOS runner, and attaches the artifacts to the
 # same release.
 #
-# Unsigned/not notarized: no Apple Developer account yet, so the app isn't
-# code-signed. Users will need to right-click -> Open (or run
-# `xattr -cr /Applications/Unreleased.app`) on first launch to get past
-# Gatekeeper. CSC_IDENTITY_AUTO_DISCOVERY=false stops electron-builder from
-# trying to ad-hoc sign with whatever keychain identity happens to exist on
-# the runner.
+# Unsigned/not notarized: no Apple Developer account yet. package.json sets
+# mac.identity to null so this job does not ad-hoc sign the app. An ad-hoc
+# signature is only valid on the Mac that created it; on anyone else's Mac
+# Gatekeeper reports the app as damaged, and clearing quarantine does not
+# fix that. CSC_IDENTITY_AUTO_DISCOVERY=false is the backstop so a runner
+# keychain identity is not picked up either. Users right-click -> Open on
+# first launch. See the README.
 #
 # latest-mac.yml is what electron-updater's MacUpdater reads to find
 # updates — without it, mac clients log an update error on every launch.

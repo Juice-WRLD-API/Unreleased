@@ -15,7 +15,7 @@ import { ModalOverlay, LockToggle } from './Modal'
 // floating=true, which drops the backdrop, fills the window, turns the header
 // into the drag handle, and closes the window itself instead of the dialog.
 
-type FormatId = 'mp3' | 'm4a' | 'flac' | 'wav' | 'ogg' | 'opus'
+type FormatId = 'mp3' | 'm4a' | 'alac' | 'flac' | 'wav' | 'ogg' | 'opus'
 
 interface FormatOption {
   id: FormatId
@@ -27,6 +27,7 @@ interface FormatOption {
 const FORMATS: FormatOption[] = [
   { id: 'mp3',  label: 'MP3',  blurb: 'Universal, small files',        lossy: true },
   { id: 'm4a',  label: 'M4A',  blurb: 'AAC — efficient, Apple-native', lossy: true },
+  { id: 'alac', label: 'ALAC', blurb: 'Apple Lossless',                 lossy: false },
   { id: 'opus', label: 'Opus', blurb: 'Best quality per KB',           lossy: true },
   { id: 'ogg',  label: 'OGG',  blurb: 'Vorbis, open format',           lossy: true },
   { id: 'flac', label: 'FLAC', blurb: 'Lossless, compressed',          lossy: false },

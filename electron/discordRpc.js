@@ -31,6 +31,11 @@ let enabled = false
 // Last requested presence op, applied once a connection is ready. Replaces
 // itself on every call, so only the latest state is ever sent.
 let pendingOp = null // { clear: true } | { clear: false, activity }
+// Fired on every successful login, including a reconnect after Discord was
+// quit, set invisible, or lost its pipe. The renderer resends the live
+// playhead; replaying the last payload would anchor the timer to a stale
+// position, and sending nothing leaves Discord counting from the reconnect.
+let onConnected = null
 
 function clearReconnectTimer() {
   if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null }
@@ -52,6 +57,7 @@ function createClient() {
     if (c !== client) return
     connected = true
     if (pendingOp) { const op = pendingOp; pendingOp = null; applyOp(op) }
+    onConnected?.()
   })
   c.on('disconnected', () => {
     if (c !== client) return
@@ -91,6 +97,10 @@ async function applyOp(op) {
   } catch {
     // Activity updates can race a disconnect — ignore, next call will retry.
   }
+}
+
+function setOnConnected(fn) {
+  onConnected = fn
 }
 
 function setEnabled(value) {
@@ -147,7 +157,12 @@ function setNowPlaying(info) {
   if (!enabled) return
   if (!info || !info.title) { lastInfo = null; clearActivity(); return }
   lastInfo = info
+  setActivity(buildActivity(info))
+}
 
+// Split out so a test can check the timestamps without a Discord client.
+// `now` is injectable for that test.
+function buildActivity(info, now = Date.now()) {
   const activity = {
     // Discord renders a Spotify-style live time-bar for Listening activities.
     // When we don't supply real timestamps (paused — see below), it falls
@@ -202,11 +217,14 @@ function setNowPlaying(info) {
     activity.buttons = [{ label: BUTTON_LABEL, url: info.linkUrl }]
   }
 
-  if (info.isPlaying && info.duration > 0) {
-    // Timestamps drive Discord's own live (animating) progress bar.
-    const startMs = Date.now() - Math.max(0, info.currentTime) * 1000
+  if (info.isPlaying) {
+    // Timestamps drive Discord's own live progress bar. Always send a start
+    // while playing, even when the length isn't known yet: omitting both
+    // makes Discord count from the moment the activity was set (and show the
+    // frozen "⏸ position · artist" line) instead of the song position.
+    const startMs = now - Math.max(0, info.currentTime) * 1000
     activity.startTimestamp = startMs
-    activity.endTimestamp = startMs + info.duration * 1000
+    if (info.duration > 0) activity.endTimestamp = startMs + info.duration * 1000
   } else {
     // Paused: Discord's progress bar is always wall-clock driven, so it can't
     // be frozen — supplying timestamps would keep it ticking, omitting them
@@ -218,7 +236,7 @@ function setNowPlaying(info) {
     activity.state = info.artist ? `⏸ ${pos} · ${info.artist}` : `⏸ ${pos}`
   }
 
-  setActivity(activity)
+  return activity
 }
 
 // Re-applies the currently playing/paused activity with a new labelMode —
@@ -229,4 +247,4 @@ function refreshLabel(labelMode) {
   setNowPlaying({ ...lastInfo, labelMode })
 }
 
-module.exports = { setEnabled, setActivity, clearActivity, setNowPlaying, refreshLabel }
+module.exports = { setEnabled, setOnConnected, setActivity, clearActivity, setNowPlaying, refreshLabel, buildActivity }

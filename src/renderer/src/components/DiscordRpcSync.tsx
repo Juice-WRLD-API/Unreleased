@@ -58,6 +58,17 @@ export default function DiscordRpcSync(): JSX.Element | null {
   // the drift check below compute where Discord *thinks* playback is now and
   // compare it to where it actually is.
   const lastSentPosRef = useRef<{ currentTime: number; at: number } | null>(null)
+  // Bumped when Discord's pipe connects or comes back, so the effect below
+  // sends the live playhead instead of leaving the timer at the reconnect.
+  const [rpcEpoch, setRpcEpoch] = useState(0)
+  useEffect(() => {
+    if (!el?.onDiscordRpcConnected) return
+    return el.onDiscordRpcConnected(() => {
+      lastSentKeyRef.current = null
+      lastSentPosRef.current = null
+      setRpcEpoch((n) => n + 1)
+    })
+  }, [el])
 
   // A locally-scanned file has no curated `imageUrl`, and its `path` is a
   // filesystem path the API's cover-art endpoint can't resolve — so its cover
@@ -120,7 +131,7 @@ export default function DiscordRpcSync(): JSX.Element | null {
       // The matched song (cover + era) resolves asynchronously after the
       // now-playing update, so it — and the resolved era — are part of the
       // key; otherwise the resend carrying that data would be deduped away.
-      const key = `radio:${radioFmNowPlaying.title}:${radioFmNowPlaying.artist}:${radioFmMatchedSong?.songId ?? ''}:${era ?? ''}`
+      const key = `radio:${radioFmNowPlaying.title}:${radioFmNowPlaying.artist}:${radioFmMatchedSong?.songId ?? ''}:${era ?? ''}:${radioFmNowPlaying.duration_ms ?? 0}`
       if (key === lastSentKeyRef.current) return
       lastSentKeyRef.current = key
       const currentTime = (radioFmNowPlaying.elapsed_ms ?? 0) / 1000
@@ -168,7 +179,7 @@ export default function DiscordRpcSync(): JSX.Element | null {
     // The era and the local-file cover both resolve asynchronously (era names
     // from /eras/, the cover from a title match), so both are in the key —
     // otherwise the resend that carries them would be deduped away.
-    const key = `track:${currentTrack.id}:playing:${trackEra ?? ''}:${trackCoverUrl ?? ''}:${trackLinkUrl ?? ''}`
+    const key = `track:${currentTrack.id}:playing:${currentTrack.duration}:${trackEra ?? ''}:${trackCoverUrl ?? ''}:${trackLinkUrl ?? ''}`
     if (key === lastSentKeyRef.current) return
     lastSentKeyRef.current = key
     const currentTime = getCurrentTime()
@@ -184,7 +195,7 @@ export default function DiscordRpcSync(): JSX.Element | null {
       coverUrl: trackCoverUrl,
       linkUrl: trackLinkUrl,
     })
-  }, [el, currentTrack?.id, currentTrack?.title, currentTrack?.artist, currentTrack?.duration, trackCoverUrl, trackEra, trackLinkUrl, isPlaying, radioFmActive, radioFmNowPlaying?.title, radioFmNowPlaying?.artist, radioFmNowPlaying?.album, radioFmMatchedSong?.imageUrl, radioFmMatchedSong?.path, radioFmMatchedSong?.era, erasReady])
+  }, [el, currentTrack?.id, currentTrack?.title, currentTrack?.artist, currentTrack?.duration, trackCoverUrl, trackEra, trackLinkUrl, isPlaying, radioFmActive, radioFmNowPlaying?.title, radioFmNowPlaying?.artist, radioFmNowPlaying?.album, radioFmNowPlaying?.duration_ms, radioFmMatchedSong?.imageUrl, radioFmMatchedSong?.path, radioFmMatchedSong?.era, erasReady, rpcEpoch])
 
   // Seek detection: periodically compare where Discord thinks playback is
   // (extrapolated from the last update) against the real live position, and

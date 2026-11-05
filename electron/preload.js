@@ -179,6 +179,14 @@ contextBridge.exposeInMainWorld('electron', {
   // Discord Rich Presence
   discordRpcSetActivity: (activity) => ipcRenderer.invoke('discord-rpc-set-activity', activity),
   discordRpcClearActivity: ()       => ipcRenderer.invoke('discord-rpc-clear-activity'),
+  // Discord connected, or reconnected after a quit / invisible / dropped pipe.
+  // The activity has to be sent again from the live playhead; the main process
+  // can't see it.
+  onDiscordRpcConnected: (cb) => {
+    const fn = () => cb()
+    ipcRenderer.on('discord-rpc-connected', fn)
+    return () => ipcRenderer.removeListener('discord-rpc-connected', fn)
+  },
 
   // Library
   loadLibraryData:    ()              => ipcRenderer.invoke('load-library-data'),
@@ -223,6 +231,9 @@ contextBridge.exposeInMainWorld('electron', {
   // Local audio format conversion (on-demand ffmpeg). Progress arrives on
   // 'convert-progress' keyed by the id passed into convertAudio.
   convertAudio: (payload) => ipcRenderer.invoke('convert-audio', payload),
+  // ALAC (and only ALAC) in a remote or not-yet-playable file. Resolves
+  // { path } of a FLAC to play, {} when the source is not ALAC, or { error }.
+  preparePlayback: (payload) => ipcRenderer.invoke('prepare-playback', payload),
   onConvertProgress: (cb) => {
     const fn = (_, d) => cb(d)
     ipcRenderer.on('convert-progress', fn)

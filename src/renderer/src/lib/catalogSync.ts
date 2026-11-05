@@ -46,7 +46,7 @@ const FAILURE_STREAK = 8
  *  once (~13 MB) instead of looking each song up. */
 const BULK_LOOKUP_MIN = 25
 const RECENT_MAX = 8
-const AUDIO_PATH = /\.(mp3|m4a|aac|flac|wav|ogg|opus)$/i
+const AUDIO_PATH = /\.(mp3|m4a|aac|flac|wav|ogg|opus|alac)$/i
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const electron = (): any => (window as any).electron

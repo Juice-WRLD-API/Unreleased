@@ -62,11 +62,28 @@ import { PopLayer } from './PopLayer'
 // streamed by URL (the route needs the auth header), so their `donor://`
 // marker resolves to a fetched blob URL - or '' while that fetch is still
 // pending. Callers that can wait use ensureDonorUrl first.
+// Chromium plays AAC and does not play ALAC. Once a source has been transcoded
+// to FLAC, every later load of that same URL (seek recovery, the next play)
+// uses the FLAC. Local files are swapped inside the local-media handler, so
+// they are not entered here.
+const alacPlayable = new Map<string, string>()
+
+function isAlacCandidate(url: string): boolean {
+  let name = url
+  try {
+    if (url.startsWith('local-media:')) name = new URL(url).searchParams.get('p') || ''
+    else name = new URL(url, 'https://local.invalid').pathname
+  } catch { /* keep the raw string */ }
+  return /\.(m4a|mp4|caf|alac)$/i.test(name)
+}
+
 function resolvePlaybackUrl(track: { id: string; streamUrl?: string; path: string }): string {
   const offline = useStore.getState().offlineTracks[track.id]
-  if (offline && !isOfflineCopyUnreadable(track.id, offline)) return toFileUrl(offline.localPath)
-  if (isDonorStreamUrl(track.streamUrl)) return cachedDonorUrl(track.streamUrl) ?? ''
-  return track.streamUrl ?? toFileUrl(track.path)
+  const url = offline && !isOfflineCopyUnreadable(track.id, offline)
+    ? toFileUrl(offline.localPath)
+    : isDonorStreamUrl(track.streamUrl) ? (cachedDonorUrl(track.streamUrl) ?? '')
+    : (track.streamUrl ?? toFileUrl(track.path))
+  return alacPlayable.get(url) ?? url
 }
 
 // A session whose file wasn't known when its Track was built shows the file's
@@ -484,6 +501,13 @@ export default function Player(): JSX.Element {
   // overwritten by the timestamp captured when recovery was first scheduled.
   const recoveryResumeAt = useRef(0)
   const recoveryGeneration = useRef(0)
+  // Held while a remote (or not-yet-transcodable) ALAC file is being turned
+  // into FLAC, so the stall watchdog doesn't skip a song that hasn't started
+  // only because the converter is still working.
+  const alacPreparing = useRef(false)
+  const alacPrepGen = useRef(0)
+  const alacPrepUrl = useRef<string | null>(null)
+  const recoverPlaybackRef = useRef<(reason: string) => void>(() => {})
   // Calling load() resets currentTime to zero and queues a timeupdate before
   // metadata is ready. Remember which recovery owns that reload so the native
   // reset cannot overwrite the user's live resume intent.
@@ -842,6 +866,63 @@ export default function Player(): JSX.Element {
     }
   }, [currentTrack?.id, currentTrackFull])
 
+  // Ask the main process to transcode an ALAC source to FLAC and play that.
+  // AAC in the same container comes back as 'other' and is left to the caller.
+  // `recoverOnOther` retries a file that already failed; the offline-copy
+  // fallback passes false so a corrupt AAC file still falls through to streaming.
+  const requestAlac = (audio: HTMLAudioElement, trackId: string, url: string, recoverOnOther = true): Promise<'alac' | 'other' | 'error'> => {
+    const el = (window as any).electron
+    if (!el?.preparePlayback || !trackId || !url) return Promise.resolve('other')
+    const ready = alacPlayable.get(url)
+    if (ready) {
+      if (!sameMediaSrc(audio.currentSrc || audio.src, ready)) {
+        audio.src = ready
+        audio.volume = volumeRef.current
+        applyRate(audio)
+        if (useStore.getState().isPlaying) playSlot(audio)
+      }
+      return Promise.resolve('alac')
+    }
+    if (alacPreparing.current && alacPrepUrl.current === url) return Promise.resolve('alac')
+    const gen = ++alacPrepGen.current
+    alacPrepUrl.current = url
+    alacPreparing.current = true
+    runLog('playback', `preparing ALAC playback for ${describeSource(url)}`)
+    return el.preparePlayback({ url }).then((result: { path?: string; error?: string } | null) => {
+      if (gen !== alacPrepGen.current) return 'alac' as const
+      alacPreparing.current = false
+      const a = getActive()
+      const s = useStore.getState()
+      if (!a || s.currentTrack?.id !== trackId) return 'alac' as const
+      if (result?.path) {
+        const play = toFileUrl(result.path)
+        alacPlayable.set(url, play)
+        if (!sameMediaSrc(a.currentSrc || a.src, play)) {
+          a.src = play
+          a.volume = volumeRef.current
+          applyRate(a)
+          if (s.isPlaying) playSlot(a)
+        }
+        return 'alac' as const
+      }
+      if (result?.error) {
+        runLog('playback', `ALAC prepare failed for "${s.currentTrack?.title}": ${result.error}`)
+        if (s.isPlaying) {
+          showAppToast(`Couldn't play "${s.currentTrack?.title}" (${result.error})`)
+          setIsPlaying(false)
+        }
+        return 'error' as const
+      }
+      if (recoverOnOther && a.error && s.isPlaying) recoverPlaybackRef.current('error')
+      return 'other' as const
+    }).catch((err: unknown) => {
+      if (gen !== alacPrepGen.current) return 'alac' as const
+      alacPreparing.current = false
+      runLog('playback', `ALAC prepare failed: ${String(err)}`)
+      return 'error' as const
+    })
+  }
+
   // Load audio into active slot when track changes
   useEffect(() => {
     const audio = getActive()
@@ -906,6 +987,9 @@ export default function Player(): JSX.Element {
     audio.volume = volumeRef.current
     applyRate(audio)
     if (isPlaying) playSlot(audio)
+    // Local ALAC is transcoded inside the local-media handler. A remote file
+    // starts as itself (so AAC is not delayed) and is swapped if it is ALAC.
+    if (!fileUrl.startsWith('local-media:') && isAlacCandidate(fileUrl)) requestAlac(audio, currentTrack.id, fileUrl)
   }, [currentTrack?.id])
 
   // Rotate suggested covers (when the setting is on and the song has no cover
@@ -1191,6 +1275,7 @@ export default function Player(): JSX.Element {
     runLog('playback', `${reason} on "${track.title}" (${track.id}) - reloading at ${resumeAt.toFixed(1)}s (attempt ${attempt + 1}/${MAX_RECOVERY_ATTEMPTS})`)
     scheduleReload(audio, track.id, url, Math.min(1000 * 2 ** attempt, 8000))
   }
+  recoverPlaybackRef.current = recoverPlayback
 
   // A source the browser can't play at all — a 404, a codec it doesn't
   // support — will never come back on retry, and stopping dead in the middle
@@ -1225,6 +1310,19 @@ export default function Player(): JSX.Element {
     recoveryProbe.current = probe
     clearRecoveryTimer()
     const result = await probeSource(src)
+    // The copy is there and this player understands the type. ALAC reports
+    // that way (audio/mp4, same as AAC) and then fails to decode. Transcode
+    // it; marking the copy missing would throw away a file that's fine.
+    if (result.verdict === 'playable' && isAlacCandidate(src)) {
+      if (recoveryProbe.current !== probe) return
+      recoveryProbe.current = null
+      const s = useStore.getState()
+      if (getActive() !== audio || !s.isPlaying || s.currentTrack?.id !== track.id) return
+      // false: a container that is not actually ALAC must still be marked
+      // unreadable below, the same as any other copy that won't open.
+      const kind = await requestAlac(audio, track.id, src, false)
+      if (kind !== 'other') return
+    }
     markOfflineCopyUnreadable(track.id, entry)
     await rereadOfflineIndex()
     if (recoveryProbe.current !== probe) return
@@ -1266,9 +1364,20 @@ export default function Player(): JSX.Element {
     const { currentTrack: track, offlineTracks, isPlaying: playing } = useStore.getState()
     runLog('playback', `error on "${track?.title}" (${track?.id}) in ${slot}: ${describeMediaError(err)}, ${describeSource(src)}`)
     if (!playing) return
+    // An ALAC file fails immediately. Hold recovery while it is transcoded to
+    // FLAC; the swap lands in requestAlac. Local files usually never get here
+    // — the protocol handler transcodes them before the element sees ALAC —
+    // and only do when ffmpeg is not installed yet.
+    if (alacPreparing.current) return
     const offline = track ? offlineTracks[track.id] : undefined
     if (track && offline && src.startsWith('local-media:') && !isOfflineCopyUnreadable(track.id, offline)) {
       void fallBackFromOfflineCopy(audio, track, offline, describeMediaError(err))
+      return
+    }
+    if (track && isAlacCandidate(src)
+      && (err.code === MediaError.MEDIA_ERR_DECODE || err.code === MediaError.MEDIA_ERR_SRC_NOT_SUPPORTED)
+      && lastProgressTime.current === 0) {
+      requestAlac(audio, track.id, src)
       return
     }
     // Unsupported before a single frame played = the file itself is the
@@ -1365,6 +1474,9 @@ export default function Player(): JSX.Element {
 
     const check = (): void => {
       if (!isPlaying) return
+      // ALAC is being transcoded to something this player can decode. There is
+      // no progress yet, and treating that as a stall skips the song.
+      if (alacPreparing.current) return
       // A reload is already queued — let it land before judging anything.
       if (recoveryTimer.current != null) return
       // The audio graph can be suspended by the OS (screen off / Android doze)

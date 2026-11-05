@@ -1,6 +1,6 @@
 # Agent guide: Juice WRLD API and Unreleased
 
-**Version 1.52** · updated 2026-11-03. Bump the version and date whenever you
+**Version 1.55** · updated 2026-11-05. Bump the version and date whenever you
 change this file (minor for fixes and additions, major for rewrites).
 
 **Keep this file current.** If you find something in the docs or this file that
@@ -112,15 +112,24 @@ docs and the server disagree, the backend code in `backend/` wins.
 - **`/versions/?all=true`** returns every version row as a flat array.
   `/versions/` ignores filter params; filter on the client. `/versions/{song_id}/`
   is paginated and empty (`count: 0`) for songs with no version group.
-- **`/albums/` holds every official album and EP** (24 rows as of 2026-10-30,
-  filled from Spotify, Apple Music and SoundCloud), each with `type` (Album, EP,
-  Mixtape), `cover_url` (a site asset or a storage path, so go through
-  `buildImageUrl`) and an ordered `songs` list of catalogue song `path`s.
-  Reads add a read-only `song` to each track (`id`, `public_id`, `name`,
-  `category`, `length`, `image_url`, or null) once the backend change from
-  2026-10-30 is deployed; writes still take `{order, path}` only. Editions are
-  rows of their own that repeat the base album's paths. The public list is
-  cached for 15 minutes, so admin edits show there late.
+- **`/albums/` is paginated** (`{count, next, previous, results}`, 20 per
+  page). Checked 2026-11-03: `count` is 24 and page 2 is the four edition rows
+  (Death Race for Love bonus, both Fighting Demons editions, The Party Never
+  Ends 2.0). `next` is `http://`. Each row has `type` (Album, EP, Mixtape),
+  `cover_url` (a site asset or a storage path, so go through `buildImageUrl`)
+  and an ordered `songs` list of catalogue song `path`s. Reads add a read-only
+  `song` summary to each track (`id`, `public_id`, `name`, `category`,
+  `length`, `image_url`, or null); writes still take `{order, path}` only.
+  Editions are rows of their own that repeat the base album's paths. The
+  public list is cached for 15 minutes (`Cache-Control: max-age=900`), so
+  admin edits show there late. `fetchAlbums`, `adminFetchAlbums` and
+  `fetchArtists` walk every page by number (not the `http://` link) and still
+  accept a bare array from an older server.
+- **`POST /files/tags/`** reads comp-file tags. Body is `{paths, channel}`,
+  at most 500 paths per call (`getCompFileTags` loops). The response is
+  `{tags: {path: CompFileTags}}`. Missing files and anything that is not audio
+  are left out of `tags`. Every tag value is a string, `""` when the tag is
+  absent, plus `has_cover`. There is no GET.
 - **`/files/download/?path=` supports Range** (206 with `Content-Range`, CORS
   exposes the range headers). An `<audio>` element handles seeking by itself.
 - **`/files/image-thumbnail/` 404s for real images** (nginx's HTML 404 page,
@@ -253,6 +262,44 @@ scripts/                  release.bat, beta.bat, run.bat, check-terminal-coverag
 `.env.local` (copy `.env.local.example`): `VITE_AUTH_TOKEN` skips Discord login in
 dev, `VITE_JWAPI_WS` points the sockets elsewhere, plus Last.fm and release
 tokens. Never print or commit these values.
+
+### Albums, Tracker Files, and comp tag edits
+
+Names here collide with older screens.
+
+**Albums.** The public page is the `albums` view (`AlbumsView.tsx`). Staff
+editing stays on `albums-admin`. `open albums` and `open albums-admin` match
+that split. The `album` command is admin CRUD and does not open the page.
+Home opens an album with `setAlbumsSelectedId` and then `setActiveView('albums')`.
+Keep that order: the setter rewrites `/albums?id=` only while the path is
+already `/albums`, and `setActiveView` copies the stored id into the one
+history entry it pushes. Setting the view first pushes `/albums` with no id,
+and Back from the album stops on the grid. On `file:` the page does not read
+`?id=` on mount, only on `popstate`. Playback does not use a track's `song`
+summary. `tracksOf` keeps catalogue songs found by path; a path with no match
+is dimmed and left out of Play, Shuffle and the queue. "Other Versions" is
+every other loaded album whose title matches after stripping a trailing
+parenthetical.
+
+**Files inside Tracker.** The Tracker `files` tab embeds `ApiFilesView`.
+Folder changes there must not call `history.pushState`; `useApiFilesBrowse`'s
+`embedded` flag is what leaves `/tracker` alone. "Show in Files" on a Tracker
+song stays in Tracker (`setApiFilesPath` plus `setTrackerTab('files')`). The
+song menu and the desktop player call `openInFiles`, which switches to the
+standalone `api-files` view. `apiFilesPath` is consumed once, when the browser
+mounts, then cleared. Setting it while that browser is already mounted does
+not move the folder.
+
+**Comp tag edits.** Files → Edit tags and `comp retag` propose a `retag` batch
+through `proposeTagEdits` / `submitCompProposalBatch`. That path is not the
+Library's on-disk ID3 write. Send only the keys that change. A missing key
+stays, `""` clears one, and `cover: ""` removes the embedded cover. A new
+cover is a data URL, staged once and shared by `upload_id`. The bulk editor
+only tags `mp3`, `m4a`, `flac`, `opus`, `wav`, `aiff` and `aif`.
+
+**News channels.** Admin tab id `news-channels` is `NewsChannelsEditor`, not
+the Files-tab Channels tab (`channels`). `all` is a client-only tab and is
+never a channel id. Terminal: `news channels`.
 
 ---
 
@@ -413,11 +460,18 @@ Node 22.
 
 - **comp / channel**: one of the Files-tab sources (`comp`, `redemptionz`,
   `legacy`), not a separate computer. Unrelated to news channels.
-- **Tracker**: the song catalogue view (`/songs/`). **Files**: the file archive
-  (`/files/`).
+- **Tracker**: the song catalogue view (`/songs/`). Its Files tab embeds the
+  archive and must not take over the address bar. **Files**: the standalone
+  file archive (`/files/`, view `api-files`).
+- **Albums**: the public album page (`albums`). **Albums admin**
+  (`albums-admin`) is the staff editor. The `album` terminal command is the
+  admin API, not the page.
 - **Era**: a period of Juice WRLD's work (`/eras/`), e.g. "jute", "LND".
 - **Proposal**: an edit waiting for review, either song data (editor) or comp
-  file (contributor).
+  file (contributor). A comp `retag` proposes tag changes; it does not write
+  them until the batch is approved.
+- **News channel**: a feed tab (`/news/channels/`). Not a comp channel. The
+  admin tab id is `news-channels`.
 - **999 FM**: the live radio. **WRLD**: the full-screen now-playing view.
 - **Relay / port**: copying work from one platform branch to another.
 
@@ -428,6 +482,37 @@ Node 22.
 Newest first. One entry each: date, what went wrong, what to do instead. Delete
 entries that stop being true.
 
+- 2026-11-05: Chromium plays AAC inside `.m4a` and does not decode ALAC, so an
+  ALAC `.m4a` failed like a broken file (`audio/mp4` still looks playable).
+  The desktop app sniffs the codec (`electron/alac.js`) and plays a FLAC
+  transcode through the on-demand ffmpeg. The website and the mobile builds
+  still can't play ALAC. Don't treat `audio/mp4` as proof the file will play.
+  Don't port `Player.tsx`'s ALAC path either: the error handler returns as
+  soon as it calls `requestAlac`, and without `preparePlayback` that call
+  does nothing, so a file that won't decode never skips.
+- 2026-11-03: A failed read of `offline-library.json` (truncated write, or the
+  file locked for a moment) was treated as an empty library and cached under
+  that file's stamp, so the next download or playlist sync saved the empty
+  index over the real one. Only a missing file is an empty library. An
+  unreadable index must throw and must not be written. Save it by renaming a
+  temp file over the previous one.
+- 2026-11-03: Discord Rich Presence counted from when Discord reconnected, and
+  a playing update sent before `duration` was known omitted timestamps, so
+  Discord showed a frozen `⏸ position · artist` line plus its own elapsed
+  timer. A playing activity always sends `startTimestamp` from the live
+  playhead. On `ready` (including reconnect) main tells the renderer
+  (`discord-rpc-connected`) to send again. The dedupe key includes duration,
+  or a late length never replaces the first payload.
+- 2026-11-03: macOS release builds were ad-hoc signed on the GitHub runner.
+  That signature is only valid on the machine that made it, so other Macs
+  report "Unreleased.app is damaged" and `xattr -cr` does not help. Keep
+  `mac.identity` null until there is an Apple Developer certificate. A copy
+  that is already damaged can be opened with `xattr -cr` on the real path
+  (`/Applications` or `~/Applications`) and then
+  `codesign --force --deep --sign -` on that same path.
+- 2026-11-03: `fetchAlbums` unwrapped page 1 of `/albums/` and dropped the
+  edition rows on page 2. `fetchAlbums`, `adminFetchAlbums` and `fetchArtists`
+  walk pages by number. Do not follow the `http://` `next` link.
 - 2026-11-03: Bulk playlist additions use `addSongsToPlaylist`, bypassing native
   offline sync when it lives only in `addToPlaylist`. Keep sync in the batch
   function and delegate single additions to it, so adding an album or selected
