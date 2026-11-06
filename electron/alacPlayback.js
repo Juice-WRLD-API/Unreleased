@@ -208,8 +208,9 @@ function createAlacPlayback(opts) {
 
   /**
    * A remote URL, or a local file the protocol could not transcode because
-   * ffmpeg was not installed yet. Resolves `{ path }` of a FLAC, `{}` when
-   * the source is not ALAC, or `{ error }`.
+   * ffmpeg was not installed yet. Resolves `{ path, ready }` of a FLAC
+   * (`ready` once the encode has finished), `{}` when the source is not
+   * ALAC, or `{ error }`.
    * @param {string} url
    */
   async function prepare(url) {
@@ -240,7 +241,11 @@ function createAlacPlayback(opts) {
     if (!ffmpeg && opts.downloadFfmpeg) ffmpeg = await opts.downloadFfmpeg()
     if (!ffmpeg) return { error: 'The audio converter is not installed' }
     const dest = path.join(dir(), cacheName(tag))
-    if (!fs.existsSync(dest + '.ok') && !jobs.has(dest)) {
+    // `ready` is only true once the encode has finished. The path is returned
+    // either way so playback can tail the file, but a failed encode deletes
+    // it — callers must not remember a path that isn't ready.
+    const ready = fs.existsSync(dest + '.ok')
+    if (!ready && !jobs.has(dest)) {
       try { fs.unlinkSync(dest) } catch { /* no partial */ }
       void prune()
       const job = encode(ffmpeg, input, dest)
@@ -248,7 +253,7 @@ function createAlacPlayback(opts) {
       // turning a later playback of the cached file into a rejection.
       job.catch(() => {})
     }
-    return { path: dest }
+    return { path: dest, ready }
   }
 
   return { startLocal, prepare, inCache, jobs, sniffFile }

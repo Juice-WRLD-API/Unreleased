@@ -1,6 +1,6 @@
 # Agent guide: Juice WRLD API and Unreleased
 
-**Version 1.55** · updated 2026-11-05. Bump the version and date whenever you
+**Version 1.56** · updated 2026-11-06. Bump the version and date whenever you
 change this file (minor for fixes and additions, major for rewrites).
 
 **Keep this file current.** If you find something in the docs or this file that
@@ -482,6 +482,12 @@ Node 22.
 Newest first. One entry each: date, what went wrong, what to do instead. Delete
 entries that stop being true.
 
+- 2026-11-06: `prepare()` returns the FLAC path as soon as encoding starts, and a
+  failed encode deletes that file. Remembering the path before `ready` made
+  every later play load the missing file and skip ALAC preparation, so the
+  song stayed unplayable until restart. Only store a path once `ready` is
+  set. A playback-cache URL is not the downloaded copy; a 404 there must not
+  mark the offline file unreadable.
 - 2026-11-05: Chromium plays AAC inside `.m4a` and does not decode ALAC, so an
   ALAC `.m4a` failed like a broken file (`audio/mp4` still looks playable).
   The desktop app sniffs the codec (`electron/alac.js`) and plays a FLAC

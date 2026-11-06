@@ -65,7 +65,8 @@ import { PopLayer } from './PopLayer'
 // Chromium plays AAC and does not play ALAC. Once a source has been transcoded
 // to FLAC, every later load of that same URL (seek recovery, the next play)
 // uses the FLAC. Local files are swapped inside the local-media handler, so
-// they are not entered here.
+// they are not entered here. Only a finished transcode is stored: the path
+// comes back as soon as encoding starts, and a failed encode deletes the file.
 const alacPlayable = new Map<string, string>()
 
 function isAlacCandidate(url: string): boolean {
@@ -75,6 +76,22 @@ function isAlacCandidate(url: string): boolean {
     else name = new URL(url, 'https://local.invalid').pathname
   } catch { /* keep the raw string */ }
   return /\.(m4a|mp4|caf|alac)$/i.test(name)
+}
+
+// FLAC written by the ALAC transcode, under userData/playback-cache. This is
+// not the downloaded copy, even though both are local-media URLs.
+function isAlacTranscodeUrl(src: string): boolean {
+  let filePath = src
+  try {
+    if (src.startsWith('local-media:')) filePath = new URL(src).searchParams.get('p') || ''
+  } catch { /* keep src */ }
+  return filePath.includes('playback-cache') && /\.flac$/i.test(filePath)
+}
+
+function dropAlacPlayable(src: string): void {
+  for (const [key, value] of alacPlayable) {
+    if (sameMediaSrc(value, src)) alacPlayable.delete(key)
+  }
 }
 
 function resolvePlaybackUrl(track: { id: string; streamUrl?: string; path: string }): string {
@@ -888,7 +905,7 @@ export default function Player(): JSX.Element {
     alacPrepUrl.current = url
     alacPreparing.current = true
     runLog('playback', `preparing ALAC playback for ${describeSource(url)}`)
-    return el.preparePlayback({ url }).then((result: { path?: string; error?: string } | null) => {
+    return el.preparePlayback({ url }).then((result: { path?: string; ready?: boolean; error?: string } | null) => {
       if (gen !== alacPrepGen.current) return 'alac' as const
       alacPreparing.current = false
       const a = getActive()
@@ -896,7 +913,10 @@ export default function Player(): JSX.Element {
       if (!a || s.currentTrack?.id !== trackId) return 'alac' as const
       if (result?.path) {
         const play = toFileUrl(result.path)
-        alacPlayable.set(url, play)
+        // Not ready: ffmpeg is still writing (or about to). Remembering the
+        // path here stuck the song on a file a failed encode then deletes, and
+        // later loads never asked for ALAC again.
+        if (result.ready) alacPlayable.set(url, play)
         if (!sameMediaSrc(a.currentSrc || a.src, play)) {
           a.src = play
           a.volume = volumeRef.current
@@ -1369,6 +1389,20 @@ export default function Player(): JSX.Element {
     // — the protocol handler transcodes them before the element sees ALAC —
     // and only do when ffmpeg is not installed yet.
     if (alacPreparing.current) return
+    // playback-cache is the transcode, not the downloaded song. A missing
+    // file (the encode failed, or the cache was pruned) has to be forgotten
+    // so the next play asks for ALAC again; a file that's still there is
+    // reloaded as itself. Either way this must not mark the real download
+    // unreadable — that made the next sync fetch a good copy again.
+    if (isAlacTranscodeUrl(src)) {
+      const trackId = track?.id
+      void probeSource(src).then((result) => {
+        if (audio !== getActive() || !useStore.getState().isPlaying || useStore.getState().currentTrack?.id !== trackId) return
+        if (/HTTP 404/.test(result.detail)) dropAlacPlayable(src)
+        recoverPlayback('error')
+      })
+      return
+    }
     const offline = track ? offlineTracks[track.id] : undefined
     if (track && offline && src.startsWith('local-media:') && !isOfflineCopyUnreadable(track.id, offline)) {
       void fallBackFromOfflineCopy(audio, track, offline, describeMediaError(err))
