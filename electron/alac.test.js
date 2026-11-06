@@ -107,6 +107,10 @@ try {
   const resolved = require('ffmpeg-static')
   ffmpeg = typeof resolved === 'string' ? resolved : null
 } catch { /* devDependency, absent in a packaged tree */ }
+if (!ffmpeg) {
+  const found = spawnSync('ffmpeg', ['-version'], { encoding: 'utf8' })
+  if (found.status === 0) ffmpeg = 'ffmpeg'
+}
 
 test('a real ALAC m4a is sniffed and played back as FLAC', { skip: !ffmpeg }, async () => {
   if (!ffmpeg) return
@@ -142,5 +146,52 @@ test('a real ALAC m4a is sniffed and played back as FLAC', { skip: !ffmpeg }, as
   if (!again || !('ready' in again)) throw new Error('expected the cached transcode')
   assert.equal(again.ready, true)
   assert.equal(again.path, started.live)
+
+  const url = 'local-media://play?p=' + encodeURIComponent(alac)
+  const prepared = await playback.prepare(url)
+  assert.equal(prepared.ready, true)
+  assert.equal(prepared.path, started.live)
+  fs.rmSync(dir, { recursive: true, force: true })
+})
+
+test('a transcode path is not ready until the encode finishes, and a failure leaves it unready', { skip: !ffmpeg }, async () => {
+  if (!ffmpeg) return
+  const bin = ffmpeg
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'alac-ready-'))
+  const pcm = path.join(dir, 'tone.pcm')
+  const alac = path.join(dir, 'tone.m4a')
+  fs.writeFileSync(pcm, Buffer.alloc(44100))
+  const enc = spawnSync(bin, ['-hide_banner', '-y', '-f', 's16le', '-ar', '44100', '-ac', '1', '-i', pcm, '-c:a', 'alac', alac], { encoding: 'utf8' })
+  assert.equal(enc.status, 0, 'encode alac')
+  const url = 'local-media://play?p=' + encodeURIComponent(alac)
+
+  const playback = createAlacPlayback({
+    cacheDir: () => path.join(dir, 'cache'),
+    ffmpegPath: () => bin,
+  })
+  const live = await playback.prepare(url)
+  assert.equal(live.ready, false)
+  assert.equal(typeof live.path, 'string')
+  const job = playback.jobs.get(live.path)
+  if (!job) throw new Error('expected the encode to be running')
+  await job
+  assert.equal((await playback.prepare(url)).ready, true)
+
+  // Node rejects ffmpeg's arguments, so the encode fails on every platform.
+  const failing = createAlacPlayback({
+    cacheDir: () => path.join(dir, 'fail-cache'),
+    ffmpegPath: () => process.execPath,
+  })
+  const failed = await failing.prepare(url)
+  assert.equal(failed.ready, false)
+  const failedJob = failing.jobs.get(failed.path)
+  if (!failedJob) throw new Error('expected a failing encode')
+  await failedJob.catch(() => {})
+  assert.equal(fs.existsSync(failed.path + '.ok'), false)
+  const retry = await failing.prepare(url)
+  assert.equal(retry.ready, false)
+  const retryJob = failing.jobs.get(retry.path)
+  if (retryJob) await retryJob.catch(() => {})
+  assert.equal(fs.existsSync(retry.path + '.ok'), false)
   fs.rmSync(dir, { recursive: true, force: true })
 })
