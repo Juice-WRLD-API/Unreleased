@@ -2214,8 +2214,6 @@ export default function Player(): JSX.Element {
     }
   }, [showEqPanel])
   // Accent the button when anything in the panel deviates from neutral.
-  // On iOS only speed applies (the effects chain never runs there), so synced
-  // EQ settings from another device don't light the button up.
   const eqActive = playbackSpeed !== 1 || (EFFECTS_SUPPORTED && (eqEnabled || eqBalance !== 0 || eqMono || eqBoost !== 1 || skipSilence || reverbEnabled || fxInUse(audioFx, eqEnabled)))
 
 
@@ -2701,10 +2699,7 @@ export default function Player(): JSX.Element {
         <div className="flex items-center gap-3 w-72 justify-end">
           {/* Equalizer (EQ, balance, mono, skip silence, playback speed).
               Stays visible during FM - the effects chain applies to the live
-              stream too; only the speed row hides inside the panel. On iOS the
-              effects chain is off (routing through Web Audio kills background
-              playback, see audioEffects.ts) but the panel still opens for speed,
-              pitch, sleep timer and A-B loop, which don't use the chain. */}
+              stream too; only the speed row hides inside the panel. */}
           <button
             ref={eqBtnRef}
             onClick={toggleEqPanel}
