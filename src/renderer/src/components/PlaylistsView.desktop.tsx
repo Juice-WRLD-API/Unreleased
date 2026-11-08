@@ -38,6 +38,7 @@ import CompactVersionRows from './CompactVersionRows'
 import { groupPlaylistBySong, subscribeCompactGroupsInvalidation } from '../lib/compactGroups'
 import type { SongUnit } from '../lib/compactGroups'
 import { versionsEnabled } from '../lib/versionsApi'
+import { baseTitle } from '../lib/onThisDay'
 import { shareOrigin } from '../lib/platform'
 import { useVirtualWindowEl } from '../hooks/useVirtualWindow'
 import PlaylistCard from './PlaylistCard'
@@ -59,6 +60,29 @@ import { fetchImageBlob } from '../lib/coverImage'
 // when the exporter wrote them. Import can either match the path to a local
 // file, or use the name to find the song in the API.
 type M3uEntry = { path: string; title: string | null; duration?: number | null }
+
+// Per-playlist layout, remembered on this device. Only non-list layouts are
+// stored, so the map stays small.
+type PlaylistLayout = 'list' | 'grid' | 'compact'
+const PLAYLIST_LAYOUT_KEY = 'unreleased:playlistLayouts'
+function readPlaylistLayouts(): Record<string, PlaylistLayout> {
+  try {
+    const v = JSON.parse(localStorage.getItem(PLAYLIST_LAYOUT_KEY) || '{}')
+    return v && typeof v === 'object' ? v : {}
+  } catch { return {} }
+}
+function readPlaylistLayout(key: string): PlaylistLayout {
+  const v = readPlaylistLayouts()[key]
+  return v === 'grid' || v === 'compact' ? v : 'list'
+}
+function writePlaylistLayout(key: string, mode: PlaylistLayout): void {
+  try {
+    const all = readPlaylistLayouts()
+    if (mode === 'list') delete all[key]
+    else all[key] = mode
+    localStorage.setItem(PLAYLIST_LAYOUT_KEY, JSON.stringify(all))
+  } catch { /* storage unavailable: layout just won't stick */ }
+}
 
 // ── PlaylistMosaic ────────────────────────────────────────────────────────────
 
@@ -650,6 +674,26 @@ export default function PlaylistsView(): JSX.Element {
   const [songUnits, setSongUnits] = useState<SongUnit<Track>[]>([])
   const [loadingCompact, setLoadingCompact] = useState(false)
   const { expanded: expandedGroups, toggle: toggleGroupExpanded, clear: clearExpandedGroups } = useExpandedGroups()
+  // Each playlist remembers its layout (list / grid / compact) across
+  // restarts. Device-local, keyed by which playlist is open.
+  const layoutKey = showLiked ? 'liked'
+    : selectedId != null ? `p:${selectedId}`
+    : localSelectedId != null ? `l:${localSelectedId}`
+    : null
+  const layoutKeyRef = useRef(layoutKey)
+  layoutKeyRef.current = layoutKey
+  useLayoutEffect(() => {
+    if (layoutKey == null) return
+    const mode = readPlaylistLayout(layoutKey)
+    setCompactView(mode === 'compact' && versionsEnabled)
+    setGridView(mode === 'grid')
+    clearExpandedGroups()
+  }, [layoutKey]) // eslint-disable-line react-hooks/exhaustive-deps
+  const setLayout = useCallback((mode: PlaylistLayout): void => {
+    setCompactView(mode === 'compact')
+    setGridView(mode === 'grid')
+    if (layoutKeyRef.current != null) writePlaylistLayout(layoutKeyRef.current, mode)
+  }, [])
 
   // Zip / share / bulk-add
   const [isSharedView, setIsSharedView] = useState(false)
@@ -2138,8 +2182,10 @@ export default function PlaylistsView(): JSX.Element {
     // view, so compact view's rows are the exact same markup. `queue` is what
     // playing the row plays through; `expander` swaps the drag grip for the
     // arrow that opens a song's versions (compact view only).
-    const renderTrackRow = (track: Track, displayIdx: number, { style, canDrag, queue, songPool, expander }: {
+    const renderTrackRow = (track: Track, displayIdx: number, { style, canDrag, queue, songPool, expander, compact }: {
       style?: React.CSSProperties
+      /** Compact view: the row stands for the song, so drop the "(v5)" tag. */
+      compact?: boolean
       canDrag: boolean
       queue: Track[]
       /** Compact view - see the store's queueSongPool. */
@@ -2194,7 +2240,7 @@ export default function PlaylistsView(): JSX.Element {
           </button>
           <AlbumArtThumbnail track={track} size={40} className="rounded-md" shimmer={false} eager />
           <div className="min-w-0" onDoubleClick={() => { if (!selectMode) playTrack(track, queue, null, null, { songPool }) }}>
-            <p className="text-text-primary text-sm font-medium truncate" title={track.title}>{track.title}</p>
+            <p className="text-text-primary text-sm font-medium truncate" title={track.title}>{compact ? baseTitle(track.title) : track.title}</p>
             <p className="text-text-muted text-xs truncate flex items-center gap-1">
               <span className="truncate">{track.artist}{track.album ? ` · ${track.album}` : ''}</span>
             </p>
@@ -2545,14 +2591,14 @@ export default function PlaylistsView(): JSX.Element {
                 )}
                 <div className="flex items-center bg-surface-overlay rounded-xl p-0.5 shrink-0">
                   <button
-                    onClick={() => { setCompactView(false); setGridView(false) }}
+                    onClick={() => setLayout('list')}
                     className={`flex items-center justify-center w-8 h-8 rounded-lg transition-colors ${!compactView && !gridView ? 'bg-surface-raised text-text-primary' : 'text-text-muted hover:text-text-secondary'}`}
                     title="List view"
                   >
                     <Rows3 size={15} />
                   </button>
                   <button
-                    onClick={() => { setGridView(true); setCompactView(false) }}
+                    onClick={() => setLayout('grid')}
                     className={`flex items-center justify-center w-8 h-8 rounded-lg transition-colors ${gridView ? 'bg-surface-raised text-text-primary' : 'text-text-muted hover:text-text-secondary'}`}
                     title="Grid view"
                   >
@@ -2560,7 +2606,7 @@ export default function PlaylistsView(): JSX.Element {
                   </button>
                   {versionsEnabled && (
                     <button
-                      onClick={() => { setCompactView(true); setGridView(false); clearExpandedGroups() }}
+                      onClick={() => { setLayout('compact'); clearExpandedGroups() }}
                       className={`flex items-center justify-center w-8 h-8 rounded-lg transition-colors ${compactView ? 'bg-surface-raised text-text-primary' : 'text-text-muted hover:text-text-secondary'}`}
                       title="Compact view - one row per song, with its versions under an arrow"
                     >
@@ -2628,6 +2674,7 @@ export default function PlaylistsView(): JSX.Element {
                           canDrag: false,
                           queue: compactLeads,
                           songPool: tracks,
+                          compact: true,
                           expander: hasVersions
                             ? { expanded: open, count: unit.versions.length, onToggle: () => toggleGroupExpanded(unit.groupId!) }
                             : undefined,

@@ -17,7 +17,7 @@
 // <audio> elements must carry crossOrigin="anonymous" for any of that to
 // apply.
 
-import { IS_MOBILE } from './platform'
+import { IS_IOS, IS_MOBILE } from './platform'
 
 export const EQ_BANDS = [32, 64, 125, 250, 500, 1000, 2000, 4000, 8000, 16000]
 export const EQ_GAIN_LIMIT = 12
@@ -200,9 +200,9 @@ export function sanitizeUserPresets(raw: unknown): EqPreset[] {
     && p.gains.every((g: unknown) => typeof g === 'number' && Number.isFinite(g)))
 }
 
-// Effects are available on iOS too. Web Audio can interrupt auto-play and
-// background playback there; both EQ layouts warn users about that tradeoff.
-export const EFFECTS_SUPPORTED = true
+// Keep iOS media elements outside Web Audio so background playback remains
+// native. A MediaElementSource cannot be detached again without a reload.
+export const EFFECTS_SUPPORTED = !IS_IOS
 
 // On mobile the graph is built lazily: elements stay unrouted until an effect
 // is switched on, preserving native background playback until effects are used.
@@ -292,6 +292,7 @@ function buildSaturationCurve(drive: number): Float32Array<ArrayBuffer> {
 }
 
 function ensureGraph(): AudioContext | null {
+  if (!EFFECTS_SUPPORTED) return null
   if (ctx) return ctx
   // Mobile: not until an effect is actually in use (see effectsWanted).
   if (!effectsWanted) return null

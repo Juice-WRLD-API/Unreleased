@@ -81,9 +81,9 @@ function widget(which: 'player' | 'playlist' | 'clock', words: string[]): string
     if (!kind.includes(value)) fail(`${key}: ${kind.join(', ')}`)
     parsed = /^\d+$/.test(value) ? Number(value) : value
   } else {
-    // The playlist's list: queue, liked, or a playlist by name.
+    // The playlist's list: queue, history, liked, or a playlist by name.
     const v = value.toLowerCase()
-    if (v === 'queue' || v === 'liked') parsed = v
+    if (v === 'queue' || v === 'history' || v === 'liked') parsed = v
     else {
       const p = st().playlists.find((x) => x.name.toLowerCase() === v) ?? st().playlists.find((x) => x.name.toLowerCase().includes(v)) ?? fail(`no playlist "${value}"`)
       parsed = `playlist:${p.id}`

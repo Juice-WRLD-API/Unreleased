@@ -174,7 +174,7 @@ export default function EqualizerPanel(): JSX.Element {
 
       {IS_IOS && (
         <p className="mx-4 mb-2 text-[11px] text-text-muted bg-[var(--surface-overlay)] border border-[var(--border)] rounded-lg px-3 py-2">
-          On iOS, auto-play might not work while using the equalizer or sound effects, especially when the app is in the background or the screen is locked.
+          Equalizer and sound effects are unavailable on iOS to keep music playing when you leave the app or lock your phone.
         </p>
       )}
 
