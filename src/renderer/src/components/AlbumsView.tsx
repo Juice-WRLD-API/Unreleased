@@ -1,5 +1,5 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
-import { ChevronLeft, Play, Shuffle, MoreHorizontal, Music, ListEnd, ListPlus, ListMusic, Plus, Loader2 } from 'lucide-react'
+import { ChevronLeft, Play, Shuffle, MoreHorizontal, Music, ListEnd, ListPlus, ListMusic, Plus, Loader2, CheckSquare2, Square, X } from 'lucide-react'
 import { addSongsInBackground } from '../lib/optimisticPlaylist'
 import { useStore, useStorePick } from '../store/useStore'
 import * as albumsApi from '../lib/albumsApi'
@@ -8,8 +8,10 @@ import { loadAllSongs, songToTrack, parseDuration, type JWApiSong } from '../lib
 import { formatDuration } from '../lib/format'
 import { useCanEdit } from '../hooks/useChannelRoles'
 import { useContentMotion } from '../hooks/useContentMotion'
+import { useMultiSelect } from '../hooks/useMultiSelect'
+import { useLongPress } from '../hooks/useLongPress'
 import SongContextMenu, { type SongContextMenuState } from './SongContextMenu'
-import ContextMenu from './ContextMenu'
+import ContextMenu, { type ContextMenuEntry } from './ContextMenu'
 import type { Track } from '../types'
 
 // Albums laid out like Apple Music: a cover grid, and an album page with the
@@ -130,7 +132,8 @@ export default function AlbumsView(): JSX.Element {
   const [catalogReady, setCatalogReady] = useState(false)
   const [type, setType] = useState<string>('All')
   const [ctxMenu, setCtxMenu] = useState<SongContextMenuState | null>(null)
-  const [albumMenu, setAlbumMenu] = useState<{ x: number; y: number } | null>(null)
+  // The "…" actions menu, for the whole album or for the selected tracks.
+  const [albumMenu, setAlbumMenu] = useState<{ x: number; y: number; anchor?: { top: number; bottom: number }; scope: 'album' | 'selection' } | null>(null)
   const scrollRef = useRef<HTMLDivElement>(null)
   const contentRef = useRef<HTMLDivElement>(null)
 
@@ -186,6 +189,58 @@ export default function AlbumsView(): JSX.Element {
     const queue = tracksOf(a)
     if (queue.length > 0) playTrack(queue[Math.min(startAt, queue.length - 1)], queue)
   }
+
+  // ── multi-select ───────────────────────────────────────────────────────────
+  // Keyed by row index, since an album can list the same path twice. Only
+  // rows with a catalogue song can be selected.
+  const albumRows = album ? rowsOf(album) : []
+  const longPress = useLongPress()
+  const selectAnchor = useRef<number | null>(null)
+  const {
+    selectMode, selected, toggle, selectMany, exitSelectMode, selectAll, clear,
+  } = useMultiSelect<number>({
+    onExit: () => { selectAnchor.current = null },
+    ctrlA: {
+      enabled: album !== null,
+      getAll: () => new Map(albumRows.flatMap((r, i): [number, number][] => (r.song ? [[i, i]] : []))),
+    },
+  })
+  useEffect(() => { exitSelectMode() }, [selectedId, exitSelectMode])
+
+  const toggleRow = (i: number): void => { toggle(i, i); selectAnchor.current = i }
+  /** Shift+click: add every playable row between the last clicked one and this one. */
+  const selectRange = (i: number): void => {
+    const from = selectAnchor.current
+    if (from == null) { toggleRow(i); return }
+    const next = new Map(selected)
+    for (let k = Math.min(from, i); k <= Math.max(from, i); k++) if (albumRows[k]?.song) next.set(k, k)
+    selectMany(next)
+  }
+  const selectedRows = [...selected.keys()].sort((x, y) => x - y).map((i) => albumRows[i]).filter((r): r is Row => !!r?.song)
+  const selectedTracks = selectedRows.map((r) => songToTrack(r.song!))
+  const selectedSongIds = selectedRows.flatMap((r) => (r.songId != null ? [r.songId] : []))
+
+  const menuItems = (tracks: Track[], songIds: number[], done: () => void): ContextMenuEntry[] => [
+    { label: 'Play Next', icon: ListPlus, onSelect: () => { [...tracks].reverse().forEach((t) => playNext(t)); done() } },
+    { label: 'Add to Queue', icon: ListEnd, onSelect: () => { tracks.forEach((t) => addToQueue(t)); done() } },
+    {
+      label: 'Add to Playlist',
+      icon: Plus,
+      onOpen: () => { if (account) void refreshPlaylists() },
+      children: account
+        ? playlists.map((p) => ({ label: p.name, icon: ListMusic, onSelect: () => { void addSongsInBackground(p.id, songIds); done() } }))
+        : [],
+      childrenEmpty: account ? 'No playlists yet.' : undefined,
+      childrenFooter: !account ? (
+        <div className="p-1">
+          <p className="text-xs text-text-muted mb-2">Log in to save to playlists.</p>
+          <button onClick={() => { setShowUserAuth(true); setAlbumMenu(null) }} className="w-full py-1.5 rounded-lg bg-accent/15 text-accent text-xs font-semibold">
+            Log in
+          </button>
+        </div>
+      ) : undefined,
+    },
+  ]
 
   const types = useMemo(() => {
     const seen = new Set((albums ?? []).map((a) => a.type).filter((t): t is string => !!t))
@@ -262,7 +317,7 @@ export default function AlbumsView(): JSX.Element {
                   <Shuffle size={14} /> Shuffle
                 </button>
                 <button
-                  onClick={(e) => { const r = e.currentTarget.getBoundingClientRect(); setAlbumMenu({ x: r.left, y: r.bottom + 6 }) }}
+                  onClick={(e) => { const r = e.currentTarget.getBoundingClientRect(); setAlbumMenu({ x: r.left, y: r.bottom + 6, scope: 'album' }) }}
                   disabled={playable === 0}
                   aria-label="More"
                   className="hidden md:flex ml-auto w-9 h-9 rounded-full bg-surface-raised text-accent items-center justify-center hover:bg-surface-overlay transition-colors disabled:opacity-40"
@@ -280,10 +335,19 @@ export default function AlbumsView(): JSX.Element {
             {rows.map((r, i) => {
               const active = r.songId != null && currentTrack?.id === `jw-${r.songId}`
               const startIndex = rows.slice(0, i).filter((x) => x.song).length
+              const isSelected = selected.has(i)
               const openMenu = (x: number, y: number): void => {
                 if (!r.song) return
+                // Right-clicking one of several selected rows acts on all of them.
+                if (isSelected && selected.size > 1) { setCtxMenu(null); setAlbumMenu({ x, y, scope: 'selection' }); return }
                 const track = songToTrack(r.song)
                 setCtxMenu((prev) => (prev?.track.id === track.id ? null : { track, songId: r.song!.id, x, y }))
+              }
+              const activate = (e: React.MouseEvent | React.KeyboardEvent): void => {
+                if (!r.song) return
+                if (e.shiftKey && (selectMode || selectAnchor.current != null)) { selectRange(i); return }
+                if (e.ctrlKey || e.metaKey || selectMode) { toggleRow(i); return }
+                playAlbum(a, startIndex)
               }
               return (
                 <li key={`${r.entry.path}-${i}`}>
@@ -291,13 +355,17 @@ export default function AlbumsView(): JSX.Element {
                     role="button"
                     tabIndex={r.song ? 0 : -1}
                     aria-disabled={!r.song}
-                    onClick={() => r.song && playAlbum(a, startIndex)}
-                    onKeyDown={(e) => { if ((e.key === 'Enter' || e.key === ' ') && r.song) { e.preventDefault(); playAlbum(a, startIndex) } }}
+                    aria-pressed={selectMode ? isSelected : undefined}
+                    {...(r.song ? longPress.bind(() => toggleRow(i)) : {})}
+                    onClick={(e) => { if (longPress.consumeFired()) return; activate(e) }}
+                    onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); activate(e) } }}
                     onContextMenu={(e) => { e.preventDefault(); openMenu(e.clientX, e.clientY) }}
-                    className={`group flex items-center gap-3 h-11 px-2 md:px-3 md:rounded-md ${i % 2 === 0 ? 'md:bg-surface-raised' : ''} ${r.song ? 'cursor-default hover:bg-surface-overlay md:hover:bg-surface-overlay' : 'opacity-45'} transition-colors`}
+                    className={`group flex items-center gap-3 h-11 px-2 md:px-3 md:rounded-md select-none ${isSelected ? 'bg-accent/10 md:bg-accent/10' : i % 2 === 0 ? 'md:bg-surface-raised' : ''} ${r.song ? `cursor-default ${isSelected ? '' : 'hover:bg-surface-overlay md:hover:bg-surface-overlay'}` : 'opacity-45'} transition-colors`}
                   >
                     <span className="w-6 shrink-0 flex items-center justify-center text-[13px] tabular-nums">
-                      {active ? (
+                      {selectMode && r.song ? (
+                        isSelected ? <CheckSquare2 size={16} className="text-accent" /> : <Square size={16} className="text-text-muted opacity-50" />
+                      ) : active ? (
                         <span className={`flex items-end gap-[2px] h-3 text-accent ${isPlaying ? 'album-eq-playing' : ''}`} aria-label="Now playing">
                           <span className="album-eq-bar" /><span className="album-eq-bar" /><span className="album-eq-bar" />
                         </span>
@@ -311,8 +379,9 @@ export default function AlbumsView(): JSX.Element {
                     <span className={`flex-1 min-w-0 truncate text-[13px] border-b border-[var(--border)] md:border-0 h-full flex items-center ${active ? 'text-accent font-medium' : 'text-text-primary'}`} title={r.name}>
                       <span className="truncate">{r.name}</span>
                     </span>
-                    {r.song && (
+                    {r.song && !selectMode && (
                       <button
+                        onMouseDown={(e) => e.stopPropagation()}
                         onClick={(e) => { e.stopPropagation(); openMenu(e.clientX, e.clientY) }}
                         aria-label="More options"
                         className="shrink-0 w-7 h-7 rounded-full flex items-center justify-center text-accent opacity-100 md:opacity-0 md:group-hover:opacity-100 focus-visible:opacity-100 hover:bg-surface-highest transition-opacity"
@@ -345,29 +414,12 @@ export default function AlbumsView(): JSX.Element {
           <ContextMenu
             x={albumMenu.x}
             y={albumMenu.y}
+            anchor={albumMenu.anchor}
             onClose={() => setAlbumMenu(null)}
-            title={a.title}
-            items={[
-              { label: 'Play Next', icon: ListPlus, onSelect: () => { [...tracksOf(a)].reverse().forEach((t) => playNext(t)) } },
-              { label: 'Add to Queue', icon: ListEnd, onSelect: () => { tracksOf(a).forEach((t) => addToQueue(t)) } },
-              {
-                label: 'Add to Playlist',
-                icon: Plus,
-                onOpen: () => { if (account) void refreshPlaylists() },
-                children: account
-                  ? playlists.map((p) => ({ label: p.name, icon: ListMusic, onSelect: () => { void addSongsInBackground(p.id, songIdsOf(a)) } }))
-                  : [],
-                childrenEmpty: account ? 'No playlists yet.' : undefined,
-                childrenFooter: !account ? (
-                  <div className="p-1">
-                    <p className="text-xs text-text-muted mb-2">Log in to save to playlists.</p>
-                    <button onClick={() => { setShowUserAuth(true); setAlbumMenu(null) }} className="w-full py-1.5 rounded-lg bg-accent/15 text-accent text-xs font-semibold">
-                      Log in
-                    </button>
-                  </div>
-                ) : undefined,
-              },
-            ]}
+            title={albumMenu.scope === 'selection' ? `${selectedTracks.length} ${selectedTracks.length === 1 ? 'song' : 'songs'}` : a.title}
+            items={albumMenu.scope === 'selection'
+              ? menuItems(selectedTracks, selectedSongIds, exitSelectMode)
+              : menuItems(tracksOf(a), songIdsOf(a), () => undefined)}
           />
         )}
       </>
@@ -375,7 +427,7 @@ export default function AlbumsView(): JSX.Element {
   }
 
   return (
-    <>
+    <div className="flex-1 min-w-0 min-h-0 flex flex-col">
       <div ref={scrollRef} className="flex-1 min-h-0 overflow-y-auto relative isolate">
         {/* Artwork tint behind the header, the way Apple Music washes the
             page top in the cover's colors. */}
@@ -398,6 +450,46 @@ export default function AlbumsView(): JSX.Element {
         </div>
       </div>
 
+      {album && selectMode && (
+        <div className="shrink-0 border-t border-[var(--border)] bg-surface px-4 py-2.5 flex items-center gap-2 relative z-30">
+          <span className="text-sm text-text-primary font-medium flex-1 min-w-0 truncate">
+            {selected.size} {selected.size === 1 ? 'song' : 'songs'} selected
+          </span>
+          <button onClick={selectAll} className="text-xs text-text-muted hover:text-text-primary px-2 py-1 rounded transition-colors">
+            Select all
+          </button>
+          <button onClick={clear} className="text-xs text-text-muted hover:text-text-primary px-2 py-1 rounded transition-colors">
+            Clear
+          </button>
+          <button
+            onClick={() => { if (selectedTracks.length) { playTrack(selectedTracks[0], selectedTracks); exitSelectMode() } }}
+            disabled={selectedTracks.length === 0}
+            className="flex items-center gap-1.5 px-3 py-1.5 bg-accent text-white hover:opacity-90 rounded-lg text-xs font-medium disabled:opacity-50 transition-opacity"
+          >
+            <Play size={12} fill="currentColor" /> Play
+          </button>
+          <button
+            onClick={() => { selectedTracks.forEach((t) => addToQueue(t)); exitSelectMode() }}
+            disabled={selectedTracks.length === 0}
+            className="flex items-center gap-1.5 px-3 py-1.5 bg-surface-overlay hover:bg-surface-raised text-text-primary rounded-lg text-xs font-medium disabled:opacity-50 transition-colors"
+          >
+            <ListEnd size={13} /> Add to queue
+          </button>
+          <button
+            onClick={(e) => { const r = e.currentTarget.getBoundingClientRect(); setAlbumMenu({ x: r.left, y: r.bottom + 2, anchor: { top: r.top, bottom: r.bottom }, scope: 'selection' }) }}
+            disabled={selectedTracks.length === 0}
+            aria-label="More actions"
+            title="More actions"
+            className="p-1.5 rounded-lg bg-surface-overlay hover:bg-surface-raised text-text-primary disabled:opacity-50 transition-colors"
+          >
+            <MoreHorizontal size={15} />
+          </button>
+          <button onClick={exitSelectMode} className="p-1.5 rounded-lg hover:bg-surface-overlay transition-colors" title="Exit selection" aria-label="Exit selection">
+            <X size={15} className="text-text-muted" />
+          </button>
+        </div>
+      )}
+
       {ctxMenu && (
         <SongContextMenu
           state={ctxMenu}
@@ -412,6 +504,6 @@ export default function AlbumsView(): JSX.Element {
           }}
         />
       )}
-    </>
+    </div>
   )
 }

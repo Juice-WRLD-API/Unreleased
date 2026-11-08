@@ -1,6 +1,6 @@
 // The see-through playlist on the desktop: a header with the list's covers and name, then its songs, the whole of it
-// turned away in 3D. It shows the queue - the song playing first, then what follows - or the user's Liked Songs or
-// one of their playlists, picked from a shelf under its name. The song playing stands out of the list as a lens of
+// turned away in 3D. It shows the queue - the song playing first, then what follows - the songs played before it, or the
+// user's Liked Songs or one of their playlists, picked from a shelf under its name. The song playing stands out of the list as a lens of
 // glass; a row clicked plays, the queue kept, or the list from that song.
 import './base.css'
 import '../cards/cards.css'
@@ -132,10 +132,12 @@ function draw(): void {
     ? (items.length > 1 ? `${items.length - 1} up next` : 'Nothing up next')
     : `${items.length} ${items.length === 1 ? 'song' : 'songs'}`
   mosaic($('#header > .mosaic'), items.map((r) => r.cover).filter((c): c is string => !!c))
-  $('#play-list').classList.toggle('gone', id === 'queue' || !items.length)
+  $('#play-list').classList.toggle('gone', id === 'queue' || id === 'history' || !items.length)
   const quiet = $('#quiet')
   quiet.classList.toggle('hidden', items.length > 0)
-  quiet.textContent = id === 'queue' ? 'Play something, and what follows shows up here' : list?.id === id ? 'No songs here yet' : 'Loading…'
+  quiet.textContent = id === 'queue' ? 'Play something, and what follows shows up here'
+    : list?.id !== id ? 'Loading…'
+    : id === 'history' ? 'Songs you play show up here' : 'No songs here yet'
 
   // The rows made again only when they changed; the glass follows the playing row.
   const keys = items.map((r) => r.key).join('\n')
@@ -152,7 +154,7 @@ function draw(): void {
       $('.cover-slot', row).replaceWith(cover(r.cover, 'cover'))
       return row
     }))
-    if (id === 'queue') listEl.scrollTop = 0
+    if (id === 'queue' || id === 'history') listEl.scrollTop = 0
   } else {
     // A cover sent again (one that wouldn't load, now one that does) is put in where it is, the list left as it was.
     items.forEach((r, index) => {

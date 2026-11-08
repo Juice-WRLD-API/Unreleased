@@ -230,6 +230,8 @@ const listCache = new Map<string, Track[]>()
 async function listTracks(id: string): Promise<Track[]> {
   const s = useStore.getState()
   if (id === 'queue') return s.queue.length ? s.queue.slice(s.queueIndex) : s.currentTrack ? [s.currentTrack] : []
+  // What was played, newest first. It changes with every song, so it's read fresh each time, never cached.
+  if (id === 'history') return s.playHistory.slice(0, LIST_LIMIT)
   const cached = listCache.get(id)
   if (cached) return cached
   let tracks: Track[] = []
@@ -255,6 +257,7 @@ function shelf(): { id: string; name: string; count: number; covers: string[] }[
   const queue = s.queue.length ? s.queue.slice(s.queueIndex) : s.currentTrack ? [s.currentTrack] : []
   return [
     { id: 'queue', name: 'Queue', count: queue.length, covers: covers(queue) },
+    { id: 'history', name: 'History', count: s.playHistory.length, covers: covers(s.playHistory) },
     { id: 'liked', name: 'Liked Songs', count: s.likedTrackIds.length, covers: covers(listCache.get('liked') ?? []) },
     ...s.playlists.map((p) => ({ id: `playlist:${p.id}`, name: p.name, count: p.track_count, covers: [playlistCoverUrl(p)].filter((c): c is string => !!c) })),
   ]
@@ -262,6 +265,7 @@ function shelf(): { id: string; name: string; count: number; covers: string[] }[
 
 function listName(id: string): string {
   if (id === 'queue') return 'Queue'
+  if (id === 'history') return 'History'
   if (id === 'liked') return 'Liked Songs'
   const p = useStore.getState().playlists.find((x) => `playlist:${x.id}` === id)
   return p?.name ?? 'Playlist'
@@ -441,6 +445,12 @@ export async function runDesktopCommand(cmd: string, arg: unknown): Promise<void
       if (typeof id !== 'string') break
       if (id === 'queue') { void runDesktopCommand('jump', s.queueIndex + Number(index)); break }
       const tracks = await listTracks(id)
+      // A song from the history plays as it does in the queue panel: the queue kept, the song played next.
+      if (id === 'history') {
+        const track = tracks[Number(index) || 0]
+        if (track) s.playFromHistory(track)
+        break
+      }
       const track = tracks[Math.min(Math.max(Number(index) || 0, 0), tracks.length - 1)]
       if (!track) break
       if (shuffle !== s.shuffle) s.toggleShuffle()
@@ -530,6 +540,8 @@ function watchLists(): void {
   if (listsWatched) return
   listsWatched = true
   useStore.subscribe((s, p) => {
+    // The history isn't cached, so a new song played only asks the widgets to read it again.
+    if (s.playHistory !== p.playHistory) listsVersion++
     if (s.playlists === p.playlists && s.likedTrackIds === p.likedTrackIds) return
     listCache.clear()
     listsVersion++
@@ -629,7 +641,7 @@ export function watchDesktopState(send: (patch: Record<string, unknown>) => void
     if (s.songPrefs !== p.songPrefs || s.currentTrack !== p.currentTrack || s.currentTrackFull !== p.currentTrackFull || s.isPlaying !== p.isPlaying || s.queue !== p.queue
       || s.queueIndex !== p.queueIndex || s.likedTrackIds !== p.likedTrackIds || s.volume !== p.volume || s.repeat !== p.repeat
       || s.shuffle !== p.shuffle || s.lyricsOffset !== p.lyricsOffset || s.radioFmActive !== p.radioFmActive || s.radioFmNowPlaying !== p.radioFmNowPlaying
-      || s.radioFmMatchedSong !== p.radioFmMatchedSong || s.playlists !== p.playlists || s.radioFmIsLive !== p.radioFmIsLive
+      || s.radioFmMatchedSong !== p.radioFmMatchedSong || s.playlists !== p.playlists || s.playHistory !== p.playHistory || s.radioFmIsLive !== p.radioFmIsLive
       || s.eqEnabled !== p.eqEnabled || s.playbackSpeed !== p.playbackSpeed || s.eqBalance !== p.eqBalance || s.eqMono !== p.eqMono
       || s.eqBoost !== p.eqBoost || s.skipSilence !== p.skipSilence || s.reverbEnabled !== p.reverbEnabled || s.audioFx !== p.audioFx
       || s.lyricsScale !== p.lyricsScale || s.lyricsColorActive !== p.lyricsColorActive || s.lyricsColorInactive !== p.lyricsColorInactive) later()

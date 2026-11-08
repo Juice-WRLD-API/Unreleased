@@ -50,7 +50,7 @@ export interface DesktopPlayer extends WidgetCommon {
   lyricsOpen: boolean
 }
 
-export type PlaylistSource = 'queue' | 'liked' | `playlist:${string}`
+export type PlaylistSource = 'queue' | 'history' | 'liked' | `playlist:${string}`
 
 export interface DesktopPlaylist extends WidgetCommon {
   side: 'left' | 'right'
