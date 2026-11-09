@@ -6,6 +6,63 @@ All notable changes to this project are documented here.
 
 ---
 
+## [2.6.37] — 2026-11-08
+
+Changes since 2.6.0:
+
+### Albums
+
+- **New** **Albums** is a cover grid and an album page: Play, Shuffle, a numbered tracklist, Other Versions, and more by the same artist. Home's shelf opens that page. Staff editing stays on Albums admin (`open albums` vs `open albums-admin`)
+- **New** On an album, select tracks with Ctrl/Cmd-click, Shift-click, a long press, or Ctrl/Cmd+A. The bar plays that selection, adds it to the queue, or saves it to a playlist. Right-clicking one of several selected rows acts on all of them
+- **Improve** A track whose path is not in the catalogue stays dimmed and is left out of Play, Shuffle, the queue, and selection
+- **Improve** The public album list includes edition rows past the first page
+- **New** An album's menu can add its playable tracks to a playlist
+
+### Playlists
+
+- **Improve** Each playlist, Liked Songs, and each local playlist remembers list, grid, or compact on this device
+- **Improve** Compact rows hide a trailing version tag such as `(v2)` or `[v2]`. The full title stays on the tooltip
+- **Improve** Ctrl+F focuses the open playlist's track search
+- **New** **Download tagged** and **Download untagged** force tags on or off for that one download
+- **Fix** Adding several songs sends one request and still updates a playlist that is kept offline
+- **Fix** A playlist the server no longer has is dropped when its read returns 404
+
+### Files, tags, and covers
+
+- **New** Tracker has a Files tab. Show in Files on a Tracker song stays there. The song menu and the desktop player open the standalone Files view
+- **New** **Edit tags** on comp files reads the current tags and submits one batch of retag proposals, including an embedded cover. The files change when that batch is approved. Terminal: `comp tags` and `comp retag`
+- **New** **Submit cover art** from a song's menu, song info, Home → Tools, or the app menu. Your submissions are under Settings; the review queue is an admin tab. Terminal: `coverart`
+- **New** On desktop, Files can open a local folder by typing or pasting its path
+- **New** The admin console has a **News channels** tab, separate from the Files channel list
+
+### Playback and the desktop playlist
+
+- **New** The desktop app plays Apple Lossless inside `.m4a` and CAF by transcoding it to FLAC. The website and the mobile builds still cannot. An `audio/mp4` file is not proof it will play
+- **New** Settings → Playback → **Pause when headphones disconnect** (on by default) pauses when the output goes away and plays again when it comes back. Terminal: `set pause-on-disconnect`. It does nothing on the website
+- **New** The desktop playlist widget can show **History** (newest first) as well as the queue, Liked Songs, or a playlist. Clicking a history row plays it and keeps the queue. Terminal: `desktop playlist source history`
+- **Improve** Discord Rich Presence counts from the live playhead, including after Discord reconnects
+- **Improve** Previous at the start of a repeat-all queue steps back to the song that just finished
+- **Improve** Turning repeat off on a looped song moves on to the next one
+- **Fix** The mini player and the desktop player take a length from playback when the track lists none, so the time and the seek bar work
+- **Fix** An offline library that cannot be read is left as it is, instead of being saved over as an empty one
+- **Fix** An interrupted client-side ZIP download can resume
+
+### Navigation, search, and updates
+
+- **New** The mouse back and forward buttons step through views you opened. On desktop that stack is the app's own, not the browser's history
+- **New** Tracker search accepts `sort:length`, `sort:-length`, or `sort:length:desc`. That order lasts while the token is in the query
+- **Improve** Custom color swatches (lyric colors, the accent, share-lyrics colors) show a pipette mark so they read as pickers
+- **Improve** A macOS update downloads the DMG for that Mac (`Unreleased-<version>-arm64.dmg` on Apple silicon, including an Intel build under Rosetta, otherwise `Unreleased-<version>.dmg`) and opens it for you to drag over the old copy. Launch does not wait. Windows and Linux still install from the app
+- **Fix** Two monitors of the same model are named apart, so hiding one or leaving a widget on it does not change the other
+
+### Editing
+
+- **Improve** My proposals loads a page at a time, with status and search on the server and totals per tab. Terminal: `proposal ls [--status s] [--search q] [--page n]`
+- **Improve** Song and comp reviews can approve or deny a batch in one request
+- **Improve** Song metadata fields that hold several lines keep their line breaks
+
+---
+
 ## [2.6.0] — 2026-10-27
 
 Changes since 2.5.46:

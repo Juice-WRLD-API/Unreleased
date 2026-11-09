@@ -17,7 +17,10 @@ is the Electron desktop build.
 | macOS (Apple Silicon and Intel) | `.dmg` |
 | Linux (x64) | AppImage |
 
-Installed builds update themselves in the background.
+On Windows and Linux, installed builds download and install updates themselves.
+A macOS update downloads the DMG for that Mac (the `-arm64` build on Apple
+silicon, including an Intel build running under Rosetta) and asks you to drag
+it over the old copy. Launch does not wait for that download.
 
 The macOS app is not signed yet. If Gatekeeper says it is damaged, the copy
 was signed on the build machine and that signature does not count on yours.
@@ -38,7 +41,9 @@ codesign --force --deep --sign - /Applications/Unreleased.app
   (synced across devices), playlists, an albums shelf, 999 FM, news, games and
   your listening stats.
 - **Albums**: official albums, EPs and mixtapes as a cover grid and an album
-  page (Play, Shuffle, a numbered tracklist). Home's shelf opens the same page.
+  page (Play, Shuffle, a numbered tracklist, Other Versions). Home's shelf
+  opens the same page. Select tracks to play them, queue them, or add them to
+  a playlist. A path with no catalogue song stays dimmed and is left out.
   Editing an album is a separate staff screen.
 - **Tracker**: search and filter the whole API song catalogue by era, category
   and metadata. You choose which fields show in the list and in the detail
@@ -52,10 +57,14 @@ codesign --force --deep --sign - /Applications/Unreleased.app
   art, and convert between audio formats with ffmpeg.
 - **Playlists**: folders, custom covers and descriptions, drag to reorder,
   JSON/M3U import and export, share links, and following someone else's
-  playlist live.
+  playlist live. Each playlist remembers list, grid, or compact on this
+  device. Compact rows hide a trailing version tag such as `(v2)`.
 - **Player**: a queue with history, search and reshuffle, radio/shuffle mode,
   automatic recovery when a stream stalls, synced lyrics (Shift+L), an
   equalizer with volume boost, era covers, and personal covers per song.
+  The desktop app plays Apple Lossless by transcoding it to FLAC. Settings →
+  Playback can pause when headphones disconnect and play again when they
+  reconnect (desktop only).
 - **WRLD**: a full-screen now-playing view with blurred cover art, scrolling
   synced lyrics, a visualizer, and 999 FM controls.
 - **999 FM**: the API's live radio, where listeners vote to skip and suggest
@@ -75,8 +84,13 @@ codesign --force --deep --sign - /Applications/Unreleased.app
   numbers.
 - **News** feed with channels and notifications.
 - **Integrations**: Discord Rich Presence and Last.fm scrobbling.
+- **Identify song**: name a song from 10 seconds of the microphone, of what
+  this device is playing, or of a file. Home → Tools, the button beside
+  Tracker search, or the terminal's `identify`.
 - **Desktop niceties**: mini player, pop-out windows, tray controls, media
-  keys, and global and in-app hotkeys you can rebind separately.
+  keys, and global and in-app hotkeys you can rebind separately. Mouse back
+  and forward step through views you opened. The desktop playlist widget can
+  show the queue, history, Liked Songs, or a playlist.
 - **Customisation**: skins and themes, and a sidebar or pill nav (drag it to
   any window edge) where you choose and reorder the tabs.
 
@@ -111,6 +125,10 @@ npm run electron:dev
 This starts Vite on port `3018` and opens Electron against it with hot reload.
 On Windows, `scripts\run.bat` does the same thing. On Linux, use
 `electron:dev:wayland` or `electron:dev:x11` to pick a display backend.
+
+Only one copy can run against the same user-data folder. If the installed app
+is open, `npm run electron:dev` quits immediately. To run dev beside it, pass
+Electron a separate folder: `electron . --user-data-dir=<scratch>`.
 
 To work on the renderer alone in a browser:
 

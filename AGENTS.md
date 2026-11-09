@@ -1,6 +1,6 @@
 # Agent guide: Juice WRLD API and Unreleased
 
-**Version 1.55** · updated 2026-11-05. Bump the version and date whenever you
+**Version 1.56** · updated 2026-11-09. Bump the version and date whenever you
 change this file (minor for fixes and additions, major for rewrites).
 
 **Keep this file current.** If you find something in the docs or this file that
@@ -37,8 +37,9 @@ checkout as a sibling.
 | `iJWA/` | Retired. Its features now live in the app as **Desktop** (see section 6) | `Juice-WRLD-API/iJWA` |
 
 Branches in the player repo **do not sync automatically**. Each one has its own
-version number (desktop 2.5.x, web 2.3.x, Android/iOS 3.2.x, beta 3.0.x-beta as of
-2026-10-25) and its own history. Work moves between them by hand ("porting" or
+version number (desktop 2.6.37 and web 2.3.3 as of 2026-11-08; Android/iOS
+native 3.2.x as of the 2026-11-03 relay; beta 3.0.x-beta as of 2026-10-25) and
+its own history. Work moves between them by hand ("porting" or
 "relaying"), see section 2.
 
 ---
@@ -280,6 +281,37 @@ summary. `tracksOf` keeps catalogue songs found by path; a path with no match
 is dimmed and left out of Play, Shuffle and the queue. "Other Versions" is
 every other loaded album whose title matches after stripping a trailing
 parenthetical.
+
+**Album multi-select.** Selection is the row index, not the path or the song
+id: the same path can be listed twice, and a row with no catalogue song cannot
+be selected. Ctrl/Cmd-click toggles, Shift-click selects the playable rows
+between the last click and this one, and a long press or Ctrl/Cmd+A enters
+select mode. Changing the open album leaves select mode. A right-click on one
+of several selected rows opens the selection menu (Play Next, Add to Queue,
+Add to Playlist). Play on the bar plays those tracks as their own queue.
+
+**Playlist layouts.** List, grid, and compact are remembered on this device in
+`localStorage` (`unreleased:playlistLayouts`). Only grid and compact are
+stored; list is the key being absent. Keys are `liked`, `p:<server id>`, and
+`l:<local id>`. Restoring compact also requires `versionsEnabled` in
+`lib/versionsApi.ts`. That export is the constant `true` today, so compact
+does come back; a later `false` would open those playlists as a list.
+Compact row titles go through `baseTitle` in `lib/onThisDay.ts`, which strips a
+trailing `(vN)` or `[vN]` and nothing else. The `title` tooltip keeps the full
+name.
+
+**Desktop playlist widget.** Its source can be `queue`, `history`, `liked`, or
+`playlist:<id>` (`PlaylistSource` in `store/desktopSlice.ts`). History is
+`playHistory`, newest first, capped by `LIST_LIMIT`, and is not cached: it
+changes with every song. A click calls `playFromHistory`, which keeps the
+queue. The widget's play-the-list control is hidden for queue and history.
+Terminal: `desktop playlist source history`.
+
+**Mouse back and forward.** Buttons 3 and 4 call `navigateHistory` (`App.tsx`).
+The stack is in-memory view names, 50 deep, because the desktop build is
+`file://` and does not route views through the browser history. Replaying a
+view calls `setActiveView`, or `openPublicProfile` for that view. Do not send
+these buttons to `history.back()`.
 
 **Files inside Tracker.** The Tracker `files` tab embeds `ApiFilesView`.
 Folder changes there must not call `history.pushState`; `useApiFilesBrowse`'s
