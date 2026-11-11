@@ -66,7 +66,55 @@ const SongContextMenu = lazyOverlay(() => import('./SongContextMenu'))
 // fetch is still pending. Callers that can wait use ensureDonorUrl first.
 function resolvePlaybackUrl(track: { id: string; streamUrl?: string; path: string }): string {
   if (isDonorStreamUrl(track.streamUrl)) return cachedDonorUrl(track.streamUrl) ?? ''
+  if (iosPrefetch?.blobUrl && iosPrefetch.streamUrl === track.streamUrl) return iosPrefetch.blobUrl
   return track.streamUrl ?? toFileUrl(track.path)
+}
+
+// ── iOS next-song prefetch ───────────────────────────────────────────────────
+// iOS advances by swapping the source on the one element it has unlocked (see
+// onAudioEnded). That swap silences the page while the new song loads, and a
+// backgrounded PWA with nothing audible gets suspended before a network load
+// can finish - playback stopped at the end of every song until the app was
+// opened, except into songs already played, which load from cache at once.
+// So the next song is downloaded whole during the tail of the current one,
+// while the page is still alive, and the swap loads it from memory.
+// How far from the end of a song that download starts.
+const IOS_PREFETCH_S = 90
+// Anything bigger than this streams as before rather than sitting in memory.
+const IOS_PREFETCH_MAX_BYTES = 150 * 1024 * 1024
+// One entry: the upcoming song, then the current one for as long as it plays.
+// blobUrl stays null while the download runs and after one that failed (kept
+// so the same URL isn't retried on every timeupdate).
+let iosPrefetch: { streamUrl: string; blobUrl: string | null; ctrl: AbortController } | null = null
+
+function dropIosPrefetch(): void {
+  if (!iosPrefetch) return
+  iosPrefetch.ctrl.abort()
+  if (iosPrefetch.blobUrl) URL.revokeObjectURL(iosPrefetch.blobUrl)
+  iosPrefetch = null
+}
+
+function startIosPrefetch(streamUrl: string): void {
+  if (iosPrefetch?.streamUrl === streamUrl) return
+  dropIosPrefetch()
+  const entry: NonNullable<typeof iosPrefetch> = { streamUrl, blobUrl: null, ctrl: new AbortController() }
+  iosPrefetch = entry
+  void (async () => {
+    try {
+      const res = await fetch(streamUrl, { signal: entry.ctrl.signal })
+      if (!res.ok || Number(res.headers.get('Content-Length') ?? 0) > IOS_PREFETCH_MAX_BYTES) {
+        entry.ctrl.abort()
+        return
+      }
+      const blob = await res.blob()
+      if (iosPrefetch !== entry) return
+      // A blob URL has no file extension to sniff, so Safari only plays it
+      // when the server named a type it knows.
+      const type = blob.type.split(';')[0].trim()
+      if (!type || document.createElement('audio').canPlayType(type) === '') return
+      entry.blobUrl = URL.createObjectURL(blob)
+    } catch { /* the song streams from the network as before */ }
+  })()
 }
 
 // A session whose file wasn't known when its Track was built shows the file's
@@ -740,6 +788,17 @@ export default function Player(): JSX.Element {
     applyRate(spare)
   }
 
+  // iOS counterpart of the handoff: same timing, but into memory rather than
+  // the spare slot (see iosPrefetch).
+  const prefetchNextForIos = (): void => {
+    const next = upcomingTrack()
+    const current = useStore.getState().currentTrack
+    const url = next?.streamUrl
+    if (!next || !url || next.id === current?.id || url === current?.streamUrl) return
+    if (isDonorStreamUrl(url)) { void ensureDonorUrl(url).catch(() => {}); return }
+    if (/^https?:/.test(url)) startIosPrefetch(url)
+  }
+
   // Moves playback onto the spare slot if it already holds `next`. Called
   // between nextTrack() and the render it causes, so the load effect finds
   // skipNextLoadUrl set and leaves the slots alone.
@@ -880,6 +939,10 @@ export default function Player(): JSX.Element {
   useEffect(() => {
     const audio = getActive()
     if (resumeTrackId.current !== currentTrack?.id) resumeTrackId.current = null
+    // A prefetched song is kept only while it's the one playing. One still
+    // downloading when its song starts is dropped too, so the source this
+    // track resolves to can't change under it mid-play.
+    if (iosPrefetch && (iosPrefetch.streamUrl !== currentTrack?.streamUrl || !iosPrefetch.blobUrl)) dropIosPrefetch()
     if (!audio || !currentTrack) return
     const fileUrl = resolvePlaybackUrl(currentTrack)
     fillSessionArtist(currentTrack.id, currentTrack.streamUrl)
@@ -937,7 +1000,9 @@ export default function Player(): JSX.Element {
     // guard against a redundant re-run of this effect (e.g. React StrictMode's
     // deliberate double-invoke in dev) firing a second network request for
     // the same track.
-    if (audio.src === fileUrl) return
+    // (sameMediaSrc: on iOS onAudioEnded has already loaded this URL, and
+    // `.src` reads back normalized - a raw compare restarted that load.)
+    if (sameMediaSrc(audio.src, fileUrl)) return
 
     setCurrentTrackReady(false)
     // A different track just started loading - any in-flight preload of an
@@ -1300,6 +1365,16 @@ export default function Player(): JSX.Element {
     const src = audio.currentSrc || audio.src
     const { currentTrack: track, isPlaying: playing } = useStore.getState()
     runLog('playback', `error on "${track?.title}" (${track?.id}) in ${slot}: ${describeMediaError(err)}, ${describeSource(src)}`)
+    // The prefetched copy wouldn't play - go back to streaming this song.
+    if (iosPrefetch?.blobUrl && src === iosPrefetch.blobUrl && track?.streamUrl === iosPrefetch.streamUrl) {
+      dropIosPrefetch()
+      audio.src = track.streamUrl
+      audio.load()
+      audio.volume = volumeRef.current
+      applyRate(audio)
+      if (playing) playSlot(audio)
+      return
+    }
     if (!playing) return
     // Unsupported before a single frame played = the file itself is the
     // problem, or the server errored on the first request (see probeSource) -
@@ -1735,6 +1810,8 @@ export default function Player(): JSX.Element {
     // Mobile handoff: get the next song loading while this one still plays.
     if (!abLooping && dur > 0 && dur - audio.currentTime <= HANDOFF_PRELOAD_S
       && useStore.getState().isPlaying && handoffActive()) preloadHandoff()
+    if (IS_IOS && !abLooping && dur > 0 && dur - audio.currentTime <= IOS_PREFETCH_S
+      && useStore.getState().isPlaying) prefetchNextForIos()
 
     // Start crossfade when approaching end. A queued timeupdate event can
     // still fire right after the user pauses (it was already in flight),
@@ -1935,6 +2012,9 @@ export default function Player(): JSX.Element {
     }
     if (IS_IOS) {
       loopPositions.delete(audio)
+      // A prefetch that didn't finish in time is abandoned here, before the
+      // URL is chosen, so the load effect resolves the same one.
+      if (iosPrefetch && !iosPrefetch.blobUrl) dropIosPrefetch()
       const url = resolvePlaybackUrl(next)
       if (!url) { audio.pause(); return } // donor download is handled by the load effect
       audio.src = url
