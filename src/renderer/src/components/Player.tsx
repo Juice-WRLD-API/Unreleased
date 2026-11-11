@@ -349,11 +349,21 @@ function SeekRange({ seekDrag, radioFmActive, ...rest }: SeekRangeProps): JSX.El
 // Media Session position state - for the lock screen / OS seek bar.
 function MediaSessionPosition({ active, playbackSpeed }: { active: boolean; playbackSpeed: number }): null {
   const currentTime = useStore((s) => s.currentTime)
+  const trackId = useStore((s) => s.currentTrack?.id)
+  const loading = usePlayerLoading((s) => s.on)
   useEffect(() => {
     if (!('mediaSession' in navigator)) return
     if (!active) return
     const duration = getAudioDuration()
-    if (!duration || isNaN(duration)) return
+    // The OS advances the bar on its own from the last reported position and
+    // rate, with no way to report "stalled" (a zero rate throws). So while the
+    // song is loading or rebuffering - or a new one has no duration yet and
+    // the previous song's state would keep running - withdraw the state; the
+    // bar then follows the element itself, which isn't moving.
+    if (loading || !duration || isNaN(duration)) {
+      try { navigator.mediaSession.setPositionState() } catch {/* ignore */}
+      return
+    }
     try {
       navigator.mediaSession.setPositionState({
         duration,
@@ -361,7 +371,7 @@ function MediaSessionPosition({ active, playbackSpeed }: { active: boolean; play
         position:     Math.min(currentTime, duration),
       })
     } catch {/* ignore */}
-  }, [currentTime, playbackSpeed, active])
+  }, [currentTime, playbackSpeed, active, loading, trackId])
   return null
 }
 
@@ -1686,7 +1696,17 @@ export default function Player(): JSX.Element {
     navigator.mediaSession.setActionHandler('pause', () => setIsPlaying(false))
     navigator.mediaSession.setActionHandler('nexttrack',     () => runPlayerCommand('next'))
     navigator.mediaSession.setActionHandler('previoustrack', () => runPlayerCommand('previous'))
+    // Without a seekto handler the lock screen / notification progress bar is
+    // display-only (iOS won't let it be dragged). Deliberately no
+    // seekforward/seekbackward: on iOS those replace the next/previous buttons.
+    try {
+      navigator.mediaSession.setActionHandler('seekto', (details) => {
+        if (details.seekTime == null || useStore.getState().radioFmActive) return
+        seekAudio(details.seekTime)
+      })
+    } catch { /* action not supported by this browser */ }
     return () => {
+      try { navigator.mediaSession.setActionHandler('seekto', null) } catch { /* unsupported */ }
       navigator.mediaSession.setActionHandler('play',          null)
       navigator.mediaSession.setActionHandler('pause',         null)
       navigator.mediaSession.setActionHandler('nexttrack',     null)
