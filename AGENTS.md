@@ -1,6 +1,6 @@
 # Agent guide: Juice WRLD API and Unreleased
 
-**Version 1.55** · updated 2026-11-05. Bump the version and date whenever you
+**Version 1.57** · updated 2026-11-08. Bump the version and date whenever you
 change this file (minor for fixes and additions, major for rewrites).
 
 **Keep this file current.** If you find something in the docs or this file that
@@ -297,6 +297,17 @@ stays, `""` clears one, and `cover: ""` removes the embedded cover. A new
 cover is a data URL, staged once and shared by `upload_id`. The bulk editor
 only tags `mp3`, `m4a`, `flac`, `opus`, `wav`, `aiff` and `aif`.
 
+**Community edits.** Home → Tools → Submit a remix or edit
+(`CommunityEditSubmitModal`, `lib/communityEditsApi.ts`, terminal `remix`,
+backend `docs/23-community-edits.md`). Approving files it in the `community` channel
+(never primary) at `Remixes & Edits/Community-Made/<uuid>/edit.<ext>`. The dialog sends the
+file's SHA-256 to `check/` before uploading, and the server fingerprints the
+upload and answers 409 with a `match` (`target` file, song or pending) when
+it is too similar. Against other edits and the Files remix folders "too
+similar" is 75%; against catalogue songs it is 95%, because a remix is meant
+to sound like its song. Don't lower that one. A pending match from someone
+else is never named.
+
 **News channels.** Admin tab id `news-channels` is `NewsChannelsEditor`, not
 the Files-tab Channels tab (`channels`). `all` is a client-only tab and is
 never a channel id. Terminal: `news channels`.
@@ -482,6 +493,13 @@ Node 22.
 Newest first. One entry each: date, what went wrong, what to do instead. Delete
 entries that stop being true.
 
+- 2026-11-08: iOS v3.2.7 and v3.2.8 failed to archive with "cannot find
+  'LocalLibraryPlugin' in scope". Its file reference in `project.pbxproj`
+  reused the hand-picked ID `A1B2C3D42FF000070072D4E8` of the `Frameworks`
+  group, so Xcode resolved the Sources entry to the group and never compiled
+  the file (the log also warns that Compile Sources holds `ios/App`). When
+  hand-editing a pbxproj, check that every new ID is unused
+  (`grep -c <id>` must be 0 before adding it).
 - 2026-11-05: Chromium plays AAC inside `.m4a` and does not decode ALAC, so an
   ALAC `.m4a` failed like a broken file (`audio/mp4` still looks playable).
   The desktop app sniffs the codec (`electron/alac.js`) and plays a FLAC

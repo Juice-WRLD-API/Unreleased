@@ -589,6 +589,7 @@ export default function EditorProfileView(): JSX.Element {
                           <>
                             <AdminStatBox label="Song edits" value={adminPreview?.pendingProposals} highlight={!!adminPreview?.pendingProposals} onClick={() => openAdmin('proposals')} />
                             {canReviewCoverArt && <AdminStatBox label="Cover art" value={adminPreview?.pendingCoverArt} highlight={!!adminPreview?.pendingCoverArt} onClick={() => openAdmin('cover-art')} />}
+                            {canReviewCoverArt && <AdminStatBox label="Remixes & edits" value={adminPreview?.pendingCommunityEdits} highlight={!!adminPreview?.pendingCommunityEdits} onClick={() => openAdmin('community-edits')} />}
                             <AdminStatBox label="Comp files" value={adminPreview?.pendingComp} highlight={!!adminPreview?.pendingComp} onClick={() => openAdmin('comp-proposals')} />
                             {CONTRIBUTOR_ENABLED && <AdminStatBox label="Replace comp" labelOnly onClick={() => openAdmin('comp-replace')} />}
                           </>

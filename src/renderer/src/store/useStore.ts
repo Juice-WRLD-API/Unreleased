@@ -147,14 +147,14 @@ export type SettingsTab = 'account' | 'appearance' | 'preferences' | 'playback' 
 
 // The detached ("pop-out") BrowserWindows the desktop build can open instead of
 // rendering a view inline (see FloatApp). Each can be turned off individually:
-// for settings/songInfo/editor that falls back to the in-app overlay, and for
-// miniPlayer (which has no in-app equivalent) it hides the pop-out entry point.
-export type PopoutWindowKind = 'settings' | 'songInfo' | 'editor' | 'localEditor' | 'miniPlayer' | 'convert' | 'equalizer' | 'profile'
+// each one falls back to its in-app version. (The mini player is always a
+// pop-out, so it has no switch here.)
+export type PopoutWindowKind = 'settings' | 'songInfo' | 'editor' | 'localEditor' | 'convert' | 'equalizer' | 'profile'
 // `equalizer` defaults OFF � unlike the others (which start life as pop-outs
 // and fall back to inline when disabled), the equalizer's normal home is the
 // in-app popover; turning it on makes the panel open as its own window.
 const POPOUT_WINDOW_DEFAULTS: Record<PopoutWindowKind, boolean> = {
-  settings: true, songInfo: true, editor: true, localEditor: true, miniPlayer: true, convert: true, equalizer: false,
+  settings: true, songInfo: true, editor: true, localEditor: true, convert: true, equalizer: false,
   // Review work (proposals, comp files, reports) is the one place people keep
   // a page open *while* using the rest of the app � checking a song against
   // the proposal editing it, playing what they're about to approve. Its own
@@ -444,6 +444,10 @@ interface AppState {
   // The song the "Submit cover art" dialog is open for (null = closed). See
   // components/CoverArtSubmitModal.
   coverArtModal: CoverArtTarget | null
+
+  // Whether the "Submit a remix or edit" dialog is open. See
+  // components/CommunityEditSubmitModal.
+  communityEditModal: boolean
 
   // Playlist folders � a local-first grouping over both synced and local
   // playlists (keyed by "api:<id>"/"local:<id>"). Persisted to localStorage and
@@ -826,6 +830,9 @@ interface AppActions {
   /** Opens / closes the "Submit cover art" dialog for a song. */
   openCoverArtSubmit: (target?: CoverArtTarget) => void
   closeCoverArtSubmit: () => void
+  /** Opens / closes the "Submit a remix or edit" dialog. */
+  openCommunityEditSubmit: () => void
+  closeCommunityEditSubmit: () => void
   /** Queues a general feedback report and tries to deliver it. `contact` is
    *  the optional reach-me field the endpoint accepts. Resolves once that
    *  delivery attempt settles: `true` if it actually reached the server this
@@ -2332,6 +2339,9 @@ export const useStore = create<AppStore>((set, get, store) => ({
   coverArtModal: null,
   openCoverArtSubmit: (target) => set({ coverArtModal: target ?? { songId: null, songName: '' } }),
   closeCoverArtSubmit: () => set({ coverArtModal: null }),
+  communityEditModal: false,
+  openCommunityEditSubmit: () => set({ communityEditModal: true }),
+  closeCommunityEditSubmit: () => set({ communityEditModal: false }),
 
   _enqueueReport: async (report: PendingReport) => {
     const next = [...get().pendingReports, report]

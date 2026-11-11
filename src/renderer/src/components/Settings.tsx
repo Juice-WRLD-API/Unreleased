@@ -10,6 +10,7 @@ import VizControls from './VizControls'
 import { useVizStore } from '../store/vizStore'
 import MyCdnNodes from './MyCdnNodes'
 import MyCoverArt from './MyCoverArt'
+import MyCommunityEdits from './MyCommunityEdits'
 import ApiKeys from './ApiKeys'
 import Passkeys from './Passkeys'
 import { useStore, useStorePick, type SidebarPosition, type AppMenuPosition, type PopoutWindowKind } from '../store/useStore'
@@ -87,7 +88,7 @@ const APP_MENU_POSITIONS: { id: AppMenuPosition; label: string; icon: ElementTyp
 
 // The detached pop-out windows the user can turn on/off individually. Order =
 // display order. `sub` only where a kind behaves differently from the default
-// "opens in the main window when off" — the mini player has no in-app version.
+// "opens in the main window when off".
 const POPOUT_KINDS: { key: PopoutWindowKind; label: string; sub?: string }[] = [
   { key: 'settings', label: 'Settings' },
   { key: 'songInfo', label: 'Song info' },
@@ -95,7 +96,6 @@ const POPOUT_KINDS: { key: PopoutWindowKind; label: string; sub?: string }[] = [
   { key: 'localEditor', label: 'Local metadata editor' },
   { key: 'convert', label: 'Convert format' },
   { key: 'profile', label: 'Profile', sub: 'Proposals, comp files, reports and admin in their own window' },
-  { key: 'miniPlayer', label: 'Mini player', sub: 'No in-app version — off hides the pop-out button' },
 ]
 
 type UpdateState = 'idle' | 'checking' | 'available' | 'latest' | 'downloading' | 'downloaded' | 'error'
@@ -1279,6 +1279,9 @@ export default function Settings({ floating = false }: { floating?: boolean }): 
 
                     <p className="text-[10px] font-semibold uppercase tracking-widest text-text-muted mt-4 mb-1.5 px-0.5">My cover art</p>
                     <MyCoverArt />
+
+                    <p className="text-[10px] font-semibold uppercase tracking-widest text-text-muted mt-4 mb-1.5 px-0.5">My remixes &amp; edits</p>
+                    <MyCommunityEdits />
 
                     <p className="text-[10px] font-semibold uppercase tracking-widest text-text-muted mt-4 mb-1.5 px-0.5">My CDN nodes</p>
                     <MyCdnNodes />
@@ -2824,16 +2827,14 @@ export default function Settings({ floating = false }: { floating?: boolean }): 
                     </div>
                   )}
                 </div>
-                {popoutWindows.miniPlayer && (
-                  <Row
-                    icon={PictureInPicture2}
-                    iconColor="#8b5cf6"
-                    label="Solo mini player"
-                    sub="Hide the main window and other pop-outs while the mini player is open — restored when it closes"
-                  >
-                    <Toggle on={appSettings.miniPlayerHidesWindows} onClick={() => setSetting('miniPlayerHidesWindows', !appSettings.miniPlayerHidesWindows)} />
-                  </Row>
-                )}
+                <Row
+                  icon={PictureInPicture2}
+                  iconColor="#8b5cf6"
+                  label="Solo mini player"
+                  sub="Hide the main window and other pop-outs while the mini player is open — restored when it closes"
+                >
+                  <Toggle on={appSettings.miniPlayerHidesWindows} onClick={() => setSetting('miniPlayerHidesWindows', !appSettings.miniPlayerHidesWindows)} />
+                </Row>
                 <Row icon={MessageCircle} iconColor="#5865f2" label="Show Discord Status">
                   <Toggle on={appSettings.discordRpcEnabled} onClick={() => setSetting('discordRpcEnabled', !appSettings.discordRpcEnabled)} />
                 </Row>

@@ -383,7 +383,7 @@ export default function Player(): JSX.Element {
     toggleLike,
     setActiveView,
     activeView,
-    playNext, account, updateLibraryTrack, popoutWindows } = useStorePick('currentTrack', 'currentTrackFull', 'isPlaying', 'volume', 'shuffle', 'repeat', 'setIsPlaying', 'setVolume', 'setProgress', 'setCurrentTime', 'setCurrentTrackFull', 'toggleShuffle', 'toggleRepeat', 'setRepeat', 'nextTrack', 'prevTrack', 'setShowNowPlaying', 'showNowPlaying', 'showQueue', 'setShowQueue', 'playerCollapsed', 'setPlayerCollapsed', 'queue', 'queueIndex', 'crossfadeEnabled', 'crossfadeDuration', 'sleepTimerEnd', 'setSleepTimer', 'audioOutput', 'setAudioOutput', 'playbackSpeed', 'setPlaybackSpeed', 'likedTrackIds', 'toggleLike', 'setActiveView', 'activeView', 'playNext', 'account', 'updateLibraryTrack', 'popoutWindows')
+    playNext, account, updateLibraryTrack } = useStorePick('currentTrack', 'currentTrackFull', 'isPlaying', 'volume', 'shuffle', 'repeat', 'setIsPlaying', 'setVolume', 'setProgress', 'setCurrentTime', 'setCurrentTrackFull', 'toggleShuffle', 'toggleRepeat', 'setRepeat', 'nextTrack', 'prevTrack', 'setShowNowPlaying', 'showNowPlaying', 'showQueue', 'setShowQueue', 'playerCollapsed', 'setPlayerCollapsed', 'queue', 'queueIndex', 'crossfadeEnabled', 'crossfadeDuration', 'sleepTimerEnd', 'setSleepTimer', 'audioOutput', 'setAudioOutput', 'playbackSpeed', 'setPlaybackSpeed', 'likedTrackIds', 'toggleLike', 'setActiveView', 'activeView', 'playNext', 'account', 'updateLibraryTrack')
   const canEditSong = useCanEdit()
 
   const [showContextMenu, setShowContextMenu] = useState(false)
@@ -2247,7 +2247,7 @@ export default function Player(): JSX.Element {
       input?.focus()
       input?.select()
     },
-    'mini-player':         () => { if (useStore.getState().popoutWindows.miniPlayer) (window as any).electron?.openFloatWindow?.('mini-player') },
+    'mini-player':         () => (window as any).electron?.openFloatWindow?.('mini-player'),
     'close-float-windows': () => (window as any).electron?.closeFloatWindows?.(),
     'restart-app':         () => (window as any).electron?.relaunchApp?.(),
     'rescan-library':      () => useStore.getState().scanLibrary(),
@@ -2938,10 +2938,8 @@ export default function Player(): JSX.Element {
             <Maximize2 size={16} />
           </button>}
 
-          {/* Desktop only: pop the compact always-on-top mini player window.
-              Hidden when the user turned this pop-out off (it has no in-app
-              equivalent, so there's nothing to fall back to). */}
-          {(window as any).electron?.openFloatWindow && popoutWindows.miniPlayer && (
+          {/* Desktop only: pop the compact always-on-top mini player window. */}
+          {(window as any).electron?.openFloatWindow && (
             <button
               onClick={() => (window as any).electron.openFloatWindow('mini-player')}
               className="text-text-secondary hover:text-text-primary transition-colors"

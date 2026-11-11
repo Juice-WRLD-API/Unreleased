@@ -23,10 +23,11 @@ import type { AdminUser, EditorApplication, ProposalStatus, SongEditProposal } f
 import * as reportsApi from '../lib/reportsApi'
 import type { FeedbackRow, SongReportRow, SongReportStatus } from '../lib/reportsApi'
 import { adminCoverArtCounts } from '../lib/coverArtApi'
+import { adminCommunityEditCounts } from '../lib/communityEditsApi'
 import { useStrictModeSafeEffect } from './useStrictModeSafeEffect'
 import { errorMessage } from '../lib/format'
 
-export type AdminTab = 'proposals' | 'cover-art' | 'comp-proposals' | 'comp-replace' | 'applications' | 'reports' | 'feedback' | 'users' | 'stats' | 'channels' | 'news-channels' | 'eras' | 'cdn-nodes' | 'beta' | 'lyrics' | 'logs'
+export type AdminTab = 'proposals' | 'cover-art' | 'community-edits' | 'comp-proposals' | 'comp-replace' | 'applications' | 'reports' | 'feedback' | 'users' | 'stats' | 'channels' | 'news-channels' | 'eras' | 'cdn-nodes' | 'beta' | 'lyrics' | 'logs'
 
 // Deep-link paths for the standalone (non-embedded) admin console - each
 // section its own top-level URL instead of one flat "/admin" for every tab.
@@ -37,6 +38,7 @@ export type AdminTab = 'proposals' | 'cover-art' | 'comp-proposals' | 'comp-repl
 export const ADMIN_TAB_PATHS: Partial<Record<AdminTab, string>> = {
   proposals: '/admin',
   'cover-art': '/cover-art',
+  'community-edits': '/community-edits',
   'comp-proposals': '/comp-files',
   'comp-replace': '/comp-replace',
   applications: '/applications',
@@ -63,7 +65,7 @@ export type FeedbackFilter = 'human' | 'automated' | ''
 export interface AdminNavItem {
   id: AdminTab
   label: string
-  iconKey: 'proposals' | 'cover-art' | 'comp-proposals' | 'comp-replace' | 'applications' | 'reports' | 'feedback' | 'users' | 'stats' | 'channels' | 'news-channels' | 'eras' | 'cdn-nodes' | 'beta' | 'lyrics' | 'logs'
+  iconKey: 'proposals' | 'cover-art' | 'community-edits' | 'comp-proposals' | 'comp-replace' | 'applications' | 'reports' | 'feedback' | 'users' | 'stats' | 'channels' | 'news-channels' | 'eras' | 'cdn-nodes' | 'beta' | 'lyrics' | 'logs'
   badge?: number
 }
 
@@ -107,6 +109,18 @@ export function useAdminQueue(opts: UseAdminQueueOptions) {
       .catch(() => { if (!stale) setPendingCoverArt(null) })
     return () => { stale = true }
   }, [canLoad, canReviewCoverArt, coverArtCountKey])
+
+  // Same for Remixes & edits, which the same reviewers handle.
+  const [pendingCommunityEdits, setPendingCommunityEdits] = useState<number | null>(null)
+  const [communityEditCountKey, setCommunityEditCountKey] = useState(0)
+  useEffect(() => {
+    if (!canLoad || !canReviewCoverArt) { setPendingCommunityEdits(null); return }
+    let stale = false
+    adminCommunityEditCounts()
+      .then((c) => { if (!stale) setPendingCommunityEdits(c.pending) })
+      .catch(() => { if (!stale) setPendingCommunityEdits(null) })
+    return () => { stale = true }
+  }, [canLoad, canReviewCoverArt, communityEditCountKey])
 
   const [tab, setTab] = useState<AdminTab>(initialTab)
   const [loading, setLoading] = useState(false)
@@ -215,6 +229,7 @@ export function useAdminQueue(opts: UseAdminQueueOptions) {
     { id: 'proposals',    label: 'Song edits',   iconKey: 'proposals',   badge: pendingProps || undefined },
     ...(canReviewCoverArt ? [
       { id: 'cover-art' as const, label: 'Cover art', iconKey: 'cover-art' as const, badge: pendingCoverArt || undefined },
+      { id: 'community-edits' as const, label: 'Remixes & edits', iconKey: 'community-edits' as const, badge: pendingCommunityEdits || undefined },
     ] : []),
     ...(CONTRIBUTOR_ENABLED ? [
       { id: 'comp-proposals' as const, label: 'Comp files', iconKey: 'comp-proposals' as const },
@@ -252,6 +267,8 @@ export function useAdminQueue(opts: UseAdminQueueOptions) {
     pendingApps, pendingProps, pendingReports,
     pendingCoverArt,
     refreshCoverArtCount: () => setCoverArtCountKey(k => k + 1),
+    pendingCommunityEdits,
+    refreshCommunityEditCount: () => setCommunityEditCountKey(k => k + 1),
     fullNav, nav,
   }
 }

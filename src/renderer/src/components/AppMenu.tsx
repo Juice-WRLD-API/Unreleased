@@ -345,6 +345,7 @@ export default function AppMenu({ variant = 'bar', collapsed = false }: { varian
         // Timing lyrics by hand is for everyone; its Whisper side is a donor
         // feature, and administrators also see everyone's jobs there.
         { kind: 'item', label: 'Synced lyrics…', onClick: run(() => openLyricsGen()) },
+        { kind: 'item', label: 'Submit a remix or edit…', onClick: () => useStore.getState().openCommunityEditSubmit() },
         { kind: 'item', label: 'Sync…', onClick: run(() => useCatalogSync.getState().setOpen(true)) },
         { kind: 'sep' },
         { kind: 'item', label: 'Mini player', hotkey: 'mini-player', onClick: hk('mini-player') },
