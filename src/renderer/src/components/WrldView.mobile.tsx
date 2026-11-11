@@ -2160,6 +2160,7 @@ const LyricsPanel = memo(function LyricsPanel({
         onTouchStart={handleTouchStart}
         onTouchMove={handleTouchMove}
         onTouchEnd={handleTouchEnd}
+        onTouchCancel={handleTouchEnd}
       >
         {/* Mask lives on this static wrapper, not the translating element
             below - a mask-image sharing a compositing layer with an animated

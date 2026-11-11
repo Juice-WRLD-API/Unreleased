@@ -331,6 +331,7 @@ interface SeekRangeProps {
   onChange: (e: React.ChangeEvent<HTMLInputElement>) => void
   onMouseUp?: () => void
   onTouchEnd?: () => void
+  onTouchCancel?: () => void
   onKeyUp?: () => void
 }
 function SeekRange({ seekDrag, radioFmActive, ...rest }: SeekRangeProps): JSX.Element {
@@ -351,6 +352,7 @@ function MediaSessionPosition({ active, playbackSpeed }: { active: boolean; play
   const currentTime = useStore((s) => s.currentTime)
   const trackId = useStore((s) => s.currentTrack?.id)
   const loading = usePlayerLoading((s) => s.on)
+  const fm = useStore((s) => s.radioFmActive)
   useEffect(() => {
     if (!('mediaSession' in navigator)) return
     if (!active) return
@@ -360,7 +362,9 @@ function MediaSessionPosition({ active, playbackSpeed }: { active: boolean; play
     // song is loading or rebuffering - or a new one has no duration yet and
     // the previous song's state would keep running - withdraw the state; the
     // bar then follows the element itself, which isn't moving.
-    if (loading || !duration || isNaN(duration)) {
+    // Same for 999 FM: a live stream has no position, and the paused queue
+    // song's last report would otherwise run on underneath it.
+    if (fm || loading || !duration || isNaN(duration)) {
       try { navigator.mediaSession.setPositionState() } catch {/* ignore */}
       return
     }
@@ -371,7 +375,7 @@ function MediaSessionPosition({ active, playbackSpeed }: { active: boolean; play
         position:     Math.min(currentTime, duration),
       })
     } catch {/* ignore */}
-  }, [currentTime, playbackSpeed, active, loading, trackId])
+  }, [currentTime, playbackSpeed, active, loading, trackId, fm])
   return null
 }
 
@@ -1425,6 +1429,16 @@ export default function Player(): JSX.Element {
     // recovery reload - would read as the OS taking playback away, so a quick
     // triple-tap on skip was enough to stop the player outright.
     if (audio.readyState < HTMLMediaElement.HAVE_CURRENT_DATA) return
+    // iOS doesn't pause a bare element spuriously: a pause the app didn't ask
+    // for is the system taking audio for a phone call, Siri, another app, or
+    // unplugged headphones. Nudging it back played the song over the call, so
+    // yield at once. When iOS hands audio back it resumes the element itself,
+    // and handleAudioPlaying follows. (Still-paused check: a source swap's
+    // own pause event arrives after play() has already been requested.)
+    if (IS_IOS) {
+      if (audio.paused) setIsPlaying(false)
+      return
+    }
     unexpectedPauses.current++
     if (unexpectedPauses.current > 2) {
       console.warn('Playback paused externally - yielding')
@@ -1539,7 +1553,32 @@ export default function Player(): JSX.Element {
     const audio = getActive()
     if (!audio) return
     if (!cfActive.current && pauseFadeRaf.current == null) audio.volume = volume
+    // iOS ignores element volume (the hardware buttons own it), which left
+    // the mute button and hotkey doing nothing there. `muted` does work.
+    if (IS_IOS) for (const ref of [slotA, slotB]) { if (ref.current) ref.current.muted = volume === 0 }
   }, [volume])
+
+  // Sleep timer on a clock. The check in handleTimeUpdate only runs while a
+  // queue song is advancing, so the timer never stopped 999 FM, and one that
+  // ran out while paused stayed armed and paused the next song the instant
+  // it was started. That check stays as the backstop for a hidden tab, whose
+  // timers are throttled.
+  useEffect(() => {
+    if (!sleepTimerEnd) return
+    const fire = (): void => {
+      const s = useStore.getState()
+      if (!s.sleepTimerEnd || Date.now() < s.sleepTimerEnd) return
+      s.setSleepTimer(null)
+      if (s.radioFmActive) s.setRadioFmActive(false)
+      if (s.isPlaying) s.setIsPlaying(false)
+    }
+    const id = window.setTimeout(fire, Math.max(0, sleepTimerEnd - Date.now()))
+    document.addEventListener('visibilitychange', fire)
+    return () => {
+      clearTimeout(id)
+      document.removeEventListener('visibilitychange', fire)
+    }
+  }, [sleepTimerEnd])
 
   // Playback rate - apply to both audio slots (speed and the pitch-shift
   // option both funnel through applyRate)
@@ -1685,17 +1724,27 @@ export default function Player(): JSX.Element {
   useEffect(() => {
     if (!('mediaSession' in navigator)) return
     if (!mediaSessionActive) return
-    navigator.mediaSession.playbackState = isPlaying ? 'playing' : 'paused'
-  }, [isPlaying, mediaSessionActive])
+    // 999 FM plays with isPlaying off (it's a separate element), and reporting
+    // that as paused put a play button on the lock screen while it streamed.
+    navigator.mediaSession.playbackState = isPlaying || radioFmActive ? 'playing' : 'paused'
+  }, [isPlaying, radioFmActive, mediaSessionActive])
 
   // Media Session action handlers - play/pause/skip
   useEffect(() => {
     if (!('mediaSession' in navigator)) return
     if (!mediaSessionActive) return
-    navigator.mediaSession.setActionHandler('play',  () => setIsPlaying(true))
-    navigator.mediaSession.setActionHandler('pause', () => setIsPlaying(false))
-    navigator.mediaSession.setActionHandler('nexttrack',     () => runPlayerCommand('next'))
-    navigator.mediaSession.setActionHandler('previoustrack', () => runPlayerCommand('previous'))
+    // While 999 FM is on these must not reach the queue: play/next/previous
+    // started a queue song on top of the stream, and pause did nothing at all.
+    // The in-app transport is disabled then for the same reason. Pause stops
+    // the stream, since a live stream has nothing else to pause into.
+    const fmOn = (): boolean => useStore.getState().radioFmActive
+    navigator.mediaSession.setActionHandler('play',  () => { if (!fmOn()) setIsPlaying(true) })
+    navigator.mediaSession.setActionHandler('pause', () => {
+      if (fmOn()) useStore.getState().setRadioFmActive(false)
+      else setIsPlaying(false)
+    })
+    navigator.mediaSession.setActionHandler('nexttrack',     () => { if (!fmOn()) runPlayerCommand('next') })
+    navigator.mediaSession.setActionHandler('previoustrack', () => { if (!fmOn()) runPlayerCommand('previous') })
     // Without a seekto handler the lock screen / notification progress bar is
     // display-only (iOS won't let it be dragged). Deliberately no
     // seekforward/seekbackward: on iOS those replace the next/previous buttons.
@@ -2784,6 +2833,10 @@ export default function Player(): JSX.Element {
                 onChange={handleSeekChange}
                 onMouseUp={radioFmActive ? undefined : handleSeekCommit}
                 onTouchEnd={radioFmActive ? undefined : handleSeekCommit}
+                // A touch the system takes over (a swipe gesture, an alert)
+                // ends in touchcancel, not touchend; without this the bar
+                // stayed frozen at the drag position while the song played on.
+                onTouchCancel={radioFmActive ? undefined : handleSeekCommit}
                 onKeyUp={radioFmActive ? undefined : handleSeekCommit}
                 disabled={!currentTrack}
               />
