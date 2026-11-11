@@ -1,7 +1,8 @@
 // Cover art submissions (backend docs/22-cover-art.md). Anyone signed in can
 // send in cover art for a song; managers of the primary channel and admins
-// approve or reject it. Approving points the song's `image_url` at the
-// submission's image, which then becomes public.
+// approve or reject it. Approving never changes the song: it adds the image to
+// the community channel in Files at `Cover Arts/Community-Made/<uuid>/cover.png` (an approved comp
+// upload), and the submission's own image becomes public.
 //
 // Songs are picked by internal `id`, the same as edit proposals.
 import { routeUrl } from './apiServers'
@@ -34,8 +35,10 @@ export interface CoverArtSubmission {
   status: CoverArtStatus
   reviewer_username: string | null
   review_notes: string
-  /** The song's image_url before this cover replaced it (set on approval). */
-  previous_image_url: string | null
+  /** Set once approved: the comp upload that filed it, and where (the `community` channel). */
+  comp_proposal_id: number | null
+  comp_channel: string | null
+  comp_path: string | null
   created_at: string
   reviewed_at: string | null
 }
@@ -148,8 +151,7 @@ export async function adminReviewCoverArt(id: number, action: 'approve' | 'rejec
   }, getToken())
 }
 
-/** Takes back an approval; the song goes back to its previous cover if it
- *  still shows this one. */
+/** Takes back an approval: the cover's upload to Files is reversed. */
 export async function adminReverseCoverArt(id: number): Promise<CoverArtSubmission> {
   return authedRequest<CoverArtSubmission>(`${ADMIN_BASE}/${id}/reverse/`, { method: 'POST' }, getToken())
 }

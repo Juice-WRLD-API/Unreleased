@@ -21,6 +21,7 @@ import ReportsTab from './ReportsTab.mobile'
 import FeedbackTab from './FeedbackTab'
 import CompProposalsTab from './CompProposalsTab.mobile'
 import CoverArtTab from './CoverArtTab'
+import CommunityEditsTab from './CommunityEditsTab'
 import ChannelsTab from './ChannelsTab.mobile'
 import NewsChannelsTab from './NewsChannelsTab'
 import EraTab from './EraTab.mobile'
@@ -96,6 +97,7 @@ export default function AdminPage({ embedded = false, initialTab, onExit }: {
     feedback,
     refresh,
     refreshCoverArtCount,
+    refreshCommunityEditCount,
     nav,
   } = useAdminQueue({
     canLoad: isAdmin,
@@ -109,7 +111,7 @@ export default function AdminPage({ embedded = false, initialTab, onExit }: {
     // strand a manager on a tab their nav bar no longer offers a button for.
     // Cover art stays when it's in that nav (see useAdminQueue).
     forceTab: { when: managerOnly, tab: 'comp-proposals' },
-    managerNavIds: ['cover-art', 'comp-proposals'],
+    managerNavIds: ['cover-art', 'community-edits', 'comp-proposals'],
     canReviewCoverArt,
   })
 
@@ -170,7 +172,7 @@ export default function AdminPage({ embedded = false, initialTab, onExit }: {
           {/* A tab's data loads once per visit (see the sig comment in
               useAdminQueue) rather than refetching every time it's reselected -
               this is the explicit way back to fresh data instead. */}
-          {tab !== 'cover-art' && tab !== 'comp-proposals' && tab !== 'channels' && tab !== 'news-channels' && tab !== 'eras' && tab !== 'cdn-nodes' && tab !== 'lyrics' && tab !== 'logs' ? (
+          {tab !== 'cover-art' && tab !== 'community-edits' && tab !== 'comp-proposals' && tab !== 'channels' && tab !== 'news-channels' && tab !== 'eras' && tab !== 'cdn-nodes' && tab !== 'lyrics' && tab !== 'logs' ? (
             <BarButton label="Refresh" onClick={() => { if (!loading) refresh() }}>
               <RefreshCw size={18} className={loading ? 'animate-spin opacity-60' : ''} />
             </BarButton>
@@ -225,6 +227,11 @@ export default function AdminPage({ embedded = false, initialTab, onExit }: {
               })}
               channel={activeChannel}
             />
+          </div>
+        )}
+        {visited.has('community-edits') && canReviewCoverArt && (
+          <div className={tab === 'community-edits' ? 'h-full' : 'hidden'}>
+            <CommunityEditsTab onCountsChanged={refreshCommunityEditCount} />
           </div>
         )}
         {visited.has('cover-art') && canReviewCoverArt && (

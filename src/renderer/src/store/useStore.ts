@@ -406,6 +406,9 @@ interface AppState {
   // The song the "Submit cover art" dialog is open for (null = closed). See
   // components/CoverArtSubmitModal.
   coverArtModal: CoverArtTarget | null
+
+  // Whether the "Submit a remix or edit" dialog is open.
+  communityEditModal: boolean
   // Whether ErrorBoundary auto-submits a crash report the moment it catches
   // an error, through the same feedback pipeline (submitFeedback) the manual
   // "Report this error" button uses. On by default; Settings can turn it off
@@ -840,6 +843,8 @@ interface AppActions {
   /** Opens / closes the "Submit cover art" dialog for a song. */
   openCoverArtSubmit: (target?: CoverArtTarget) => void
   closeCoverArtSubmit: () => void
+  openCommunityEditSubmit: () => void
+  closeCommunityEditSubmit: () => void
 
 
   setLibraryTracks: (tracks: LibraryTrack[]) => void
@@ -2730,6 +2735,9 @@ export const useStore = create<AppStore>((set, get, store) => ({
   coverArtModal: null,
   openCoverArtSubmit: (target) => set({ coverArtModal: target ?? { songId: null, songName: '' } }),
   closeCoverArtSubmit: () => set({ coverArtModal: null }),
+  communityEditModal: false,
+  openCommunityEditSubmit: () => set({ communityEditModal: true }),
+  closeCommunityEditSubmit: () => set({ communityEditModal: false }),
   setPendingCompProposal: (pendingCompProposal) => set({ pendingCompProposal }),
   setPendingEditorSongId: (pendingEditorSongId) => set({ pendingEditorSongId }),
   openSongEditor: (songId) => {

@@ -125,6 +125,7 @@ const LoginApprovalPrompt = lazyView(() => import('./components/LoginApprovalPro
 // Donors and administrators only - fetched the first time it opens.
 const LyricsGenModal = lazyOverlay(() => import('./components/LyricsGenModal'))
 const CoverArtSubmitModal = lazyOverlay(() => import('./components/CoverArtSubmitModal'))
+const CommunityEditSubmitModal = lazyOverlay(() => import('./components/CommunityEditSubmitModal'))
 const BulkEditModal = lazyOverlay(() => import('./components/BulkEditModal'))
 const UploadManager = lazyOverlay(() => import('./components/UploadManager'))
 const NotificationCenter = lazyOverlay(() => import('./components/NotificationCenter'))
@@ -503,6 +504,7 @@ export default function App(): JSX.Element {
       {coverArtOpen && (
         <ErrorBoundary variant="overlay" onDismiss={() => useStore.getState().closeCoverArtSubmit()}>
           <CoverArtSubmitModal />
+          <CommunityEditSubmitModal />
         </ErrorBoundary>
       )}
       {showRecognition && <ErrorBoundary variant="overlay"><Suspense fallback={null}><RecognitionModal /></Suspense></ErrorBoundary>}

@@ -1,5 +1,5 @@
 import { useRef, useState } from 'react'
-import { ChevronRight, Play, ListMusic, Gamepad2, Flame, Music2, Disc3, User, Newspaper, Radio, Heart, Search, MoreHorizontal, Album, Music, Wrench, MicVocal, AudioLines, ImagePlus } from 'lucide-react'
+import { ChevronRight, Play, ListMusic, Gamepad2, Flame, Music2, Disc3, User, Newspaper, Radio, Heart, Search, MoreHorizontal, Album, Music, Wrench, MicVocal, AudioLines, ImagePlus, FileAudio } from 'lucide-react'
 import { AlbumArtThumbnail } from './AlbumArtThumbnail'
 import { ProgressiveCover } from './ProgressiveCover'
 import { Tile } from './Tile'
@@ -418,6 +418,12 @@ export default function HomeViewDesktop(): JSX.Element {
     title: 'Submit cover art',
     subtitle: 'Send in better art for any song',
     onClick: () => useStore.getState().openCoverArtSubmit(),
+  }, {
+    id: 'community-edit',
+    icon: <FileAudio size={18} className="text-accent" />,
+    title: 'Submit a remix or edit',
+    subtitle: 'Share your remix or stem edit in Files',
+    onClick: () => useStore.getState().openCommunityEditSubmit(),
   }]
   const showTools = showSection('tools')
 
