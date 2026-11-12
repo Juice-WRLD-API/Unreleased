@@ -108,10 +108,12 @@ export default function DownloadManager(): JSX.Element | null {
   const activeUploads = downloads.filter((d) => d.type === 'upload' && d.state === 'downloading').length
 
   return (
-    <PopLayer ref={panelRef} className="fixed z-[9990] animate-menu-pop" style={panelPos}>
-      <div className="w-[320px] rounded-xl border border-[var(--border)] bg-[var(--surface)] shadow-[0_8px_32px_rgba(0,0,0,0.4)] overflow-hidden">
+    // The glass sits on the PopLayer itself, the element that fades in, so
+    // its blur holds through the entrance (a fading ancestor would cut it).
+    <PopLayer ref={panelRef} className="fixed z-[9990] animate-menu-pop rounded-2xl glass-thick glass-specular" style={panelPos}>
+      <div className="w-[320px] rounded-2xl overflow-hidden">
         {/* Header */}
-        <div className="flex items-center gap-2 px-3 py-2.5 bg-[var(--surface-overlay)] border-b border-[var(--border)]">
+        <div className="flex items-center gap-2 px-3 py-2.5 bg-[var(--fill)] border-b border-[var(--separator)]">
           <Download size={13} className="text-[var(--accent)] shrink-0" />
           <span className="text-[var(--text-primary)] text-xs font-semibold flex-1">
             Downloads
@@ -211,7 +213,7 @@ function DownloadRow({ item }: { item: DownloadItem }): JSX.Element {
   return (
     <div
       data-flip-key={item.id}
-      className={`px-3 py-2.5 hover:bg-[var(--surface-overlay)] transition-colors${canOpen ? ' cursor-pointer' : ''}`}
+      className={`px-3 py-2.5 hover:bg-[var(--fill)] transition-colors${canOpen ? ' cursor-pointer' : ''}`}
       onClick={canOpen ? () => el.openPath(item.savePath!) : undefined}
     >
       <div className="flex items-start gap-2">

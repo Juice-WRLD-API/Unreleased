@@ -1,4 +1,4 @@
-import { routeUrl, apiFetch, buildImageUrl, resolvePrefCoverUrl, type JWApiSong } from './juicewrldApi'
+import { routeUrl, apiFetch, apiPeek, buildImageUrl, resolvePrefCoverUrl, type JWApiSong } from './juicewrldApi'
 import type { SongPrefMap } from './songPrefs'
 import { apiRequest } from './apiClient'
 import { getToken } from './userApi'
@@ -99,6 +99,20 @@ export async function fetchArtists(): Promise<Artist[]> {
 
 export async function fetchAlbums(): Promise<Album[]> {
   return collectPages((page) => apiFetch<Paged<Album>>('/albums/', page === 1 ? {} : { page }))
+}
+
+/** The album list as `fetchAlbums` last cached it, page by page, with no
+ *  request. Undefined when page 1 was never cached. */
+export function peekAlbums(): Album[] | undefined {
+  const all: Album[] = []
+  for (let page = 1; page <= MAX_LIST_PAGES; page++) {
+    const data = apiPeek<Paged<Album> | Album[]>('/albums/', page === 1 ? {} : { page })
+    if (!data) return page === 1 ? undefined : all
+    if (Array.isArray(data)) return data
+    all.push(...(data.results ?? []))
+    if (!data.next) return all
+  }
+  return all
 }
 
 // ── Admin (Token + is_administrator + OTP) ───────────────────────────────────

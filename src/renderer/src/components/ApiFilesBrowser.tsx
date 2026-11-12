@@ -60,6 +60,8 @@ import { useApiFilesZip } from '../hooks/useApiFilesZip'
 import { usePendingCompGhosts } from '../hooks/usePendingCompGhosts'
 import { PendingGhostItem, PendingMarker } from './PendingCompGhost'
 import { showAppToast } from '../lib/appToast'
+import { GlassSegmented } from './GlassSegmented'
+import { GLASS_SEARCH, GLASS_SEARCH_WRAP } from './glassControls'
 
 // lucide's `fill` is a prop, not a class, so the filled heart needs to be a
 // component of its own to fit a menu item's `icon` slot.
@@ -517,6 +519,25 @@ export default function ApiFilesBrowser({ embedded = false }: { embedded?: boole
   // /files/* endpoint takes as its `path` param, unlike Copy link's full URL.
   const copyPath = (entry: JWApiFileEntry): void => copyToClipboard(entry, entry.path, 'path')
 
+  // The file itself, pasteable into Explorer/Finder. Desktop only: the main
+  // process downloads it to a scratch folder first.
+  const copyFile = (entry: JWApiFileEntry): void => {
+    const el = (window as any).electron
+    if (!el?.copyRemoteFileToClipboard) return
+    showAppToast(`Copying "${entry.name}"…`)
+    el.copyRemoteFileToClipboard(buildStreamUrl(entry.path, activeChannel), entry.name)
+      .then((r: { error?: string } | undefined) => showAppToast(r?.error ? `Couldn't copy the file: ${r.error}` : 'File copied to clipboard'))
+      .catch(() => showAppToast("Couldn't copy the file"))
+  }
+
+  // The embedded cover art as an image (pasteable into Discord, an editor…).
+  const copyCover = (entry: JWApiFileEntry): void => {
+    void import('../lib/coverImage')
+      .then((m) => m.copyCoverImage(buildCoverArtUrl(entry.path, false, activeChannel)))
+      .then(() => showAppToast('Cover copied to clipboard'))
+      .catch(() => showAppToast('No cover to copy'))
+  }
+
   // ── Add to playlist ────────────────────────────────────────────────────────
   // Server playlists are keyed by numeric Tracker song id, so this only works
   // for audio files that resolved to a Tracker match (same lookup that gates
@@ -881,74 +902,52 @@ export default function ApiFilesBrowser({ embedded = false }: { embedded?: boole
             <div className="flex items-center gap-3 shrink-0">
               {/* Comps are API sources; local files don't belong to one. */}
               {channels.length > 0 && !localMode && (
-                <div className="flex items-center bg-surface-overlay rounded-lg p-1 gap-0.5">
-                  {channels.map((ch) => (
-                    <button
-                      key={ch.slug}
-                      onClick={() => onChannelChange(ch.slug)}
-                      disabled={channels.length === 1}
-                      className={`px-2.5 py-1.5 rounded-md text-xs font-medium transition-colors ${activeChannel === ch.slug ? 'bg-surface-raised text-text-primary shadow-sm' : 'text-text-muted hover:text-text-primary'} disabled:opacity-70`}
-                      title={ch.description || ch.name}
-                    >{ch.name}</button>
-                  ))}
-                </div>
+                <GlassSegmented
+                  ariaLabel="Channel"
+                  value={activeChannel}
+                  onChange={onChannelChange}
+                  options={channels.map((ch) => ({ value: ch.slug, label: ch.name, title: ch.description || ch.name }))}
+                />
               )}
-              {/* Sort controls */}
-              <div className="flex items-center gap-1 text-text-muted">
-                {(['name', 'type', 'size'] as SortBy[]).map((by) => (
-                  <button
-                    key={by}
-                    onClick={() => toggleSort(by)}
-                    className={`flex items-center gap-0.5 text-xs px-2 py-1 rounded-md transition-colors capitalize ${
-                      sortBy === by
-                        ? 'bg-surface-raised text-text-primary'
-                        : 'hover:text-text-secondary hover:bg-surface-overlay'
-                    }`}
-                    title={`Sort by ${by}`}
-                  >
-                    {by}
-                    <SortIcon by={by} />
-                  </button>
-                ))}
-              </div>
+              {/* Sort - clicking the chosen field again flips the direction. */}
+              <GlassSegmented
+                ariaLabel="Sort by"
+                value={sortBy}
+                onChange={toggleSort}
+                options={(['name', 'type', 'size'] as SortBy[]).map((by) => ({
+                  value: by,
+                  title: `Sort by ${by}`,
+                  label: <><span className="capitalize">{by}</span><SortIcon by={by} /></>,
+                }))}
+              />
               {/* Type filter */}
-              <div className="flex items-center bg-surface-overlay rounded-lg p-1 gap-0.5">
-                {MEDIA_FILTERS.map(({ key, label, icon: Icon }) => (
-                  <button
-                    key={key}
-                    onClick={() => setTypeFilter(key)}
-                    className={`p-2 rounded-md transition-colors ${typeFilter === key ? 'bg-surface-raised text-text-primary' : 'text-text-muted hover:text-text-secondary'}`}
-                    title={`Show ${label.toLowerCase()}`}
-                  ><Icon size={14} /></button>
-                ))}
-              </div>
+              <GlassSegmented
+                ariaLabel="File type"
+                value={typeFilter}
+                onChange={setTypeFilter}
+                options={MEDIA_FILTERS.map(({ key, label, icon: Icon }) => ({ value: key, icon: <Icon size={14} />, title: `Show ${label.toLowerCase()}` }))}
+              />
               {/* View toggle */}
-              <div className="flex items-center bg-surface-overlay rounded-lg p-1 gap-0.5">
-                <button
-                  onClick={() => setViewMode('list')}
-                  className={`p-2 rounded-md transition-colors ${viewMode === 'list' ? 'bg-surface-raised text-text-primary' : 'text-text-muted hover:text-text-secondary'}`}
-                  title="List view"
-                ><LayoutList size={15} /></button>
-                <button
-                  onClick={() => setViewMode('grid')}
-                  className={`p-2 rounded-md transition-colors ${viewMode === 'grid' ? 'bg-surface-raised text-text-primary' : 'text-text-muted hover:text-text-secondary'}`}
-                  title="Grid view"
-                ><LayoutGrid size={15} /></button>
-              </div>
+              <GlassSegmented
+                ariaLabel="Layout"
+                value={viewMode}
+                onChange={setViewMode}
+                options={[
+                  { value: 'list', icon: <LayoutList size={15} />, title: 'List view' },
+                  { value: 'grid', icon: <LayoutGrid size={15} />, title: 'Grid view' },
+                ]}
+              />
               {/* API / Local toggle (Electron only) */}
               {isElectron && (
-                <div className="flex items-center bg-surface-overlay rounded-lg p-1 gap-1">
-                  <button
-                    onClick={() => setLocalMode(false)}
-                    className={`flex items-center gap-1.5 px-2.5 py-2 rounded-md text-xs font-medium transition-colors ${!localMode ? 'bg-surface-raised text-text-primary shadow-sm' : 'text-text-muted hover:text-text-primary'}`}
-                    title="Browse API files"
-                  ><Globe size={12} /> API</button>
-                  <button
-                    onClick={() => setLocalMode(true)}
-                    className={`flex items-center gap-1.5 px-2.5 py-2 rounded-md text-xs font-medium transition-colors ${localMode ? 'bg-surface-raised text-text-primary shadow-sm' : 'text-text-muted hover:text-text-primary'}`}
-                    title="Browse local files"
-                  ><MonitorSmartphone size={12} /> Local</button>
-                </div>
+                <GlassSegmented
+                  ariaLabel="Source"
+                  value={localMode ? 'local' : 'api'}
+                  onChange={(v) => setLocalMode(v === 'local')}
+                  options={[
+                    { value: 'api', label: 'API', icon: <Globe size={12} />, title: 'Browse API files' },
+                    { value: 'local', label: 'Local', icon: <MonitorSmartphone size={12} />, title: 'Browse local files' },
+                  ]}
+                />
               )}
             </div>
           </div>
@@ -958,17 +957,17 @@ export default function ApiFilesBrowser({ embedded = false }: { embedded?: boole
               or with the folder toggle on, just the current folder and its
               subfolders. */}
           {!localMode && (
-            <div className="relative mb-2">
-              <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-text-muted pointer-events-none" />
+            <div className={`${GLASS_SEARCH_WRAP} mb-2`}>
+              <Search size={15} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-text-muted pointer-events-none" />
               <input
                 type="text"
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
                 onFocus={prefetchSearchIndex}
                 placeholder={searchInFolder && currentPath ? `Search in ${currentPath.slice(currentPath.lastIndexOf('/') + 1)}…` : 'Search files…'}
-                className={`w-full bg-surface-overlay border border-[var(--border)] rounded-lg pl-8 ${currentPath ? (search ? 'pr-20' : 'pr-14') : (search ? 'pr-14' : 'pr-8')} py-1.5 text-sm text-text-primary placeholder:text-text-muted focus:outline-none focus:border-accent/40`}
+                className={`${GLASS_SEARCH} pl-9 ${currentPath ? (search ? 'pr-24' : 'pr-16') : (search ? 'pr-16' : 'pr-10')}`}
               />
-              <div className="absolute right-2 top-1/2 -translate-y-1/2 flex items-center gap-1.5">
+              <div className="absolute right-3.5 top-1/2 -translate-y-1/2 flex items-center gap-1.5">
                 {search && (
                   <button
                     onClick={() => { setSearch(''); setDebouncedSearch('') }}
@@ -1108,7 +1107,7 @@ export default function ApiFilesBrowser({ embedded = false }: { embedded?: boole
         {/* Content */}
         <div
           ref={listingRef}
-          className={`flex-1 overflow-y-auto px-5 pb-4 transition-colors ${fileDragOver ? 'bg-accent/[0.04] ring-2 ring-inset ring-accent/40' : ''}`}
+          className={`flex-1 overflow-y-auto px-5 pb-4 pb-player transition-colors ${fileDragOver ? 'bg-accent/[0.04] ring-2 ring-inset ring-accent/40' : ''}`}
           // Dropping OS files/folders on empty space uploads into the folder
           // being browsed; folder rows handle drops onto themselves.
           onDragOver={e => {
@@ -1581,7 +1580,7 @@ export default function ApiFilesBrowser({ embedded = false }: { embedded?: boole
       </div>
 
       {copiedPath && (
-        <PopLayer className="fixed bottom-5 left-1/2 -translate-x-1/2 z-50 flex items-center gap-2 bg-surface border border-[var(--border)] rounded-lg shadow-2xl px-3.5 py-2.5 text-xs text-text-primary animate-menu-pop">
+        <PopLayer className="fixed bottom-5 above-player left-1/2 -translate-x-1/2 z-50 flex items-center gap-2 bg-surface border border-[var(--border)] rounded-lg shadow-2xl px-3.5 py-2.5 text-xs text-text-primary animate-menu-pop">
           <Check size={13} className="text-accent" /> {copiedKind === 'paths' ? 'Paths copied' : copiedKind === 'path' ? 'Path copied' : 'Link copied'}
         </PopLayer>
       )}
@@ -1590,7 +1589,7 @@ export default function ApiFilesBrowser({ embedded = false }: { embedded?: boole
           shows zip status while selectMode is active, so this only covers
           the single-folder "Download folder" context-menu action. */}
       {!selectMode && zipStatus !== 'idle' && (
-        <PopLayer className="fixed bottom-5 right-5 z-50 flex items-center gap-2 bg-surface border border-[var(--border)] rounded-lg shadow-2xl px-3.5 py-2.5 text-xs text-text-primary animate-menu-pop">
+        <PopLayer className="fixed bottom-5 above-player right-5 z-50 flex items-center gap-2 bg-surface border border-[var(--border)] rounded-lg shadow-2xl px-3.5 py-2.5 text-xs text-text-primary animate-menu-pop">
           {zipStatus === 'starting' || zipStatus === 'zipping' ? (
             <><Loader2 size={13} className="animate-spin text-accent" /> {zipStatus === 'starting' ? 'Starting ZIP…' : zipProgress ? `Zipping folder ${zipProgress.done}/${zipProgress.total}…` : 'Zipping folder…'}</>
           ) : zipStatus === 'done' ? (
@@ -1602,7 +1601,7 @@ export default function ApiFilesBrowser({ embedded = false }: { embedded?: boole
       )}
 
       {boostToast && (
-        <PopLayer className="fixed bottom-5 left-1/2 -translate-x-1/2 z-50 flex items-center gap-2 bg-surface border border-[var(--border)] rounded-lg shadow-2xl px-3.5 py-2.5 text-xs text-text-primary animate-menu-pop">
+        <PopLayer className="fixed bottom-5 above-player left-1/2 -translate-x-1/2 z-50 flex items-center gap-2 bg-surface border border-[var(--border)] rounded-lg shadow-2xl px-3.5 py-2.5 text-xs text-text-primary animate-menu-pop">
           <Heart size={13} className="text-pink-400" fill="currentColor" /> Priority routing active
         </PopLayer>
       )}
@@ -1766,35 +1765,48 @@ export default function ApiFilesBrowser({ embedded = false }: { embedded?: boole
               isAudio && 'divider',
               getMediaType(entry.name) === 'text' && { icon: FileText, label: 'View', onSelect: () => openApiText(entry) },
               { icon: CheckSquare2, label: 'Select', onSelect: () => enterSelectMode(entry) },
-              { icon: Link, label: 'Copy link', onSelect: () => copyLink(entry) },
-              { icon: Clipboard, label: 'Copy path', onSelect: () => copyPath(entry) },
+              {
+                icon: Clipboard,
+                label: 'Copy',
+                children: [
+                  { icon: Link, label: 'Link', onSelect: () => copyLink(entry) },
+                  { icon: Clipboard, label: 'Path', onSelect: () => copyPath(entry) },
+                  !isDir && (window as any).electron?.copyRemoteFileToClipboard && { icon: FileText, label: 'File', onSelect: () => copyFile(entry) },
+                  isAudio && { icon: ImageIcon, label: 'Cover', onSelect: () => copyCover(entry) },
+                ],
+              },
               // Contributor actions — proposals target a file, so directories
-              // are excluded. Both land on the contributor page prefilled.
-              canPropose && !isDir && 'divider',
-              // On a selected row this edits the whole selection's audio.
-              canPropose && isAudio && {
-                icon: Tags,
-                label: selectedPaths.has(entry.path) && selectedPaths.size > 1 ? 'Edit tags of selection…' : 'Edit tags…',
-                onSelect: () => {
-                  const files = selectedPaths.has(entry.path) ? selectedAudioFiles() : [{ path: entry.path, name: entry.name }]
-                  openBulkFileEditor(files, activeChannel)
-                },
-              },
+              // are excluded. All land on the contributor page prefilled.
               canPropose && !isDir && {
-                icon: Replace,
-                label: 'Propose replacement',
-                onSelect: () => {
-                  setPendingCompProposal({ paths: [entry.path], changeType: 'replace' })
-                  setActiveView('contributor')
-                },
-              },
-              canPropose && !isDir && {
-                icon: Trash2,
-                label: 'Propose deletion',
-                onSelect: () => {
-                  setPendingCompProposal({ paths: [entry.path], changeType: 'delete' })
-                  setActiveView('contributor')
-                },
+                icon: Pencil,
+                label: 'Editor',
+                children: [
+                  // On a selected row this edits the whole selection's audio.
+                  isAudio && {
+                    icon: Tags,
+                    label: selectedPaths.has(entry.path) && selectedPaths.size > 1 ? 'Edit tags of selection…' : 'Edit tags…',
+                    onSelect: () => {
+                      const files = selectedPaths.has(entry.path) ? selectedAudioFiles() : [{ path: entry.path, name: entry.name }]
+                      openBulkFileEditor(files, activeChannel)
+                    },
+                  },
+                  {
+                    icon: Replace,
+                    label: 'Propose replacement',
+                    onSelect: () => {
+                      setPendingCompProposal({ paths: [entry.path], changeType: 'replace' })
+                      setActiveView('contributor')
+                    },
+                  },
+                  {
+                    icon: Trash2,
+                    label: 'Propose deletion',
+                    onSelect: () => {
+                      setPendingCompProposal({ paths: [entry.path], changeType: 'delete' })
+                      setActiveView('contributor')
+                    },
+                  },
+                ],
               },
               canPropose && isDir && 'divider',
               canPropose && isDir && { icon: Upload, label: 'Upload files here', onSelect: () => openUploadPicker(entry.path, 'files') },
@@ -1828,7 +1840,14 @@ export default function ApiFilesBrowser({ embedded = false }: { embedded?: boole
               media === 'text' && { icon: FileText, label: 'View', onSelect: () => openLocalText(entry) },
               { icon: ExternalLink, label: 'Open with system app', onSelect: () => openLocalFile(entry.path) },
               { icon: CheckSquare2, label: 'Select', onSelect: () => enterSelectMode(entry) },
-              { icon: Clipboard, label: 'Copy path', onSelect: () => copyPath(entry) },
+              {
+                icon: Clipboard,
+                label: 'Copy',
+                children: [
+                  entry.type === 'file' && { icon: FileText, label: 'File', onSelect: () => { void (window as any).electron?.copyFileToClipboard?.(entry.path) } },
+                  { icon: Clipboard, label: 'Path', onSelect: () => copyPath(entry) },
+                ],
+              },
               { icon: Pencil, label: 'Rename', onSelect: () => startRename(entry) },
               'divider',
               {

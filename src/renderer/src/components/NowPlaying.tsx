@@ -18,19 +18,13 @@ export default function NowPlaying(): JSX.Element {
     currentTrack,
     currentTrackFull,
     setShowNowPlaying,
-    showQueue,
     lyricsOverride,
-  } = useStorePick('currentTrack', 'currentTrackFull', 'setShowNowPlaying', 'showQueue', 'lyricsOverride')
+  } = useStorePick('currentTrack', 'currentTrackFull', 'setShowNowPlaying', 'lyricsOverride')
 
   const [artCollapsed, setArtCollapsed] = useState(false)
   const [showShareLyrics, setShowShareLyrics] = useState(false)
   const [panelWidth, dragHandle] = useResizablePanel(360, 280, 520)
   const [isMobile, setIsMobile] = useState(window.innerWidth < 768)
-  const isElectron = navigator.userAgent.includes('Electron')
-  // When the Queue panel is also open it sits to the right of this one and
-  // is the one that needs to clear the custom window controls (see its own
-  // header) — this panel only needs the clearance when it's the rightmost.
-  const needsWindowControlClearance = isElectron && !isMobile && !showQueue
 
   useEffect(() => {
     const check = (): void => setIsMobile(window.innerWidth < 768)
@@ -57,10 +51,12 @@ export default function NowPlaying(): JSX.Element {
       // inset: 0` there, so Safari's Liquid Glass toolbar tinting samples this
       // element's background directly - bg-surface-raised made the status bar
       // read visibly darker than the rest of the app while this panel is open.
-      className={`${isMobile ? 'bg-surface' : 'bg-surface-raised'} flex shrink-0 overflow-hidden`}
+      // Desktop: a glass card beside the view, ending above the floating
+      // player (--player-dock) like the sidebar ends above the window edge.
+      className={`${isMobile ? 'bg-surface' : 'bg-surface-raised glass-pane backdrop-blur-[28px] backdrop-saturate-[1.8] relative rounded-2xl mt-2 ml-2'} flex shrink-0 overflow-hidden`}
       style={isMobile
         ? { position: 'fixed', inset: 0, zIndex: 50 }
-        : { width: panelWidth, borderLeft: '1px solid var(--border)' }
+        : { width: panelWidth, marginBottom: 'max(0.5rem, var(--player-dock, 0px))' }
       }
     >
       {!isMobile && (

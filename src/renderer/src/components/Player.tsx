@@ -16,7 +16,6 @@ import {
   ListOrdered,
   Heart,
   ChevronUp,
-  ChevronDown,
   MoreHorizontal,
   PictureInPicture2,
   Radio,
@@ -52,6 +51,7 @@ import { showQueueEndedToast } from '../lib/queueEndedToast'
 import PlaybackNotice from './PlaybackNotice'
 import { ensureDonorCover } from '../lib/donorCoverArt'
 import { showAppToast } from '../lib/appToast'
+import { expandToWrld as runWrldExpand, isExpandingToWrld } from '../lib/wrldExpand'
 import { runLog } from '../lib/runLog'
 import { isOfflineCopyUnreadable, markOfflineCopyUnreadable } from '../lib/offlineCopies'
 import { CoverFade, LikePop, SwapIcon, TrackSwap } from './PlayerMotion'
@@ -186,6 +186,11 @@ const REPEATABLE_HOTKEYS = new Set(['seek-forward', 'seek-backward', 'volume-up'
 
 // How long the pause-fade ramps volume when "smooth fade when pausing" is on.
 const PAUSE_FADE_MS = 400
+
+// Gap around the floating desktop bar, in px: left-2/right-2/bottom-2 below,
+// and the same again above it in --player-dock. On wide windows the bar stops
+// at max-w-[1080px] and sits centred (mx-auto).
+const PLAYER_DOCK_GAP = 8
 
 // How much of a song counts as having played it (or half its length, for
 // anything shorter). See creditPlayIfListened.
@@ -367,8 +372,6 @@ export default function Player(): JSX.Element {
     showNowPlaying,
     showQueue,
     setShowQueue,
-    playerCollapsed,
-    setPlayerCollapsed,
     queue,
     queueIndex,
     crossfadeEnabled,
@@ -383,8 +386,10 @@ export default function Player(): JSX.Element {
     toggleLike,
     setActiveView,
     activeView,
-    playNext, account, updateLibraryTrack } = useStorePick('currentTrack', 'currentTrackFull', 'isPlaying', 'volume', 'shuffle', 'repeat', 'setIsPlaying', 'setVolume', 'setProgress', 'setCurrentTime', 'setCurrentTrackFull', 'toggleShuffle', 'toggleRepeat', 'setRepeat', 'nextTrack', 'prevTrack', 'setShowNowPlaying', 'showNowPlaying', 'showQueue', 'setShowQueue', 'playerCollapsed', 'setPlayerCollapsed', 'queue', 'queueIndex', 'crossfadeEnabled', 'crossfadeDuration', 'sleepTimerEnd', 'setSleepTimer', 'audioOutput', 'setAudioOutput', 'playbackSpeed', 'setPlaybackSpeed', 'likedTrackIds', 'toggleLike', 'setActiveView', 'activeView', 'playNext', 'account', 'updateLibraryTrack')
+    playNext, account, updateLibraryTrack } = useStorePick('currentTrack', 'currentTrackFull', 'isPlaying', 'volume', 'shuffle', 'repeat', 'setIsPlaying', 'setVolume', 'setProgress', 'setCurrentTime', 'setCurrentTrackFull', 'toggleShuffle', 'toggleRepeat', 'setRepeat', 'nextTrack', 'prevTrack', 'setShowNowPlaying', 'showNowPlaying', 'showQueue', 'setShowQueue', 'queue', 'queueIndex', 'crossfadeEnabled', 'crossfadeDuration', 'sleepTimerEnd', 'setSleepTimer', 'audioOutput', 'setAudioOutput', 'playbackSpeed', 'setPlaybackSpeed', 'likedTrackIds', 'toggleLike', 'setActiveView', 'activeView', 'playNext', 'account', 'updateLibraryTrack')
   const canEditSong = useCanEdit()
+  // The bar grows into WRLD (lib/wrldExpand.ts).
+  const expandToWrld = useCallback(() => runWrldExpand(() => setActiveView('wrld'), useStore.getState().activeView), [setActiveView])
 
   const [showContextMenu, setShowContextMenu] = useState(false)
   // Cursor position for a right-click-spawned menu. null → menu was opened via
@@ -2242,7 +2247,7 @@ export default function Player(): JSX.Element {
     'view-tracker':   () => setActiveView('api-tracker'),
     'view-playlists': () => setActiveView('playlists'),
     'view-library':   () => setActiveView('library'),
-    'view-wrld':      () => setActiveView('wrld'),
+    'view-wrld':      expandToWrld,
     'view-admin':     () => {
       // Admin tools live in the editor profile page's Admin tab now.
       if (showStaffProfile(account) && (account?.is_administrator || account?.is_editor || account?.is_manager)) useStore.getState().openProfile()
@@ -2497,6 +2502,30 @@ export default function Player(): JSX.Element {
     setShowOutputPicker((v) => !v)
   }
 
+  // The desktop bar floats over the bottom of the main area. Publish the room
+  // it takes there (its height plus the gap below and above it) as
+  // --player-dock, for views that scroll under it and the panes that end
+  // above it. 0 while it's hidden: WRLD, and narrow windows (display: none
+  // reads as height 0).
+  const dockRef = useRef<HTMLDivElement>(null)
+  const barShown = activeView !== 'wrld'
+  useLayoutEffect(() => {
+    const root = document.documentElement
+    const el = dockRef.current
+    const publish = (h: number): void => {
+      // The page left under WRLD keeps the bar's room while WRLD slides up
+      // over it, or it would grow and reflow mid-slide; lib/wrldExpand.ts
+      // clears it when the slide ends.
+      if (h === 0 && isExpandingToWrld()) return
+      root.style.setProperty('--player-dock', h > 0 ? `${h + PLAYER_DOCK_GAP * 2}px` : '0px')
+    }
+    if (!el) { publish(0); return }
+    publish(el.offsetHeight)
+    const ro = new ResizeObserver(() => publish(el.offsetHeight))
+    ro.observe(el)
+    return () => { ro.disconnect(); publish(0) }
+  }, [barShown])
+
   return (
     <>
       <MediaSessionPosition active={mediaSessionActive} playbackSpeed={playbackSpeed} />
@@ -2699,60 +2728,18 @@ export default function Player(): JSX.Element {
       </div>
 
       {/* ── Desktop player ── */}
-      <div className={`app-player hidden md:flex bg-surface border-t border-[var(--border)] items-center shrink-0 relative ${playerCollapsed ? 'h-7' : 'h-[90px] px-4 gap-4'}`} onContextMenu={(e) => { e.preventDefault(); if (currentTrack) { setCtxMenuPos({ x: e.clientX, y: e.clientY }); setShowContextMenu(true) } }}>
-        {playerCollapsed ? (
-        <>
-          {/* Thin progress line along the top edge */}
-          {radioFmActive ? (
-            <div className="absolute top-0 left-0 right-0 h-[2px] bg-red-900/40">
-              <FmProgressFill className="h-full bg-red-400" />
-            </div>
-          ) : (
-            <div className="absolute top-0 left-0 right-0 h-[2px] bg-surface-overlay">
-              <ProgressFill seekDrag={seekDrag} className="h-full bg-accent" />
-              <span className={`player-loading ${audioLoading ? 'on' : ''}`} />
-            </div>
-          )}
-          <button
-            onClick={() => setIsPlaying(!isPlaying)}
-            disabled={!currentTrack || radioFmActive}
-            className="ml-4 w-6 h-6 rounded-full bg-white flex items-center justify-center shrink-0 hover:scale-105 active:scale-95 transition-transform disabled:opacity-30"
-            title={isPlaying ? 'Pause' : 'Play'}
-          >
-            <SwapIcon swapKey={isPlaying}>
-              {isPlaying
-                ? <Pause size={12} fill="#000" className="text-black" />
-                : <Play  size={12} fill="#000" className="text-black ml-0.5" />}
-            </SwapIcon>
-          </button>
-          <TrackSwap swapKey={swapKey} order={swapOrder} className="ml-3 text-xs truncate min-w-0 flex-1">
-            <span className="text-text-secondary font-medium">
-              {radioFmActive && radioFmNowPlaying ? radioFmNowPlaying.title : (currentTrack?.title || 'Not playing')}
-            </span>
-            {(radioFmActive && radioFmNowPlaying ? radioFmNowPlaying.artist : currentTrack?.artist) && (
-              <span className="text-text-muted"> — {radioFmActive && radioFmNowPlaying ? radioFmNowPlaying.artist : currentTrack?.artist}</span>
-            )}
-          </TrackSwap>
-          <span className="text-text-muted text-xs tabular-nums shrink-0">
-            {radioFmActive
-              ? <><FmElapsedTime /> / {formatDuration(Math.floor(fmDurationMs / 1000))}</>
-              : <><ElapsedTime /> / {formatDuration(duration)}</>}
-          </span>
-          <button
-            onClick={() => setPlayerCollapsed(false)}
-            title="Expand player"
-            className="mx-4 text-text-secondary hover:text-text-primary transition-colors shrink-0"
-          >
-            <ChevronUp size={18} />
-          </button>
-        </>
-        ) : (
-        <>
+      {/* A frosted bar floating over the bottom of the main area (App.tsx
+          renders Player inside <main>), with views scrolling under it. The
+          glass is a ::before layer: SongContextMenu's panels can be fixed
+          without a portal, and backdrop-filter on the bar itself would pin
+          them to it. Expanding (the chevron or the cover) grows the bar into
+          WRLD, see expandToWrld. */}
+      <div ref={dockRef} className={`app-player hidden md:flex glass-backdrop glass-specular glass-lift absolute z-30 left-2 right-2 bottom-2 mx-auto max-w-[1080px] items-center h-[88px] rounded-[22px] px-4 gap-4`} data-wrld-expand="bar" onContextMenu={(e) => { e.preventDefault(); if (currentTrack) { setCtxMenuPos({ x: e.clientX, y: e.clientY }); setShowContextMenu(true) } }}>
         {/* Track info */}
         <div className="flex items-center gap-3 w-72 min-w-0 shrink-0">
           <button
-            className="w-14 h-14 rounded-md bg-surface-overlay shrink-0 overflow-hidden hover:ring-2 ring-accent transition-all"
-            onClick={() => setActiveView('wrld')}
+            className="w-14 h-14 rounded-[10px] bg-surface-overlay shrink-0 overflow-hidden hover:ring-2 ring-accent transition-all"
+            onClick={expandToWrld}
             title={radioFmActive ? '999FM' : 'Open WRLD'}
           >
             {radioFmActive ? (
@@ -2859,7 +2846,10 @@ export default function Player(): JSX.Element {
         </div>
 
         {/* Center: controls + progress */}
-        <div className="flex-1 flex flex-col items-center gap-2">
+        {/* The seek row is 20px tall for grabbing but its line is 4px, so
+            -mb-2 drops the dead space under it: the buttons' top and the
+            line's bottom then sit the same distance from the bar's edges. */}
+        <div className="flex-1 flex flex-col items-center gap-1.5">
           <div className="flex items-center gap-5">
             {!radioFmActive && <button onClick={toggleShuffle}
               className={`transition-colors ${shuffle ? 'text-accent' : 'text-text-secondary hover:text-text-primary'}`}>
@@ -2893,7 +2883,7 @@ export default function Player(): JSX.Element {
           </div>
 
           {/* Progress bar */}
-          <div className="flex items-center gap-2 w-full max-w-xl">
+          <div className="flex items-center gap-2 w-full max-w-xl -mb-2">
             <span className="text-text-muted text-xs w-10 text-right tabular-nums">
               {radioFmActive
                 ? <FmElapsedTime />
@@ -2990,15 +2980,14 @@ export default function Player(): JSX.Element {
           </div>
 
           <button
-            onClick={() => setPlayerCollapsed(true)}
-            title="Collapse player"
+            onClick={expandToWrld}
+            title="Open WRLD"
+            aria-label="Open WRLD"
             className="text-text-secondary hover:text-text-primary transition-colors"
           >
-            <ChevronDown size={18} />
+            <ChevronUp size={18} />
           </button>
         </div>
-        </>
-        )}
 
         {/* Output device popover */}
         {showOutputPicker && outputRect && (

@@ -66,6 +66,8 @@ import { reorderField, apiFieldsFor, useTrackerOmit, OPTIONAL_SONG_FIELDS } from
 import { useFieldDrag } from '../hooks/useFieldDrag'
 import ContextMenu, { AnchoredContextMenu } from './ContextMenu'
 import ThemedSelect from './ThemedSelect'
+import { GlassSegmented } from './GlassSegmented'
+import { GLASS_SEARCH, GLASS_SEARCH_WRAP, glassToolButton, glassPillButton } from './glassControls'
 import ApiFilesView from './ApiFilesView'
 
 const StatisticsPanel = lazyView(() => import('./StatisticsPanel'))
@@ -1727,10 +1729,10 @@ function VersionTitlePromptModal({
   const [value, setValue] = useState('')
   return (
     <MotionOverlay
-      className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/70 backdrop-blur-sm p-4"
+      className="fixed inset-0 z-[9999] flex items-center justify-center glass-scrim p-4"
       onClick={(e) => { if (e.target === e.currentTarget) onSkip() }}
     >
-      <div className="bg-surface border border-[var(--border)] rounded-2xl shadow-2xl w-full max-w-sm p-5">
+      <div className="relative bg-surface border border-[var(--border)] modal-glass rounded-2xl shadow-2xl w-full max-w-sm p-5">
         <h3 className="text-text-primary text-sm font-semibold mb-1">Name this version group</h3>
         <p className="text-text-muted text-xs mb-3">
           These songs are now linked as versions of each other, but the group has no title yet (e.g. "TV Mix", "Alternate").
@@ -2708,72 +2710,22 @@ export default function ApiTrackerView(): JSX.Element {
       <div className="px-4 md:px-5 pt-4 md:pt-5 pb-3 shrink-0">
         <h1 className="text-text-primary text-xl font-bold mb-1">Tracker</h1>
 
-        <div className="flex items-center gap-0.5 mb-2.5 w-fit bg-surface-overlay rounded-md p-0.5">
-          <button
-            onClick={() => setTrackerTab('songs')}
-            className={`flex items-center gap-1 px-2 py-1 rounded text-[0.6875rem] font-medium transition-colors ${
-              trackerTab === 'songs'
-                ? 'bg-surface-raised text-text-primary'
-                : 'text-text-muted hover:text-text-secondary'
-            }`}
-          >
-            <Music2 size={11} /> Songs
-          </button>
-          <button
-            onClick={() => setTrackerTab('lyrics')}
-            className={`flex items-center gap-1 px-2 py-1 rounded text-[0.6875rem] font-medium transition-colors ${
-              trackerTab === 'lyrics'
-                ? 'bg-surface-raised text-text-primary'
-                : 'text-text-muted hover:text-text-secondary'
-            }`}
-          >
-            <Mic2 size={11} /> Lyrics
-          </button>
-          <button
-            onClick={() => setTrackerTab('calendar')}
-            className={`flex items-center gap-1 px-2 py-1 rounded text-[0.6875rem] font-medium transition-colors ${
-              trackerTab === 'calendar'
-                ? 'bg-surface-raised text-text-primary'
-                : 'text-text-muted hover:text-text-secondary'
-            }`}
-          >
-            <CalendarDays size={11} /> Overview
-          </button>
-          <button
-            onClick={() => setTrackerTab('producers')}
-            className={`flex items-center gap-1 px-2 py-1 rounded text-[0.6875rem] font-medium transition-colors ${
-              trackerTab === 'producers'
-                ? 'bg-surface-raised text-text-primary'
-                : 'text-text-muted hover:text-text-secondary'
-            }`}
-          >
-            <Users size={11} /> Producers
-          </button>
-          <button
-            onClick={() => setTrackerTab('statistics')}
+        <GlassSegmented
+          ariaLabel="Tracker sections"
+          className="mb-3"
+          value={trackerTab}
+          onChange={setTrackerTab}
+          options={[
+            { value: 'songs', label: 'Songs', icon: <Music2 size={13} /> },
+            { value: 'lyrics', label: 'Lyrics', icon: <Mic2 size={13} /> },
+            { value: 'calendar', label: 'Overview', icon: <CalendarDays size={13} /> },
+            { value: 'producers', label: 'Producers', icon: <Users size={13} /> },
             // Warm the chunk and both endpoints so the first open doesn't
             // flash a skeleton and then Statistics' own.
-            onPointerEnter={warmStatistics}
-            onFocus={warmStatistics}
-            className={`flex items-center gap-1 px-2 py-1 rounded text-[0.6875rem] font-medium transition-colors ${
-              trackerTab === 'statistics'
-                ? 'bg-surface-raised text-text-primary'
-                : 'text-text-muted hover:text-text-secondary'
-            }`}
-          >
-            <BarChart3 size={11} /> Statistics
-          </button>
-          <button
-            onClick={() => setTrackerTab('files')}
-            className={`flex items-center gap-1 px-2 py-1 rounded text-[0.6875rem] font-medium transition-colors ${
-              trackerTab === 'files'
-                ? 'bg-surface-raised text-text-primary'
-                : 'text-text-muted hover:text-text-secondary'
-            }`}
-          >
-            <HardDrive size={11} /> Files
-          </button>
-        </div>
+            { value: 'statistics', label: 'Statistics', icon: <BarChart3 size={13} />, onPointerEnter: warmStatistics, onFocus: warmStatistics },
+            { value: 'files', label: 'Files', icon: <HardDrive size={13} /> },
+          ]}
+        />
 
         {trackerTab === 'songs' && <StatsBar stats={stats} />}
 
@@ -2781,39 +2733,35 @@ export default function ApiTrackerView(): JSX.Element {
           {/* Search - uses searchall to include producers; field:"value" tokens
               (see trackerSearch.ts) are parsed out and applied client-side. */}
           <div className="flex items-center gap-1.5 w-full">
-            <div className="relative flex-1 min-w-0">
-              <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-text-muted pointer-events-none" />
+            <div className={`${GLASS_SEARCH_WRAP} flex-1 min-w-0`}>
+              <Search size={15} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-text-muted pointer-events-none" />
               <input
                 ref={searchInputRef}
                 type="text"
                 placeholder='Search, or artists:"Juice WRLD"…'
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
-                className="w-full bg-surface-overlay text-text-primary text-sm pl-8 pr-8 py-2.5 md:py-2 rounded-lg outline-none focus:ring-1 ring-accent border border-transparent focus:border-accent/40 placeholder:text-text-muted"
+                className={`${GLASS_SEARCH} pl-9 pr-9`}
               />
               {search && (
-                <button onClick={() => setSearch('')} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-text-muted hover:text-text-primary">
+                <button onClick={() => setSearch('')} aria-label="Clear search" className="absolute right-3 top-1/2 -translate-y-1/2 text-text-muted hover:text-text-primary">
                   <X size={13} />
                 </button>
               )}
             </div>
-            <button onClick={() => useStore.getState().setShowRecognition(true)} title="Identify song" aria-label="Identify song" className="shrink-0 p-2.5 md:p-2 rounded-lg bg-surface-overlay text-text-muted hover:text-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent">
+            <button onClick={() => useStore.getState().setShowRecognition(true)} title="Identify song" aria-label="Identify song" className={glassToolButton(false)}>
               <AudioLines size={16} />
             </button>
             <div className="relative shrink-0 hidden md:block">
               <button
                 onClick={() => setShowFilterMenu((v) => !v)}
                 onMouseDown={(e) => e.stopPropagation()}
-                className={`relative flex items-center justify-center p-2.5 md:p-2 rounded-lg transition-colors ${
-                  showFilterMenu || multiFilterActive || categoryFilter.size > 0 || eraFilter.size > 0 || libraryFilter !== 'all'
-                    ? 'bg-accent/15 text-accent'
-                    : 'bg-surface-overlay text-text-muted hover:text-text-secondary'
-                }`}
+                className={glassToolButton(showFilterMenu || multiFilterActive || categoryFilter.size > 0 || eraFilter.size > 0 || libraryFilter !== 'all')}
                 title="Filters"
               >
                 <ListFilter size={15} />
                 {(categoryFilter.size + eraFilter.size + (libraryFilter !== 'all' ? 1 : 0)) > 0 && (
-                  <span className="absolute -top-1 -right-1 min-w-[15px] h-[15px] px-[3px] rounded-full bg-accent text-[0.5625rem] leading-[15px] font-bold text-white text-center">
+                  <span className="absolute -top-0.5 -right-0.5 min-w-[15px] h-[15px] px-[3px] rounded-full bg-accent text-[0.5625rem] leading-[15px] font-bold text-white text-center">
                     {categoryFilter.size + eraFilter.size + (libraryFilter !== 'all' ? 1 : 0)}
                   </span>
                 )}
@@ -2838,7 +2786,7 @@ export default function ApiTrackerView(): JSX.Element {
             </div>
             <SearchHelpButton
               size={15}
-              className={(open) => `p-2.5 md:p-2 rounded-lg transition-colors ${open ? 'bg-accent/15 text-accent' : 'bg-surface-overlay text-text-muted hover:text-text-secondary'}`}
+              className={glassToolButton}
             />
 
             <button
@@ -2847,51 +2795,32 @@ export default function ApiTrackerView(): JSX.Element {
                 else { setOrderField('date_added'); setOrderDir('desc'); resetSongs() }
               }}
               title="Sort by recently added - only covers the last ~200 file changes, so older songs may not have a known date"
-              className={`hidden md:flex items-center gap-1.5 px-2.5 py-2 rounded-lg text-xs font-medium transition-colors shrink-0 ${
-                orderField === 'date_added' ? 'bg-accent/15 text-accent' : 'bg-surface-overlay text-text-muted hover:text-text-secondary'
-              }`}
+              className={`${glassPillButton(orderField === 'date_added')} !hidden md:!flex`}
             >
               <Clock size={14} />
               Recently added
             </button>
 
-            <div className="flex items-center bg-surface-overlay rounded-lg p-0.5 shrink-0">
-              <button
-                onClick={() => { setViewMode('list'); setCompactView(false) }}
-                className={`p-2 md:p-1.5 rounded-md transition-colors ${viewMode === 'list' && !compactView ? 'bg-surface-raised text-text-primary' : 'text-text-muted hover:text-text-secondary'}`}
-                title="List view"
-              >
-                <LayoutList size={16} />
-              </button>
-              <button
-                onClick={() => { setViewMode('detail'); setCompactView(false) }}
-                className={`p-2 md:p-1.5 rounded-md transition-colors ${viewMode === 'detail' && !compactView ? 'bg-surface-raised text-text-primary' : 'text-text-muted hover:text-text-secondary'}`}
-                title="Detailed view"
-              >
-                <Rows3 size={16} />
-              </button>
-              <button
-                onClick={() => { setViewMode('grid'); setCompactView(false) }}
-                className={`p-2 md:p-1.5 rounded-md transition-colors ${viewMode === 'grid' && !compactView ? 'bg-surface-raised text-text-primary' : 'text-text-muted hover:text-text-secondary'}`}
-                title="Grid view"
-              >
-                <LayoutGrid size={16} />
-              </button>
-              {versionsEnabled && (
-                <button
-                  onClick={() => { setCompactView(true); clearExpandedGroups() }}
-                  className={`p-2 md:p-1.5 rounded-md transition-colors ${compactView ? 'bg-surface-raised text-text-primary' : 'text-text-muted hover:text-text-secondary'}`}
-                  title="Compact view - collapse songs into their version groups"
-                >
-                  <Layers size={16} />
-                </button>
-              )}
-            </div>
+            <GlassSegmented
+              ariaLabel="Layout"
+              className="shrink-0"
+              value={compactView ? 'compact' : viewMode}
+              onChange={(v) => {
+                if (v === 'compact') { setCompactView(true); clearExpandedGroups() }
+                else { setViewMode(v); setCompactView(false) }
+              }}
+              options={[
+                { value: 'list', icon: <LayoutList size={16} />, title: 'List view' },
+                { value: 'detail', icon: <Rows3 size={16} />, title: 'Detailed view' },
+                { value: 'grid', icon: <LayoutGrid size={16} />, title: 'Grid view' },
+                ...(versionsEnabled ? [{ value: 'compact' as const, icon: <Layers size={16} />, title: 'Compact view - collapse songs into their version groups' }] : []),
+              ]}
+            />
 
             {viewMode === 'detail' && !compactView && (
               <button
                 onClick={(e) => setFieldMenu({ target: 'detail', ...fieldMenuAnchor(e, -1) })}
-                className={`p-2.5 md:p-2 rounded-lg transition-colors shrink-0 ${fieldMenu?.target === 'detail' ? 'bg-accent/15 text-accent' : 'bg-surface-overlay text-text-muted hover:text-text-secondary'}`}
+                className={glassToolButton(fieldMenu?.target === 'detail')}
                 title="Customize fields - or click any field label to swap/hide it"
               >
                 <SlidersHorizontal size={15} />
@@ -2911,7 +2840,7 @@ export default function ApiTrackerView(): JSX.Element {
                 { value: 'unsurfaced', label: 'Unsurfaced' },
                 { value: 'recording_session', label: 'Sessions' },
               ]}
-              className="flex-1 min-w-0 bg-surface-overlay text-text-primary text-sm px-3 py-2.5 rounded-lg outline-none border border-transparent focus:ring-1 ring-accent focus:border-accent/40"
+              className="glass-field flex-1 min-w-0 text-text-primary text-sm px-4 h-10 rounded-full outline-none"
             />
           </div>
 
@@ -2954,17 +2883,17 @@ export default function ApiTrackerView(): JSX.Element {
         </div>}
 
         {trackerTab === 'lyrics' && (
-          <div className="relative w-full">
-            <Mic2 size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-text-muted pointer-events-none" />
+          <div className={`${GLASS_SEARCH_WRAP} w-full`}>
+            <Mic2 size={15} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-text-muted pointer-events-none" />
             <input
               type="text"
               placeholder="Search lyrics…"
               value={lyricsQuery}
               onChange={(e) => setLyricsQuery(e.target.value)}
-              className="w-full bg-surface-overlay text-text-primary text-sm pl-8 pr-8 py-2.5 md:py-2 rounded-lg outline-none focus:ring-1 ring-accent border border-transparent focus:border-accent/40 placeholder:text-text-muted"
+              className={`${GLASS_SEARCH} pl-9 pr-9`}
             />
             {lyricsQuery && (
-              <button onClick={() => setLyricsQuery('')} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-text-muted hover:text-text-primary">
+              <button onClick={() => setLyricsQuery('')} aria-label="Clear search" className="absolute right-3 top-1/2 -translate-y-1/2 text-text-muted hover:text-text-primary">
                 <X size={13} />
               </button>
             )}
@@ -2974,7 +2903,7 @@ export default function ApiTrackerView(): JSX.Element {
 
       {/* Body */}
       {trackerTab === 'lyrics' ? (
-        <div className="flex-1 overflow-y-auto px-3 md:px-5 pb-4">
+        <div className="flex-1 overflow-y-auto px-3 md:px-5 pb-4 pb-player">
           {!debouncedLyricsQuery.trim() ? (
             <div className="flex flex-col items-center justify-center h-40 gap-2">
               <Mic2 size={32} className="text-text-muted opacity-30" />
@@ -3031,7 +2960,7 @@ export default function ApiTrackerView(): JSX.Element {
           )}
         </div>
       ) : trackerTab === 'calendar' ? (
-        <div className="flex-1 overflow-y-auto px-3 md:px-5 pb-4">
+        <div className="flex-1 overflow-y-auto px-3 md:px-5 pb-4 pb-player">
           {calendarLoading ? (
             <div className="flex items-center justify-center h-40 gap-2 text-text-muted">
               <Loader2 size={18} className="animate-spin" />
@@ -3222,7 +3151,7 @@ export default function ApiTrackerView(): JSX.Element {
           <StatisticsPanel onOpenEra={(era) => { setEraFilter(new Set([era])); setTrackerTab('songs') }} />
         </Suspense>
       ) : trackerTab === 'producers' ? (
-        <div className="flex-1 overflow-y-auto px-3 md:px-5 pb-4">
+        <div className="flex-1 overflow-y-auto px-3 md:px-5 pb-4 pb-player">
           {calendarLoading ? (
             <div className="flex items-center justify-center h-40 gap-2 text-text-muted">
               <Loader2 size={18} className="animate-spin" />
@@ -3416,7 +3345,7 @@ export default function ApiTrackerView(): JSX.Element {
           {/* Song list / grid */}
           {/* relative so CompactGroupList's offset math is measured against
               this scroller rather than some higher positioned ancestor. */}
-          <div ref={listScrollRef} className="relative flex-1 overflow-y-auto px-3 md:px-5 pb-4">
+          <div ref={listScrollRef} className="relative flex-1 overflow-y-auto px-3 md:px-5 pb-4 pb-player">
             {compactView ? loadingCompact ? (
               <div className="flex items-center justify-center h-40 gap-2 text-text-muted">
                 <Loader2 size={18} className="animate-spin" />

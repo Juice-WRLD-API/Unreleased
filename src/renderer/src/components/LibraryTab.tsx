@@ -301,7 +301,7 @@ function CardGrid({ count, render }: {
   const { start, end, totalHeight } = useVirtualWindow(scrollRef, contentRef, rows, rowStride)
 
   return (
-    <div ref={scrollRef} className="flex-1 min-h-0 overflow-y-auto [scrollbar-gutter:stable]" style={{ padding: `${GRID_PAD / 16}rem` }}>
+    <div ref={scrollRef} className="flex-1 min-h-0 overflow-y-auto [scrollbar-gutter:stable] pb-player" style={{ padding: `${GRID_PAD / 16}rem` }}>
       {count === 0 ? (
         <NoResults />
       ) : (
@@ -341,7 +341,7 @@ function SongList({ tracks, header, onContext, showAlbum = true }: {
   const { start, end, totalHeight } = useVirtualWindow(scrollRef, contentRef, tracks.length, rowH)
   useVisibleTracks(tracks)
   return (
-    <div ref={scrollRef} className="flex-1 min-h-0 overflow-y-auto px-4 pb-4 [scrollbar-gutter:stable]">
+    <div ref={scrollRef} className="flex-1 min-h-0 overflow-y-auto px-4 pb-4 [scrollbar-gutter:stable] pb-player">
       {header}
       {tracks.length === 0 ? (
         <NoResults />
@@ -477,7 +477,7 @@ function EmptyState({ onOpenSettings, onImportUrl, onScan, hasFolders }: {
   hasFolders: boolean
 }): JSX.Element {
   return (
-    <div className="flex-1 min-h-0 overflow-y-auto">
+    <div className="flex-1 min-h-0 overflow-y-auto pb-player">
       <div className="max-w-3xl mx-auto py-12 px-5">
         <div className="flex items-center gap-3 mb-5 text-text-muted"><Disc3 size={38} strokeWidth={1} /><Music size={24} strokeWidth={1.3} /></div>
         <h2 className="text-3xl font-semibold tracking-tight text-text-primary">Add music to your library</h2>
@@ -538,7 +538,7 @@ function LibraryOverview({ tracks, albums, artists, onNav, onOpenAlbum, onOpenAr
     { key: 'artists', label: 'Artists', count: artists.length, icon: <User size={20} /> },
   ]
   return (
-    <div className="flex-1 min-h-0 overflow-y-auto pr-1 pb-1 [scrollbar-gutter:stable]">
+    <div className="flex-1 min-h-0 overflow-y-auto pr-1 pb-1 [scrollbar-gutter:stable] pb-player">
       <nav aria-label="Browse your library" className="library-shortcuts mb-4">
         {shortcuts.map(s => <button key={s.key} onClick={() => onNav({ kind: 'lib', key: s.key })} className="library-shortcut">
           <span className="text-accent shrink-0">{s.icon}</span>
@@ -1009,7 +1009,7 @@ export default function LibraryTab(): JSX.Element {
         ) : nav.key === 'songs' ? (
           <SongList tracks={songs} onContext={openCtx}
             header={
-              <div className="sticky top-0 z-10 bg-surface flex items-center gap-3 pl-3 pr-2 py-2.5 mb-1 border-b border-[var(--border)]">
+              <div className="sticky top-0 z-10 glass-bar flex items-center gap-3 pl-3 pr-2 py-2.5 mb-1 border-b border-[var(--border)]">
                 <div className="w-5 text-xs text-text-muted text-center">#</div>
                 <div className="w-11 shrink-0" />
                 <button onClick={() => toggleSort('title')} aria-label={`Sort by title${sortField === 'title' ? (sortDir === 'asc' ? ', descending' : ', ascending') : ''}`} className="flex-1 flex items-center gap-1 text-xs text-text-muted hover:text-text-primary transition-colors rounded focus-visible:ring-2 focus-visible:ring-accent">

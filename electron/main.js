@@ -2383,7 +2383,7 @@ ipcMain.handle('copy-text-to-clipboard', (_, text) => {
 // not its name) needs the platform's native file-list format. Electron can't
 // write it: clipboard.writeBuffer('CF_HDROP', …) registers a new *custom*
 // format under that name, which Explorer ignores. So shell out to the OS.
-ipcMain.handle('copy-file-to-clipboard', async (_, filePath) => {
+async function copyFileToClipboard(filePath) {
   if (typeof filePath !== 'string' || !filePath) return { error: 'No file path' }
   if (!fs.existsSync(filePath)) return { error: 'File not found' }
   const { execFile } = require('child_process')
@@ -2403,6 +2403,27 @@ ipcMain.handle('copy-file-to-clipboard', async (_, filePath) => {
   // say so, rather than silently doing something different than advertised.
   clipboard.writeText(filePath)
   return { ok: true, fallback: 'path' }
+}
+ipcMain.handle('copy-file-to-clipboard', (_, filePath) => copyFileToClipboard(filePath))
+
+// A remote (API) file → clipboard as a real file. Downloads it to a scratch
+// folder under the OS temp dir under its own name, then hands that to the same
+// native file-list copy as above. Only http(s) URLs are accepted.
+ipcMain.handle('copy-remote-file-to-clipboard', async (_, url, name) => {
+  if (typeof url !== 'string' || !/^https?:\/\//i.test(url)) return { error: 'Invalid URL' }
+  const safe = String(name || 'file').replace(/[/\\:*?"<>|]/g, '_').trim().slice(0, 150) || 'file'
+  try {
+    const dir = fs.mkdtempSync(path.join(app.getPath('temp'), 'unreleased-copy-'))
+    const dest = path.join(dir, safe)
+    const res = await net.fetch(url)
+    if (!res.ok || !res.body) return { error: `Download failed (${res.status})` }
+    const { Readable } = require('stream')
+    const { pipeline } = require('stream/promises')
+    await pipeline(Readable.fromWeb(res.body), fs.createWriteStream(dest))
+    return await copyFileToClipboard(dest)
+  } catch (e) {
+    return { error: e.message }
+  }
 })
 
 // Cover art → clipboard as an actual image (pasteable into Discord, Photoshop,

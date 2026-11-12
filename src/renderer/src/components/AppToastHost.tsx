@@ -24,7 +24,7 @@ export default function AppToastHost(): JSX.Element {
       style={{ bottom: 'calc(var(--bottom-nav-height, 0px) + 96px)' }}
     >
       {toasts.map(t => (
-        <div key={t.id} data-flip-key={t.id} className="pointer-events-auto flex items-center gap-2.5 pl-3 pr-2 py-2 rounded-xl border border-[var(--border)] bg-surface shadow-2xl text-sm text-text-primary max-w-[90vw]">
+        <div key={t.id} data-flip-key={t.id} className="pointer-events-auto relative flex items-center gap-2.5 pl-3 pr-2 py-2 rounded-2xl glass-thick glass-specular text-sm text-text-primary max-w-[90vw]">
           {t.tone === 'info'
             ? <Info size={16} className="text-accent shrink-0" />
             : <AlertCircle size={16} className="text-red-400 shrink-0" />}

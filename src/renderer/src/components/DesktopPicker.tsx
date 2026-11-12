@@ -445,7 +445,7 @@ export default function DesktopPicker({ kind, onClose, onPicked }: {
   const title = { light: 'Lights', lyrics: 'Lyric styles', viz: 'Visualizers', overlay: 'Edge light' }[kind]
   const cover = useStore((s) => s.currentTrack?.imageUrl || (s.currentTrackFull?.id === s.currentTrack?.id ? s.currentTrackFull?.albumArt : null) || null)
   const colors = useAlbumColors(cover)
-  // WRLD holds still underneath while this is open.
+  // WRLD slows down (but keeps moving) underneath while this is open.
   useEffect(() => {
     const { coverViz } = useVizStore.getState()
     coverViz(true)

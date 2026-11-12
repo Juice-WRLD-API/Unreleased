@@ -2,6 +2,7 @@ import { SwapIcon } from './PlayerMotion'
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, memo, useCallback } from 'react'
 import { createPortal } from 'react-dom'
 import { Music, Radio, Search, SkipForward, ThumbsUp, ThumbsDown, X, ChevronDown, ChevronLeft, Play, Pause, SkipBack, SkipForward as SkipFwd, Shuffle, Repeat, Repeat1, Volume2, VolumeX, MoreHorizontal, Info, Heart, ListMusic, GripVertical, Trash2, Download, History, SlidersHorizontal, RefreshCw, TextQuote, Loader2, Settings2, Star, Ban } from 'lucide-react'
+import { useWrldExpandIn } from '../lib/wrldExpand'
 import { lazyOverlay } from '../lib/lazyView'
 import { ModalOverlay, LockToggle } from './Modal'
 import CoverEditor from './CoverEditor'
@@ -227,6 +228,8 @@ export default function WrldView(): JSX.Element {
   // The page itself, in the tab or inside the fullscreen portal - where the
   // visualizer measures its layout from.
   const pageRef = useRef<HTMLDivElement>(null)
+  // Slides up from the player bar when opened from it (lib/wrldExpand.ts).
+  useWrldExpandIn(pageRef)
 
   const isElectronApp = navigator.userAgent.includes('Electron')
   const elFullscreen = (window as any).electron

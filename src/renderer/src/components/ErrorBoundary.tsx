@@ -172,7 +172,7 @@ export default class ErrorBoundary extends Component<Props, State> {
       )
       if (!overlay) return card
       return (
-        <div className="fixed inset-0 z-[200] flex items-center justify-center p-6 bg-black/60 backdrop-blur-sm">
+        <div className="fixed inset-0 z-[200] flex items-center justify-center p-6 glass-scrim">
           {card}
         </div>
       )

@@ -1,6 +1,6 @@
 # Agent guide: Juice WRLD API and Unreleased
 
-**Version 1.58** · updated 2026-11-12. Bump the version and date whenever you
+**Version 1.64** · updated 2026-11-12. Bump the version and date whenever you
 change this file (minor for fixes and additions, major for rewrites).
 
 **Keep this file current.** If you find something in the docs or this file that
@@ -303,8 +303,10 @@ backend `docs/23-community-edits.md`). Approving files it in the `community` cha
 (never primary) at `Remixes & Edits/Community-Made/<uuid>/edit.<ext>`. The dialog sends the
 file's SHA-256 to `check/` before uploading, and the server fingerprints the
 upload and answers 409 with a `match` (`target` file, song or pending) when
-it is too similar. Against other edits and the Files remix folders "too
-similar" is 75%; against catalogue songs it is 95%, because a remix is meant
+it is too similar. Against other edits and every audio file in Files except
+`Compilation/` (`COMP_EDIT_EXCLUDED_FOLDERS` in the backend's
+`similarity/sources.py`; the songs live there; widening it needs a `fingerprint`
+backfill) "too similar" is 75%; against catalogue songs it is 95%, because a remix is meant
 to sound like its song. Don't lower that one. A pending match from someone
 else is never named.
 
@@ -471,6 +473,36 @@ Node 22.
   (`--surface`, `--accent`…). Every element restyles on every frame and skin
   switches lag. Write them through `paintPalette` in `lib/themeEffects.ts`,
   which cross-fades with a view transition.
+- **Glass chrome (desktop, `app`)**: the iOS-style glass look is the default on
+  every skin, with no toggle (the user's call, 2026-11-12). The desktop player
+  bar floats over the bottom of `<main>` and publishes `--player-dock`. A view
+  on `SCROLL_UNDER` in `App.tsx` runs under it and must pad every scroller it
+  can show with `.pb-player` (a `sticky bottom-0` bar also takes
+  `.sticky-dock`); any other view is padded for you and ends above the bar.
+  Notices pinned to the window's bottom go above it (`.above-player`). Classes
+  live in `index.css` under "Glass chrome". Behind everything is
+  `AmbientBackdrop` (the playing cover, blurred and tinted), fixed at
+  z-index -1, so `body`, `#root` and `.app-shell` stay transparent and a view
+  must not paint an opaque full-size background (Chat still does). Sidebar,
+  side panels and Home tiles are translucent `.glass-pane`s over it. Glass
+  fills mix from `--glass-base` (the surface with a hint of the accent,
+  lifted toward white on light skins); mix new ones from it too. Docked
+  panes are a veil (`--glass-pane`: frosted white on light, smoked on dark),
+  not a fill, and every glass surface takes the light-catching edge
+  (`.glass-specular`, built into `.glass-pane`; the element must be
+  positioned). View toolbars use the glass controls: `GlassSegmented` for
+  tabs and view toggles, and `GLASS_SEARCH` / `glassToolButton` /
+  `glassPillButton` from `components/glassControls.ts` for search fields and
+  buttons. Inside a `.glass-pane` they turn into plain fills by themselves.
+  Dialogs keep their own controls: the veil is see-through.
+- **backdrop-filter pins fixed children**: it makes its element the containing
+  block for `position: fixed` descendants, the way `transform` does. Put it
+  straight on an element only if nothing inside is a fixed popover without a
+  portal (ContextMenu, Modal and the Themed* pickers portal; NavPillGrip,
+  ClampedMenu and many view popovers don't). Otherwise use `.glass-backdrop`,
+  which blurs from a `::before` layer. That layer shows no blur while an
+  ancestor is fading, so a popover that fades in takes the direct classes on
+  the element that fades.
 - Write copy plainly. Match the surrounding code's comment density and naming.
 
 ---
@@ -500,6 +532,27 @@ Node 22.
 
 Newest first. One entry each: date, what went wrong, what to do instead. Delete
 entries that stop being true.
+
+- 2026-11-12: The playlist hero's blurred cover faded into `var(--surface)`,
+  which under glass chrome drew a solid band across the top of the track
+  list (the page below is the see-through ambient backdrop). Fade a backdrop
+  out with `mask-image` to transparent, never into a surface color.
+- 2026-11-12: Home's On this day dropped from three columns to two while
+  WRLD slid up over it. The page left under WRLD stays mounted, but App's
+  view box took `scroll-under` and its bottom padding from `activeView`
+  (already `wrld`), so the page got shorter mid-slide and the tile grew a
+  scrollbar. Anything that shapes the view box during the slide must follow
+  `wrldUnder ?? activeView`, the way Player holds `--player-dock`. A grid at
+  `auto-fill, minmax(…)` sits within a few pixels of losing a column, so
+  look for a 6 px or 14 px scrollbar first when one flips.
+
+- 2026-11-12: Tailwind opacity modifiers on the theme colors compile to
+  nothing. `surface`, `text-*` and friends are plain `var(--…)` values in
+  `tailwind.config`, so `bg-surface/85`, `hover:bg-surface-raised/70` or
+  `bg-text-secondary/70` emit no rule at all (many existing
+  `bg-surface-overlay/40` cards are transparent for this reason). Use the
+  plain class, a glass class (`glass-bar` for a sticky header), or
+  `color-mix` in `index.css`.
 
 - 2026-11-08: iOS v3.2.7 and v3.2.8 failed to archive with "cannot find
   'LocalLibraryPlugin' in scope". Its file reference in `project.pbxproj`

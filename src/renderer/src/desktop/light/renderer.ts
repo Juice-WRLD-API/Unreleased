@@ -246,7 +246,7 @@ export class EdgeLight {
   lastDraw = 0
   t0 = performance.now()
   disposed = false
-  /** Covered (a picker open over WRLD): nothing drawn, the last frame left up. */
+  /** Covered (a picker open over WRLD): still moving, at no more than 30 fps, so the picker's screens get the GPU. */
   held = false
 
   constructor(canvas: HTMLCanvasElement, feed: LightFeed) {
@@ -302,11 +302,12 @@ export class EdgeLight {
 
   loop = (): void => {
     this.timer = 0
-    if (this.disposed || this.held) return
+    if (this.disposed) return
     const now = this.now
     const style = this.feed.style()
     const playing = this.feed.playing()
-    const rate = this.engine.frameRate(style, playing, now)
+    const full = this.engine.frameRate(style, playing, now)
+    const rate = this.held && full > 0 ? Math.min(full, 30) : full
     if (now - this.lastDraw >= 1 / (rate || 60) - 0.004 || rate === 0) this.draw(now)
     // On while it moves, and while a look's program builds, to draw it once it's ready.
     if (this.engine.frameRate(style, playing, now) > 0 || this.renderer.building) this.timer = requestAnimationFrame(this.loop)
@@ -314,14 +315,13 @@ export class EdgeLight {
 
   /** Something changed: draw again, and keep going while the light moves. */
   wake(): void {
-    if (!this.timer && !this.disposed && !this.held && !this.renderer.gl.isContextLost()) this.timer = requestAnimationFrame(this.loop)
+    if (!this.timer && !this.disposed && !this.renderer.gl.isContextLost()) this.timer = requestAnimationFrame(this.loop)
   }
 
-  /** Holds the light still while something covers it, and lets it go on again. */
+  /** Slows the light down while something covers it, and lets it go at full rate again. */
   setHeld(held: boolean): void {
     this.held = held
-    if (held) this.stopLoop()
-    else this.wake()
+    this.wake()
   }
 
   stopLoop(): void {

@@ -1,7 +1,7 @@
 import { useOpenUserCard } from './chat/UserCard'
 import { useRef, useState } from 'react'
 import {
-  Loader2, Trophy, FileEdit, ChevronLeft, RefreshCw, Plus, X, Search, Flag, ShieldCheck, FolderOpen,
+  Loader2, Trophy, FileEdit, RefreshCw, Plus, X, Search, Flag, ShieldCheck, FolderOpen,
   Pencil, Check, PictureInPicture2,
 } from 'lucide-react'
 import { useStore, IS_FLOAT_WINDOW } from '../store/useStore'
@@ -10,8 +10,11 @@ import { accountDisplayName, initial } from '../lib/format'
 import { CONTRIBUTOR_ENABLED } from '../lib/userApi'
 import ReportsTab from './ReportsTab'
 import CompProposalList, { CompFilterBar } from './CompProposalList'
+import { GlassSegmented, SegCount } from './GlassSegmented'
+import { GLASS_SEARCH, GLASS_SEARCH_WRAP, glassToolButton } from './glassControls'
 import RoleBadges from './RoleBadges'
 import { Tile } from './Tile'
+import HomeHero from './HomeHero'
 import ProposalListItem from './ProposalListItem'
 import { LoadMoreSentinel } from './LoadMoreSentinel'
 import BroadcastModal from './BroadcastModal'
@@ -136,20 +139,58 @@ export default function EditorProfileView(): JSX.Element {
   // setActiveView goes nowhere - see navigateFromWindow.
   const go = navigateFromWindow
   const floating = IS_FLOAT_WINDOW
-  const isElectron = navigator.userAgent.includes('Electron')
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const el = (window as any).electron
 
   const avatarInputRef = useRef<HTMLInputElement>(null)
 
+  // Channel, pop-out and refresh: the pop-out's toolbar, or Quick actions'
+  // header in the main window.
+  const toolbarControls = (
+    <div className="flex items-center gap-1.5">
+      {channels.length > 0 && (
+        <GlassSegmented
+          ariaLabel="Channel"
+          className="mr-1"
+          value={activeChannel}
+          onChange={setActiveChannel}
+          options={channels.map((ch) => ({ value: ch.slug, label: ch.name, title: ch.description || ch.name }))}
+        />
+      )}
+      {/* Shown only when the pop-out is turned off - with it on, this page
+          *is* the pop-out and the button would reopen the window it's
+          already in. */}
+      {!floating && el?.openFloatWindow && (
+        <button
+          onClick={() => el.openFloatWindow('profile')}
+          className="p-1.5 rounded-lg text-text-muted hover:text-text-primary hover:bg-[var(--surface-raised)] transition-colors"
+          title="Open in its own window"
+        >
+          <PictureInPicture2 size={13} />
+        </button>
+      )}
+      <button
+        onClick={() => setRefreshKey(k => k + 1)}
+        disabled={refreshing}
+        className="p-1.5 rounded-lg text-text-muted hover:text-text-primary hover:bg-[var(--surface-raised)] transition-colors disabled:opacity-40"
+        title="Refresh"
+      >
+        <RefreshCw size={15} className={refreshing ? 'animate-spin' : ''} />
+      </button>
+    </div>
+  )
+
   return (
     <div className="flex-1 flex flex-col min-h-0 overflow-hidden">
 
-      {/* ── Toolbar: back, channel switcher, refresh ── */}
-      <div className={`flex items-center justify-between px-4 md:px-5 pb-3 shrink-0 ${isElectron && !floating ? 'pt-9' : 'pt-4'}`}>
-        {floating ? (
-          // No "Back" in a pop-out - there's nothing behind it. Docking puts
-          // the profile back in the main window and closes this one.
+      {/* In the main window the page opens with Home's own top line, in the
+          same spot, so it stays put while the widgets swipe between the two
+          (lib/dashboardSwap.ts); the channel switcher and the rest of the old
+          toolbar sit on Quick actions instead. A pop-out keeps the toolbar,
+          with Dock in place of the top line. */}
+      {floating ? (
+        <div className="flex items-center justify-between px-4 md:px-5 pt-4 pb-3 shrink-0">
+          {/* Docking puts the profile back in the main window and closes this one. */}
           <button
             onClick={() => { attachToMainWindow({ view: 'profile' }); el?.closeSelf?.() }}
             className="flex items-center gap-1.5 text-text-muted hover:text-text-primary text-xs transition-colors"
@@ -157,50 +198,13 @@ export default function EditorProfileView(): JSX.Element {
           >
             <PictureInPicture2 size={13} /> Dock
           </button>
-        ) : (
-          <button
-            onClick={() => go('api-tracker')}
-            className="flex items-center gap-1.5 text-text-muted hover:text-text-primary text-xs transition-colors"
-          >
-            <ChevronLeft size={14} /> Back
-          </button>
-        )}
-        <div className="flex items-center gap-1.5">
-          {channels.length > 0 && (
-            <div className="flex items-center bg-surface-overlay rounded-lg p-1 gap-0.5 mr-1">
-              {channels.map((ch) => (
-                <button
-                  key={ch.slug}
-                  onClick={() => setActiveChannel(ch.slug)}
-                  disabled={channels.length === 1}
-                  className={`px-2.5 py-1.5 rounded-md text-xs font-medium transition-colors ${activeChannel === ch.slug ? 'bg-surface-raised text-text-primary shadow-sm' : 'text-text-muted hover:text-text-primary'} disabled:opacity-70`}
-                  title={ch.description || ch.name}
-                >{ch.name}</button>
-              ))}
-            </div>
-          )}
-          {/* Shown only when the pop-out is turned off - with it on, this page
-              *is* the pop-out and the button would reopen the window it's
-              already in. */}
-          {!floating && el?.openFloatWindow && (
-            <button
-              onClick={() => el.openFloatWindow('profile')}
-              className="p-1.5 rounded-lg text-text-muted hover:text-text-primary hover:bg-[var(--surface-raised)] transition-colors"
-              title="Open in its own window"
-            >
-              <PictureInPicture2 size={13} />
-            </button>
-          )}
-          <button
-            onClick={() => setRefreshKey(k => k + 1)}
-            disabled={refreshing}
-            className="p-1.5 rounded-lg text-text-muted hover:text-text-primary hover:bg-[var(--surface-raised)] transition-colors disabled:opacity-40"
-            title="Refresh"
-          >
-            <RefreshCw size={13} className={refreshing ? 'animate-spin' : ''} />
-          </button>
+          {toolbarControls}
         </div>
-      </div>
+      ) : (
+        <div className="shrink-0 px-6 pt-5 pb-4">
+          <HomeHero on="staff" />
+        </div>
+      )}
 
       {/* ── Bento grid ──
           Explicit left/right columns instead of one grid with mixed
@@ -212,7 +216,7 @@ export default function EditorProfileView(): JSX.Element {
           non-spanning (safe auto-placement) or a single flex-1 cell, with
           min-h-0 threaded down each flex/grid ancestor so a tile's own
           content scrolls internally instead of overflowing it. */}
-      <div className="flex-1 overflow-y-auto md:overflow-hidden px-4 md:px-5 pb-4 md:pb-5">
+      <div className="flex-1 overflow-y-auto md:overflow-hidden px-4 md:px-6 pb-4 md:pb-5 pb-player">
         <div className="flex flex-col gap-3 md:gap-4 md:h-full">
 
           {/* Top row: identity+stats and Quick actions side by side, sharing
@@ -312,7 +316,7 @@ export default function EditorProfileView(): JSX.Element {
             </div>
 
             <div className="md:flex-1">
-              <Tile title="Quick actions" span="h-full">
+              <Tile title="Quick actions" span="h-full" controls={floating ? undefined : toolbarControls}>
                 <div className="flex items-center gap-2">
                   {(account?.is_editor || account?.is_administrator) && (
                     <button
@@ -373,49 +377,35 @@ export default function EditorProfileView(): JSX.Element {
               {proposalsView === 'songs' || !isContributor ? (
                 <>
                   <div className="mb-3 shrink-0">
-                    <div className="relative mb-2">
-                      <Search size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-text-muted pointer-events-none" />
+                    <div className={`${GLASS_SEARCH_WRAP} mb-2.5`}>
+                      <Search size={15} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-text-muted pointer-events-none" />
                       <input
                         type="text"
                         value={search}
                         onChange={(e) => setSearch(e.target.value)}
                         placeholder="Search proposals…"
-                        className="w-full bg-surface-overlay text-text-primary text-sm pl-7 pr-7 py-2 rounded-lg outline-none border border-transparent focus:ring-1 ring-accent focus:border-accent/40 placeholder:text-text-muted"
+                        className={`${GLASS_SEARCH} pl-9 pr-9`}
                       />
                       {search && (
-                        <button onClick={() => setSearch('')} className="absolute right-2 top-1/2 -translate-y-1/2 text-text-muted hover:text-text-primary">
+                        <button onClick={() => setSearch('')} aria-label="Clear search" className="absolute right-3 top-1/2 -translate-y-1/2 text-text-muted hover:text-text-primary">
                           <X size={13} />
                         </button>
                       )}
                     </div>
                     <div className="flex items-center gap-1">
-                      {PROPOSAL_FILTER_TABS.map(({ key, label }) => {
-                        const count = tabCount(key)
-                        const active = filter === key
-                        return (
-                          <button
-                            key={key}
-                            onClick={() => setFilter(key)}
-                            className={`flex items-center gap-1 px-2.5 py-1 rounded-lg text-sm font-medium transition-colors ${
-                              active ? 'bg-accent/15 text-accent' : 'text-text-muted hover:text-text-primary hover:bg-surface-overlay'
-                            }`}
-                          >
-                            {label}
-                            {count > 0 && (
-                              <span className={`text-[10px] tabular-nums ${active ? 'text-accent/70' : 'text-text-muted'}`}>
-                                {count}
-                              </span>
-                            )}
-                          </button>
-                        )
-                      })}
+                      <GlassSegmented
+                        ariaLabel="Status"
+                        value={filter}
+                        onChange={setFilter}
+                        options={PROPOSAL_FILTER_TABS.map(({ key, label }) => ({ value: key, label: <SegCount label={label} count={tabCount(key)} /> }))}
+                      />
                       <button
                         onClick={() => setRefreshKey(k => k + 1)}
                         disabled={refreshing}
-                        className="ml-auto p-1.5 rounded-lg text-text-muted hover:text-text-primary hover:bg-surface-overlay transition-colors disabled:opacity-40 shrink-0"
+                        className={`${glassToolButton(false)} ml-auto`}
                         title="Refresh"
                       >
-                        <RefreshCw size={13} className={refreshing ? 'animate-spin' : ''} />
+                        <RefreshCw size={15} className={refreshing ? 'animate-spin' : ''} />
                       </button>
                       {(account?.is_editor || account?.is_administrator) && (
                         <button
@@ -469,17 +459,17 @@ export default function EditorProfileView(): JSX.Element {
               ) : (
                 <>
                   <div className="mb-3 shrink-0">
-                    <div className="relative mb-2">
-                      <Search size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-text-muted pointer-events-none" />
+                    <div className={`${GLASS_SEARCH_WRAP} mb-2.5`}>
+                      <Search size={15} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-text-muted pointer-events-none" />
                       <input
                         type="text"
                         value={compSearch}
                         onChange={(e) => setCompSearch(e.target.value)}
                         placeholder="Search comp files…"
-                        className="w-full bg-surface-overlay text-text-primary text-sm pl-7 pr-7 py-2 rounded-lg outline-none border border-transparent focus:ring-1 ring-accent focus:border-accent/40 placeholder:text-text-muted"
+                        className={`${GLASS_SEARCH} pl-9 pr-9`}
                       />
                       {compSearch && (
-                        <button onClick={() => setCompSearch('')} className="absolute right-2 top-1/2 -translate-y-1/2 text-text-muted hover:text-text-primary">
+                        <button onClick={() => setCompSearch('')} aria-label="Clear search" className="absolute right-3 top-1/2 -translate-y-1/2 text-text-muted hover:text-text-primary">
                           <X size={13} />
                         </button>
                       )}
@@ -489,15 +479,15 @@ export default function EditorProfileView(): JSX.Element {
                         filter={compFilter}
                         setFilter={setCompFilter}
                         counts={{ all: compTabCount('all'), pending: compTabCount('pending'), approved: compTabCount('approved'), rejected: compTabCount('rejected') }}
-                        size="md"
+                        glass
                       />
                       <button
                         onClick={() => setRefreshKey(k => k + 1)}
                         disabled={refreshing}
-                        className="ml-auto p-1.5 rounded-lg text-text-muted hover:text-text-primary hover:bg-surface-overlay transition-colors disabled:opacity-40 shrink-0"
+                        className={`${glassToolButton(false)} ml-auto`}
                         title="Refresh"
                       >
-                        <RefreshCw size={13} className={refreshing ? 'animate-spin' : ''} />
+                        <RefreshCw size={15} className={refreshing ? 'animate-spin' : ''} />
                       </button>
                       <button
                         onClick={() => go('contributor')}

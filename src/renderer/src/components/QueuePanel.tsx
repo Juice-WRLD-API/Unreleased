@@ -23,7 +23,6 @@ export default function QueuePanel(): JSX.Element {
   } = useStorePick('queue', 'queueIndex', 'currentTrack', 'isPlaying', 'shuffle', 'queueFilter', 'queueLoadingMore', 'radioMode', 'radioNext', 'playHistory', 'setShowQueue', 'removeFromQueue', 'clearQueue', 'reorderQueue', 'jumpToTrack', 'playFromHistory', '_loadMore', 'reshuffleQueue')
 
   const [panelWidth, dragHandle] = useResizablePanel(300, 240, 480)
-  const isElectron = navigator.userAgent.includes('Electron')
   const isMobile = useIsMobile()
   const [historyOpen, setHistoryOpen] = useState(false)
   // How many upcoming rows to render - grows when the user clicks "+N more".
@@ -96,12 +95,14 @@ export default function QueuePanel(): JSX.Element {
       // inset: 0` there, so Safari's Liquid Glass toolbar tinting samples this
       // element's background directly - bg-surface-raised made the status bar
       // read visibly darker than the rest of the app while this panel is open.
-      className={`${isMobile ? 'bg-surface' : 'bg-surface-raised'} flex shrink-0 overflow-hidden`}
+      // Desktop: a glass card beside the view, ending above the floating
+      // player (--player-dock) like the sidebar ends above the window edge.
+      className={`${isMobile ? 'bg-surface' : 'bg-surface-raised glass-pane backdrop-blur-[28px] backdrop-saturate-[1.8] relative rounded-2xl mt-2 ml-2'} flex shrink-0 overflow-hidden`}
       style={isMobile
         // Full-screen on a phone, so it sits outside the app shell's
         // safe-area padding and owns the gesture-bar inset itself.
         ? { position: 'fixed', inset: 0, zIndex: 50, paddingBottom: 'env(safe-area-inset-bottom, 0px)' }
-        : { width: panelWidth, borderLeft: '1px solid var(--border)' }
+        : { width: panelWidth, marginBottom: 'max(0.5rem, var(--player-dock, 0px))' }
       }
     >
       {/* Resize handle - desktop only */}
@@ -115,8 +116,7 @@ export default function QueuePanel(): JSX.Element {
       <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
         {/* Header */}
         <div
-          className="flex items-center justify-between px-5 pb-3 shrink-0 border-b border-[var(--border)]"
-          style={{ paddingTop: isElectron && !isMobile ? 36 : 20, paddingRight: isElectron && !isMobile ? 188 : undefined }}
+          className="flex items-center justify-between px-5 pt-5 pb-3 shrink-0 border-b border-[var(--border)]"
         >
           <div className="flex items-center gap-2">
             <ListMusic size={15} className="text-text-muted" />

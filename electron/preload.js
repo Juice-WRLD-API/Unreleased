@@ -213,6 +213,9 @@ contextBridge.exposeInMainWorld('electron', {
   // Explorer/Finder); on Linux it falls back to the path and reports
   // { fallback: 'path' }.
   copyFileToClipboard: (filePath)     => ipcRenderer.invoke('copy-file-to-clipboard', filePath),
+  // Downloads a remote file (http/https URL) under `name` and puts it on the
+  // clipboard as a file. Resolves { ok } | { error }.
+  copyRemoteFileToClipboard: (url, name) => ipcRenderer.invoke('copy-remote-file-to-clipboard', url, name),
   copyTextToClipboard: (text)         => ipcRenderer.invoke('copy-text-to-clipboard', text),
   // Cover art, as bytes the renderer already fetched (see lib/coverImage.ts):
   // copyImageToClipboard wants a PNG data URL; saveImageFile takes any image

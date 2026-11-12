@@ -76,6 +76,9 @@ const RIPPLE_LIFE = 4;
 /** Seconds without a beat before a softer drop falls on its own. */
 const RIPPLE_LULL = 1.1;
 
+/** Frame rate while a picker covers WRLD. */
+const HELD_FPS = 30;
+
 export class Visualizer {
   private audio = new AudioEngine();
   private c2d: Canvas2DRenderer;
@@ -85,7 +88,10 @@ export class Visualizer {
   private quality: Quality = "medium";
   private playing = false;
   private running = false;
-  /** Covered (a picker open over WRLD): nothing drawn, the last frame left up. */
+  /**
+   * Covered (a picker open over WRLD): still moving under the dialog's blur,
+   * but at HELD_FPS, so the picker's own screens get most of the GPU.
+   */
   private held = false;
   private raf = 0;
   private lastFrame = 0;
@@ -162,7 +168,7 @@ export class Visualizer {
    * would freeze at whatever they were last time.
    */
   pumpAudio(dt: number) {
-    if (this.running && !this.held && !document.hidden && this.mode !== "none") return; // loop is doing it
+    if (this.running && !document.hidden && this.mode !== "none") return; // loop is doing it
     if (this.audio.active) this.audio.analyze(dt, this.playing);
   }
 
@@ -228,17 +234,12 @@ export class Visualizer {
     this.running = true;
     this.lastFrame = performance.now();
     this.layoutAt = 0;
-    if (!this.held) this.raf = requestAnimationFrame(this.loop);
+    this.raf = requestAnimationFrame(this.loop);
   }
 
-  /** Holds the picture still while something covers it, and lets it go on again. */
+  /** Slows the picture down while something covers it, and lets it go at full rate again. */
   setHeld(held: boolean) {
-    if (held === this.held) return;
     this.held = held;
-    cancelAnimationFrame(this.raf);
-    if (held || !this.running) return;
-    this.lastFrame = performance.now();
-    this.raf = requestAnimationFrame(this.loop);
   }
 
   stop() {
@@ -285,12 +286,13 @@ export class Visualizer {
   }
 
   private loop = (now: number) => {
-    if (!this.running || this.held) return;
+    if (!this.running) return;
     this.raf = requestAnimationFrame(this.loop);
 
     const q = QUALITY[this.quality];
+    const fps = this.held ? Math.min(q.fps || HELD_FPS, HELD_FPS) : q.fps;
     const elapsed = now - this.lastFrame;
-    if (q.fps > 0 && elapsed < 1000 / q.fps - 1) return; // frame cap
+    if (fps > 0 && elapsed < 1000 / fps - 1) return; // frame cap
     this.lastFrame = now;
     if (document.hidden || this.mode === "none") return;
 

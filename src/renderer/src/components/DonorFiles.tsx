@@ -22,6 +22,8 @@ import DonorContextMenu from './DonorContextMenu'
 import DonorPlaylistPicker from './DonorPlaylistPicker'
 import { findDonorSlots, restoreDonorSlots } from '../lib/donorPlaylistEntries'
 import type { DonorMenuState } from './DonorContextMenu'
+import { GlassSegmented } from './GlassSegmented'
+import { GLASS_SEARCH, GLASS_SEARCH_WRAP } from './glassControls'
 
 const ACCEPT = DONOR_ALLOWED_EXTENSIONS.map((e) => `.${e}`).join(',')
 type SortBy = 'date' | 'name' | 'size'
@@ -345,38 +347,38 @@ export default function DonorFiles(): JSX.Element {
 
       {files && files.length > 0 && (
         <div className="flex items-center gap-2 mb-3">
-          <div className="relative flex-1 min-w-[160px] max-w-sm">
-            <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-text-muted pointer-events-none" />
+          <div className={`${GLASS_SEARCH_WRAP} flex-1 min-w-[160px] max-w-sm`}>
+            <Search size={15} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-text-muted pointer-events-none" />
             <input
               type="text"
               value={search}
               onChange={(e) => setSearch(e.target.value)}
               placeholder="Search your files…"
-              className="w-full bg-surface-overlay border border-[var(--border)] rounded-lg pl-8 pr-8 py-1.5 text-sm text-text-primary placeholder:text-text-muted focus:outline-none focus:border-accent/40"
+              className={`${GLASS_SEARCH} pl-9 pr-9`}
             />
             {search && (
               <button
                 onClick={() => setSearch('')}
-                className="absolute right-2 top-1/2 -translate-y-1/2 text-text-muted hover:text-text-primary transition-colors"
+                className="absolute right-3 top-1/2 -translate-y-1/2 text-text-muted hover:text-text-primary transition-colors"
                 title="Clear search"
               ><X size={14} /></button>
             )}
           </div>
-          <div className="flex items-center gap-0.5 text-text-muted shrink-0">
-            {(['date', 'name', 'size'] as SortBy[]).map((by) => (
-              <button
-                key={by}
-                onClick={() => toggleSort(by)}
-                className={`flex items-center gap-0.5 text-xs px-2 py-1.5 rounded-md transition-colors capitalize ${
-                  sortBy === by ? 'bg-surface-raised text-text-primary' : 'hover:text-text-secondary hover:bg-surface-overlay'
-                }`}
-                title={`Sort by ${by === 'date' ? 'date added' : by}`}
-              >
-                {by === 'date' ? 'Newest' : by}
+          {/* Clicking the chosen field again flips the direction. */}
+          <GlassSegmented
+            ariaLabel="Sort by"
+            className="shrink-0"
+            value={sortBy}
+            onChange={toggleSort}
+            options={(['date', 'name', 'size'] as SortBy[]).map((by) => ({
+              value: by,
+              title: `Sort by ${by === 'date' ? 'date added' : by}`,
+              label: <>
+                <span className="capitalize">{by === 'date' ? 'Newest' : by}</span>
                 {sortBy === by && (sortDir === 'asc' ? <ArrowUp size={11} /> : <ArrowDown size={11} />)}
-              </button>
-            ))}
-          </div>
+              </>,
+            }))}
+          />
         </div>
       )}
 

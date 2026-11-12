@@ -2,10 +2,11 @@ import { useChatStore } from '../../store/chatStore'
 import { useStore } from '../../store/useStore'
 import { APP_VERSION } from '../appVersion'
 import { formatListeningTime, joinPlayedSongs, buildListeningStats, prefsForPeriod, type ListeningPeriod, type RankedEntry } from '../listeningStats'
-import { resolveStatsSongs } from '../statsCatalog'
+import { resolveStatsSongs, statsSongToTrack } from '../statsCatalog'
+import { fetchSongChart, chartRangePhrase, rankMovement, type ChartRange } from '../songChartsApi'
 import { loadAllSongsWithLyricsAbortable } from '../juicewrldApi'
 import { termAccess, termUserName } from './access'
-import { fail, type TermCommand } from './types'
+import { asJson, fail, parseArgs, table, type TermCommand } from './types'
 import { getTermFullscreen, setTermFullscreen } from './fullscreenStore'
 import { getTermTheme, setTermTheme, TERM_THEMES } from './themeStore'
 
@@ -129,6 +130,7 @@ function barRows(entries: RankedEntry[], limit: number): string[] {
 }
 
 const PERIODS = ['all', '7', '30']
+const CHART_TABS = ['7d', '30d', 'all', 'liked']
 
 // ─── the commands ─────────────────────────────────────────────────────────────
 
@@ -204,6 +206,45 @@ export const FUN_COMMANDS: TermCommand[] = [
       const command = m![2].trim().replace(/^(["'])([\s\S]*)\1$/, '$2')
       if (/^watch\b/i.test(command)) fail('watch: no watching a watch')
       ctx.screen({ kind: 'watch', command, seconds })
+    },
+  },
+  {
+    name: 'charts', group: 'Content', usage: 'charts [7d | 30d | all | liked] [N] [--era <name>] [--play | --shuffle | --queue] [--json]',
+    description: 'Most played songs across every listener (the Statistics tab chart): plays, minutes, listeners and rank movement',
+    covers: ['songChartsApi.fetchSongChart'],
+    complete: (before, partial) => (before.length === 0 ? CHART_TABS.filter((p) => p.startsWith(partial)) : []),
+    run: async (args, ctx) => {
+      const { rest, bool, value } = parseArgs(args, ['era'])
+      const tab = rest.find((w) => CHART_TABS.includes(w)) ?? '7d'
+      const limit = Math.min(200, Math.max(1, Number(rest.find((w) => /^\d+$/.test(w))) || 20))
+      const range: ChartRange = tab === 'liked' ? 'all' : tab as ChartRange
+      const sort = tab === 'liked' ? 'likes' : 'plays'
+      const chart = await fetchSongChart({ range, sort, era: value.get('era'), limit }, ctx.signal)
+      if (asJson(ctx, bool.has('json'), chart)) return
+      if (chart.songs.length === 0) { ctx.print('no songs in this chart', 'dim'); return }
+      if (bool.has('play') || bool.has('shuffle') || bool.has('queue')) {
+        const songs = await resolveStatsSongs(chart.songs.map((s) => s.id), () => undefined, () => false, ctx.signal)
+        const tracks = chart.songs.map((s) => songs.get(s.id)).filter((s) => s?.path).map((s) => statsSongToTrack(s!))
+        if (tracks.length === 0) fail('none of these songs have audio')
+        const st = useStore.getState()
+        if (bool.has('queue')) tracks.forEach((t) => st.addToQueue(t))
+        else if (bool.has('shuffle')) void st.shufflePlay(tracks)
+        else st.playTrack(tracks[0], tracks)
+        ctx.print(`${bool.has('queue') ? 'queued' : bool.has('shuffle') ? 'shuffling' : 'playing'} ${tracks.length} songs`)
+        return
+      }
+      const t = chart.totals
+      const move = (m: number | 'new' | null): string => (m === null ? '' : m === 'new' ? 'new' : m === 0 ? '-' : m > 0 ? `+${m}` : `${m}`)
+      ctx.print([
+        sort === 'likes'
+          ? `Most liked songs${chart.era ? ` from ${chart.era}` : ''}`
+          : `${t.plays.toLocaleString()} plays · ${t.minutes.toLocaleString()} min · ${t.listeners.toLocaleString()} listeners · ${t.songs.toLocaleString()} songs ${chartRangePhrase(range)}${chart.era ? ` (${chart.era})` : ''}`,
+        '',
+        table([
+          ['#', '', 'song', 'era', sort === 'likes' ? 'likes' : 'plays', 'min', 'listeners'],
+          ...chart.songs.map((s) => [String(s.rank), move(rankMovement(s, range, sort)), s.name, s.era_name, (sort === 'likes' ? s.likes : s.plays).toLocaleString(), s.minutes.toLocaleString(), s.listeners.toLocaleString()]),
+        ], 36),
+      ].join('\n'))
     },
   },
   {

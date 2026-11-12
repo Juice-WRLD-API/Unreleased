@@ -301,7 +301,9 @@ export default function Sidebar(): JSX.Element {
       <aside
         ref={navRef}
         style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}
-        className={`app-sidebar pointer-events-auto relative isolate flex ${horizontal ? 'flex-row max-w-full overflow-x-auto' : 'flex-col max-h-full overflow-y-auto'} items-center gap-1 p-1.5 rounded-full bg-sidebar border border-[var(--border)] shadow-2xl`}
+        // Frosted from a ::before layer (.glass-backdrop): NavPillGrip's drop
+        // targets are position:fixed inside it.
+        className={`app-sidebar glass-backdrop glass-specular glass-lift pointer-events-auto relative isolate flex ${horizontal ? 'flex-row max-w-full overflow-x-auto' : 'flex-col max-h-full overflow-y-auto'} items-center gap-1 p-1.5 rounded-full`}
       >
         <NavPillGrip horizontal={horizontal} />
         {isElectron && appMenuPosition === 'sidebar' && (
@@ -356,16 +358,18 @@ export default function Sidebar(): JSX.Element {
   if (sidebarPosition === 'top' || sidebarPosition === 'bottom') {
     const iconBtn = 'flex items-center justify-center w-8 h-8 rounded text-text-secondary hover:text-text-primary hover:bg-surface-raised transition-colors shrink-0'
     return (
-      <aside className={`app-sidebar hidden md:flex flex-col w-full bg-sidebar shrink-0 border-[var(--border)] ${sidebarPosition === 'top' ? 'border-b' : 'border-t'}`}>
+      <aside className="hidden md:flex flex-col shrink-0 min-w-0">
         {/* Bar touches the frameless window's top edge, so it carries the
             drag strip that main's overlay provides in the other layouts.
             ELECTRON_TITLEBAR_CLEARANCE_X keeps the strip clear of the
             min/max/close buttons (132px) — a drag rect under them would win the draggable-region ordering
-            and swallow their clicks (see WindowControls in App.tsx). */}
+            and swallow their clicks (see WindowControls in App.tsx). The
+            strip sits above the glass bar, so the window buttons share the
+            band with it rather than overlapping the bar. */}
         {isElectron && sidebarPosition === 'top' && appMenuPosition !== 'title-bar' && (
           <div className="shrink-0 h-7 select-none" style={{ WebkitAppRegion: 'drag', marginRight: ELECTRON_TITLEBAR_CLEARANCE_X } as React.CSSProperties} />
         )}
-        <div className="flex items-center gap-1 px-3 py-1.5 min-w-0">
+        <div className={`app-sidebar glass-pane relative bg-sidebar rounded-2xl mx-2 ${sidebarPosition === 'top' ? (isElectron && appMenuPosition !== 'title-bar' ? '' : 'mt-2') : 'mb-2'} flex items-center gap-1 px-3 py-1.5 min-w-0`}>
           {isElectron && appMenuPosition === 'sidebar' && (
             <div className="shrink-0 mr-0.5"><AppMenu variant="sidebar-icon" /></div>
           )}
@@ -416,7 +420,9 @@ export default function Sidebar(): JSX.Element {
 
   return (
     <aside
-      className={`app-sidebar hidden md:flex flex-col h-full bg-sidebar shrink-0 ${sidebarPosition === 'right' ? 'border-l' : 'border-r'} border-[var(--border)] transition-[width] duration-200 ${collapsed ? 'w-16' : 'w-60'}`}
+      // A glass pane inset from the window edges (my-2 plus the outer side),
+      // stretched to the row's height rather than h-full so the margins fit.
+      className={`app-sidebar glass-pane relative hidden md:flex flex-col bg-sidebar shrink-0 rounded-2xl my-2 ${sidebarPosition === 'right' ? 'mr-2' : 'ml-2'} transition-[width] duration-200 ${collapsed ? 'w-16' : 'w-60'}`}
     >
       {/* On the right, the sidebar's top edge sits under the window buttons
           (132px) — keep the drag strip out of that corner

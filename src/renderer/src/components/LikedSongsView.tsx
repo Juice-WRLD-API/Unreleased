@@ -89,7 +89,7 @@ export default function LikedSongsView(): JSX.Element {
 
   return (
     <>
-    <div className="flex-1 flex flex-col min-h-0 overflow-y-auto">
+    <div className="flex-1 flex flex-col min-h-0 overflow-y-auto pb-player">
       <div className="px-5 pt-5 pb-8">
         <button
           onClick={() => setActiveView(previousView && previousView !== 'liked' ? previousView : 'wrld')}

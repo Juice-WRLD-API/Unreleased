@@ -116,6 +116,15 @@ const ERA_COLOR_OVERRIDES: Record<string, string> = {
 
 const eraColor = (i: number, key: string): string => ERA_COLOR_OVERRIDES[key] ?? eraColorForIndex(i)
 
+/** An era's color without its timeline position: the override, or a hue
+ *  hashed from the name. For small swatches next to an era name. */
+export function eraSwatch(name: string): string {
+  if (ERA_COLOR_OVERRIDES[name]) return ERA_COLOR_OVERRIDES[name]
+  let h = 0
+  for (let i = 0; i < name.length; i++) h = (h * 31 + name.charCodeAt(i)) | 0
+  return eraColorForIndex(Math.abs(h))
+}
+
 export interface TimelineRow { key: string; label: string; count: number; start: Date; end: Date }
 
 export function EraTimeline({ rows, start, end, onSelect }: {

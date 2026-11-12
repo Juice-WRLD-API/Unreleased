@@ -101,7 +101,7 @@ export default function StatsView(): JSX.Element {
 
   return (
     <>
-      <div className="flex-1 flex flex-col min-h-0 overflow-y-auto">
+      <div className="flex-1 flex flex-col min-h-0 overflow-y-auto pb-player">
         <div className="px-5 pt-5 pb-8">
           {/* ── Hero ── */}
           <div className="flex items-center gap-4 mb-5 flex-wrap">

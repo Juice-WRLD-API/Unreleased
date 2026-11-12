@@ -428,7 +428,7 @@ export default function AlbumsView(): JSX.Element {
 
   return (
     <div className="flex-1 min-w-0 min-h-0 flex flex-col">
-      <div ref={scrollRef} className="flex-1 min-h-0 overflow-y-auto relative isolate">
+      <div ref={scrollRef} className="flex-1 min-h-0 overflow-y-auto relative isolate pb-player">
         {/* Artwork tint behind the header, the way Apple Music washes the
             page top in the cover's colors. */}
         {album && coverOf(album) && (

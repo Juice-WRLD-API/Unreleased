@@ -85,7 +85,6 @@ export default function AppMenu({ variant = 'bar', collapsed = false }: { varian
     openSettings, openConvert,
     setActiveView, setShowDownloadManager, clearCompletedDownloads,
     showQueue, showNowPlaying, setShowNowPlaying,
-    playerCollapsed, setPlayerCollapsed,
     showEqPanel, shuffle, repeat, isPlaying, currentTrack,
     sleepTimerEnd, crossfadeEnabled, crossfadeDuration, setCrossfade,
     preferOgVersion, pauseFadeEnabled,
@@ -105,7 +104,6 @@ export default function AppMenu({ variant = 'bar', collapsed = false }: { varian
     'openSettings', 'openConvert',
     'setActiveView', 'setShowDownloadManager', 'clearCompletedDownloads',
     'showQueue', 'showNowPlaying', 'setShowNowPlaying',
-    'playerCollapsed', 'setPlayerCollapsed',
     'showEqPanel', 'shuffle', 'repeat', 'isPlaying', 'currentTrack',
     'sleepTimerEnd', 'crossfadeEnabled', 'crossfadeDuration', 'setCrossfade',
     'preferOgVersion', 'pauseFadeEnabled',
@@ -281,7 +279,6 @@ export default function AppMenu({ variant = 'bar', collapsed = false }: { varian
         { kind: 'item', label: 'Queue panel', hotkey: 'toggle-queue', onClick: hk('toggle-queue'), checked: showQueue },
         { kind: 'item', label: 'Now playing', onClick: run(() => setShowNowPlaying(!showNowPlaying)), checked: showNowPlaying },
         { kind: 'item', label: 'Equalizer panel', hotkey: 'equalizer', onClick: hk('equalizer'), checked: showEqPanel },
-        { kind: 'item', label: 'Collapse player', onClick: run(() => setPlayerCollapsed(!playerCollapsed)), checked: playerCollapsed },
         { kind: 'sep' },
         // Mirrors Settings → Appearance → Navigation position.
         { kind: 'item', label: 'Menu on the left', onClick: run(() => setSidebarPosition('left')), checked: sidebarPosition === 'left' },

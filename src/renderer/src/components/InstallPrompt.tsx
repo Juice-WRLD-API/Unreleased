@@ -110,7 +110,7 @@ export default function InstallPrompt(): JSX.Element | null {
 
   return createPortal(
     <MotionOverlay
-      className="fixed inset-0 z-[150] flex items-end md:items-center justify-center bg-black/70 backdrop-blur-sm p-0 md:p-4"
+      className="fixed inset-0 z-[150] flex items-end md:items-center justify-center glass-scrim p-0 md:p-4"
       onClick={(e) => { if (e.currentTarget === e.target) close() }}
     >
       <div

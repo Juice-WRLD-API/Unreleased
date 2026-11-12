@@ -57,8 +57,8 @@ export default function AddSongModal({ onClose, onSubmitted, channel }: {
 
   return (
     <MotionOverlay ref={overlayRef} className="fixed inset-0 z-50 flex items-center justify-center p-4" onClick={e => { if (e.target === overlayRef.current) onClose() }}>
-      <div className="absolute inset-0 bg-black/50 backdrop-blur-sm" onClick={onClose} />
-      <div role="dialog" aria-label="Propose new song" className="relative w-full max-w-4xl bg-[var(--surface)] rounded-2xl shadow-2xl border border-[var(--border)] flex flex-col max-h-[92dvh]">
+      <div className="absolute inset-0 glass-scrim" onClick={onClose} />
+      <div role="dialog" aria-label="Propose new song" className="relative w-full max-w-4xl bg-[var(--surface)] rounded-2xl shadow-2xl border border-[var(--border)] modal-glass flex flex-col max-h-[92dvh]">
         {/* Header */}
         <div className="flex items-center gap-3 px-5 pt-4 pb-3.5 border-b border-[var(--border)] shrink-0">
           <div className="w-9 h-9 rounded-2xl bg-accent/15 border border-accent/20 flex items-center justify-center shrink-0">

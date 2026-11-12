@@ -40,7 +40,7 @@ export default function SandboxNotch(): JSX.Element {
     // fixed left/top are computed in viewport coordinates).
     <div
       className={`fixed inset-0 z-[500] flex flex-col items-center transition-[background-color,backdrop-filter] duration-200 ${
-        showBackdrop ? 'bg-black/40 backdrop-blur-sm pointer-events-auto' : 'pointer-events-none'
+        showBackdrop ? 'glass-scrim pointer-events-auto' : 'pointer-events-none'
       }`}
       onClick={(e) => { if (e.target === e.currentTarget) collapse() }}
     >
@@ -56,7 +56,7 @@ export default function SandboxNotch(): JSX.Element {
           // mouse events regardless of pointer-events or z-index — without
           // this the pill was only clickable below the strip's bottom edge.
           style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}
-          className="relative z-10 pointer-events-auto mt-1.5 flex items-center gap-1.5 px-3 py-1 rounded-full bg-surface-overlay border border-[var(--border)] shadow-lg text-xs font-medium text-text-secondary hover:text-text-primary hover:bg-surface-raised transition-colors"
+          className="relative z-10 pointer-events-auto mt-1.5 flex items-center gap-1.5 px-3 py-1 rounded-full glass glass-specular text-xs font-medium text-text-secondary hover:text-text-primary transition-colors"
         >
           <span className="w-1.5 h-1.5 rounded-full bg-accent" />
           Sandbox

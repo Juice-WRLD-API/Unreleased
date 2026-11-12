@@ -48,8 +48,8 @@ interface VizState {
   wrldWidgets: boolean
   /** The Edge light (its look's id) drawn round the edges: over the visualizer, or on its own with it Off; null for none. */
   vizEdgeOverlay: string | null
-  /** How many pickers are open over the page (not saved). WRLD's visualizer and Edge light hold still under them:
-   *  drawn every frame, they'd fight the picker's own screens, and the dialog's blur would have to follow them. */
+  /** How many pickers are open over the page (not saved). WRLD's visualizer and Edge light keep moving under them
+   *  at a lower frame rate, so they don't fight the picker's own screens for the GPU. */
   vizCovered: number
 
   selectMode: (id: string, persist: boolean) => void

@@ -148,7 +148,7 @@ export default function SharedPlaylistView(): JSX.Element {
   }
 
   return (
-    <div className="flex-1 flex flex-col min-h-0 overflow-y-auto px-5 py-6">
+    <div className="flex-1 flex flex-col min-h-0 overflow-y-auto px-5 py-6 pb-player">
       {/* Header */}
       <button
         onClick={() => setActiveView(backView)}
