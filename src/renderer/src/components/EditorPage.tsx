@@ -216,9 +216,11 @@ const basicShellClass = (changed: boolean, roomy = false): string =>
 const basicLabelClass =
   'block text-[10px] font-semibold tracking-wide text-text-muted select-none leading-tight'
 
-export function BasicRow({ label, value, original, onChange, rows = 1, placeholder, mono = false, onBrowse, suggest, dateInput = false }: {
+export function BasicRow({ label, value, original, onChange, rows = 1, placeholder, mono = false, onBrowse, suggest, dateInput = false, trailing }: {
   label: string; value: string; original?: string
   onChange: (v: string) => void; rows?: number; placeholder?: string; mono?: boolean
+  /** Extra controls shown at the end of a single-line field. */
+  trailing?: React.ReactNode
   /** Shows a folder button inside the field that opens a file picker. */
   onBrowse?: () => void
   /** Autocompletes from other songs' values for this field (e.g. "album"). */
@@ -248,6 +250,7 @@ export function BasicRow({ label, value, original, onChange, rows = 1, placehold
             <input
               value={value} onChange={e => onChange(e.target.value)} placeholder={placeholder}
               className={`${basicControlClass} ${mono ? 'font-mono text-xs' : ''}`} />
+            {trailing}
             {onBrowse && (
               <button
                 type="button"

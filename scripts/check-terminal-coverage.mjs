@@ -30,6 +30,7 @@ const NOT_APPLICABLE = {
   // Same request as another function that is covered.
   'userApi.setPlaylistCoverBase64': 'same PATCH as uploadPlaylistCover (drag-drop path)',
   'juicewrldApi.fetchFileText': 'the terminal file tools (ignored module terminalFiles) read with it: nano',
+  'eraCoverFiles.findEraCoverFile': 'looks up an era cover with the same /files/list-all/ walk the terminal file tools make (ls, find); the path goes into a proposal as image_url',
   // Whole modules (`module.*`).
   'lastfm.*': 'Last.fm is a third-party service, not the site API',
   'gifApi.*': 'Tenor/Giphy are third-party services, not the site API',
