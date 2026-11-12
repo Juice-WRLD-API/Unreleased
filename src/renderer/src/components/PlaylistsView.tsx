@@ -991,6 +991,17 @@ export default function PlaylistsView(): JSX.Element {
   // Element-state refs (not RefObjects) because the detail view mounts long
   // after this component does — see useVirtualWindowEl.
   const [listScrollEl, setListScrollEl] = useState<HTMLDivElement | null>(null)
+  const [headerMarker, setHeaderMarker] = useState<HTMLDivElement | null>(null)
+  const [headerPinned, setHeaderPinned] = useState(false)
+  useEffect(() => {
+    setHeaderPinned(false)
+    if (!listScrollEl || !headerMarker) return
+    const observer = new IntersectionObserver(([entry]) => {
+      setHeaderPinned(!entry.isIntersecting && entry.boundingClientRect.top < (entry.rootBounds?.top ?? 0))
+    }, { root: listScrollEl, threshold: 0 })
+    observer.observe(headerMarker)
+    return () => observer.disconnect()
+  }, [listScrollEl, headerMarker])
   const [listContentEl, setListContentEl] = useState<HTMLDivElement | null>(null)
   // 56 = px-4 py-2 row wrapping 40px album art at normal scale. Multiplied by
   // the app text-size setting so the virtualized rows (whose height and
@@ -2778,17 +2789,17 @@ export default function PlaylistsView(): JSX.Element {
                 own full-width row beneath. Sticky so scrolled track rows never
                 reach the top of the scroll container, where they'd render
                 behind the frameless window's fixed min/max/close buttons; the
-                opaque background is what stops that.
+                frosted background appears only once the header is pinned.
                 The controls sit on the LEFT on purpose. Right-aligned they'd
                 land under those window buttons, which forces the 140px gutter
                 the other toolbars carry — and that gutter is pure dead space
                 next to the controls. Nothing here may share the column row
                 either: anything in that grid steals width from the columns and
                 knocks the duration header out of line with the rows.
-                -mx-2 px-6 backs the full container width while keeping the
-                grid's content box lined up with the rows' px-4. */}
-            <div className="sticky top-0 z-20 -mx-2 px-6 pt-2 pb-1.5 glass-bar border-b border-[var(--glass-rim)]">
-              <div className="flex items-center gap-2 mb-2">
+                -mx-2 px-6 keeps the grid lined up with the track rows. */}
+            <div ref={setHeaderMarker} className="h-px" aria-hidden="true" />
+            <div className={`playlist-track-header sticky top-0 z-20 -mx-2 px-6 pt-3 pb-2 ${headerPinned ? 'playlist-track-header-pinned' : ''}`}>
+              <div className="flex items-center gap-3 mb-4">
                 {searchOpen ? (
                   <>
                     <div className={`${GLASS_SEARCH_WRAP} w-64`}>
@@ -2837,7 +2848,7 @@ export default function PlaylistsView(): JSX.Element {
                   ]}
                 />
                 {compactView && (
-                  <span className="text-text-muted text-xs uppercase tracking-widest ml-1">
+                  <span className="text-text-secondary text-xs tabular-nums ml-1">
                     {loadingCompact ? 'Loading…' : `${compactRows.length} song${compactRows.length === 1 ? '' : 's'}`}
                   </span>
                 )}
@@ -2849,7 +2860,7 @@ export default function PlaylistsView(): JSX.Element {
                   with this table layout at all, so it's hidden wholesale there.
                   Compact view uses the same rows as the list, so every column
                   (and its sort) stays live. */}
-              <div className={`grid items-center gap-3 text-text-muted text-xs uppercase tracking-widest ${gridView ? 'invisible' : ''}`} style={{ gridTemplateColumns: gridCols }}>
+              <div className={`grid items-center gap-3 border-b border-[var(--glass-rim)] pb-2 text-text-secondary text-xs font-medium ${gridView ? 'invisible' : ''}`} style={{ gridTemplateColumns: gridCols }}>
                   {selectMode && (
                     <button
                       onClick={selectAllTracks}

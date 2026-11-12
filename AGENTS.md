@@ -1,6 +1,6 @@
 # Agent guide: Juice WRLD API and Unreleased
 
-**Version 1.64** · updated 2026-11-12. Bump the version and date whenever you
+**Version 1.66** · updated 2026-11-12. Bump the version and date whenever you
 change this file (minor for fixes and additions, major for rewrites).
 
 **Keep this file current.** If you find something in the docs or this file that
@@ -473,7 +473,7 @@ Node 22.
   (`--surface`, `--accent`…). Every element restyles on every frame and skin
   switches lag. Write them through `paintPalette` in `lib/themeEffects.ts`,
   which cross-fades with a view transition.
-- **Glass chrome (desktop, `app`)**: the iOS-style glass look is the default on
+- **Glass chrome (desktop, `app` and `web`)**: the iOS-style glass look is the default on
   every skin, with no toggle (the user's call, 2026-11-12). The desktop player
   bar floats over the bottom of `<main>` and publishes `--player-dock`. A view
   on `SCROLL_UNDER` in `App.tsx` runs under it and must pad every scroller it
@@ -532,6 +532,17 @@ Node 22.
 
 Newest first. One entry each: date, what went wrong, what to do instead. Delete
 entries that stop being true.
+
+- 2026-11-12: The first glass relay treated the renderer work as Electron-only
+  and missed the web desktop shell, Home and staff dashboards, WRLD entrance
+  and album cache. Port those through the web desktop components and keep the
+  web app shell's mobile safe-area and WRLD curtain behavior. Native window
+  controls, pop-outs and catalogue sync stay on app.
+
+- 2026-11-12: Expanding staff Quick actions into descriptive cards also
+  stretched the neighboring identity tile into an empty panel. Keep these
+  shortcuts compact and the identity tile content-sized; explanations belong
+  in tooltips rather than another line in each action.
 
 - 2026-11-12: The playlist hero's blurred cover faded into `var(--surface)`,
   which under glass chrome drew a solid band across the top of the track

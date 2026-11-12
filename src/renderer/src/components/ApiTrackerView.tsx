@@ -2708,7 +2708,7 @@ export default function ApiTrackerView(): JSX.Element {
     <div className="flex-1 flex flex-col min-h-0 overflow-hidden">
       {/* Header */}
       <div className="px-4 md:px-5 pt-4 md:pt-5 pb-3 shrink-0">
-        <h1 className="text-text-primary text-xl font-bold mb-1">Tracker</h1>
+        <h1 className="text-text-primary text-xl font-bold mb-1 md:mb-6">Tracker</h1>
 
         <GlassSegmented
           ariaLabel="Tracker sections"

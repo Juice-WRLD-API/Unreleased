@@ -945,6 +945,14 @@ input[type='range']:active::-moz-range-thumb {
   -webkit-backdrop-filter: blur(22px) saturate(1.8);
   backdrop-filter: blur(22px) saturate(1.8);
 }
+/* The playlist controls sit on the page; frost only when tracks pass beneath. */
+.playlist-track-header-pinned {
+  background: var(--surface);
+  background: color-mix(in srgb, var(--glass-base) 72%, transparent);
+  -webkit-backdrop-filter: blur(24px);
+  backdrop-filter: blur(24px);
+}
+
 /* Round toolbar buttons: the same glass at button scale, with a lighter
    shadow so a row of them doesn't smudge. */
 .glass-button {
@@ -1196,7 +1204,7 @@ body, #root, .app-shell {
 .above-player { bottom: calc(var(--player-dock, 0px) + 1.25rem); }
 
 @media (prefers-reduced-transparency: reduce) {
-  .glass, .glass-thick, .glass-bar, .glass-button {
+  .glass, .glass-thick, .glass-bar, .glass-button, .playlist-track-header-pinned {
     background: var(--surface-raised);
     -webkit-backdrop-filter: none;
     backdrop-filter: none;

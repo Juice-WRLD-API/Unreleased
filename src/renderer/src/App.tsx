@@ -232,7 +232,7 @@ export default function App(): JSX.Element {
   const wrldUnder = activeView === 'wrld' ? expandUnder : null
   const underWrld = wrldUnder && !HOLD_UNDER_TERMINAL.includes(wrldUnder) ? wrldUnder : null
   const shownViews: ViewType[] = HOLD_UNDER_TERMINAL.includes(activeView) ? [] : underWrld ? [underWrld, 'wrld'] : [activeView]
-  // The view on screen before this one, for the Home <-> dashboard swipe
+  // The view on screen before this one, for the Home / browse / dashboard swipe
   // (lib/dashboardSwap.ts). Tracked here rather than read from previousView,
   // which history steps don't always update. The leaving page is copied during
   // this render, the last moment its DOM is still on screen, and the copy is
@@ -249,7 +249,8 @@ export default function App(): JSX.Element {
     const dir = dashboardSwap(from, activeView)
     const box = viewBoxRef.current
     const page = box?.querySelector(`:scope [data-view="${from}"]`)?.firstElementChild
-    leavingRef.current = dir && box && page && !reducedMotion() ? captureLeaving(box, page, dir) : null
+    const wholePage = from === 'api-tracker' || from === 'api-files' || from === 'playlists' || activeView === 'api-tracker' || activeView === 'api-files' || activeView === 'playlists'
+    leavingRef.current = dir && box && page && !reducedMotion() ? captureLeaving(box, page, dir, wholePage) : null
   }
   useLayoutEffect(() => {
     const play = leavingRef.current
@@ -476,7 +477,8 @@ export default function App(): JSX.Element {
                 `contents` keeps the wrapper out of the flex layout. */}
             {/* ViewFade: each view fades/lifts in as it comes on screen. */}
             {HOLD_UNDER_TERMINAL.map((v) => (activeView === v || heldView === v || wrldUnder === v) && (
-              <ViewFade key={v} view={v} active={activeView === v || wrldUnder === v}>
+              <ViewFade key={v} view={v} active={activeView === v || wrldUnder === v}
+                swap={v === activeView ? dashboardSwap(fromViewRef.current, v) : 0} wholePageSwap>
                 {v === 'editor' ? <EditorPage />
                   : v === 'contributor' ? <ContributorPage />
                   : v === 'albums-admin' ? <AlbumsAdminView />
@@ -489,7 +491,8 @@ export default function App(): JSX.Element {
                 fills the box absolutely, with its own Suspense, so that page
                 stays on screen while WRLD's chunk loads. */}
             {shownViews.map((v) => (
-            <ViewFade key={v} view={v} active swap={v === activeView ? dashboardSwap(fromViewRef.current, v) : 0}>
+            <ViewFade key={v} view={v} active swap={v === activeView ? dashboardSwap(fromViewRef.current, v) : 0}
+              wholePageSwap={v === 'api-tracker' || v === 'api-files' || v === 'playlists' || fromViewRef.current === 'api-tracker' || fromViewRef.current === 'api-files' || fromViewRef.current === 'playlists'}>
               {v === 'wrld' ? (
                 <div className={`absolute inset-0 flex ${wrldUnder ? 'z-10' : ''}`}>
                   <Suspense fallback={null}><WrldView /></Suspense>

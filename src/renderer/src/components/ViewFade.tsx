@@ -11,14 +11,14 @@ import { reducedMotion, swapIn } from '../lib/dashboardSwap'
 // without it. Between Home and a staff dashboard (`swap`, lib/dashboardSwap.ts)
 // the widgets swipe in instead and the page itself doesn't move, so the two
 // entrances never stack.
-export default function ViewFade({ view, active, swap = 0, children }: { view: string; active: boolean; swap?: 0 | 1 | -1; children: React.ReactNode }): JSX.Element {
+export default function ViewFade({ view, active, swap = 0, wholePageSwap = false, children }: { view: string; active: boolean; swap?: 0 | 1 | -1; wholePageSwap?: boolean; children: React.ReactNode }): JSX.Element {
   const ref = useRef<HTMLDivElement>(null)
   useLayoutEffect(() => {
     if (!active) return
     const el = ref.current?.firstElementChild
     // Expanding into WRLD from the player bar is its own entrance.
     if (!(el instanceof HTMLElement) || isExpandingToWrld() || reducedMotion()) return
-    if (swap && el.querySelector('[data-swap]')) { swapIn(el, swap); return }
+    if (swap && (wholePageSwap || el.querySelector('[data-swap]'))) { swapIn(el, swap, wholePageSwap); return }
     el.animate(
       [{ opacity: 0, transform: 'translateY(8px)' }, { opacity: 1, transform: 'none' }],
       { duration: 280, easing: 'cubic-bezier(0.33, 0, 0.15, 1)' },

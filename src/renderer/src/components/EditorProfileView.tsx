@@ -2,7 +2,7 @@ import { useOpenUserCard } from './chat/UserCard'
 import { useRef, useState } from 'react'
 import {
   Loader2, Trophy, FileEdit, RefreshCw, Plus, X, Search, Flag, ShieldCheck, FolderOpen,
-  Pencil, Check, PictureInPicture2,
+  Pencil, Check, PictureInPicture2, Disc3,
 } from 'lucide-react'
 import { useStore, IS_FLOAT_WINDOW } from '../store/useStore'
 import { navigateFromWindow, attachToMainWindow } from '../lib/windowSync'
@@ -144,27 +144,31 @@ export default function EditorProfileView(): JSX.Element {
 
   const avatarInputRef = useRef<HTMLInputElement>(null)
 
-  // Channel, pop-out and refresh: the pop-out's toolbar, or Quick actions'
-  // header in the main window.
+  const channelName = channels.find(ch => ch.slug === activeChannel)?.name || activeChannel
+  const channelControl = channels.length > 0 && (
+    <div className="flex flex-wrap items-center gap-x-3 gap-y-2 min-w-0">
+      <span className="text-xs font-medium text-text-secondary shrink-0">Channel</span>
+      <GlassSegmented
+        ariaLabel="Staff channel"
+        value={activeChannel}
+        onChange={setActiveChannel}
+        options={channels.map((ch) => ({ value: ch.slug, label: ch.name, title: ch.description || ch.name }))}
+      />
+    </div>
+  )
+
+  // Window and refresh controls stay separate from the channel selection.
   const toolbarControls = (
     <div className="flex items-center gap-1.5">
-      {channels.length > 0 && (
-        <GlassSegmented
-          ariaLabel="Channel"
-          className="mr-1"
-          value={activeChannel}
-          onChange={setActiveChannel}
-          options={channels.map((ch) => ({ value: ch.slug, label: ch.name, title: ch.description || ch.name }))}
-        />
-      )}
       {/* Shown only when the pop-out is turned off - with it on, this page
           *is* the pop-out and the button would reopen the window it's
           already in. */}
       {!floating && el?.openFloatWindow && (
         <button
           onClick={() => el.openFloatWindow('profile')}
-          className="p-1.5 rounded-lg text-text-muted hover:text-text-primary hover:bg-[var(--surface-raised)] transition-colors"
+          className="p-2 rounded-lg text-text-secondary hover:text-text-primary hover:bg-[var(--surface-raised)] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
           title="Open in its own window"
+          aria-label="Open staff dashboard in its own window"
         >
           <PictureInPicture2 size={13} />
         </button>
@@ -172,8 +176,9 @@ export default function EditorProfileView(): JSX.Element {
       <button
         onClick={() => setRefreshKey(k => k + 1)}
         disabled={refreshing}
-        className="p-1.5 rounded-lg text-text-muted hover:text-text-primary hover:bg-[var(--surface-raised)] transition-colors disabled:opacity-40"
+        className="p-2 rounded-lg text-text-secondary hover:text-text-primary hover:bg-[var(--surface-raised)] transition-colors disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
         title="Refresh"
+        aria-label="Refresh staff dashboard"
       >
         <RefreshCw size={15} className={refreshing ? 'animate-spin' : ''} />
       </button>
@@ -186,7 +191,7 @@ export default function EditorProfileView(): JSX.Element {
       {/* In the main window the page opens with Home's own top line, in the
           same spot, so it stays put while the widgets swipe between the two
           (lib/dashboardSwap.ts); the channel switcher and the rest of the old
-          toolbar sit on Quick actions instead. A pop-out keeps the toolbar,
+          toolbar sit on Quick actions instead. A pop-out keeps window controls,
           with Dock in place of the top line. */}
       {floating ? (
         <div className="flex items-center justify-between px-4 md:px-5 pt-4 pb-3 shrink-0">
@@ -219,16 +224,14 @@ export default function EditorProfileView(): JSX.Element {
       <div className="flex-1 overflow-y-auto md:overflow-hidden px-4 md:px-6 pb-4 md:pb-5 pb-player">
         <div className="flex flex-col gap-3 md:gap-4 md:h-full">
 
-          {/* Top row: identity+stats and Quick actions side by side, sharing
-              a flex row (default items-stretch) so they render at the same
-              height - as two independent columns they used to size to their
-              own content and rarely lined up. */}
-          <div className="flex flex-col md:flex-row gap-3 md:gap-4 shrink-0">
+          {/* Keep these tiles content-sized: wrapping actions must not
+              stretch the identity card into a large empty panel. */}
+          <div className="flex flex-col md:flex-row md:items-start gap-3 md:gap-4 shrink-0">
             {/* Identity + Stats - one tile: the two were separate cards
                 showing barely more than a name and three lines of text each,
                 which read as empty space more than information. */}
             <div className="md:w-[42%]">
-              <Tile span="h-full">
+              <Tile>
                 <div className="flex-1 flex items-center">
                   <div className="flex items-center gap-4">
                     <div className="flex items-center gap-3 min-w-0">
@@ -315,23 +318,30 @@ export default function EditorProfileView(): JSX.Element {
               </Tile>
             </div>
 
-            <div className="md:flex-1">
-              <Tile title="Quick actions" span="h-full" controls={floating ? undefined : toolbarControls}>
-                <div className="flex items-center gap-2">
+            <div className="md:flex-1 min-w-0">
+              <Tile>
+                <div className="flex items-center justify-between gap-2 mb-2">
+                  {channelControl}
+                  {!floating && toolbarControls}
+                </div>
+                <div className="flex items-center flex-wrap gap-2">
+                  <h2 className="text-xs font-semibold text-text-secondary mr-1">Quick actions</h2>
                   {(account?.is_editor || account?.is_administrator) && (
                     <button
                       onClick={() => setShowAddSong(true)}
-                      className="flex-1 flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg bg-accent/15 hover:bg-accent/25 text-accent text-xs font-semibold transition-colors"
+                      title={`Add a song to ${channelName}`}
+                      className="flex items-center gap-1.5 h-8 px-3 rounded-lg bg-accent/10 hover:bg-accent/20 text-accent text-xs font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
                     >
-                      <Plus size={12} /> New song
+                      <Plus size={14} /> New song
                     </button>
                   )}
                   {account?.is_administrator && (
                     <button
                       onClick={() => go('albums-admin')}
-                      className="flex-1 flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg bg-surface-raised hover:bg-surface-highest text-text-secondary hover:text-text-primary text-xs font-semibold transition-colors"
+                      title="Manage album covers and tracklists"
+                      className="flex items-center gap-1.5 h-8 px-3 rounded-lg hover:bg-surface-raised text-text-secondary hover:text-text-primary text-xs font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
                     >
-                      Edit albums
+                      <Disc3 size={14} /> Edit albums
                     </button>
                   )}
                 </div>

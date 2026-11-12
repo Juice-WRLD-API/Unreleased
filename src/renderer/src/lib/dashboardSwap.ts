@@ -6,18 +6,25 @@ import type { ViewType } from '../types'
 // runs swapIn on it); the old one has already unmounted by then, so what
 // slides out is a copy of its DOM taken just before the switch
 // (captureLeaving), laid over the view box and removed once it has run.
+// Home / Tracker / Files / Playlists use the same motion on the whole page, keeping
+// their toolbars and virtual lists together rather than staggering rows.
 
 const TILE_DASHBOARDS: ViewType[] = ['home', 'editor-profile', 'contributor-profile']
+const BROWSE_VIEWS: ViewType[] = ['home', 'api-tracker', 'api-files', 'playlists']
 
 const PX = 56
 const EASE = 'cubic-bezier(0.4, 0, 0.2, 1)'
 /** The new widgets start this long after the old ones begin to leave. */
 const ENTER_AFTER = 110
 
-/** 1 when going from Home into a staff dashboard, -1 coming back, 0 for any
- *  other move. Incoming widgets slide in from that side (1 = from the right)
+/** Browse pages follow Home -> Tracker -> Files -> Playlists; staff dashboards move right
+ *  from Home and left coming back. Other moves return 0.
+ *  Incoming widgets slide in from that side (1 = from the right)
  *  and outgoing ones leave toward the other. */
 export function dashboardSwap(from: ViewType | null, to: ViewType): 0 | 1 | -1 {
+  if (from && from !== to && BROWSE_VIEWS.includes(from) && BROWSE_VIEWS.includes(to)) {
+    return BROWSE_VIEWS.indexOf(to) > BROWSE_VIEWS.indexOf(from) ? 1 : -1
+  }
   if (!from || from === to || !TILE_DASHBOARDS.includes(from) || !TILE_DASHBOARDS.includes(to)) return 0
   return to === 'home' ? -1 : 1
 }
@@ -53,9 +60,9 @@ const enterDelay = (i: number): number => ENTER_AFTER + Math.min(i * 40, 280)
  *  stacked and the lower tiles (Tools) below the window. The stagger is put
  *  in order again two frames later, once that has settled; every delay is
  *  still ahead then. */
-export function swapIn(root: HTMLElement, dir: 1 | -1): void {
+export function swapIn(root: HTMLElement, dir: 1 | -1, wholePage = false): void {
   const runs = new Map<HTMLElement, Animation>()
-  readingOrder(widgets(root)).forEach((el, i) => {
+  readingOrder(wholePage ? [root] : widgets(root)).forEach((el, i) => {
     runs.set(el, el.animate(
       [{ opacity: 0, transform: `translateX(${dir * PX}px)` }, { opacity: 1, transform: 'none' }],
       { duration: 520, delay: enterDelay(i), easing: EASE, fill: 'backwards' },
@@ -71,12 +78,13 @@ let current: HTMLElement | null = null
 /** Copies the leaving page now, while its DOM is still on screen, and returns
  *  a function that lays the copy over `box` and swipes its widgets out. Call
  *  that once the new page has committed (before paint). */
-export function captureLeaving(box: HTMLElement, page: Element, dir: 1 | -1): () => void {
+export function captureLeaving(box: HTMLElement, page: Element, dir: 1 | -1, wholePage = false): () => void {
   const copy = page.cloneNode(true) as HTMLElement
   // Scroll offsets and canvas pixels don't survive cloneNode.
   const from = page.querySelectorAll('*')
   const to = copy.querySelectorAll('*')
   const scrolled: [Element, number, number][] = []
+  if (page.scrollTop || page.scrollLeft) scrolled.push([copy, page.scrollTop, page.scrollLeft])
   from.forEach((el, i) => {
     if (el.scrollTop || el.scrollLeft) scrolled.push([to[i], el.scrollTop, el.scrollLeft])
     if (el instanceof HTMLCanvasElement) {
@@ -106,7 +114,7 @@ export function captureLeaving(box: HTMLElement, page: Element, dir: 1 | -1): ()
   const scrollUnder = box.classList.contains('scroll-under')
   // The shared top line (HomeHero) is on the new page in the same spot, so
   // the copy's own stays out of sight and the line never seems to move.
-  copy.querySelectorAll<HTMLElement>('[data-swap-keep]').forEach((el) => { el.style.visibility = 'hidden' })
+  if (!wholePage) copy.querySelectorAll<HTMLElement>('[data-swap-keep]').forEach((el) => { el.style.visibility = 'hidden' })
   const cs = getComputedStyle(box)
   const padding = [cs.paddingTop, cs.paddingRight, cs.paddingBottom, cs.paddingLeft].join(' ')
 
@@ -122,7 +130,7 @@ export function captureLeaving(box: HTMLElement, page: Element, dir: 1 | -1): ()
     current = layer
     for (const [el, top, left] of scrolled) { el.scrollTop = top; el.scrollLeft = left }
 
-    const runs = readingOrder(widgets(copy)).map((el, i) => el.animate(
+    const runs = readingOrder(wholePage ? [copy] : widgets(copy)).map((el, i) => el.animate(
       [{ opacity: 1, transform: 'none' }, { opacity: 0, transform: `translateX(${-dir * PX}px)` }],
       { duration: 380, delay: Math.min(i * 30, 210), easing: EASE, fill: 'forwards' },
     ))
