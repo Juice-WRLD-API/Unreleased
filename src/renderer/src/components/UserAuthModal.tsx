@@ -11,8 +11,9 @@ interface Props {
 }
 
 export default function UserAuthModal({ onClose }: Props): JSX.Element {
-  const { loginWithDiscord, loginWithPassword, signupWithPassword, completeApprovedLogin, loginWithPasskey } = useStorePick(
+  const { loginWithDiscord, cancelDiscordLogin, loginWithPassword, signupWithPassword, completeApprovedLogin, loginWithPasskey } = useStorePick(
     'loginWithDiscord',
+    'cancelDiscordLogin',
     'loginWithPasskey',
     'loginWithPassword',
     'signupWithPassword',
@@ -33,6 +34,13 @@ export default function UserAuthModal({ onClose }: Props): JSX.Element {
   // The passkey buttons only show where the prompt can open (Windows app, website).
   const [passkeyReady, setPasskeyReady] = useState(false)
   const [passkeyBusy, setPasskeyBusy] = useState(false)
+  // Desktop: Discord sign-in is open in the default browser.
+  const [discordWaiting, setDiscordWaiting] = useState(false)
+  const discordWaitingRef = useRef(false)
+  const switchToWindowRef = useRef(false)
+  const setWaiting = (v: boolean): void => { discordWaitingRef.current = v; setDiscordWaiting(v) }
+  // Closing the dialog gives up on a browser login still waiting.
+  useEffect(() => () => { if (discordWaitingRef.current) cancelDiscordLogin() }, [cancelDiscordLogin])
 
   useEffect(() => {
     let alive = true
@@ -103,11 +111,20 @@ export default function UserAuthModal({ onClose }: Props): JSX.Element {
     setError(null)
     setLoading(true)
     try {
-      await loginWithDiscord()
-      onClose()
+      let inAppWindow = false
+      for (;;) {
+        switchToWindowRef.current = false
+        const ok = await loginWithDiscord({ inAppWindow, onBrowserOpen: () => setWaiting(true) })
+        setWaiting(false)
+        if (ok) { onClose(); return }
+        // "Use a window in the app" cancels the browser login, then lands here.
+        if (inAppWindow || !switchToWindowRef.current) return
+        inAppWindow = true
+      }
     } catch (e) {
       setError(errorMessage(e, 'Could not start Discord login'))
     } finally {
+      setWaiting(false)
       setLoading(false)
     }
   }
@@ -347,6 +364,30 @@ export default function UserAuthModal({ onClose }: Props): JSX.Element {
             )}
             Continue with Discord
           </button>
+          {discordWaiting && (
+            <div className="space-y-2.5 px-3 py-3 rounded-xl border border-[var(--border)] bg-[var(--surface-muted,rgba(255,255,255,0.05))] text-xs">
+              <div className="flex items-start gap-2 text-text-secondary">
+                <Loader2 size={13} className="animate-spin shrink-0 mt-0.5" />
+                Finish signing in with Discord in your browser. This window picks it up when you&apos;re done.
+              </div>
+              <div className="flex items-center justify-between gap-3">
+                <button
+                  type="button"
+                  onClick={() => { switchToWindowRef.current = true; cancelDiscordLogin() }}
+                  className="text-accent font-medium hover:underline"
+                >
+                  Use a window in the app
+                </button>
+                <button
+                  type="button"
+                  onClick={cancelDiscordLogin}
+                  className="text-text-muted hover:text-text-primary transition-colors"
+                >
+                  Cancel
+                </button>
+              </div>
+            </div>
+          )}
           </>)}
         </div>
       </div>

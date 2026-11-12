@@ -1,6 +1,6 @@
 # Agent guide: Juice WRLD API and Unreleased
 
-**Version 1.57** · updated 2026-11-08. Bump the version and date whenever you
+**Version 1.58** · updated 2026-11-12. Bump the version and date whenever you
 change this file (minor for fixes and additions, major for rewrites).
 
 **Keep this file current.** If you find something in the docs or this file that
@@ -363,6 +363,14 @@ drag over the old copy; the launch doesn't wait for it. Linux uses
 electron-updater's AppImage updater. Once the app is signed, a `zip` mac
 target plus uploading it in `build-mac.yml` would bring Mac back to
 electron-updater.
+
+**Discord sign-in** (`app`) opens in the default browser, where Discord is
+usually signed in already. `electron/discordLogin.js` listens on
+`http://127.0.0.1:47613/auth/discord/callback` for the redirect, and that exact
+URI must be listed under Redirects in the Discord developer portal (the
+backend already allows any loopback port). A busy port falls back to the
+in-app window, and so does "Use a window in the app" in the dialog or
+`login discord --window`.
 
 **Sync** (Home → Tools, `app` only, off by default) keeps every released and
 unreleased song with audio offline. It is one more entry in the offline

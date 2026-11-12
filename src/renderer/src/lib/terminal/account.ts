@@ -1,9 +1,9 @@
 import { useStore } from '../../store/useStore'
 import { getSongById } from '../juicewrldApi'
 import {
-  compressImageFile, decideLoginApproval, getDiscordAuthUrl, getFavorites, getMe, getOtpSetup, listLoginApprovals, pollLoginApproval,
+  compressImageFile, decideLoginApproval, getFavorites, getMe, getOtpSetup, listLoginApprovals, pollLoginApproval,
   confirmOtpSetup, removeAvatar, requestLoginApproval, updateAvatar, updateBio, updateDisplayName,
-  updateNowPlaying, updatePrivacySettings, updateUserSettings, discordRedirectUri, type AccountUser,
+  updateNowPlaying, updatePrivacySettings, updateUserSettings, type AccountUser,
   API_KEY_SCOPES, createApiKey, isManagerAnywhere, deleteApiKey, listApiKeys, updateApiKey, type ApiKeyScope, type UserApiKey,
 } from '../userApi'
 import { addPasskey, deletePasskey, getPasskeySupport, listPasskeys, renamePasskey, type Passkey } from '../passkeyApi'
@@ -130,8 +130,8 @@ const PRIVACY_KEYS: Record<string, 'public_play_history' | 'public_playlists' | 
 
 export const ACCOUNT_COMMANDS: TermCommand[] = [
   {
-    name: 'login', aliases: ['signin'], group: 'Account', usage: 'login [username] | login discord [pasted callback url] | login passkey',
-    description: 'Sign in (asks for the password, then a 2FA code or a nod from another device if the account needs one). `login discord` opens Discord sign-in; `login passkey` opens the passkey prompt (website or Windows app)',
+    name: 'login', aliases: ['signin'], group: 'Account', usage: 'login [username] | login discord [--window | pasted callback url] | login passkey',
+    description: 'Sign in (asks for the password, then a 2FA code or a nod from another device if the account needs one). `login discord` opens Discord sign-in (in your browser on the desktop app; `--window` uses a window in the app instead); `login passkey` opens the passkey prompt (website or Windows app)',
     covers: ['userApi.passwordLogin', 'userApi.requestLoginApproval', 'userApi.pollLoginApproval', 'userApi.getDiscordAuthUrl', 'userApi.exchangeDiscord', 'userApi.discordRedirectUri', 'userApi.setToken', 'passkeyApi.signInWithPasskey', 'passkeyApi.startPasskeySignIn', 'passkeyApi.finishPasskeySignIn'],
     complete: (before, partial) => (before.length === 0 ? ['discord', 'passkey'].filter((v) => v.startsWith(partial.toLowerCase())) : []),
     run: async (args, ctx) => {
@@ -147,18 +147,32 @@ export const ACCOUNT_COMMANDS: TermCommand[] = [
       }
       if (rest[0]?.toLowerCase() === 'discord') {
         const pasted = rest[1]
-        if (!pasted) {
-          const { authorize_url } = await getDiscordAuthUrl(discordRedirectUri())
-          ctx.print(`Opening Discord sign-in…\n${authorize_url}`, 'dim')
-          await st().loginWithDiscord()
+        if (!pasted || pasted === '--window') {
+          const inAppWindow = pasted === '--window'
+          const inBrowser = !inAppWindow && !!(window as { electron?: { discordBrowserLoginStart?: unknown } }).electron?.discordBrowserLoginStart
+          ctx.print(inBrowser ? 'Opening Discord sign-in in your browser… (Ctrl+C to cancel)' : 'Opening Discord sign-in…', 'dim')
+          const stop = (): void => st().cancelDiscordLogin()
+          ctx.signal.addEventListener('abort', stop)
+          try {
+            if (!(await st().loginWithDiscord({ inAppWindow }))) { ctx.print('cancelled', 'dim'); return }
+          } finally {
+            ctx.signal.removeEventListener('abort', stop)
+          }
+          ctx.print(`signed in as ${who(signedIn())}`, 'ok')
           return
         }
         // The address Discord sent you back to, with ?code=…&state=… on the end.
         let code: string | null = null
         let state: string | null = null
-        try { const u = new URL(pasted); code = u.searchParams.get('code'); state = u.searchParams.get('state') } catch { /* not a URL */ }
+        let redirectUri: string | undefined
+        try {
+          const u = new URL(pasted)
+          code = u.searchParams.get('code'); state = u.searchParams.get('state')
+          // The exchange needs the redirect the code was issued for.
+          redirectUri = `${u.origin}${u.pathname}`
+        } catch { /* not a URL */ }
         if (!code || !state) fail('that address has no code and state in it')
-        await st().completeDiscordLogin(code as string, state as string)
+        await st().completeDiscordLogin(code as string, state as string, redirectUri)
         ctx.print(`signed in as ${who(signedIn())}`, 'ok')
         return
       }

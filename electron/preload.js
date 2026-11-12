@@ -111,6 +111,12 @@ contextBridge.exposeInMainWorld('electron', {
   fetchImageAsDataUrl: (url) => ipcRenderer.invoke('fetch-image-as-data-url', url),
   fetchImageBytes: (url) => ipcRenderer.invoke('fetch-image-bytes', url),
   openDiscordLogin: (url) => ipcRenderer.invoke('open-discord-login', url),
+  // Discord sign-in in the default browser: start() binds the loopback port
+  // and resolves { redirectUri } | null; wait(authorizeUrl) opens the browser
+  // and resolves { code, state } | { cancelled } | null.
+  discordBrowserLoginStart: () => ipcRenderer.invoke('discord-browser-login-start'),
+  discordBrowserLoginWait: (url) => ipcRenderer.invoke('discord-browser-login-wait', url),
+  discordBrowserLoginCancel: () => ipcRenderer.invoke('discord-browser-login-cancel'),
   // Passkeys: whether this OS can show the prompt, and the prompt itself in
   // its own player.juicewrldapi.com window (see passkey.js). Resolves
   // { ok, credential } | { cancelled } | { error }.

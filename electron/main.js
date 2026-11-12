@@ -10,6 +10,7 @@ const { Readable } = require('stream')
 const discordRpc = require('./discordRpc')
 const { configureRuntime } = require('./platform')
 const { registerPasskeyIpc } = require('./passkey')
+const { createDiscordBrowserLogin } = require('./discordLogin')
 const { canRequestMicrophone, canCaptureSystemAudio, canUseFileSystem } = require('./microphonePermission')
 const { createLaunchGate } = require('./launchUpdate')
 const { resolveTypedPath } = require('./localPaths')
@@ -3996,6 +3997,22 @@ ipcMain.handle('open-discord-login', (_, authorizeUrl) => {
     loginWin.on('closed', () => resolve(null))
   })
 })
+
+// Discord sign-in in the default browser, where the user is usually already
+// signed in to Discord or has a password manager (see discordLogin.js). The
+// window above stays as the fallback.
+const discordBrowserLogin = createDiscordBrowserLogin({
+  openExternal: (url) => shell.openExternal(url),
+  onDone: () => {
+    if (!mainWindow || mainWindow.isDestroyed()) return
+    if (mainWindow.isMinimized()) mainWindow.restore()
+    mainWindow.show()
+    mainWindow.focus()
+  },
+})
+ipcMain.handle('discord-browser-login-start', () => discordBrowserLogin.start())
+ipcMain.handle('discord-browser-login-wait', (_, authorizeUrl) => discordBrowserLogin.wait(String(authorizeUrl || '')))
+ipcMain.handle('discord-browser-login-cancel', () => { discordBrowserLogin.cancel() })
 
 // Passkey sign-in and setup run in a window of their own that Chromium treats
 // as https://player.juicewrldapi.com (see passkey.js for why and how).

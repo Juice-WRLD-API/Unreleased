@@ -24,7 +24,7 @@ import type { SongPreference, SongPrefMap, SongPrefPatch, WireSongPreference } f
 import { getVersionGroup } from '../lib/versionsApi'
 import type { AdminTab } from '../hooks/useAdminQueue'
 import { advanceRotatedCover, resetCoverRotation } from '../lib/coverSuggestions'
-import { setEraCoverRaw } from '../lib/eraCovers'
+import { setEraCoverRaw, replaceEraCovers, sanitizeEraCovers } from '../lib/eraCovers'
 import { setActiveChannelCache } from '../lib/activeChannelState'
 import {
   appendListeningPlay,
@@ -752,6 +752,8 @@ interface AppActions {
   /** Sets (or, with raw = null, clears) the cover override for one era and
    *  redraws any visible tracks it affects. */
   setEraCoverOverride: (era: string, raw: string | null) => void
+  /** Re-derives the visible tracks of these eras after their covers change. */
+  _redrawEras: (eras: Set<string>) => void
   /** Rotates a song onto its next suggested cover, if the setting is on and
    *  the user hasn't set a cover of their own. Called when a track starts. */
   _maybeRotateCover: (songId: number) => void
@@ -882,8 +884,13 @@ interface AppActions {
 
   setShowUserAuth: (show: boolean) => void
   loadAccount: () => Promise<void>
-  loginWithDiscord: () => Promise<void>
-  completeDiscordLogin: (code: string, state: string) => Promise<void>
+  /** Resolves true once signed in, false if the login was closed or cancelled.
+   *  On desktop it opens the default browser unless `inAppWindow` is set;
+   *  `onBrowserOpen` fires once the browser has been asked to open. */
+  loginWithDiscord: (opts?: { inAppWindow?: boolean; onBrowserOpen?: () => void }) => Promise<boolean>
+  /** Stops a desktop browser login that is waiting for Discord. */
+  cancelDiscordLogin: () => void
+  completeDiscordLogin: (code: string, state: string, redirectUri?: string) => Promise<void>
   signupWithPassword: (username: string, password: string, displayName?: string) => Promise<void>
   loginWithPassword: (username: string, password: string, otpToken?: string) => Promise<void>
   /** Signs in with a passkey (desktop: Windows only). Resolves false if the user cancelled the prompt. */
@@ -1221,6 +1228,7 @@ function buildUserSettings(s: AppStore): UserSettings {
     pause_fade_enabled: s.pauseFadeEnabled,
     prefer_og_version: s.preferOgVersion,
     rotate_suggested_covers: s.rotateSuggestedCovers,
+    era_covers: s.eraCovers,
     media_overlay_enabled: s.mediaOverlayEnabled,
     lastfm_enabled: s.lastfmEnabled,
     auto_report_errors: s.autoReportErrors,
@@ -1967,16 +1975,22 @@ export const useStore = create<AppStore>((set, get, store) => ({
     })
   },
   setEraCoverOverride: (era, raw) => {
-    setEraCoverRaw(era, raw)
+    const value = raw?.trim() || null
+    setEraCoverRaw(era, value)
     const nextCovers = { ...get().eraCovers }
-    if (raw) nextCovers[era] = raw
+    if (value) nextCovers[era] = value
     else delete nextCovers[era]
     set({ eraCovers: nextCovers })
-    // Redraw every visible API track this era touches so the change shows up
+    get()._redrawEras(new Set([era]))
+    get()._scheduleProfilePush(['userSettings'])
+  },
+  _redrawEras: (eras) => {
+    if (eras.size === 0) return
+    // Redraw every visible API track these eras touch so the change shows up
     // immediately instead of at the next track change.
     const { queue, currentTrack, currentTrackFull, songPrefs } = get()
     const redraw = (t: Track): Track => {
-      if (t.era !== era) return t
+      if (!t.era || !eras.has(t.era)) return t
       const id = userApi.trackIdToSongId(t.id)
       return id == null ? t : applyPrefToTrack(t, songPrefs[id])
     }
@@ -2677,35 +2691,73 @@ export const useStore = create<AppStore>((set, get, store) => ({
     return _loadAccountInFlight
   },
 
-  loginWithDiscord: async () => {
-    const redirectUri = userApi.discordRedirectUri()
-    const { authorize_url, state } = await userApi.getDiscordAuthUrl(redirectUri)
+  loginWithDiscord: async (opts) => {
     // Defense-in-depth CSRF check: the server already validates `state`
     // server-side, but stash the issued value so completeDiscordLogin can
     // also reject a mismatched one before ever calling exchange. sessionStorage
     // (not the in-memory store) survives the full-page redirect the web flow does.
-    try { window.sessionStorage.setItem('discord_oauth_state', state) } catch {}
-    const el = (window as any).electron
-    if (el?.openDiscordLogin) {
-      // Electron: open a popup BrowserWindow � intercepts the OAuth callback
-      const result = await el.openDiscordLogin(authorize_url) as { code: string; state: string } | null
-      if (result?.code && result?.state) {
-        await get().completeDiscordLogin(result.code, result.state)
-      }
-    } else {
-      // Web: standard redirect
-      window.location.href = authorize_url
+    // The redirect is kept too: the exchange must send the one the code was issued for.
+    const remember = (state: string, redirectUri: string): void => {
+      try {
+        window.sessionStorage.setItem('discord_oauth_state', state)
+        window.sessionStorage.setItem('discord_oauth_redirect', redirectUri)
+      } catch {}
     }
+    const el = (window as any).electron
+    type LoginResult = { code?: string; state?: string; cancelled?: boolean } | null
+    if (el?.discordBrowserLoginStart && !opts?.inAppWindow) {
+      // Desktop: sign in from the default browser, where Discord is usually
+      // already signed in. A busy port falls through to the in-app window.
+      const started = await el.discordBrowserLoginStart() as { redirectUri: string } | null
+      if (started?.redirectUri) {
+        let auth: { authorize_url: string; state: string }
+        try {
+          auth = await userApi.getDiscordAuthUrl(started.redirectUri)
+        } catch (e) {
+          void el.discordBrowserLoginCancel()
+          throw e
+        }
+        remember(auth.state, started.redirectUri)
+        const waiting = el.discordBrowserLoginWait(auth.authorize_url) as Promise<LoginResult>
+        opts?.onBrowserOpen?.()
+        const result = await waiting
+        if (!result?.code || !result.state) return false
+        await get().completeDiscordLogin(result.code, result.state, started.redirectUri)
+        return true
+      }
+    }
+    const redirectUri = userApi.discordRedirectUri()
+    const { authorize_url, state } = await userApi.getDiscordAuthUrl(redirectUri)
+    remember(state, redirectUri)
+    if (el?.openDiscordLogin) {
+      // Electron: a popup BrowserWindow that intercepts the OAuth callback
+      const result = await el.openDiscordLogin(authorize_url) as LoginResult
+      if (!result?.code || !result.state) return false
+      await get().completeDiscordLogin(result.code, result.state, redirectUri)
+      return true
+    }
+    // Web: standard redirect
+    window.location.href = authorize_url
+    return false
   },
 
-  completeDiscordLogin: async (code, state) => {
+  cancelDiscordLogin: () => {
+    void (window as any).electron?.discordBrowserLoginCancel?.()
+  },
+
+  completeDiscordLogin: async (code, state, redirectUriArg) => {
     let expectedState: string | null = null
-    try { expectedState = window.sessionStorage.getItem('discord_oauth_state') } catch {}
-    try { window.sessionStorage.removeItem('discord_oauth_state') } catch {}
+    let storedRedirect: string | null = null
+    try {
+      expectedState = window.sessionStorage.getItem('discord_oauth_state')
+      storedRedirect = window.sessionStorage.getItem('discord_oauth_redirect')
+      window.sessionStorage.removeItem('discord_oauth_state')
+      window.sessionStorage.removeItem('discord_oauth_redirect')
+    } catch {}
     if (expectedState && state !== expectedState) {
       throw new Error('Discord OAuth state mismatch')
     }
-    const redirectUri = userApi.discordRedirectUri()
+    const redirectUri = redirectUriArg || storedRedirect || userApi.discordRedirectUri()
     const { token, user } = await userApi.exchangeDiscord(code, state, redirectUri)
     userApi.setToken(token)
     set({ account: user })
@@ -3680,6 +3732,19 @@ export const useStore = create<AppStore>((set, get, store) => ({
     if (serverSettings.pause_fade_enabled !== undefined && serverSettings.pause_fade_enabled !== s.pauseFadeEnabled) s.setPauseFade(serverSettings.pause_fade_enabled)
     if (serverSettings.prefer_og_version !== undefined && serverSettings.prefer_og_version !== s.preferOgVersion) s.setPreferOgVersion(serverSettings.prefer_og_version)
     if (serverSettings.rotate_suggested_covers !== undefined && serverSettings.rotate_suggested_covers !== s.rotateSuggestedCovers) s.setRotateSuggestedCovers(serverSettings.rotate_suggested_covers)
+    // Era covers follow the account. An account that has never saved any
+    // (no key) keeps this device's picks, and the in-sync check below pushes
+    // them up.
+    if (serverSettings.era_covers !== undefined) {
+      const eraCovers = sanitizeEraCovers(serverSettings.era_covers)
+      if (stableJson(eraCovers) !== stableJson(s.eraCovers)) {
+        const changed = new Set([...Object.keys(eraCovers), ...Object.keys(s.eraCovers)]
+          .filter((era) => eraCovers[era] !== s.eraCovers[era]))
+        replaceEraCovers(eraCovers)
+        set({ eraCovers })
+        get()._redrawEras(changed)
+      }
+    }
     if (serverSettings.media_overlay_enabled !== undefined && serverSettings.media_overlay_enabled !== s.mediaOverlayEnabled) s.setMediaOverlayEnabled(serverSettings.media_overlay_enabled)
     if (serverSettings.lastfm_enabled !== undefined && serverSettings.lastfm_enabled !== s.lastfmEnabled) s.setLastfmEnabled(serverSettings.lastfm_enabled)
     if (serverSettings.auto_report_errors !== undefined && serverSettings.auto_report_errors !== s.autoReportErrors) s.setAutoReportErrors(serverSettings.auto_report_errors)

@@ -969,13 +969,24 @@ export default function Player(): JSX.Element {
         if (s.isPlaying) playSlot(a)
       }).catch((err) => {
         console.error('Could not load donor file', err)
-        if (useStore.getState().currentTrack?.id !== trackId) return
-        setIsPlaying(false)
+        const s = useStore.getState()
+        if (s.currentTrack?.id !== trackId) return
+        const notFound = err instanceof SessionEditNotFoundError
         if (isSessionEditPlaceholder(streamUrl)) {
-          showPlaybackNotice(err instanceof SessionEditNotFoundError
+          showPlaybackNotice(notFound
             ? `No session edit found for "${title}"`
             : `Couldn't load the session edit for "${title}"`)
         }
+        // A file that isn't there won't appear on retry, and stopping the
+        // queue on it is the wrong call: move on, as with any other
+        // unplayable song. Offline, every later fetch fails the same way, so
+        // stop there instead of burning through the queue.
+        if (!s.isPlaying) return
+        if (!notFound && navigator.onLine === false) { setIsPlaying(false); return }
+        skipUnplayableTrack(
+          notFound ? 'no session edit was found for them' : "their files couldn't be loaded",
+          `${notFound ? 'session edit not found' : 'donor/session-edit load failed'} for ${streamUrl}: ${String(err)}`,
+        )
       })
       return
     }

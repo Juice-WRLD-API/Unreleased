@@ -36,3 +36,21 @@ export function setEraCoverRaw(era: string, raw: string | null): void {
   else delete _covers[era]
   ls.set('eraCovers', _covers)
 }
+
+/** Replaces the whole map - used when the account's synced copy
+ *  (user_settings.era_covers) arrives from another device. */
+export function replaceEraCovers(next: Record<string, string>): void {
+  _covers = { ...next }
+  ls.set('eraCovers', _covers)
+}
+
+/** Keeps only string → non-empty string entries, so a malformed server blob
+ *  can't put junk into the cover lookup. */
+export function sanitizeEraCovers(raw: unknown): Record<string, string> {
+  const out: Record<string, string> = {}
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return out
+  for (const [era, v] of Object.entries(raw as Record<string, unknown>)) {
+    if (typeof v === 'string' && v.trim() && v.trim() !== 'null') out[era] = v.trim()
+  }
+  return out
+}

@@ -1,14 +1,15 @@
-import { useEffect, useState, useCallback, useMemo } from 'react'
+import { useEffect, useState, useCallback, useMemo, useRef } from 'react'
 import {
   RefreshCw, AlertCircle, Folder, ChevronRight, Activity,
   Plus, Upload, Pencil, Repeat, ArrowRightLeft, Trash2, FolderPlus, FileEdit,
 } from 'lucide-react'
 import { useStorePick } from '../store/useStore'
 import {
-  fetchTrackerChanges, fetchCompChanges,
+  fetchTrackerChangesPage, fetchCompChangesPage,
   type TrackerChange, type CompChange,
 } from '../lib/changesApi'
 import { errorMessage } from '../lib/format'
+import { LoadMoreSentinel } from './LoadMoreSentinel'
 
 type FeedTab = 'tracker' | 'comp'
 type ChangeRow = (TrackerChange | CompChange) & { timestamp: string | null }
@@ -184,23 +185,70 @@ export default function ChangesFeedPanel(): JSX.Element {
   const [tab, setTab] = useState<FeedTab>('tracker')
   const [tracker, setTracker] = useState<TrackerChange[]>([])
   const [comp, setComp] = useState<CompChange[]>([])
+  const [next, setNext] = useState<Record<FeedTab, number | null>>({ tracker: null, comp: null })
   const [loading, setLoading] = useState(true)
+  const [loadingMore, setLoadingMore] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  // Bumped on every fresh load so a page that lands after a refresh or a tab
+  // switch is dropped instead of appended to the new list.
+  const gen = useRef(0)
 
   const load = useCallback(async (which: FeedTab) => {
+    const g = ++gen.current
     setLoading(true)
+    setLoadingMore(false)
     setError(null)
     try {
-      if (which === 'tracker') setTracker(await fetchTrackerChanges())
-      else setComp(await fetchCompChanges())
+      if (which === 'tracker') {
+        const page = await fetchTrackerChangesPage(0)
+        if (g !== gen.current) return
+        setTracker(page.results)
+        setNext((n) => ({ ...n, tracker: page.nextOffset }))
+      } else {
+        const page = await fetchCompChangesPage(0)
+        if (g !== gen.current) return
+        setComp(page.results)
+        setNext((n) => ({ ...n, comp: page.nextOffset }))
+      }
     } catch (err) {
-      setError(errorMessage(err, 'Failed to load changes'))
+      if (g === gen.current) setError(errorMessage(err, 'Failed to load changes'))
     } finally {
-      setLoading(false)
+      if (g === gen.current) setLoading(false)
     }
   }, [])
 
   useEffect(() => { load(tab) }, [tab, load])
+
+  const loadMore = useCallback(async () => {
+    const offset = next[tab]
+    if (offset == null || loading || loadingMore) return
+    const g = gen.current
+    setLoadingMore(true)
+    try {
+      // Rows can shift down between pages when new edits land, so drop any
+      // id we already show rather than rendering it twice.
+      const appendNew = <T extends { id: string }>(prev: T[], rows: T[]): T[] => {
+        const seen = new Set(prev.map((r) => r.id))
+        return [...prev, ...rows.filter((r) => !seen.has(r.id))]
+      }
+      if (tab === 'tracker') {
+        const page = await fetchTrackerChangesPage(offset)
+        if (g !== gen.current) return
+        setTracker((prev) => appendNew(prev, page.results))
+        setNext((n) => ({ ...n, tracker: page.results.length ? page.nextOffset : null }))
+      } else {
+        const page = await fetchCompChangesPage(offset)
+        if (g !== gen.current) return
+        setComp((prev) => appendNew(prev, page.results))
+        setNext((n) => ({ ...n, comp: page.results.length ? page.nextOffset : null }))
+      }
+    } catch {
+      // Leave what's shown; stop paging so the sentinel doesn't retry in a loop.
+      if (g === gen.current) setNext((n) => ({ ...n, [tab]: null }))
+    } finally {
+      if (g === gen.current) setLoadingMore(false)
+    }
+  }, [next, tab, loading, loadingMore])
 
   const openComp = (item: CompChange): void => {
     setApiFilesPath(item.folder || '')
@@ -289,6 +337,7 @@ export default function ChangesFeedPanel(): JSX.Element {
                   </div>
                 </div>
               ))}
+          <LoadMoreSentinel hasMore={next[tab] != null} loading={loadingMore} onVisible={loadMore} />
         </div>
       )}
     </div>

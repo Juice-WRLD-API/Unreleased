@@ -4,6 +4,7 @@ import { deleteFont } from '../fontActions'
 import { pickLocalFile } from './pick'
 import { allSkins, getSkin } from '../skins'
 import { HOME_SECTIONS, isHomeSectionVisible } from '../homeSections'
+import { listEras, loadEraFullNames } from '../eras'
 import {
   DEFAULT_NAV_CONTROL_ORDER, DEFAULT_NAV_CONTROL_VISIBILITY, DEFAULT_NAV_ORDER, DEFAULT_NAV_VISIBILITY,
   NAV_ITEMS, orderedNavControls, orderedNavItems,
@@ -415,6 +416,54 @@ export const SETTINGS_COMMANDS: TermCommand[] = [
       const section = HOME_SECTIONS.find((x) => x.id === name.toLowerCase()) ?? pickByName(HOME_SECTIONS, (x) => x.id, name) ?? pickByName(HOME_SECTIONS, (x) => x.label, name) ?? fail(`no section "${name}" (try: home-sections)`)
       st().setHomeSectionVisible(section.id, v === 'toggle' ? !vis(section.id) : v === 'show')
       ctx.print(`${section.label}: ${vis(section.id) ? 'shown' : 'hidden'}`, 'ok')
+    },
+  },
+  {
+    name: 'era-covers', aliases: ['eracovers'], group: 'Settings', usage: 'era-covers [set <era> <url|path> | reset <era> | reset --all]',
+    description: "List your era covers, or set/reset one. An era cover replaces the shared cover on that era's unreleased songs; it is saved to your account (same as Settings > Playback > Era covers)",
+    complete: (before, partial) => {
+      const p = partial.toLowerCase()
+      if (before.length === 0) return ['set', 'reset'].filter((v) => v.startsWith(p))
+      return before.length === 1 ? listEras().map((e) => e.name).filter((n) => n.toLowerCase().startsWith(p)) : []
+    },
+    run: async (args, ctx) => {
+      await loadEraFullNames().catch(() => {})
+      const eras = listEras().map((e) => e.name)
+      const covers = st().eraCovers
+      const [verb, ...rest] = args.trim().split(/\s+/).filter(Boolean)
+      if (!verb || verb === 'ls') {
+        const names = eras.length ? eras : Object.keys(covers)
+        ctx.print(names.map((n) => `${n.padEnd(14)}${covers[n] ?? '-'}`).join('\n'))
+        ctx.print(`${Object.keys(covers).length} custom`)
+        return
+      }
+      const findEra = (typed: string): string | null =>
+        eras.find((n) => n.toLowerCase() === typed.toLowerCase()) ?? pickByName(eras, (n) => n, typed)
+      if (verb === 'reset') {
+        if (rest[0] === '--all') {
+          const all = Object.keys(covers)
+          for (const era of all) st().setEraCoverOverride(era, null)
+          ctx.print(`Reset ${all.length} era cover${all.length === 1 ? '' : 's'}`, 'ok')
+          return
+        }
+        const era = findEra(rest.join(' ')) ?? fail(`no era "${rest.join(' ')}" (try: era-covers)`)
+        st().setEraCoverOverride(era, null)
+        ctx.print(`${era}: default cover`, 'ok')
+        return
+      }
+      if (verb !== 'set' || rest.length < 2) fail('usage: era-covers [set <era> <url|path> | reset <era> | reset --all]')
+      // Era names and storage paths can both hold spaces: take the longest
+      // leading run of words that names an era, and the rest is the cover.
+      for (let i = rest.length - 1; i >= 1; i--) {
+        const typed = rest.slice(0, i).join(' ')
+        const era = eras.find((n) => n.toLowerCase() === typed.toLowerCase())
+        if (!era) continue
+        const cover = rest.slice(i).join(' ')
+        st().setEraCoverOverride(era, cover)
+        ctx.print(`${era}: ${cover}`, 'ok')
+        return
+      }
+      fail(`no era named at the start of "${rest.join(' ')}" (try: era-covers)`)
     },
   },
   {
