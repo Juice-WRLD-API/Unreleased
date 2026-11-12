@@ -4,9 +4,10 @@ import { CATEGORY_LABELS, CATEGORY_COLORS } from '../lib/juicewrldApi'
 import { useStatisticsData } from '../hooks/useStatisticsData'
 import {
   CATEGORY_ORDER, LIST_MAX_HEIGHT_DESKTOP,
-  EraTimeline, CategoryCard, Bar, TopSongRow, RecentPlayRow,
+  EraTimeline, CategoryCard, Bar, RecentPlayRow,
 } from '../lib/statisticsShared'
 import SongContextMenu from './SongContextMenu'
+import SongChartCard from './SongChartCard'
 
 // The desktop Statistics tab of the Tracker. Header and tab strip belong to
 // ApiTrackerView.desktop - this is just the body.
@@ -15,7 +16,7 @@ export default function StatisticsPanelDesktop({ onOpenEra }: { onOpenEra: (eraN
     canEdit, playTrack, playNext,
     stats, playStats, songMap, playById, ctxMenu, setCtxMenu, openContextMenu,
     eraRows, maxEraCount, timelineRows, timelineStart, timelineEnd,
-    topEraRows, maxTopEraPlays, maxTopSongPlays, loading, loadFailed,
+    topEraRows, maxTopEraPlays, loading, loadFailed,
   } = useStatisticsData()
 
   return (
@@ -86,28 +87,17 @@ export default function StatisticsPanelDesktop({ onOpenEra }: { onOpenEra: (eraN
                 </div>
               )}
 
+              {/* Song chart - full width, its own range, era and sort. */}
+              <SongChartCard
+                playStats={playStats}
+                onOpenEra={onOpenEra}
+                onContextMenu={openContextMenu}
+              />
+
               {/* Below here, the page has room to spare in a narrow single
                   column - two lg-width columns instead pair related sections
-                  (song lists together, era charts together) so there's less
-                  to scroll through on a wide window. */}
+                  so there's less to scroll through on a wide window. */}
               <div className="grid lg:grid-cols-2 gap-4 md:gap-6">
-                {/* Top songs */}
-                {playStats && playStats.top_songs.length > 0 && (
-                  <div className="rounded-xl border border-[var(--border)] bg-surface-overlay/40 px-2 py-3.5">
-                    <p className="text-[10px] font-semibold uppercase tracking-widest text-text-muted mb-1 px-2">
-                      Most played songs
-                    </p>
-                    <div className={`space-y-0.5 ${LIST_MAX_HEIGHT_DESKTOP} overflow-y-auto`}>
-                      {playStats.top_songs.map((song, i) => (
-                        <TopSongRow
-                          key={song.id} song={song} cover={songMap.get(song.id)} rank={i + 1} max={maxTopSongPlays}
-                          onPlay={playById} onContextMenu={openContextMenu} isMobile={false}
-                        />
-                      ))}
-                    </div>
-                  </div>
-                )}
-
                 {/* Recent activity */}
                 {playStats && playStats.recent_plays.length > 0 && (
                   <div className="rounded-xl border border-[var(--border)] bg-surface-overlay/40 px-2 py-3.5">
