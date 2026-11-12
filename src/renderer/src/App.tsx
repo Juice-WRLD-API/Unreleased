@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, Suspense } from 'react'
+import React, { useEffect, useLayoutEffect, useRef, useState, Suspense } from 'react'
 import { useStore, useStorePick } from './store/useStore'
 import { setToken, getToken } from './lib/userApi'
 import { useThemeEffects } from './lib/themeEffects'
@@ -11,6 +11,7 @@ import ViewSkeleton from './components/ViewSkeleton'
 import { ViewType } from './types'
 import { ADMIN_PATH_TABS } from './hooks/useAdminQueue'
 import ViewFade from './components/ViewFade'
+import { captureLeaving, dashboardSwap, reducedMotion } from './lib/dashboardSwap'
 
 // Minimum gap between window-focus-triggered refetches (playlists, news) -
 // alt-tabbing back and forth shouldn't refire a request on every focus event.
@@ -31,6 +32,17 @@ const MOBILE_SCROLL_UNDER: ViewType[] = ['home', 'playlists', 'albums', 'liked',
 // nav bar pads itself by --top-inset (mobile/NavBar). Tracker and Files keep
 // the reserved strip - their search and tabs stay pinned at the top.
 const MOBILE_BLEED_TOP: ViewType[] = ['home', 'playlists', 'settings', 'stats', 'docs']
+
+const BROWSE_SWAP_VIEWS: ViewType[] = ['api-tracker', 'api-files', 'playlists']
+
+// Views whose content scrolls under the floating glass player. Each pads its
+// main scroller(s) with `.pb-player` (and lifts a `sticky bottom-0` bar with
+// `.sticky-dock`). Every other view simply ends above the player, so a view
+// left off this list never has anything hidden under it.
+// Home and the staff dashboards are on it so their scrollers reach the window
+// bottom: ending at the bar's top edge clipped the tiles' drop shadows into a
+// hard line beside the bar.
+const SCROLL_UNDER: ViewType[] = ['home', 'editor-profile', 'contributor-profile', 'playlists', 'albums', 'liked', 'api-tracker', 'api-files', 'news', 'stats', 'docs', 'shared-playlist', 'public-profile', 'track']
 
 function getViewFromPath(pathname: string): ViewType {
   if (pathname === '/home') return 'home'
@@ -77,6 +89,7 @@ function getViewFromPath(pathname: string): ViewType {
 }
 
 import Sidebar from './components/Sidebar'
+import AmbientBackdrop from './components/AmbientBackdrop'
 import AutoHideNav from './components/AutoHideNav'
 import BottomNav from './components/BottomNav'
 import RadioFmPlayer from './components/RadioFmPlayer'
@@ -131,6 +144,8 @@ const UploadManager = lazyOverlay(() => import('./components/UploadManager'))
 const NotificationCenter = lazyOverlay(() => import('./components/NotificationCenter'))
 const GlobalSongInfoHost = lazyOverlay(async () => ({ default: (await import('./components/SongInfoModal')).GlobalSongInfoHost }))
 
+
+
 export default function App(): JSX.Element {
   const showRecognition = useStore((s) => s.showRecognition)
   const { showNowPlaying, showQueue, showSettings, setShowSettings, showDiagnostics, setShowDiagnostics, showUploadManager, setShowUploadManager, showNotifications, setShowNotifications, activeView, previousView, sidebarPosition, navStyle, autoHideNav, loadAccount, completeDiscordLogin, showUserAuth, setShowUserAuth, prefetchApiData, refreshPlaylists, heroBleedTop, navOrder, navVisibility, activeChannel, bulkEdit, infoSongId } = useStorePick(
@@ -153,6 +168,31 @@ export default function App(): JSX.Element {
     heldViewRef.current = null
   }
   const heldView = heldViewRef.current
+  // The view on screen before this one, for the Home / browse / dashboard swipe
+  // (lib/dashboardSwap.ts). Tracked here rather than read from previousView,
+  // which history steps don't always update. The leaving page is copied during
+  // this render, the last moment its DOM is still on screen, and the copy is
+  // swiped out in the layout effect below, in the same commit as the new
+  // page's widgets start swiping in (ViewFade).
+  const viewBoxRef = useRef<HTMLDivElement>(null)
+  const lastViewRef = useRef<ViewType>(activeView)
+  const fromViewRef = useRef<ViewType | null>(null)
+  const leavingRef = useRef<(() => void) | null>(null)
+  if (lastViewRef.current !== activeView) {
+    const from = lastViewRef.current
+    fromViewRef.current = from
+    lastViewRef.current = activeView
+    const dir = isMobileViewport() ? 0 : dashboardSwap(from, activeView)
+    const box = viewBoxRef.current
+    const page = box?.querySelector(`:scope [data-view="${from}"]`)?.firstElementChild
+    const wholePage = BROWSE_SWAP_VIEWS.includes(from) || BROWSE_SWAP_VIEWS.includes(activeView)
+    leavingRef.current = dir && box && page && !reducedMotion() ? captureLeaving(box, page, dir, wholePage) : null
+  }
+  useLayoutEffect(() => {
+    const play = leavingRef.current
+    leavingRef.current = null
+    play?.()
+  }, [activeView])
   const isMobile = useIsMobile()
   const debugLogOpen = useDebugLogViewer((s) => s.log !== null)
   const lyricsGenOpen = useStore((s) => s.lyricsGenModal !== null)
@@ -309,9 +349,11 @@ export default function App(): JSX.Element {
   // loadAccount returns early. No-op until the reporting endpoints exist.
   useEffect(() => { useStore.getState()._flushReports() }, [])
 
+  const scrollUnder = !isMobile && SCROLL_UNDER.includes(bgView)
   return (
     <UserCardHost>
-    <div className="app-shell flex flex-col bg-surface overflow-hidden">
+    <div className="app-shell flex flex-col overflow-hidden max-md:bg-surface">
+      {!isMobile && <ErrorBoundary fallback={null}><AmbientBackdrop /></ErrorBoundary>}
       {/* Sidebar stays first in the DOM; reverse variants place it visually
           on the right/bottom without reordering focus/tab order. */}
       <div className={`flex flex-1 overflow-hidden ${
@@ -357,7 +399,15 @@ export default function App(): JSX.Element {
             paddingBottom: isMobile && !MOBILE_SCROLL_UNDER.includes(bgView) ? 'var(--dock-h)' : undefined,
           }}
         >
-          <div className="flex-1 overflow-hidden flex">
+          <div className="flex-1 overflow-hidden flex relative">
+            {/* The view's own box. A view on SCROLL_UNDER runs under the
+                floating player and pads its scroller (.pb-player); any other
+                ends above it. */}
+            <div
+              ref={viewBoxRef}
+              className={`flex-1 min-w-0 flex relative overflow-hidden ${scrollUnder ? 'scroll-under' : ''}`}
+              style={isMobile || scrollUnder ? undefined : { paddingBottom: 'var(--player-dock, 0px)' }}
+            >
             <ErrorBoundary>
             <Suspense fallback={<ViewSkeleton />}>
             {/* Holdable views live in their own keyed slots so toggling between
@@ -365,7 +415,8 @@ export default function App(): JSX.Element {
                 `contents` keeps the wrapper out of the flex layout. */}
             {/* ViewFade: each view fades/lifts in as it comes on screen. */}
             {HOLD_UNDER_TERMINAL.map((v) => (bgView === v || heldView === v) && (
-              <ViewFade key={v} active={bgView === v}>
+              <ViewFade key={v} view={v} active={bgView === v}
+                swap={!isMobile && v === bgView ? dashboardSwap(fromViewRef.current, v) : 0} wholePageSwap>
                 {v === 'editor' ? <EditorPage />
                   : v === 'contributor' ? <ContributorPage />
                   : v === 'albums-admin' ? <AlbumsAdminView />
@@ -375,7 +426,8 @@ export default function App(): JSX.Element {
               </ViewFade>
             ))}
             {!HOLD_UNDER_TERMINAL.includes(bgView) && (
-            <ViewFade key={bgView} active>
+            <ViewFade key={bgView} view={bgView} active swap={isMobile ? 0 : dashboardSwap(fromViewRef.current, bgView)}
+              wholePageSwap={BROWSE_SWAP_VIEWS.some(v => v === bgView || v === fromViewRef.current)}>
               {bgView === 'home' ? <HomeView />
               : bgView === 'api-tracker' ? <ApiTrackerView />
               : bgView === 'api-files' ? <ApiFilesView />
@@ -403,6 +455,7 @@ export default function App(): JSX.Element {
             )}
             </Suspense>
           </ErrorBoundary>
+            </div>
             {/* WRLD is a full-screen overlay on top of bgView above, not a
                 slot in that ternary - so bgView (whatever you had open before)
                 stays mounted and visible underneath while WRLD drags down,
@@ -441,6 +494,12 @@ export default function App(): JSX.Element {
             )}
             <SidePanels nowPlaying={!isMobile && showNowPlaying && activeView !== 'wrld'} queue={showQueue && activeView !== 'wrld'} />
           </div>
+          {/* Inside <main>: the desktop bar floats over the bottom of this
+              area (views and side panels), clear of the sidebar. The phone
+              bar stays an in-flow row below the views. */}
+          <ErrorBoundary fallback={<div className="h-20 shrink-0 border-t border-[var(--border)] flex items-center justify-center text-text-muted text-xs">Player crashed — reload the app to restore playback controls.</div>}>
+            <Player />
+          </ErrorBoundary>
         </main>
       </div>
       {/* Everything below is a loose sibling of the main content rather than a
@@ -449,9 +508,6 @@ export default function App(): JSX.Element {
           boundary: the chrome keeps a compact inline notice, the invisible
           background workers fail silently, and the modals/overlays show a
           centered, dismissible card. */}
-      <ErrorBoundary fallback={<div className="h-20 shrink-0 border-t border-[var(--border)] flex items-center justify-center text-text-muted text-xs">Player crashed - reload the app to restore playback controls.</div>}>
-        <Player />
-      </ErrorBoundary>
       <ErrorBoundary fallback={null}><RadioFmPlayer /></ErrorBoundary>
       <ErrorBoundary fallback={null}><RadioVotePopup /></ErrorBoundary>
       <ErrorBoundary fallback={null}><LastfmScrobbler /></ErrorBoundary>

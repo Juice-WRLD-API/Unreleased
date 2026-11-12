@@ -1,8 +1,10 @@
-import { useRef, useState } from 'react'
-import { ChevronRight, Play, ListMusic, Gamepad2, Flame, Music2, Disc3, User, Newspaper, Radio, Heart, Search, MoreHorizontal, Album, Music, Wrench, MicVocal, AudioLines, ImagePlus, FileAudio } from 'lucide-react'
+import { useEffect, useState } from 'react'
+import { ChevronLeft, ChevronRight, Play, ListMusic, Gamepad2, Flame, Music2, Disc3, Newspaper, Radio, Heart, Album, Music, Wrench, MicVocal, RefreshCw, AudioLines, ImagePlus, FileAudio } from 'lucide-react'
 import { AlbumArtThumbnail } from './AlbumArtThumbnail'
 import { ProgressiveCover } from './ProgressiveCover'
 import { Tile } from './Tile'
+import HomeHero from './HomeHero'
+import OnThisDayTile from './OnThisDayTile'
 import { useHomeData, HOME_ALBUMS_SHOWN, type GameCard, type HomePlaylistCard, type HomeAlbumCard } from '../hooks/useHomeData'
 import { useElementSize } from '../hooks/useElementSize'
 import { useStore, useStorePick } from '../store/useStore'
@@ -11,14 +13,11 @@ import * as userApi from '../lib/userApi'
 import type { SongContextMenuState } from './SongContextMenu'
 import type { PlaylistContextMenuState } from './PlaylistContextMenu'
 import type { NewsMenuState } from './NewsContextMenu'
-import { orderedNavItems, isNavItemVisible } from '../lib/navItems'
 import type { NewsItem } from '../lib/newsApi'
-import type { Track, ViewType } from '../types'
+import type { Track } from '../types'
 import { hasChatAccess } from '../lib/chatAccess'
-import OnThisDayTile from './OnThisDayTile'
 import { lazyOverlay } from '../lib/lazyView'
 import { PlaylistCoverThumb } from '../lib/homeViewShared'
-import { AnchoredContextMenu } from './ContextMenu'
 
 // Staff-only, and it reads the chat store - loading it lazily keeps the chat
 // client out of Home's chunk for everyone else.
@@ -34,58 +33,178 @@ const ShareNewsModal = lazyOverlay(() => import('./chat/ShareNewsModal'))
 // same Settings → Home screen toggles as the mobile shell, laid out as a bento
 // that fills the window instead of a stack that scrolls out of it.
 //
-// The whole point of the desktop layout is that a desktop screen can hold the
-// entire dashboard at once: the view is height-bound (h-full inside App's
-// fixed-height <main>). Cover grids clamp to whole rows and size to their own
-// content (however many rows the actual items need, capped per section - see
-// fitCount's callers) rather than stretching to fill whatever space is left -
-// a card whose border runs on well past its last cover reads as broken the
-// same way a half-visible row would. News, the one section where the extra
-// headlines are worth keeping
-// reachable, is the exception: it fills its rail and scrolls internally.
-//
-// Section ids map 1:1 to one place on screen, so hiding a section in Settings
-// removes exactly one thing. Three move relative to mobile: News, 999 FM and
-// Liked share one narrow right-hand rail (compact cards, News taking whatever
-// height they leave it) rather than each claiming a full-height column of
-// their own, so Recently played and Playlists - the two sections actually
-// worth spending width on - get the rest of the page. "Your listening" is the
-// hero's row of numbers, where it costs no vertical space of its own.
+// Section ids map 1:1 to one place on screen, so hiding a section in
+// Settings removes exactly one thing. News, 999 FM and Liked share one
+// narrow right-hand rail (compact cards, News taking whatever height they
+// leave it) rather than each claiming a full-height column of their own, so
+// Recently played and Playlists - the two sections actually worth spending
+// width on - get the rest of the page. "Your listening" is the hero's row
+// of numbers, where it costs no vertical space of its own.
 
 const GAP = 12          // matches gap-3 on the cover grids
 const MIN_TILE = 104    // narrowest a cover may get before dropping a column
 const MAX_NEWS = 20
 
-// Whole rows only - see the header note. `width` decides how many columns
-// fit; the row count then follows the content itself (capped at `maxRows`)
-// rather than however much vertical space happens to be on offer, so the
-// card's height always matches what's actually inside it.
-function fitCount(width: number, total: number, maxRows: number): { cols: number; count: number } {
-  if (width <= 0 || total === 0) return { cols: 1, count: 0 }
+// Cover strips scroll sideways. The column width sets how big a cover is
+// (as many as fit at MIN_TILE or wider), and the strip then stacks as many
+// rows as the tile has height for, never fewer than `minRows`. A strip only
+// asks for `minRows` worth of height itself, so it never makes its bento row
+// taller; when its neighbour (On this day) does, the strip grows its covers
+// and adds rows into that space instead of leaving it empty.
+const COVER_TEXT_H = 41 // mb-1.5 + title line + subtitle line under a cover
+
+function stripGeometry(width: number, height: number, minRows: number): { cover: number; rows: number; minHeight: number } {
+  if (width <= 0) return { cover: MIN_TILE, rows: minRows, minHeight: minRows * (MIN_TILE + COVER_TEXT_H) + (minRows - 1) * GAP }
   const cols = Math.max(1, Math.floor((width + GAP) / (MIN_TILE + GAP)))
-  const rows = Math.min(maxRows, Math.ceil(total / cols))
-  return { cols, count: Math.min(total, cols * rows) }
+  const base = (width - (cols - 1) * GAP) / cols
+  const item = base + COVER_TEXT_H
+  const minHeight = minRows * item + (minRows - 1) * GAP
+  if (height <= minHeight) return { cover: base, rows: minRows, minHeight }
+  const rows = Math.max(minRows, Math.floor((height + GAP) / (item + GAP)))
+  const cover = (height - (rows - 1) * GAP) / rows - COVER_TEXT_H
+  return { cover, rows, minHeight }
+}
+
+function CoverStrip({ minRows, controlsRef, children }: {
+  minRows: number
+  /** Gets the strip's prev/next buttons, for the Tile header. */
+  controlsRef: (controls: React.ReactNode) => void
+  children: React.ReactNode
+}): JSX.Element {
+  const [boxRef, { width, height }] = useElementSize<HTMLDivElement>()
+  const [strip, setStrip] = useState<HTMLDivElement | null>(null)
+  const [edges, setEdges] = useState({ prev: false, next: false })
+  const { cover, rows, minHeight } = stripGeometry(width, height, minRows)
+
+  useEffect(() => {
+    if (!strip) return
+    const update = (): void => {
+      const max = strip.scrollWidth - strip.clientWidth
+      const prev = strip.scrollLeft > 1
+      const next = strip.scrollLeft < max - 1
+      setEdges((e) => (e.prev === prev && e.next === next ? e : { prev, next }))
+    }
+    // The wheel scrolls the strip sideways while it can still move that
+    // way; at either end it falls through to the page. Each notch moves a
+    // target, and the strip eases toward it frame by frame, so a mouse wheel
+    // glides instead of jumping 100px at a time.
+    let target = strip.scrollLeft
+    let frame = 0
+    const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches
+    const glide = (): void => {
+      const diff = target - strip.scrollLeft
+      if (Math.abs(diff) < 0.5) { strip.scrollLeft = target; frame = 0; return }
+      strip.scrollLeft += diff * 0.2
+      frame = requestAnimationFrame(glide)
+    }
+    const onWheel = (e: WheelEvent): void => {
+      if (Math.abs(e.deltaX) >= Math.abs(e.deltaY)) return
+      const max = strip.scrollWidth - strip.clientWidth
+      if (max <= 0) return
+      const from = frame ? target : strip.scrollLeft
+      if ((e.deltaY < 0 && from <= 0) || (e.deltaY > 0 && from >= max - 1)) return
+      e.preventDefault()
+      const delta = e.deltaMode === 1 ? e.deltaY * 16 : e.deltaMode === 2 ? e.deltaY * strip.clientWidth : e.deltaY
+      target = Math.max(0, Math.min(max, from + delta))
+      if (reduceMotion) { strip.scrollLeft = target; return }
+      if (!frame) frame = requestAnimationFrame(glide)
+    }
+    // An arrow click or a drag takes over: start the next wheel from there.
+    const onScroll = (): void => {
+      if (!frame) target = strip.scrollLeft
+      update()
+    }
+    update()
+    strip.addEventListener('scroll', onScroll, { passive: true })
+    strip.addEventListener('wheel', onWheel, { passive: false })
+    const ro = new ResizeObserver(update)
+    ro.observe(strip)
+    return () => {
+      cancelAnimationFrame(frame)
+      strip.removeEventListener('scroll', onScroll)
+      strip.removeEventListener('wheel', onWheel)
+      ro.disconnect()
+    }
+  }, [strip, cover, rows])
+
+  const page = (dir: -1 | 1): void => {
+    if (!strip) return
+    const step = Math.max(cover + GAP, Math.floor((strip.clientWidth + GAP) / (cover + GAP)) * (cover + GAP))
+    strip.scrollBy({ left: dir * step, behavior: 'smooth' })
+  }
+
+  const showArrows = edges.prev || edges.next
+  useEffect(() => {
+    controlsRef(showArrows ? (
+      <div className="flex items-center gap-0.5 shrink-0">
+        <StripArrow dir={-1} disabled={!edges.prev} onClick={() => page(-1)} />
+        <StripArrow dir={1} disabled={!edges.next} onClick={() => page(1)} />
+      </div>
+    ) : null)
+    // page() reads the current strip and cover; re-publish when they change.
+  }, [showArrows, edges.prev, edges.next, strip, cover]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  return (
+    <div ref={boxRef} className="relative flex-1" style={{ minHeight }}>
+      <div
+        ref={setStrip}
+        className="absolute inset-0 overflow-x-auto overflow-y-hidden no-scrollbar grid gap-3 grid-flow-col"
+        style={{ gridTemplateRows: `repeat(${rows}, ${cover + COVER_TEXT_H}px)`, gridAutoColumns: `${cover}px` }}
+      >
+        {children}
+      </div>
+    </div>
+  )
+}
+
+function StripArrow({ dir, disabled, onClick }: { dir: -1 | 1; disabled: boolean; onClick: () => void }): JSX.Element {
+  const Icon = dir < 0 ? ChevronLeft : ChevronRight
+  return (
+    <button
+      onClick={onClick}
+      disabled={disabled}
+      aria-label={dir < 0 ? 'Scroll back' : 'Scroll forward'}
+      className="w-7 h-7 rounded-lg flex items-center justify-center text-text-muted hover:text-text-primary hover:bg-[var(--surface-raised)] disabled:opacity-30 disabled:hover:bg-transparent disabled:hover:text-text-muted transition-colors"
+    >
+      <Icon size={15} />
+    </button>
+  )
+}
+
+// The main column is a 12-column bento: visible sections pair up two to a row
+// in page order, wide/narrow on one row and narrow/wide on the next, so no two
+// rows line up. An unpaired last section takes the full row. Below
+// BENTO_MIN_WIDTH a narrow half would be too cramped for covers, so every
+// section gets its own row again. Class names are spelled out for Tailwind.
+type MainSection = 'recent' | 'onthisday' | 'playlists' | 'albums' | 'tools'
+const BENTO_MIN_WIDTH = 900
+const BENTO_SPLITS: [string, string][] = [
+  ['col-span-7', 'col-span-5'],
+  ['col-span-5', 'col-span-7'],
+]
+
+function bentoSpans(sections: MainSection[], paired: boolean): Partial<Record<MainSection, string>> {
+  const spans: Partial<Record<MainSection, string>> = {}
+  for (let i = 0; i < sections.length; i += 2) {
+    const a = sections[i]
+    const b = sections[i + 1]
+    if (!paired || !b) {
+      spans[a] = 'col-span-12'
+      if (b) spans[b] = 'col-span-12'
+      continue
+    }
+    const [wa, wb] = BENTO_SPLITS[(i / 2) % BENTO_SPLITS.length]
+    spans[a] = wa
+    spans[b] = wb
+  }
+  return spans
 }
 
 function EmptyNote({ children }: { children: React.ReactNode }): JSX.Element {
   return <p className="text-text-muted text-xs">{children}</p>
 }
 
-// ─── Row A / B mains: the two clamped cover grids ────────────────────────────
-
-function CoverGrid({ children, cols, bodyRef }: {
-  children: React.ReactNode
-  cols: number
-  bodyRef: (node: HTMLDivElement | null) => void
-}): JSX.Element {
-  return (
-    <div ref={bodyRef}>
-      <div className="grid gap-3" style={{ gridTemplateColumns: `repeat(${cols}, minmax(0, 1fr))` }}>
-        {children}
-      </div>
-    </div>
-  )
-}
+// ─── Main column: the cover strips ───────────────────────────────────────────
 
 function RecentTile({ tracks, onPlay, onContextMenu, span }: {
   tracks: Track[]
@@ -93,12 +212,11 @@ function RecentTile({ tracks, onPlay, onContextMenu, span }: {
   onContextMenu: (track: Track, e: React.MouseEvent) => void
   span: string
 }): JSX.Element {
-  const [bodyRef, { width }] = useElementSize<HTMLDivElement>()
-  const { cols, count } = fitCount(width, tracks.length, 2)
+  const [controls, setControls] = useState<React.ReactNode>(null)
   return (
-    <Tile title="Recently played" icon={<Disc3 size={15} />} span={span}>
-      <CoverGrid cols={cols} bodyRef={bodyRef}>
-        {tracks.slice(0, count).map((track) => (
+    <Tile title="Recently played" icon={<Disc3 size={15} />} controls={controls} span={span}>
+      <CoverStrip minRows={2} controlsRef={setControls}>
+        {tracks.map((track) => (
           <button
             key={track.id}
             onClick={() => onPlay(track)}
@@ -116,7 +234,7 @@ function RecentTile({ tracks, onPlay, onContextMenu, span }: {
             <p className="text-text-muted text-[11px] truncate mt-0.5">{track.artist}</p>
           </button>
         ))}
-      </CoverGrid>
+      </CoverStrip>
     </Tile>
   )
 }
@@ -127,18 +245,14 @@ function PlaylistsTile({ playlists, onAll, onContextMenu, span }: {
   onContextMenu: (p: HomePlaylistCard, e: React.MouseEvent) => void
   span: string
 }): JSX.Element {
-  const [bodyRef, { width }] = useElementSize<HTMLDivElement>()
-  // One row only - Playlists is capped at 10 items upstream (useHomeData), so
-  // a lone leftover on a second row was common and looked unfinished; the
-  // rest is a click away via "All".
-  const { cols, count } = fitCount(width, playlists.length, 1)
+  const [controls, setControls] = useState<React.ReactNode>(null)
   return (
-    <Tile title="Playlists" icon={<ListMusic size={15} />} action={{ label: 'All', onClick: onAll }} span={span}>
+    <Tile title="Playlists" icon={<ListMusic size={15} />} controls={controls} action={{ label: 'All', onClick: onAll }} span={span}>
       {playlists.length === 0 ? (
         <EmptyNote>No playlists yet - build one from any song&apos;s menu.</EmptyNote>
       ) : (
-        <CoverGrid cols={cols} bodyRef={bodyRef}>
-          {playlists.slice(0, count).map((p) => (
+        <CoverStrip minRows={1} controlsRef={setControls}>
+          {playlists.map((p) => (
             <button
               key={p.key}
               onClick={p.open}
@@ -152,7 +266,7 @@ function PlaylistsTile({ playlists, onAll, onContextMenu, span }: {
               <p className="text-text-muted text-[11px] truncate mt-0.5">{p.subtitle}</p>
             </button>
           ))}
-        </CoverGrid>
+        </CoverStrip>
       )}
     </Tile>
   )
@@ -163,12 +277,18 @@ function AlbumsTile({ albums, onAll, span }: {
   onAll: () => void
   span: string
 }): JSX.Element {
-  const [bodyRef, { width }] = useElementSize<HTMLDivElement>()
-  const { cols, count } = fitCount(width, albums.length, 1)
+  const [controls, setControls] = useState<React.ReactNode>(null)
   return (
-    <Tile title="Albums" icon={<Album size={15} />} action={{ label: 'All', onClick: onAll }} span={span}>
-      <CoverGrid cols={cols} bodyRef={bodyRef}>
-        {albums.slice(0, count).map((a) => (
+    <Tile title="Albums" icon={<Album size={15} />} controls={controls} action={{ label: 'All', onClick: onAll }} span={span}>
+      <CoverStrip minRows={1} controlsRef={setControls}>
+        {/* Only on the very first visit, before any album list was cached. */}
+        {albums.length === 0 && Array.from({ length: 8 }, (_, i) => (
+          <div key={i} aria-hidden="true" className="min-w-0">
+            <div className="aspect-square rounded-lg bg-surface-raised animate-pulse mb-1.5" />
+            <div className="h-3 w-3/4 rounded bg-surface-raised animate-pulse" />
+          </div>
+        ))}
+        {albums.map((a) => (
           <div key={a.key} className="group text-left min-w-0">
             <div className="relative aspect-square rounded-lg overflow-hidden bg-surface-raised mb-1.5">
               <button onClick={a.open} aria-label={a.title} className="absolute inset-0 flex items-center justify-center">
@@ -193,7 +313,7 @@ function AlbumsTile({ albums, onAll, span }: {
             </button>
           </div>
         ))}
-      </CoverGrid>
+      </CoverStrip>
     </Tile>
   )
 }
@@ -235,18 +355,29 @@ function NewsTile({ items, onOpen, onContextMenu, onAll, span }: {
 
 // ─── Row B side + row C: the compact shortcut tiles ──────────────────────────
 
-function ShortcutCard({ icon, title, subtitle, tone = 'accent', onClick }: {
+function ShortcutCard({ icon, title, subtitle, tone = 'accent', progress = null, onClick }: {
   icon: JSX.Element
   title: React.ReactNode
   subtitle: React.ReactNode
   tone?: 'accent' | 'live'
+  /** 0-1: a thin bar along the card's foot (Sync's progress). */
+  progress?: number | null
   onClick: () => void
 }): JSX.Element {
   return (
     <button
+      data-swap
       onClick={onClick}
-      className="group shrink-0 w-full flex items-center gap-3 rounded-xl border border-[var(--border)] bg-[var(--surface-overlay)] px-3.5 py-3 text-left hover:border-[var(--accent)] hover:bg-surface-highest transition-colors"
+      className="group relative overflow-hidden shrink-0 w-full flex items-center gap-3 rounded-xl glass-pane glass-press px-3.5 py-3 text-left"
     >
+      {progress !== null && (
+        <span aria-hidden="true" className="absolute inset-x-0 bottom-0 h-[3px] bg-accent/15">
+          <span
+            className="block h-full bg-accent origin-left transition-transform duration-[600ms] ease-[cubic-bezier(0.4,0,0.2,1)] motion-reduce:transition-none"
+            style={{ transform: `scaleX(${progress})` }}
+          />
+        </span>
+      )}
       <span className={`w-10 h-10 rounded-lg flex items-center justify-center shrink-0 ${tone === 'live' ? 'bg-red-600/15' : 'bg-accent/15'}`}>
         {icon}
       </span>
@@ -264,13 +395,13 @@ function GamesCard({ games, onOpen }: {
   onOpen: (view: GameCard['view']) => void
 }): JSX.Element {
   return (
-    <div className="w-full flex items-stretch gap-1.5 rounded-xl border border-[var(--border)] bg-[var(--surface-overlay)] px-2 py-2.5">
+    <div data-swap className="w-full flex items-stretch gap-1.5 rounded-xl glass-pane px-2 py-2.5">
       {games.map((g) => (
         <button
           key={g.view}
           onClick={() => onOpen(g.view)}
           title={g.label}
-          className="group flex-1 min-w-0 flex flex-col items-center gap-1 rounded-lg py-1 hover:bg-surface-highest transition-colors"
+          className="group flex-1 min-w-0 flex flex-col items-center gap-1 rounded-lg py-1 hover:bg-[var(--fill)] transition-colors"
         >
           <span className="w-9 h-9 rounded-lg bg-accent/15 flex items-center justify-center shrink-0">
             <Gamepad2 size={16} className="text-accent" />
@@ -292,247 +423,97 @@ function GamesCard({ games, onOpen }: {
 
 // ─── Main column foot: Tools ─────────────────────────────────────────────────
 
-interface HomeTool {
-  id: string
-  icon: JSX.Element
-  title: string
-  subtitle: string
-  onClick: () => void
-}
-
 // Shortcuts into the app's tool dialogs. Cards keep a readable width and wrap
 // onto more rows as tools are added, rather than stretching one across the page.
-function ToolsTile({ tools, span }: { tools: HomeTool[]; span: string }): JSX.Element {
+// The title sits beside the cards rather than above them: Tools is the last
+// row of the bento, and a header line of its own pushed it past the window.
+function ToolsTile({ children, span }: { children: React.ReactNode; span: string }): JSX.Element {
   return (
-    <Tile title="Tools" icon={<Wrench size={15} />} span={span}>
-      <div className="grid gap-3 grid-cols-[repeat(auto-fill,minmax(240px,1fr))]">
-        {tools.map((tool) => (
-          <ShortcutCard key={tool.id} icon={tool.icon} title={tool.title} subtitle={tool.subtitle} onClick={tool.onClick} />
-        ))}
+    <Tile span={span}>
+      <div className="flex items-center gap-4">
+        <div className="flex items-center gap-2 shrink-0">
+          <Wrench size={15} className="text-text-muted" />
+          <h2 className="text-text-primary text-sm font-bold uppercase tracking-wider">Tools</h2>
+        </div>
+        <div className="flex-1 min-w-0 grid gap-3 grid-cols-[repeat(auto-fill,minmax(220px,1fr))]">
+          {children}
+        </div>
       </div>
     </Tile>
   )
 }
 
-// ─── Hero ────────────────────────────────────────────────────────────────────
-
-function greeting(): string {
-  const h = new Date().getHours()
-  if (h < 5) return 'Up late'
-  if (h < 12) return 'Good morning'
-  if (h < 18) return 'Good afternoon'
-  return 'Good evening'
-}
-
-function Stat({ value, label }: { value: string; label: string }): JSX.Element {
-  return (
-    <span className="flex items-baseline gap-1.5 min-w-0">
-      <span className="text-text-primary text-base font-bold tabular-nums">{value}</span>
-      <span className="text-text-muted text-xs truncate">{label}</span>
-    </span>
-  )
-}
-
-// Desktop counterpart to mobile Home's "More" button. Mobile's opens a sheet
-// of nav tabs that don't fit the bottom bar's cap - the sidebar has no such
-// cap, so there's nothing to overflow into it. This lists the destinations
-// that ship off by default instead (Wrapped, News, Liked Songs, API Docs -
-// see `defaultHidden` in navItems.tsx): still one click away without having
-// to turn them on in Settings first, just like mobile's sheet lets you reach
-// an overflowed tab without adding it to the bar.
-function MoreMenu({ anchorRef, onClose, items, onSelect }: {
-  anchorRef: React.RefObject<HTMLElement>
-  onClose: () => void
-  items: { view: ViewType; label: string; icon: React.ReactNode }[]
-  onSelect: (view: ViewType) => void
-}): JSX.Element {
-  return (
-    <AnchoredContextMenu
-      anchorRef={anchorRef}
-      onClose={onClose}
-      className="min-w-[190px]"
-      items={items.map((item) => ({ label: item.label, icon: navMenuIcon(item.view, item.icon), onSelect: () => onSelect(item.view) }))}
-      body={items.length === 0 ? <p className="px-3 py-2 text-xs text-text-muted whitespace-nowrap">Nothing else to show</p> : undefined}
-    />
-  )
-}
-
-// The nav registry's icons are elements sized for the side menu; the menu
-// wants a component it sizes and tints itself. One per view, so a row's icon
-// keeps its identity across renders.
-const navMenuIcons = new Map<ViewType, React.ElementType>()
-function navMenuIcon(view: ViewType, node: React.ReactNode): React.ElementType {
-  let icon = navMenuIcons.get(view)
-  if (!icon) {
-    icon = function NavMenuIcon({ className = '' }: { className?: string }): JSX.Element {
-      return <span className={`flex items-center justify-center [&_svg]:w-3.5 [&_svg]:h-3.5 ${className}`}>{node}</span>
-    }
-    navMenuIcons.set(view, icon)
-  }
-  return icon
-}
-
-export default function HomeViewDesktop(): JSX.Element {
+export default function HomeView(): JSX.Element {
   const {
     account, likedTrackIds, radioFmIsLive, radioFmNowPlaying, setActiveView,
-    openProfile, openOwnPublicProfile, showSection, recent, newsItems, games, playlistRow, albumRow,
-    totalPlays, distinctSongs, weekPlays, siteStats, openTrack, openNewsItem, openRadioFm,
+    showSection, recent, newsItems, games, playlistRow, albumRow, albumsPending,
+    openTrack, openNewsItem, openRadioFm,
   } = useHomeData()
-  const { navOrder, navVisibility, playTrack, playNext } = useStorePick('navOrder', 'navVisibility', 'playTrack', 'playNext')
+  const { playTrack, playNext } = useStorePick('playTrack', 'playNext')
   const canEdit = useCanEdit()
-  const [showMore, setShowMore] = useState(false)
-  const moreBtnRef = useRef<HTMLButtonElement>(null)
   const [ctxMenu, setCtxMenu] = useState<SongContextMenuState | null>(null)
   const [playlistMenu, setPlaylistMenu] = useState<PlaylistContextMenuState | null>(null)
   const [newsMenu, setNewsMenu] = useState<NewsMenuState | null>(null)
   const [sharingNews, setSharingNews] = useState<NewsItem | null>(null)
-  const hiddenNavItems = orderedNavItems(navOrder).filter(
-    (i) => i.defaultHidden && !isNavItemVisible(i, navVisibility, false),
-  )
+  const [mainRef, { width: mainWidth }] = useElementSize<HTMLDivElement>()
 
   const showRecent = showSection('recent') && recent.length > 0
   const showOnThisDay = showSection('onthisday')
   const showNews = showSection('news') && newsItems.length > 0
   const showPlaylists = showSection('playlists')
-  const showAlbums = HOME_ALBUMS_SHOWN && showSection('albums') && albumRow.length > 0
+  const showAlbums = HOME_ALBUMS_SHOWN && showSection('albums') && (albumRow.length > 0 || albumsPending)
   const showRadio = showSection('radio')
   const showLiked = showSection('liked') && likedTrackIds.length > 0
   const showGames = showSection('games')
-  const showListening = showSection('listening')
   const showChat = showSection('chat') && hasChatAccess(account)
-  const tools: HomeTool[] = [{
-    id: 'lyrics-gen',
-    icon: <MicVocal size={18} className="text-accent" />,
-    title: 'Synced lyrics',
-    subtitle: "Time a song's lyrics by the line or the word",
-    onClick: () => useStore.getState().openLyricsGen(),
-  }, {
-    id: 'identify',
-    icon: <AudioLines size={18} className="text-accent" />,
-    title: 'Identify song',
-    subtitle: 'Name a song from the mic, this device or a file',
-    onClick: () => useStore.getState().setShowRecognition(true),
-  }, {
-    id: 'cover-art',
-    icon: <ImagePlus size={18} className="text-accent" />,
-    title: 'Submit cover art',
-    subtitle: 'Send in better art for any song',
-    onClick: () => useStore.getState().openCoverArtSubmit(),
-  }, {
-    id: 'community-edit',
-    icon: <FileAudio size={18} className="text-accent" />,
-    title: 'Submit a remix or edit',
-    subtitle: 'Share your remix or stem edit in Files',
-    onClick: () => useStore.getState().openCommunityEditSubmit(),
-  }]
   const showTools = showSection('tools')
 
   const mainShown = showRecent || showOnThisDay || showPlaylists || showAlbums || showTools
   const sideShown = showChat || showNews || showRadio || showLiked || showGames
+  const mainSections = ([
+    showRecent && 'recent',
+    showOnThisDay && 'onthisday',
+    showPlaylists && 'playlists',
+    showAlbums && 'albums',
+    showTools && 'tools',
+  ] as const).filter((s): s is MainSection => !!s)
+  const spans = bentoSpans(mainSections, mainWidth >= BENTO_MIN_WIDTH)
 
   return (
-    <div className="flex-1 min-h-0 overflow-y-auto">
+    <div className="flex-1 min-h-0 overflow-y-auto glass-scroll pb-player">
       <div className="h-full min-h-[600px] w-full px-6 py-5 flex flex-col gap-4">
-        {/* ── Hero: one line, with "Your listening" folded in as numbers ── */}
-        <div className="shrink-0 flex items-center gap-3.5 flex-wrap">
-          <button
-            onClick={openOwnPublicProfile}
-            aria-label="Your public profile"
-            className="w-11 h-11 shrink-0 rounded-full overflow-hidden bg-[var(--surface-overlay)] flex items-center justify-center text-text-muted hover:bg-surface-highest transition-colors"
-          >
-            {account?.avatar
-              ? <img src={account.avatar} alt="" className="w-full h-full object-cover" />
-              : <User size={19} />}
-          </button>
-          <h1 className="text-text-primary text-xl font-bold leading-tight truncate min-w-0">
-            {greeting()}{account ? `, ${account.display_name}` : ''}
-          </h1>
-          {account && userApi.showStaffProfile(account) && (
-            <button
-              onClick={openProfile}
-              className="flex items-center gap-1.5 h-8 px-3 rounded-full bg-surface-raised hover:bg-surface-highest text-text-secondary hover:text-text-primary text-xs font-semibold transition-colors"
-            >
-              {userApi.staffProfileLabel(account)}
-            </button>
-          )}
-          <button
-            onClick={() => setActiveView('api-tracker')}
-            aria-label="Search the catalog"
-            title="Search the catalog"
-            className="w-9 h-9 shrink-0 rounded-full flex items-center justify-center text-text-muted hover:text-text-primary hover:bg-[var(--surface-overlay)] transition-colors"
-          >
-            <Search size={17} />
-          </button>
-          <div className="relative shrink-0">
-            <button
-              ref={moreBtnRef}
-              onClick={() => setShowMore((v) => !v)}
-              aria-label="More"
-              title="More"
-              className="w-9 h-9 shrink-0 rounded-full flex items-center justify-center text-text-muted hover:text-text-primary hover:bg-[var(--surface-overlay)] transition-colors"
-            >
-              <MoreHorizontal size={19} />
-            </button>
-            {showMore && (
-              <MoreMenu
-                anchorRef={moreBtnRef}
-                onClose={() => setShowMore(false)}
-                items={hiddenNavItems}
-                onSelect={setActiveView}
-              />
-            )}
-          </div>
-          {showListening && (
-            <div className="ml-auto flex items-center gap-4 min-w-0">
-              {totalPlays === 0 ? (
-                <span className="text-text-muted text-xs truncate">Play something and your stats will show up here.</span>
-              ) : (
-                <>
-                  <Stat value={totalPlays.toLocaleString()} label={totalPlays === 1 ? 'play' : 'plays'} />
-                  <Stat value={distinctSongs.toLocaleString()} label={distinctSongs === 1 ? 'song' : 'songs'} />
-                  <Stat value={weekPlays.toLocaleString()} label="this week" />
-                </>
-              )}
-              {siteStats && (
-                <>
-                  <div className="w-px h-6 bg-[var(--border)] shrink-0" />
-                  <button
-                    onClick={() => setActiveView('statistics')}
-                    title="Catalog statistics"
-                    className="rounded-lg -mx-1 px-1 hover:bg-[var(--surface-overlay)] transition-colors"
-                  >
-                    <Stat value={siteStats.total_songs.toLocaleString()} label="in the catalog" />
-                  </button>
-                </>
-              )}
-              <button
-                onClick={() => setActiveView('stats')}
-                className="flex items-center gap-0.5 px-2.5 py-1 rounded-lg text-text-muted text-xs font-semibold hover:text-text-primary hover:bg-[var(--surface-overlay)] transition-colors shrink-0"
-              >
-                Wrapped<ChevronRight size={13} />
-              </button>
-            </div>
-          )}
-        </div>
+        {/* Shared with the staff dashboards, so it stays put while the
+            widgets swipe between them. */}
+        <HomeHero on="home" />
 
-        {/* ── Main: recently played + playlists (+ tools) stacked, full width ──
+        {/* ── Main: recently played, on this day, playlists, albums, tools as a bento ──
             ── Side rail: news, 999 FM, liked, games - compact, narrow ── */}
         {(mainShown || sideShown) && (
-          <div className="flex-1 min-h-0 flex gap-4">
+          <div className="flex-1 min-h-0 flex gap-7">
             {mainShown && (
-              <div className="flex-1 min-w-0 min-h-0 overflow-y-auto flex flex-col gap-4">
+              <div className="flex-1 min-w-0 min-h-0 overflow-y-auto no-scrollbar -mx-6 px-6 -mt-4 pt-4 -mb-5 pb-5 md:-mb-16 md:pb-16">
+              {/* A scroller clips its children's shadows at its edge, which drew a
+                  hard seam where each gap between tiles met the column's side.
+                  The padding gives the tiles' glass shadow room inside, and the
+                  matching negative margin keeps the layout where it was. On md+
+                  the bottom room reaches past the shadow (12px + 36px blur) into
+                  the page's space under the player bar; 20px cut it off in a
+                  line beside the bar.
+                  The grid sits inside the scroller, not on it: a grid of definite
+                  height squeezes its auto rows to fit, and tiles then scroll inside. */}
+              <div ref={mainRef} className="grid grid-cols-12 gap-4">
                 {showRecent && (
                   <RecentTile
                     tracks={recent}
                     onPlay={openTrack}
                     onContextMenu={(track, e) => setCtxMenu({ track, songId: userApi.trackIdToSongId(track.id), x: e.clientX, y: e.clientY })}
-                    span="shrink-0"
+                    span={spans.recent ?? 'col-span-12'}
                   />
                 )}
                 {showOnThisDay && (
                   <OnThisDayTile
                     onContextMenu={(track, e) => setCtxMenu({ track, songId: userApi.trackIdToSongId(track.id), x: e.clientX, y: e.clientY })}
-                    span="shrink-0"
+                    span={spans.onthisday ?? 'col-span-12'}
                   />
                 )}
                 {showPlaylists && (
@@ -540,17 +521,45 @@ export default function HomeViewDesktop(): JSX.Element {
                     playlists={playlistRow}
                     onAll={() => setActiveView('playlists')}
                     onContextMenu={(p, e) => { if (p.playlist) setPlaylistMenu({ playlist: p.playlist, x: e.clientX, y: e.clientY }) }}
-                    span="shrink-0"
+                    span={spans.playlists ?? 'col-span-12'}
                   />
                 )}
                 {showAlbums && (
                   <AlbumsTile
                     albums={albumRow}
                     onAll={() => setActiveView('albums')}
-                    span="shrink-0"
+                    span={spans.albums ?? 'col-span-12'}
                   />
                 )}
-                {showTools && <ToolsTile tools={tools} span="shrink-0" />}
+                {showTools && (
+                  <ToolsTile span={spans.tools ?? 'col-span-12'}>
+                    <ShortcutCard
+                      icon={<MicVocal size={18} className="text-accent" />}
+                      title="Synced lyrics"
+                      subtitle="Time a song's lyrics by the line or the word"
+                      onClick={() => useStore.getState().openLyricsGen()}
+                    />
+                    <ShortcutCard
+                      icon={<AudioLines size={18} className="text-accent" />}
+                      title="Identify song"
+                      subtitle="Name a song from the mic, this PC or a file"
+                      onClick={() => useStore.getState().setShowRecognition(true)}
+                    />
+                    <ShortcutCard
+                      icon={<ImagePlus size={18} className="text-accent" />}
+                      title="Submit cover art"
+                      subtitle="Send in better art for any song"
+                      onClick={() => useStore.getState().openCoverArtSubmit()}
+                    />
+                    <ShortcutCard
+                      icon={<FileAudio size={18} className="text-accent" />}
+                      title="Submit a remix or edit"
+                      subtitle="Share your remix or stem edit in Files"
+                      onClick={() => useStore.getState().openCommunityEditSubmit()}
+                    />
+                  </ToolsTile>
+                )}
+              </div>
               </div>
             )}
 

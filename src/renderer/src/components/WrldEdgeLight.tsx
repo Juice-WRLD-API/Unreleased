@@ -18,7 +18,7 @@ function screenFit(): number {
 
 export default function WrldEdgeLight({ look, held, onUnsupported }: {
   look: string
-  /** Covered by a picker: the light holds still. */
+  /** Covered by a picker: the light slows down. */
   held: boolean
   /** WebGL2 isn't there: the tab leaves the light out. */
   onUnsupported: () => void

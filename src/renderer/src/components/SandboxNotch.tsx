@@ -40,7 +40,7 @@ export default function SandboxNotch(): JSX.Element {
     // fixed left/top are computed in viewport coordinates).
     <div
       className={`fixed inset-0 z-[500] flex flex-col items-center transition-[background-color,backdrop-filter] duration-200 ${
-        showBackdrop ? 'bg-black/40 backdrop-blur-sm pointer-events-auto' : 'pointer-events-none'
+        showBackdrop ? 'glass-scrim pointer-events-auto' : 'pointer-events-none'
       }`}
       onClick={(e) => { if (e.target === e.currentTarget) collapse() }}
     >

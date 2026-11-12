@@ -278,6 +278,36 @@ html.wrld-active #root {
 .slim-scroll::-webkit-scrollbar-thumb { background: var(--scrollbar); border-radius: 8px; border: 3px solid transparent; background-clip: content-box; }
 .slim-scroll::-webkit-scrollbar-thumb:hover { background: var(--text-muted); background-clip: content-box; }
 
+/* Page scrollbar for the glass chrome: a short pill inset from the window
+   edge, nearly invisible until the pointer is over the page.
+   Views that scroll under the window chrome (.scroll-under) get it on their
+   .pb-player scroller. The track is shortened with two empty end buttons so
+   it starts below the min/max/close buttons and ends above the player bar. */
+:is(.glass-scroll, .scroll-under .pb-player)::-webkit-scrollbar { width: 14px; height: 14px; }
+:is(.glass-scroll, .scroll-under .pb-player)::-webkit-scrollbar-track { background: transparent; }
+:is(.glass-scroll, .scroll-under .pb-player)::-webkit-scrollbar-thumb {
+  background: transparent;
+  background-clip: content-box;
+  border: 4px solid transparent;
+  border-radius: 999px;
+  transition: background-color 0.45s cubic-bezier(0.4, 0, 0.2, 1);
+}
+:is(.glass-scroll, .scroll-under .pb-player):hover::-webkit-scrollbar-thumb {
+  background-color: color-mix(in srgb, var(--text-muted) 38%, transparent);
+}
+:is(.glass-scroll, .scroll-under .pb-player)::-webkit-scrollbar-thumb:hover,
+:is(.glass-scroll, .scroll-under .pb-player)::-webkit-scrollbar-thumb:active {
+  background-color: color-mix(in srgb, var(--text-muted) 70%, transparent);
+}
+:is(.glass-scroll, .scroll-under .pb-player)::-webkit-scrollbar-button:vertical:start:decrement {
+  display: block; height: 40px; background: transparent;
+}
+@media (min-width: 768px) {
+  .scroll-under .pb-player::-webkit-scrollbar-button:vertical:end:increment {
+    display: block; height: var(--player-dock, 0px); background: transparent;
+  }
+}
+
 /* Draggable titlebar */
 .titlebar-drag { -webkit-app-region: drag; }
 .titlebar-no-drag { -webkit-app-region: no-drag; }
@@ -748,6 +778,15 @@ input[type='range']:active::-moz-range-thumb {
   border-left: 1px solid var(--border);
   border-top-left-radius: 3px;
 }
+/* Over a glass panel the caret's fill would stack on the panel's own veil,
+   so only its top half (the part above the panel) is drawn. Inside a docked
+   pane the nested panel is a plain fill (see .glass-pane .glass-pane). */
+.pl-grid-caret.is-glass {
+  background-color: var(--glass-pane);
+  border-color: var(--glass-rim);
+  clip-path: polygon(0 0, 100% 0, 0 100%);
+}
+.glass-pane .pl-grid-caret.is-glass { background-color: var(--fill); }
 
 /* Per-row reveal, staggered - layered on top of the panel entrance so the
    list cascades in. `backwards` (not `both`) so the fill state is dropped
@@ -991,6 +1030,385 @@ input[type='range']:active::-moz-range-thumb {
       backdrop-filter: none;
     }
   }
+}
+
+@media (max-width: 767px) {
+  .glass-scrim {
+    background-color: rgb(0 0 0 / 0.6);
+    backdrop-filter: blur(4px);
+  }
+  .glass-thick {
+    background-color: var(--surface);
+    border: 1px solid var(--border);
+    box-shadow: 0 12px 32px rgb(0 0 0 / 0.35);
+  }
+}
+
+@media (min-width: 768px) {
+/* ─── Glass chrome ────────────────────────────────────────────────────────────
+   The iOS 26 / Apple Music look, on every skin: chrome floats as rounded panes
+   with a hairline rim and a brighter top edge, and the pieces with moving
+   content behind them (the player bar, the pill nav, the notification and
+   transfer panels, toasts, the dialog scrim) frost it with a backdrop blur.
+   Fills and rims are mixed from the skin's own text color, the way iOS's
+   systemFill/separator are, so custom skins get them without new skin vars.
+
+   backdrop-filter makes its element the containing block for position:fixed
+   descendants. Put it straight on an element only when nothing inside
+   positions itself against the window: ContextMenu, Modal and the Themed*
+   pickers portal out, but NavPillGrip's drop targets, ClampedMenu and many
+   views' popovers don't. A pane that may hold one of those takes
+   .glass-backdrop, which blurs from a ::before layer instead. That layer
+   loses its blur while an ancestor is fading (opacity < 1 makes the ancestor
+   the backdrop root), so animated popovers use the direct classes. */
+:root {
+  --fill: color-mix(in srgb, var(--text-primary) 9%, transparent);
+  --fill-strong: color-mix(in srgb, var(--text-primary) 16%, transparent);
+  --separator: var(--border);
+  /* Inset-grouped cells and the raised thumb of a segmented control. Dark
+     skins lift both further off the page, as iOS does. */
+  --grouped: color-mix(in srgb, var(--text-primary) 5%, var(--surface));
+  --control-thumb: var(--surface);
+  --glass-rim: color-mix(in srgb, var(--text-primary) 12%, transparent);
+  --glass-edge: color-mix(in srgb, #fff 12%, transparent);
+  /* What every glass fill is mixed from: the skin's surface with a hint of
+     the accent. Light skins lift it toward white, so glass sits brighter than
+     the page the way iOS light glass does; dark skins keep it dark. */
+  --glass-accent: rgb(var(--accent-rgb));
+  --glass-base: color-mix(in srgb, var(--glass-accent) 9%, color-mix(in srgb, #fff 55%, var(--surface)));
+  /* The light an edge of glass catches: bright along the top-left, a faint
+     shade along the bottom-right (.glass-specular). */
+  --glass-spec-hi: rgb(255 255 255 / 0.9);
+  --glass-spec-lo: rgb(0 0 0 / 0.08);
+  /* A soft gloss down from a pane's top edge. */
+  --glass-sheen: rgb(255 255 255 / 0.45);
+  /* Docked panes: a frosted white veil on light skins. */
+  --glass-pane: color-mix(in srgb, color-mix(in srgb, var(--glass-accent) 8%, #fff) 52%, transparent);
+  --glass-pane-shadow: 0 10px 30px rgb(0 0 0 / 0.08), 0 1px 3px rgb(0 0 0 / 0.05);
+}
+.dark {
+  --grouped: color-mix(in srgb, var(--text-primary) 11%, var(--surface));
+  --control-thumb: color-mix(in srgb, var(--text-primary) 36%, var(--surface));
+  --glass-base: color-mix(in srgb, var(--glass-accent) 10%, var(--surface-raised));
+  --glass-spec-hi: rgb(255 255 255 / 0.32);
+  --glass-spec-lo: rgb(255 255 255 / 0.1);
+  --glass-sheen: rgb(255 255 255 / 0.06);
+  /* Dark skins: smoked glass, darker than what's behind it, so text on it
+     keeps its contrast however bright the cover is. */
+  --glass-pane: color-mix(in srgb, color-mix(in srgb, var(--glass-accent) 12%, #000) 28%, transparent);
+  --glass-pane-shadow: 0 12px 36px rgb(0 0 0 / 0.35), 0 1px 3px rgb(0 0 0 / 0.2);
+}
+
+/* A see-through pane over whatever moves beneath it. */
+.glass {
+  background: var(--surface-raised);
+  background: color-mix(in srgb, var(--glass-base) 62%, transparent);
+  -webkit-backdrop-filter: blur(22px) saturate(1.8);
+  backdrop-filter: blur(22px) saturate(1.8);
+  box-shadow:
+    inset 0 0 0 0.5px var(--glass-rim),
+    inset 0 1px 0 var(--glass-edge),
+    0 8px 28px rgb(0 0 0 / 0.22);
+}
+/* Denser, for panels that carry body text: still frosted, but busy artwork
+   behind can't fight the rows for legibility. */
+.glass-thick {
+  background: var(--surface-raised);
+  background: color-mix(in srgb, var(--glass-base) 84%, transparent);
+  -webkit-backdrop-filter: blur(30px) saturate(1.8);
+  backdrop-filter: blur(30px) saturate(1.8);
+  box-shadow:
+    inset 0 0 0 0.5px var(--glass-rim),
+    inset 0 1px 0 var(--glass-edge),
+    0 12px 40px rgb(0 0 0 / 0.3);
+}
+/* Bar backgrounds only (no lift). */
+.glass-bar {
+  background: var(--surface);
+  background: color-mix(in srgb, var(--glass-base) 72%, transparent);
+  -webkit-backdrop-filter: blur(22px) saturate(1.8);
+  backdrop-filter: blur(22px) saturate(1.8);
+}
+/* The playlist controls sit on the page; frost only when tracks pass beneath. */
+.playlist-track-header-pinned {
+  background: var(--surface);
+  background: color-mix(in srgb, var(--glass-base) 72%, transparent);
+  -webkit-backdrop-filter: blur(24px);
+  backdrop-filter: blur(24px);
+}
+
+/* Round toolbar buttons: the same glass at button scale, with a lighter
+   shadow so a row of them doesn't smudge. */
+.glass-button {
+  background: var(--surface-raised);
+  background: color-mix(in srgb, var(--glass-base) 55%, transparent);
+  -webkit-backdrop-filter: blur(16px) saturate(1.8);
+  backdrop-filter: blur(16px) saturate(1.8);
+  box-shadow:
+    inset 0 0 0 0.5px color-mix(in srgb, var(--text-primary) 14%, transparent),
+    inset 0 1px 0 color-mix(in srgb, #fff 14%, transparent),
+    0 2px 10px rgb(0 0 0 / 0.12);
+}
+
+/* Frosted glass painted from a ::before layer, for panes that may hold a
+   position:fixed popover (see above): the floating player bar and the pill
+   nav. The element's own drop shadow stays on the element (.glass-lift), so
+   an overflow-hidden pane doesn't clip it. --glass-tint sets the pane color. */
+.glass-backdrop {
+  isolation: isolate;
+  background-color: transparent;
+}
+.glass-backdrop::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  border-radius: inherit;
+  pointer-events: none;
+  background-color: var(--glass-tint, color-mix(in srgb, var(--glass-base) 60%, transparent));
+  -webkit-backdrop-filter: blur(28px) saturate(1.8);
+  backdrop-filter: blur(28px) saturate(1.8);
+  box-shadow:
+    inset 0 0 0 0.5px var(--glass-rim),
+    inset 0 1px 0 var(--glass-edge);
+}
+.glass-lift { box-shadow: 0 10px 36px rgb(0 0 0 / 0.26); }
+/* The pill nav floats over pages, so it frosts them like the player. */
+.app-sidebar.glass-backdrop {
+  --glass-tint: color-mix(in srgb, var(--glass-base) 55%, transparent);
+}
+
+/* Specular edge: a 1px ring painted over the element's own edge, bright where
+   light would catch the top-left and faint along the bottom-right, the way
+   iOS glass edges read. A masked ::after, so it follows the radius and sits
+   over children that reach the edge. The element must be positioned. */
+.glass-specular::after,
+.glass-pane::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  padding: 1px;
+  pointer-events: none;
+  background: linear-gradient(150deg, var(--glass-spec-hi), transparent 34%, transparent 66%, var(--glass-spec-lo));
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  mask: linear-gradient(#000 0 0) content-box exclude, linear-gradient(#000 0 0);
+}
+
+/* Docked panes: the inset sidebar, the Now Playing / Queue cards and Home's
+   tiles. A veil rather than a fill - frosted white on light skins, smoked on
+   dark ones, with a touch of the accent - so the ambient backdrop's colors
+   show through, plus a gloss from the top and the specular edge. Only that
+   backdrop sits behind them, and it's blurred already, so no backdrop-filter
+   to pay for. --pane-color (the sidebar's own skin color) is only the solid
+   fallback for reduced transparency. */
+.glass-pane {
+  position: relative;
+  background-color: var(--glass-pane);
+  background-image: linear-gradient(180deg, var(--glass-sheen), transparent 42%);
+  box-shadow:
+    inset 0 0 0 0.5px var(--glass-rim),
+    var(--glass-pane-shadow);
+}
+.app-sidebar.glass-pane { --pane-color: var(--sidebar); }
+/* A pane that is itself a button lifts a little under the pointer. */
+.glass-pane.glass-press { transition: background-color 0.3s cubic-bezier(0.4, 0, 0.2, 1); }
+.glass-pane.glass-press:hover { background-color: color-mix(in srgb, var(--text-primary) 8%, var(--glass-pane)); }
+/* Glass on glass reads as mud: a pane inside another (Home's tool cards in
+   the Tools tile) becomes a plain fill of the outer one. */
+.glass-pane .glass-pane {
+  background-color: var(--fill);
+  background-image: none;
+  box-shadow: none;
+}
+.glass-pane .glass-pane::after { display: none; }
+.glass-pane .glass-pane.glass-press:hover { background-color: var(--fill-strong); }
+
+/* Controls that sit straight on the ambient backdrop, like a view's toolbar
+   (search field, round icon buttons): the docked-pane veil at control scale,
+   rim only, no shadow or sheen, so a row of them reads as one strip. .is-on
+   tints one with the accent. An <input> can't carry .glass-specular (no
+   ::after), so its positioned wrapper takes it. */
+.glass-field {
+  background-color: var(--glass-pane);
+  box-shadow: inset 0 0 0 0.5px var(--glass-rim);
+  transition:
+    background-color 0.3s cubic-bezier(0.4, 0, 0.2, 1),
+    box-shadow 0.3s cubic-bezier(0.4, 0, 0.2, 1),
+    color 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+.glass-field:hover { background-color: color-mix(in srgb, var(--text-primary) 7%, var(--glass-pane)); }
+.glass-field.is-on {
+  background-color: color-mix(in srgb, var(--glass-accent) 22%, var(--glass-pane));
+  box-shadow: inset 0 0 0 0.5px color-mix(in srgb, var(--glass-accent) 45%, transparent);
+  color: var(--glass-accent);
+}
+.glass-field:focus-visible,
+input.glass-field:focus {
+  outline: none;
+  box-shadow:
+    inset 0 0 0 1px color-mix(in srgb, var(--glass-accent) 60%, transparent),
+    0 0 0 3px color-mix(in srgb, var(--glass-accent) 18%, transparent);
+}
+
+/* Inside a docked pane (a Home or profile tile) the veil would be glass on
+   glass, so fields and segmented tracks become plain fills of the pane. */
+.glass-pane .glass-field,
+.glass-pane .glass-seg { background-color: var(--fill); }
+.glass-pane .glass-field:hover { background-color: var(--fill-strong); }
+.glass-pane .glass-field.is-on { background-color: color-mix(in srgb, var(--glass-accent) 18%, transparent); }
+
+/* Segmented control (components/GlassSegmented): a veil track with a raised
+   thumb that slides to the chosen option. The thumb sits under the labels
+   (z-index -1 inside the isolated track). */
+.glass-seg {
+  position: relative;
+  isolation: isolate;
+  display: inline-flex;
+  align-items: center;
+  padding: 3px;
+  border-radius: 9999px;
+  background-color: var(--glass-pane);
+  box-shadow: inset 0 0 0 0.5px var(--glass-rim);
+}
+.glass-seg-thumb {
+  position: absolute;
+  top: 3px;
+  bottom: 3px;
+  left: 0;
+  z-index: -1;
+  border-radius: 9999px;
+  background-color: var(--control-thumb);
+  box-shadow: 0 1px 4px rgb(0 0 0 / 0.18), inset 0 0 0 0.5px var(--glass-rim);
+  pointer-events: none;
+}
+.glass-seg-thumb.is-ready {
+  transition:
+    transform 0.45s cubic-bezier(0.4, 0, 0.2, 1),
+    width 0.45s cubic-bezier(0.4, 0, 0.2, 1);
+}
+@media (prefers-reduced-motion: reduce) {
+  .glass-seg-thumb.is-ready { transition: none; }
+}
+
+/* The ambient backdrop behind the whole window (components/AmbientBackdrop):
+   the playing cover blurred to a wash of its colors, or an accent glow, under
+   a tint of the skin's surface strong enough to keep text readable. It sits
+   at z-index -1 in the root stacking context, which paints it above <html>'s
+   background but under every box's own background - so body, #root and the
+   shell give theirs up (html keeps var(--surface) as the base). */
+body, #root, .app-shell {
+  background-color: transparent !important;
+  background-image: none !important;
+}
+.app-ambient {
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  overflow: hidden;
+  pointer-events: none;
+  --ambient-tint: 62%;
+  --ambient-art: brightness(1.15) saturate(1.9);
+}
+/* Dark skins: dim the art a little first, so a bright cover can't lift the
+   page enough to cost muted text its contrast. */
+.dark .app-ambient {
+  --ambient-tint: 60%;
+  --ambient-art: brightness(0.75) saturate(2);
+}
+.app-ambient-glow {
+  position: absolute;
+  inset: 0;
+  background:
+    radial-gradient(55% 60% at 88% 6%, rgb(var(--accent-rgb) / 0.55), transparent 70%),
+    radial-gradient(50% 55% at 6% 96%, rgb(var(--accent-rgb) / 0.4), transparent 70%);
+}
+.app-ambient-art {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  /* Scaled past the window so the blur's soft edges fall outside it. */
+  transform: scale(1.3);
+  filter: blur(90px) var(--ambient-art);
+  opacity: 0;
+  transition: opacity 0.9s cubic-bezier(0.4, 0, 0.2, 1);
+}
+.app-ambient-art.is-shown { opacity: 1; }
+.app-ambient-tint {
+  position: absolute;
+  inset: 0;
+  /* The surface with a touch of the accent, so even a gray cover reads as
+     the skin's color. */
+  background: color-mix(in srgb, color-mix(in srgb, var(--glass-accent) 7%, var(--surface)) var(--ambient-tint), transparent);
+}
+@media (prefers-reduced-motion: reduce) {
+  .app-ambient-art { transition-duration: 0.01s; }
+}
+
+/* Behind a dialog: the page dims a little and frosts, instead of going dark. */
+.glass-scrim {
+  background-color: rgb(0 0 0 / 0.3);
+  -webkit-backdrop-filter: blur(16px) saturate(1.4);
+  backdrop-filter: blur(16px) saturate(1.4);
+}
+/* Dialog panels keep their opaque color (their headers and footers are
+   painted in it) and swap the flat border for the rim. The rim is drawn on
+   top, since an inset shadow would sit under those headers. */
+.modal-glass { border-color: transparent !important; }
+.modal-glass::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: 45;
+  border-radius: inherit;
+  padding: 1px;
+  pointer-events: none;
+  background: linear-gradient(150deg, var(--glass-spec-hi), color-mix(in srgb, var(--text-primary) 10%, transparent) 34%, color-mix(in srgb, var(--text-primary) 10%, transparent) 66%, var(--glass-spec-lo));
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  mask: linear-gradient(#000 0 0) content-box exclude, linear-gradient(#000 0 0);
+}
+
+/* Room for the floating player at the end of a scroller in a view that runs
+   under it (App.tsx SCROLL_UNDER). --player-dock is the bar's height plus its
+   gap, published by Player; 0 while the bar is hidden. Outside those views
+   the view area is padded instead, so the class does nothing there.
+   !important because some scrollers set their padding inline (Library).
+   Desktop widths only: narrow windows show the in-flow phone player, and
+   keep each scroller's own padding. */
+@media (min-width: 768px) {
+  .scroll-under .pb-player { padding-bottom: calc(var(--player-dock, 0px) + 0.5rem) !important; }
+  /* A selection bar pinned to the bottom of such a scroller sits above the bar. */
+  .scroll-under .sticky-dock { bottom: var(--player-dock, 0px); }
+}
+/* Toasts and notices pinned to the bottom of the window clear the bar. */
+.scroll-under .files-selection-bar { margin-bottom: calc(var(--player-dock, 0px) + 0.5rem); }
+.above-player { bottom: calc(var(--player-dock, 0px) + 1.25rem); }
+
+@media (prefers-reduced-transparency: reduce) {
+  .glass, .glass-thick, .glass-bar, .glass-button, .playlist-track-header-pinned {
+    background: var(--surface-raised);
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+  }
+  .glass-backdrop::before {
+    background-color: var(--surface-raised);
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+  }
+  .glass-scrim {
+    background-color: rgb(0 0 0 / 0.55);
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+  }
+  .app-ambient { display: none; }
+  .glass-pane { background-color: var(--pane-color, var(--surface-raised)); background-image: none; }
+  .glass-field, .glass-seg { background-color: var(--surface-raised); }
+}
+
 }
 
 /* The copy a closing modal or menu leaves behind to animate out on

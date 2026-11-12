@@ -48,7 +48,7 @@ import { foldersMatchServer, newFolderId, normalizeFolderName, pruneFolders } fr
 import type { PlaylistFolder, ServerPlaylistFolder } from '../lib/playlistFolders'
 import { createQueueSlice, QueueSlice, withoutPlayHistory } from './queueSlice'
 import { createDesktopSlice, type DesktopSlice } from './desktopSlice'
-import { getSkin, setCustomSkinsCache, type Skin, type SkinId } from '../lib/skins'
+import { DEFAULT_SKIN_ID, getSkin, setCustomSkinsCache, type Skin, type SkinId } from '../lib/skins'
 import { getFont, syncedFontId } from '../lib/fonts'
 import {
   sanitizeFieldKeys, DEFAULT_DETAIL_FIELDS, DEFAULT_MOBILE_DETAIL_FIELDS, DEFAULT_LIST_COLUMNS,
@@ -189,8 +189,6 @@ interface AppState {
   // back into the main window - the per-view list modals keep their own local
   // state. null = nothing shown.
   infoSongId: number | null
-  // Desktop bottom player collapsed to a slim strip to reclaim vertical space.
-  playerCollapsed: boolean
   // True while the WRLD tab's own in-page fullscreen (album-art focus mode)
   // is active - lets App.tsx hide the frameless-window title bar controls,
   // which would otherwise float over the immersive view.
@@ -619,7 +617,6 @@ interface AppActions {
   setShowEqPanel: (show: boolean) => void
   toggleEqPanel: () => void
   setInfoSongId: (id: number | null) => void
-  setPlayerCollapsed: (collapsed: boolean) => void
   setWrldFullscreen: (fullscreen: boolean) => void
   setHeroBleedTop: (heroBleedTop: boolean) => void
   setTheme: (theme: SkinId) => void
@@ -1368,7 +1365,6 @@ export const useStore = create<AppStore>((set, get, store) => ({
   showMoreNav: false,
   showEqPanel: false,
   infoSongId: null,
-  playerCollapsed: ls.get<boolean>('playerCollapsed') ?? false,
   wrldFullscreen: false,
   heroBleedTop: false,
   radioFmActive: false,
@@ -1380,10 +1376,9 @@ export const useStore = create<AppStore>((set, get, store) => ({
   radioFmQueuePreview: [],
   radioFmMatchedSong: null,
   // Seeds lib/skins' cache as a side effect - MUST stay above `theme` so a
-  // persisted custom skin id resolves (getSkin) instead of falling back to dark.
+  // persisted custom skin id resolves (getSkin) instead of falling back to the default skin.
   customSkins: hydrateCustomSkins(),
-  // getSkin() maps unknown persisted ids (renamed/removed skins) back to dark.
-  theme: getSkin(ls.get<string>('theme') ?? 'dark').id,
+  theme: getSkin(ls.get<string>('theme') ?? DEFAULT_SKIN_ID).id,
   sidebarPosition: ls.get<SidebarPosition>('sidebarPosition') ?? 'left',
   navStyle: ls.get<NavStyle>('navStyle') ?? 'classic',
   autoHideNav: ls.get<boolean>('autoHideNav') ?? false,
@@ -1580,7 +1575,6 @@ export const useStore = create<AppStore>((set, get, store) => ({
     if (infoSongId != null) useSandboxStore.getState().expand()
     set({ infoSongId })
   },
-  setPlayerCollapsed: (playerCollapsed) => { set({ playerCollapsed }); ls.set('playerCollapsed', playerCollapsed) },
   setWrldFullscreen: (wrldFullscreen) => set({ wrldFullscreen }),
   setHeroBleedTop: (heroBleedTop) => set({ heroBleedTop }),
   setTheme: (theme) => { set({ theme }); ls.set('theme', theme); get()._scheduleProfilePush(['userSettings']) },
@@ -1601,7 +1595,7 @@ export const useStore = create<AppStore>((set, get, store) => ({
     set({ customSkins: next })
     ls.set('customSkins', next)
     setCustomSkinsCache(next)
-    if (get().theme === id) get().setTheme('dark')
+    if (get().theme === id) get().setTheme(DEFAULT_SKIN_ID)
     get()._scheduleProfilePush(['userSettings'])
   },
   setSidebarPosition: (sidebarPosition) => { set({ sidebarPosition }); ls.set('sidebarPosition', sidebarPosition); get()._scheduleProfilePush(['userSettings']) },

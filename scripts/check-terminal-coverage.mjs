@@ -25,6 +25,7 @@ const LIB = join(SRC, 'lib')
 // "module.function": why the terminal has no command for it. Keep this list
 // short and honest - a reason should say what is reachable instead.
 const NOT_APPLICABLE = {
+  'wrldExpand.expandToWrld': 'animates navigation to WRLD from the player bar and makes no API request (open wrld)',
   // Live sockets: the terminal can't hold a streaming screen open as a command.
   'heardleMatchApi.connectMatchSocket': 'live websocket; the REST queue calls are covered',
   // Same request as another function that is covered.

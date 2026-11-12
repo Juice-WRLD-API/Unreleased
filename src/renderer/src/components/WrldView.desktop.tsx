@@ -1,3 +1,4 @@
+import { useWrldExpandIn } from '../lib/wrldExpand'
 import { setTermFullscreen } from '../lib/terminal/fullscreenStore'
 import { SwapIcon } from './PlayerMotion'
 import { useEffect, useLayoutEffect, useRef, useState, memo, useCallback } from 'react'
@@ -225,6 +226,8 @@ export default function WrldView(): JSX.Element {
   // The page itself, in the tab or inside the fullscreen portal - where the
   // visualizer measures its layout from.
   const pageRef = useRef<HTMLDivElement>(null)
+  // Slides up from the player bar when opened from it (lib/wrldExpand.ts).
+  useWrldExpandIn(pageRef)
 
   const enterFullscreen = (): void => {
     document.documentElement.requestFullscreen?.().catch(() => {})

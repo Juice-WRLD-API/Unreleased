@@ -91,7 +91,7 @@ export default function LikedSongsView({ onBack }: { onBack?: () => void } = {})
 
   return (
     <>
-    <div className="flex-1 flex flex-col min-h-0 overflow-y-auto pb-dock">
+    <div className="flex-1 flex flex-col min-h-0 overflow-y-auto pb-dock pb-player">
       <div className="px-5 pt-5 pb-8">
         <button
           onClick={onBack ?? (() => setActiveView(previousView && previousView !== 'liked' ? previousView : 'wrld'))}

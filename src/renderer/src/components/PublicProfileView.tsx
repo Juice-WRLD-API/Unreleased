@@ -447,7 +447,7 @@ export default function PublicProfileView(): JSX.Element {
 
   if (loading) {
     return (
-      <div className="flex-1 flex flex-col min-h-0 overflow-y-auto px-5 py-6 animate-pulse">
+      <div className="flex-1 flex flex-col min-h-0 overflow-y-auto px-5 py-6 pb-player animate-pulse">
         <div className="h-5 w-20 rounded bg-surface-overlay mb-4" />
         <div className="flex items-center gap-4 mb-2">
           <div className="w-16 h-16 rounded-full bg-surface-overlay shrink-0" />
@@ -557,7 +557,7 @@ export default function PublicProfileView(): JSX.Element {
   }
 
   return (
-    <div className="flex-1 flex flex-col min-h-0 overflow-y-auto px-5 py-6">
+    <div className="flex-1 flex flex-col min-h-0 overflow-y-auto px-5 py-6 pb-player">
       <button
         onClick={() => setActiveView(previousView && previousView !== 'public-profile' ? previousView : 'wrld')}
         className="flex items-center gap-1.5 self-start text-accent md:text-text-muted hover:text-text-primary text-body md:text-sm md:tracking-normal max-md:active:opacity-60 transition-colors mb-4"

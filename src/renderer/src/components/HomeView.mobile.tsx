@@ -100,7 +100,7 @@ export default function HomeViewMobile(): JSX.Element {
     account, likedTrackIds, radioFmIsLive, radioFmNowPlaying, setActiveView,
     openProfile, openOwnPublicProfile, showSection, recent, newsItems, games, playlistRow, albumRow,
     totalPlays, distinctSongs, weekPlays, siteStats, openTrack, openNewsItem, openRadioFm,
-  } = useHomeData()
+  } = useHomeData({ mobile: true })
   // Whatever doesn't fit the bottom nav directly - its old in-bar "More" tab
   // moved here, since fitting it AND a Home tab both in the bar pushed the
   // cap down by one more real destination. Mobile-only, so it stays here

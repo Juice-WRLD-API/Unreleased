@@ -5,6 +5,7 @@ import { TABS, TabPanel } from './docs/content'
 import { DocsPrimitivesProvider } from './docs/primitivesContext'
 import { Code, Section, Endpoint, MethodPath } from './docs/primitives.desktop'
 import { useDocsSearch } from '../hooks/useDocsSearch'
+import { GLASS_SEARCH, GLASS_SEARCH_WRAP } from './glassControls'
 
 export default function DocsPage(): JSX.Element {
   const { activeTab, setActiveTab, rawQuery, setRawQuery, query, register, hitsByTab, totalHits } = useDocsSearch()
@@ -39,24 +40,24 @@ export default function DocsPage(): JSX.Element {
           </a>
         </div>
         {/* Search */}
-        <div className="relative mb-3">
-          <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-text-muted pointer-events-none" />
+        <div className={`${GLASS_SEARCH_WRAP} mb-3`}>
+          <Search size={15} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-text-muted pointer-events-none" />
           <input
             value={rawQuery}
             onChange={(e) => setRawQuery(e.target.value)}
             onKeyDown={(e) => { if (e.key === 'Escape') setRawQuery('') }}
             placeholder="Search all docs: endpoints, fields, params…"
-            className="w-full bg-[var(--surface-raised)] border border-[var(--border)] rounded-xl pl-9 pr-16 py-2 text-sm text-text-primary placeholder:text-text-muted focus:outline-none focus:border-accent/50 transition-colors"
+            className={`${GLASS_SEARCH} pl-9 pr-16`}
           />
           {rawQuery && (
             <>
-              <span className="absolute right-9 top-1/2 -translate-y-1/2 text-[10px] text-text-muted tabular-nums">
+              <span className="absolute right-10 top-1/2 -translate-y-1/2 text-[10px] text-text-muted tabular-nums">
                 {totalHits}
               </span>
               <button
                 onClick={() => setRawQuery('')}
                 title="Clear search"
-                className="absolute right-2.5 top-1/2 -translate-y-1/2 p-1 rounded text-text-muted hover:text-text-primary transition-colors"
+                className="absolute right-3 top-1/2 -translate-y-1/2 p-1 rounded text-text-muted hover:text-text-primary transition-colors"
               >
                 <X size={13} />
               </button>
@@ -98,7 +99,7 @@ export default function DocsPage(): JSX.Element {
       </div>
 
       {/* Content */}
-      <div className="flex-1 overflow-y-auto p-6">
+      <div className="flex-1 overflow-y-auto p-6 pb-player">
         <div className="max-w-4xl mx-auto space-y-6">
           {query && totalHits === 0 && (
             <div className="text-center py-16">

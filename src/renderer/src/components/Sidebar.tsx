@@ -288,7 +288,7 @@ export default function Sidebar(): JSX.Element {
       <aside
         ref={navRef}
         style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}
-        className={`app-sidebar pointer-events-auto relative isolate hidden md:flex ${horizontal ? 'flex-row max-w-full overflow-x-auto' : 'flex-col max-h-full overflow-y-auto'} items-center gap-1 p-1.5 rounded-full bg-sidebar border border-[var(--border)] shadow-2xl`}
+        className={`app-sidebar pointer-events-auto relative isolate hidden md:flex ${horizontal ? 'flex-row max-w-full overflow-x-auto' : 'flex-col max-h-full overflow-y-auto'} items-center gap-1 p-1.5 rounded-full glass-backdrop glass-specular glass-lift`}
       >
         <NavPillGrip horizontal={horizontal} />
         {items.map(({ icon, label, view }, idx) => (
@@ -337,7 +337,7 @@ export default function Sidebar(): JSX.Element {
   if (sidebarPosition === 'top' || sidebarPosition === 'bottom') {
     const iconBtn = 'flex items-center justify-center w-8 h-8 rounded text-text-secondary hover:text-text-primary hover:bg-surface-raised transition-colors shrink-0'
     return (
-      <aside className={`app-sidebar hidden md:flex flex-col w-full bg-sidebar shrink-0 border-[var(--border)] ${sidebarPosition === 'top' ? 'border-b' : 'border-t'}`}>
+      <aside className={`app-sidebar glass-pane relative hidden md:flex flex-col min-w-0 mx-2 rounded-2xl shrink-0 ${sidebarPosition === 'top' ? 'mt-2' : 'mb-2'}`}>
         <div className="flex items-center gap-1 px-3 py-1.5 min-w-0">
           <nav ref={navRef} className="relative isolate flex items-center gap-1 flex-1 min-w-0 overflow-x-auto">
             {items.map(({ icon, label, view }, idx) => (
@@ -386,7 +386,9 @@ export default function Sidebar(): JSX.Element {
 
   return (
     <aside
-      className={`app-sidebar hidden md:flex flex-col h-full bg-sidebar shrink-0 ${sidebarPosition === 'right' ? 'border-l' : 'border-r'} border-[var(--border)] transition-[width] duration-200 ${collapsed ? 'w-16' : 'w-60'}`}
+      // A glass pane inset from the window edges (my-2 plus the outer side),
+      // stretched to the row's height rather than h-full so the margins fit.
+      className={`app-sidebar glass-pane relative hidden md:flex flex-col shrink-0 rounded-2xl my-2 ${sidebarPosition === 'right' ? 'mr-2' : 'ml-2'} transition-[width] duration-200 ${collapsed ? 'w-16' : 'w-60'}`}
     >
       {/* Logo - collapses to zero height when the sidebar is collapsed. The
           open cap is in rem like its contents (11.75rem), so a larger app

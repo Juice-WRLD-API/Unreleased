@@ -22,7 +22,7 @@ export default function StatisticsPanelDesktop({ onOpenEra }: { onOpenEra: (eraN
   return (
     <div className="flex-1 flex flex-col min-h-0 overflow-hidden">
       {/* Content */}
-      <div className="flex-1 overflow-y-auto p-4 md:p-6">
+      <div className="flex-1 overflow-y-auto p-4 md:p-6 pb-player">
         <div className="max-w-[1600px] mx-auto space-y-5 md:space-y-6">
           {loading ? (
             <div className="space-y-4">
