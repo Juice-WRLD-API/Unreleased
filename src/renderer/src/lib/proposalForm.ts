@@ -41,6 +41,8 @@ export interface ProposalFormState {
   fileNames: string
   songLength: string
   bitrate: string
+  bpm: string
+  musicalKey: string
   edNotes: string
 }
 
@@ -49,7 +51,7 @@ export const EMPTY_PROPOSAL_FORM: ProposalFormState = {
   lyrics: '', syncedLyrics: '', prod: '', engineer: '', location: '', filePath: '',
   previewDate: '', leakType: '', recDate: '', relDate: '', instrumentals: '',
   instrumentalNames: '', sessionTitles: '', sessionTracking: '', addInfo: '', notes: '', dateLeaked: '', fileNames: '',
-  songLength: '', bitrate: '', edNotes: '',
+  songLength: '', bitrate: '', bpm: '', musicalKey: '', edNotes: '',
 }
 
 type Action =
@@ -94,6 +96,8 @@ function reducer(state: ProposalFormState, action: Action): ProposalFormState {
         fileNames: s.file_names || '',
         addInfo: s.additional_information || '',
         notes: s.notes || '',
+        bpm: s.bpm != null ? String(s.bpm) : '',
+        musicalKey: s.key || '',
       }
     }
     case 'reset':
@@ -159,5 +163,7 @@ export function buildProposedData(f: ProposalFormState): Record<string, unknown>
   if (f.fileNames)  proposed.file_names  = f.fileNames
   if (f.songLength) proposed.length      = f.songLength
   if (f.bitrate)    proposed.bitrate     = f.bitrate
+  if (f.bpm.trim() && Number.isFinite(Number(f.bpm))) proposed.bpm = Number(f.bpm)
+  if (f.musicalKey) proposed.key         = f.musicalKey
   return proposed
 }
