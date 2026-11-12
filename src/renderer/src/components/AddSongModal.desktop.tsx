@@ -3,6 +3,7 @@ import { useRef, useState } from 'react'
 import { Loader2, Plus, X, Check, AlertCircle, Wand2 } from 'lucide-react'
 import { hasEraCoverFile, findEraCoverFile } from '../lib/eraCoverFiles'
 import { errorMessage } from '../lib/format'
+import { toSiteRelativeImageUrl } from '../lib/juicewrldApi'
 import FilePickerModal from './FilePickerModal'
 import { BasicRow, BasicSelect, SyncedLyricsTable } from './EditorPage.desktop'
 import CopyFromSong from './CopyFromSong'
@@ -35,6 +36,7 @@ export default function AddSongModal({ onClose, onSubmitted, channel }: {
   const overlayRef = useRef<HTMLDivElement>(null)
   const [coverBusy, setCoverBusy] = useState(false)
   const [coverError, setCoverError] = useState<string | null>(null)
+  const [pickingImage, setPickingImage] = useState(false)
 
   useEscapeToClose(onClose)
 
@@ -113,13 +115,13 @@ export default function AddSongModal({ onClose, onSubmitted, channel }: {
           </div>
 
           <SectionLabel>Audio</SectionLabel>
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-1.5">
+          <div className="grid grid-cols-3 gap-1.5">
             <BasicRow label="Length" value={f.songLength} onChange={v => updateField('songLength', v)} placeholder="3:59" mono />
             <BasicRow label="BPM" value={f.bpm} onChange={v => updateField('bpm', v)} placeholder="140" mono />
             <BasicRow label="Key" value={f.musicalKey} onChange={v => updateField('musicalKey', v)} placeholder="C# Minor" />
-            <BasicRow label="Bitrate" value={f.bitrate} onChange={v => updateField('bitrate', v)} placeholder="320 kbps" mono />
           </div>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5">
+            <BasicRow label="Bitrate" value={f.bitrate} onChange={v => updateField('bitrate', v)} rows={2} placeholder="Original File&#10;320kbps (.mp3)" mono />
             <BasicRow label="File names" value={f.fileNames} onChange={v => updateField('fileNames', v)} rows={2} />
             <BasicRow label="Leak type" value={f.leakType} onChange={v => updateField('leakType', v)} rows={2} placeholder="e.g. Stem, Master, Video…" suggest="leak_type" />
             <BasicRow label="Instrumentals" value={f.instrumentals} onChange={v => updateField('instrumentals', v)} rows={2} placeholder="Instrumental versions available" />
@@ -127,6 +129,7 @@ export default function AddSongModal({ onClose, onSubmitted, channel }: {
           </div>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5">
             <BasicRow label="Image URL" value={f.imageUrl} onChange={v => updateField('imageUrl', v)} placeholder="https://…" mono
+              onBrowse={() => setPickingImage(true)}
               trailing={
                 <button
                   type="button"
@@ -208,6 +211,16 @@ export default function AddSongModal({ onClose, onSubmitted, channel }: {
           altTitles={f.altNames.split('\n').map(s => s.trim()).filter(Boolean)}
           onSelect={p => { updateField('filePath', p); setPickingFile(false) }}
           onClose={() => setPickingFile(false)}
+        />
+      )}
+
+      {pickingImage && (
+        <FilePickerModal
+          kind="image"
+          songTitle={f.name}
+          altTitles={f.altNames.split('\n').map(s => s.trim()).filter(Boolean)}
+          onSelect={p => { updateField('imageUrl', toSiteRelativeImageUrl(p)); setPickingImage(false) }}
+          onClose={() => setPickingImage(false)}
         />
       )}
     </MotionOverlay>
