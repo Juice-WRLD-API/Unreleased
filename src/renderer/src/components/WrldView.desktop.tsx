@@ -131,7 +131,7 @@ export default function WrldView(): JSX.Element {
     gradientsEnabled: s.gradientsEnabled,
     toggleEqPanel: s.toggleEqPanel,
     // Same "anything non-neutral" indicator as the player bar's EQ button.
-    eqFxActive: s.playbackSpeed !== 1 || (EFFECTS_SUPPORTED && (s.eqEnabled || s.eqBalance !== 0 || s.eqMono || s.eqBoost !== 1 || s.skipSilence || s.reverbEnabled || fxInUse(s.audioFx, s.eqEnabled))),
+    eqFxActive: s.playbackSpeed !== 1 || s.eqEnabled || (EFFECTS_SUPPORTED && (s.eqBalance !== 0 || s.eqMono || s.eqBoost !== 1 || s.skipSilence || s.reverbEnabled || fxInUse(s.audioFx, s.eqEnabled))),
     lyricsOverride: s.lyricsOverride,
   })))
 

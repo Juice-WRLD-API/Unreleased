@@ -149,6 +149,13 @@ export interface QueueSlice {
    * a random one. The current song stays behind it as history.
    */
   startRandomRadio: () => void
+  /**
+   * WRLD's Random button: on, the song playing carries on and every song
+   * after it is a random pick from /radio/random/ (the same radio as above,
+   * not 999 FM). Coming from 999 FM there's no song of ours playing, so it
+   * moves straight to a random one. Off stops radio, like shuffle off does.
+   */
+  setRandomMode: (on: boolean) => void
 
   /** Advance to the next track. Returns the track, or null if playback stops. */
   nextTrack: () => Track | null
@@ -557,6 +564,22 @@ export const createQueueSlice: StateCreator<any, [], [], QueueSlice> = (set, get
     // The prefetch was only just started, so this marks radio as waiting and
     // _prefetchRadioTrack plays the random song as soon as it arrives.
     get().nextTrack()
+  },
+
+  // ── setRandomMode ──────────────────────────────────────────────────────────
+  setRandomMode: (on) => {
+    const { currentTrack, radioMode, radioFmActive } = get()
+    if (!on) {
+      if (!radioMode) return
+      ls.set('shuffle', false)
+      set({ shuffle: false, radioMode: false, radioNext: null, _radioWaiting: false })
+      return
+    }
+    if (!currentTrack || (radioMode && !radioFmActive)) return
+    if (radioFmActive) { get().startRandomRadio(); return }
+    ls.set('shuffle', true)
+    set({ shuffle: true })
+    get().startRadio(currentTrack, null, { keepPlayState: true })
   },
 
   // ── nextTrack ──────────────────────────────────────────────────────────────

@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { ChevronDown, ChevronUp, ImageIcon, Music2, RotateCcw, FolderSearch } from 'lucide-react'
 import { useStore } from '../store/useStore'
 import { useShallow } from 'zustand/react/shallow'
-import { resolvePrefCoverUrl, smallCoverUrl } from '../lib/juicewrldApi'
+import { resolvePrefCoverUrl, smallCoverUrl, buildImageUrl, loadAllSongs, type JWApiSong } from '../lib/juicewrldApi'
 import { loadEraFullNames, eraFullName, listEras } from '../lib/eras'
 import FilePickerModal from './FilePickerModal'
 
@@ -10,9 +10,31 @@ import FilePickerModal from './FilePickerModal'
 // every unreleased song in that era picks it up (see lib/eraCovers and
 // applyPrefToTrack's precedence). Released songs and songs with their own
 // personal cover are untouched, so this only ever fills a gap.
+//
+// The picks are stored on the account (user_settings.era_covers), so they
+// follow the user to every device they sign in on.
+
+/** The cover most of an era's unreleased songs show today, so each row can
+ *  show what a pick would replace. */
+function defaultEraCovers(songs: JWApiSong[]): Record<string, string> {
+  const counts: Record<string, Record<string, number>> = {}
+  for (const s of songs) {
+    const era = s.era?.name
+    if (!era || s.category === 'released' || !s.image_url) continue
+    const byUrl = (counts[era] ??= {})
+    byUrl[s.image_url] = (byUrl[s.image_url] ?? 0) + 1
+  }
+  const out: Record<string, string> = {}
+  for (const [era, byUrl] of Object.entries(counts)) {
+    const top = Object.entries(byUrl).sort((a, b) => b[1] - a[1])[0]
+    const url = top ? buildImageUrl(top[0]) : undefined
+    if (url) out[era] = url
+  }
+  return out
+}
 export default function EraCoversSection(): JSX.Element {
-  const { eraCovers, setEraCoverOverride } = useStore(
-    useShallow((s) => ({ eraCovers: s.eraCovers, setEraCoverOverride: s.setEraCoverOverride }))
+  const { eraCovers, setEraCoverOverride, signedIn } = useStore(
+    useShallow((s) => ({ eraCovers: s.eraCovers, setEraCoverOverride: s.setEraCoverOverride, signedIn: !!s.account }))
   )
 
   const [expanded, setExpanded] = useState(false)
@@ -21,6 +43,14 @@ export default function EraCoversSection(): JSX.Element {
     if (!expanded || eraNames.length > 0) return
     loadEraFullNames().then(() => setEraNames(listEras().map((e) => e.name))).catch(() => {})
   }, [expanded, eraNames.length])
+
+  const [defaults, setDefaults] = useState<Record<string, string>>({})
+  useEffect(() => {
+    if (!expanded) return
+    let cancelled = false
+    loadAllSongs().then((songs) => { if (!cancelled) setDefaults(defaultEraCovers(songs)) }).catch(() => {})
+    return () => { cancelled = true }
+  }, [expanded])
 
   const [openEra, setOpenEra] = useState<string | null>(null)
   const [draft, setDraft] = useState('')
@@ -51,6 +81,7 @@ export default function EraCoversSection(): JSX.Element {
       <p className="text-text-muted text-xs mt-1">
         Replace the shared cover an era's unreleased songs show by default. Released songs, and any song
         you've personalized yourself, are never affected.
+        {' '}{signedIn ? 'Saved to your account, so they show on every device you sign in on.' : 'Sign in to keep them on every device.'}
       </p>
 
       {expanded && (
@@ -60,12 +91,15 @@ export default function EraCoversSection(): JSX.Element {
           )}
           {eraNames.map((era) => {
             const raw = eraCovers[era]
-            const url = resolvePrefCoverUrl(raw)
+            const url = resolvePrefCoverUrl(raw) ?? defaults[era]
             const full = eraFullName(era)
             return (
               <div key={era} className="rounded-lg border border-[var(--border)] px-2.5 py-2">
                 <div className="flex items-center gap-2.5">
-                  <div className="shrink-0 w-9 h-9 rounded-md overflow-hidden bg-surface-overlay flex items-center justify-center">
+                  <div
+                    className={`shrink-0 w-9 h-9 rounded-md overflow-hidden bg-surface-overlay flex items-center justify-center ${raw ? '' : 'opacity-60'}`}
+                    title={raw ? 'Your cover' : 'Default cover'}
+                  >
                     {url ? (
                       <img key={url} src={smallCoverUrl(url)} alt="" className="w-full h-full object-cover"
                         onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = 'none' }} />
@@ -75,7 +109,9 @@ export default function EraCoversSection(): JSX.Element {
                   </div>
                   <div className="flex-1 min-w-0">
                     <p className="text-xs font-medium text-text-primary truncate">{era}</p>
-                    {full && <p className="text-[10px] text-text-muted truncate">{full}</p>}
+                    <p className="text-[10px] text-text-muted truncate">
+                      {full ?? ''}{full ? ' · ' : ''}{raw ? 'Custom' : 'Default'}
+                    </p>
                   </div>
                   <button
                     onClick={() => { setOpenEra(openEra === era ? null : era); setDraft('') }}

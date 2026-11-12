@@ -34,6 +34,7 @@ import { rememberRecentTrack } from '../lib/recentTracks'
 import { useCanEdit } from '../hooks/useChannelRoles'
 import { toFileUrl } from '../lib/fileTypes'
 import { IS_IOS, IS_MOBILE } from '../lib/platform'
+import { iosEqKey, iosEqSettings, renderIosEq, type IosEqSettings } from '../lib/iosEqRender'
 import { FullTrack, Track } from '../types'
 import { lazyOverlay } from '../lib/lazyView'
 import EqualizerPanel from './EqualizerPanel'
@@ -66,6 +67,7 @@ const SongContextMenu = lazyOverlay(() => import('./SongContextMenu'))
 // fetch is still pending. Callers that can wait use ensureDonorUrl first.
 function resolvePlaybackUrl(track: { id: string; streamUrl?: string; path: string }): string {
   if (isDonorStreamUrl(track.streamUrl)) return cachedDonorUrl(track.streamUrl) ?? ''
+  if (track.streamUrl && iosEqCurrent?.streamUrl === track.streamUrl) return iosEqCurrent.blobUrl ?? track.streamUrl
   if (iosPrefetch?.blobUrl && iosPrefetch.streamUrl === track.streamUrl) return iosPrefetch.blobUrl
   return track.streamUrl ?? toFileUrl(track.path)
 }
@@ -85,7 +87,10 @@ const IOS_PREFETCH_MAX_BYTES = 150 * 1024 * 1024
 // One entry: the upcoming song, then the current one for as long as it plays.
 // blobUrl stays null while the download runs and after one that failed (kept
 // so the same URL isn't retried on every timeupdate).
-let iosPrefetch: { streamUrl: string; blobUrl: string | null; ctrl: AbortController } | null = null
+// With the equalizer on, the download is also rendered with it (iosEqRender)
+// and blobUrl is that render. `source` is the file as downloaded and `eqKey`
+// names the settings blobUrl was made with ('' = the file as it is).
+let iosPrefetch: { streamUrl: string; blobUrl: string | null; ctrl: AbortController; source: Blob | null; eqKey: string } | null = null
 
 function dropIosPrefetch(): void {
   if (!iosPrefetch) return
@@ -94,10 +99,15 @@ function dropIosPrefetch(): void {
   iosPrefetch = null
 }
 
+function currentIosEq(): IosEqSettings | null {
+  return iosEqSettings(useStore.getState())
+}
+
 function startIosPrefetch(streamUrl: string): void {
   if (iosPrefetch?.streamUrl === streamUrl) return
   dropIosPrefetch()
-  const entry: NonNullable<typeof iosPrefetch> = { streamUrl, blobUrl: null, ctrl: new AbortController() }
+  const eq = currentIosEq()
+  const entry: NonNullable<typeof iosPrefetch> = { streamUrl, blobUrl: null, ctrl: new AbortController(), source: null, eqKey: iosEqKey(eq) }
   iosPrefetch = entry
   void (async () => {
     try {
@@ -108,13 +118,84 @@ function startIosPrefetch(streamUrl: string): void {
       }
       const blob = await res.blob()
       if (iosPrefetch !== entry) return
-      // A blob URL has no file extension to sniff, so Safari only plays it
-      // when the server named a type it knows.
-      const type = blob.type.split(';')[0].trim()
-      if (!type || document.createElement('audio').canPlayType(type) === '') return
-      entry.blobUrl = URL.createObjectURL(blob)
+      entry.source = blob
+      let playable: Blob | null = null
+      if (eq) {
+        try {
+          playable = await renderIosEq(blob, eq, entry.ctrl.signal)
+        } catch (err) {
+          // Plays without the EQ; the sync effect retries once it's current.
+          entry.eqKey = ''
+          if (iosPrefetch === entry) runLog('playback', `iOS EQ render of the next song failed: ${String(err)}`)
+        }
+        if (iosPrefetch !== entry) return
+      }
+      if (!playable) {
+        // A blob URL has no file extension to sniff, so Safari only plays it
+        // when the server named a type it knows.
+        const type = blob.type.split(';')[0].trim()
+        if (!type || document.createElement('audio').canPlayType(type) === '') return
+        playable = blob
+      }
+      entry.blobUrl = URL.createObjectURL(playable)
     } catch { /* the song streams from the network as before */ }
   })()
+}
+
+// ── iOS equalizer for the song that's playing ────────────────────────────────
+// A song reached through the prefetch above arrives already rendered. This
+// covers the rest: a song started by hand, and settings changed mid-song. It
+// holds what the current song should play instead of its stream - a render,
+// or null for the stream itself (EQ switched off, or a render that failed and
+// isn't worth retrying until the settings change).
+let iosEqCurrent: { streamUrl: string; source: Blob | null; blobUrl: string | null; eqKey: string } | null = null
+// Bumped by every sync and drop, so an older render finishing late is ignored.
+let iosEqJob = 0
+
+function setIosEqCurrent(next: typeof iosEqCurrent): void {
+  if (iosEqCurrent?.blobUrl && iosEqCurrent.blobUrl !== next?.blobUrl) URL.revokeObjectURL(iosEqCurrent.blobUrl)
+  iosEqCurrent = next
+}
+
+function dropIosEqCurrent(): void {
+  iosEqJob++
+  setIosEqCurrent(null)
+}
+
+// Brings what `streamUrl` resolves to in line with the EQ settings. Resolves
+// true when resolvePlaybackUrl now answers differently for it, i.e. the
+// element playing it should be swapped over.
+async function syncIosEq(streamUrl: string): Promise<boolean> {
+  const job = ++iosEqJob
+  const eq = currentIosEq()
+  const key = iosEqKey(eq)
+  // An upcoming song rendered under other settings: dropped, and the next
+  // timeupdate in the tail fetches it again.
+  if (iosPrefetch && iosPrefetch.streamUrl !== streamUrl && iosPrefetch.eqKey !== key) dropIosPrefetch()
+  const pre = iosPrefetch?.streamUrl === streamUrl && iosPrefetch.blobUrl ? iosPrefetch : null
+  const mine = iosEqCurrent?.streamUrl === streamUrl ? iosEqCurrent : null
+  if ((mine ? mine.eqKey : pre ? pre.eqKey : '') === key) return false
+  // The prefetched copy is already what's wanted - fall back to it.
+  if (pre?.eqKey === key) { setIosEqCurrent(null); return true }
+  let source = mine?.source ?? pre?.source ?? null
+  if (!eq) { setIosEqCurrent({ streamUrl, source, blobUrl: null, eqKey: key }); return true }
+  let blobUrl: string | null = null
+  try {
+    if (!source) {
+      const res = await fetch(streamUrl)
+      if (!res.ok || Number(res.headers.get('Content-Length') ?? 0) > IOS_PREFETCH_MAX_BYTES) throw new Error(`HTTP ${res.status}`)
+      source = await res.blob()
+    }
+    const rendered = await renderIosEq(source, eq)
+    if (job !== iosEqJob) return false
+    blobUrl = URL.createObjectURL(rendered)
+  } catch (err) {
+    if (job !== iosEqJob) return false
+    runLog('playback', `iOS EQ render failed: ${String(err)}`)
+  }
+  const was = resolvePlaybackUrl({ id: '', path: '', streamUrl })
+  setIosEqCurrent({ streamUrl, source, blobUrl, eqKey: key })
+  return resolvePlaybackUrl({ id: '', path: '', streamUrl }) !== was
 }
 
 // A session whose file wasn't known when its Track was built shows the file's
@@ -957,6 +1038,7 @@ export default function Player(): JSX.Element {
     // downloading when its song starts is dropped too, so the source this
     // track resolves to can't change under it mid-play.
     if (iosPrefetch && (iosPrefetch.streamUrl !== currentTrack?.streamUrl || !iosPrefetch.blobUrl)) dropIosPrefetch()
+    if (iosEqCurrent && iosEqCurrent.streamUrl !== currentTrack?.streamUrl) dropIosEqCurrent()
     if (!audio || !currentTrack) return
     const fileUrl = resolvePlaybackUrl(currentTrack)
     fillSessionArtist(currentTrack.id, currentTrack.streamUrl)
@@ -999,13 +1081,24 @@ export default function Player(): JSX.Element {
         if (s.isPlaying) playSlot(a)
       }).catch((err) => {
         console.error('Could not load donor file', err)
-        if (useStore.getState().currentTrack?.id !== trackId) return
-        setIsPlaying(false)
+        const s = useStore.getState()
+        if (s.currentTrack?.id !== trackId) return
+        const notFound = err instanceof SessionEditNotFoundError
         if (isSessionEditPlaceholder(streamUrl)) {
-          showPlaybackNotice(err instanceof SessionEditNotFoundError
+          showPlaybackNotice(notFound
             ? `No session edit found for "${title}"`
             : `Couldn't load the session edit for "${title}"`)
         }
+        // A file that isn't there won't appear on retry, and stopping the
+        // queue on it is the wrong call: move on, as with any other
+        // unplayable song. Offline, every later fetch fails the same way, so
+        // stop there instead of burning through the queue.
+        if (!s.isPlaying) return
+        if (!notFound && navigator.onLine === false) { setIsPlaying(false); return }
+        skipUnplayableTrack(
+          notFound ? 'no session edit was found for them' : "their files couldn't be loaded",
+          `${notFound ? 'session edit not found' : 'donor/session-edit load failed'} for ${streamUrl}: ${String(err)}`,
+        )
       })
       return
     }
@@ -1336,6 +1429,72 @@ export default function Player(): JSX.Element {
     scheduleReload(audio, track.id, url, Math.min(1000 * 2 ** attempt, 8000))
   }
 
+  // Points the active slot at another copy of the song it's playing (its EQ
+  // render, or back to the plain file) and carries on from the same position.
+  // Same shape as a recovery reload, including the timeupdate quarantine that
+  // keeps the progress bar from snapping to zero while the copy loads.
+  const swapActiveSource = (url: string): void => {
+    const a = getActive()
+    const trackId = useStore.getState().currentTrack?.id
+    if (!a || !trackId || cfActive.current || sameMediaSrc(a.src, url)) return
+    recoveryResumeAt.current = a.currentTime
+    clearRecoveryTimer()
+    const generation = ++recoveryGeneration.current
+    const onReady = (): void => {
+      a.removeEventListener('loadedmetadata', onReady)
+      if (recoveryLoading.current?.audio === a && recoveryLoading.current.generation === generation) recoveryLoading.current = null
+      const latest = useStore.getState()
+      if (latest.currentTrack?.id !== trackId || getActive() !== a || recoveryGeneration.current !== generation) return
+      const resumeAt = recoveryResumeAt.current
+      if (resumeAt > 0 && isFinite(a.duration) && resumeAt < a.duration) {
+        try { seekSlot(a, resumeAt) } catch { /* not seekable yet */ }
+      }
+      applyRate(a)
+      a.volume = volumeRef.current
+      if (latest.isPlaying) playSlot(a, () => {})
+    }
+    a.addEventListener('loadedmetadata', onReady)
+    recoveryLoading.current = { audio: a, generation }
+    a.src = url
+    a.load()
+    if (useStore.getState().isPlaying) playSlot(a, () => {})
+    lastProgressAt.current = Date.now()
+  }
+
+  // iOS equalizer: keep the playing song on a copy rendered with the current
+  // settings (see iosEqRender). Runs when the song or the settings change,
+  // after a pause so a fader drag renders once rather than on every step.
+  // Only while the app is on screen - a source swap in the background is the
+  // very thing that can end playback there - so one that comes due while
+  // hidden waits for the app to be opened.
+  const iosEqSig = IS_IOS ? iosEqKey(iosEqSettings({ eqEnabled, eqGains, audioFx })) : ''
+  useEffect(() => {
+    const trackId = currentTrack?.id
+    const streamUrl = currentTrack?.streamUrl
+    if (!IS_IOS || radioFmActive || !trackId || !streamUrl || !/^https?:/.test(streamUrl)) return
+    let timer: number | null = null
+    const run = (): void => {
+      timer = null
+      if (document.visibilityState !== 'visible') return
+      void syncIosEq(streamUrl).then((changed) => {
+        const track = useStore.getState().currentTrack
+        if (!changed || !track || track.id !== trackId) return
+        const url = resolvePlaybackUrl(track)
+        if (url) swapActiveSource(url)
+      })
+    }
+    const schedule = (): void => {
+      if (timer != null) clearTimeout(timer)
+      timer = window.setTimeout(run, 400)
+    }
+    schedule()
+    document.addEventListener('visibilitychange', schedule)
+    return () => {
+      if (timer != null) clearTimeout(timer)
+      document.removeEventListener('visibilitychange', schedule)
+    }
+  }, [currentTrack?.id, currentTrack?.streamUrl, iosEqSig, radioFmActive])
+
   // A source the browser can't play at all - a 404, a codec it doesn't
   // support - will never come back on retry, and stopping dead in the middle
   // of a queue is the same complaint from the user's side. Move past it.
@@ -1380,8 +1539,13 @@ export default function Player(): JSX.Element {
     const { currentTrack: track, isPlaying: playing } = useStore.getState()
     runLog('playback', `error on "${track?.title}" (${track?.id}) in ${slot}: ${describeMediaError(err)}, ${describeSource(src)}`)
     // The prefetched copy wouldn't play - go back to streaming this song.
-    if (iosPrefetch?.blobUrl && src === iosPrefetch.blobUrl && track?.streamUrl === iosPrefetch.streamUrl) {
-      dropIosPrefetch()
+    // Likewise for an EQ render: keep its entry, minus the render, so the
+    // same settings aren't rendered again for this song.
+    const eqRenderFailed = !!iosEqCurrent?.blobUrl && src === iosEqCurrent.blobUrl && track?.streamUrl === iosEqCurrent.streamUrl
+    if (track?.streamUrl && (eqRenderFailed
+      || (iosPrefetch?.blobUrl && src === iosPrefetch.blobUrl && track.streamUrl === iosPrefetch.streamUrl))) {
+      if (eqRenderFailed && iosEqCurrent) setIosEqCurrent({ ...iosEqCurrent, blobUrl: null })
+      else dropIosPrefetch()
       audio.src = track.streamUrl
       audio.load()
       audio.volume = volumeRef.current
@@ -2363,7 +2527,7 @@ export default function Player(): JSX.Element {
     }
   }, [showEqPanel])
   // Accent the button when anything in the panel deviates from neutral.
-  const eqActive = playbackSpeed !== 1 || (EFFECTS_SUPPORTED && (eqEnabled || eqBalance !== 0 || eqMono || eqBoost !== 1 || skipSilence || reverbEnabled || fxInUse(audioFx, eqEnabled)))
+  const eqActive = playbackSpeed !== 1 || eqEnabled || (EFFECTS_SUPPORTED && (eqBalance !== 0 || eqMono || eqBoost !== 1 || skipSilence || reverbEnabled || fxInUse(audioFx, eqEnabled)))
 
 
   // (Play/pause on Space is handled by the unified hotkey system above - the

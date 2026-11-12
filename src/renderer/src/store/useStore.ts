@@ -25,7 +25,7 @@ import {
 import type { SongPreference, SongPrefMap, SongPrefPatch, WireSongPreference } from '../lib/songPrefs'
 import { getVersionGroup } from '../lib/versionsApi'
 import { advanceRotatedCover, resetCoverRotation } from '../lib/coverSuggestions'
-import { setEraCoverRaw } from '../lib/eraCovers'
+import { setEraCoverRaw, replaceEraCovers, sanitizeEraCovers } from '../lib/eraCovers'
 import { setActiveChannelCache } from '../lib/activeChannelState'
 import {
   appendListeningPlay,
@@ -669,6 +669,8 @@ interface AppActions {
   /** Sets (or, with raw = null, clears) the cover override for one era and
    *  redraws any visible tracks it affects. */
   setEraCoverOverride: (era: string, raw: string | null) => void
+  /** Re-derives the visible tracks of these eras after their covers change. */
+  _redrawEras: (eras: Set<string>) => void
   /** Rotates a song onto its next suggested cover, if the setting is on and
    *  the user hasn't set a cover of their own. Called when a track starts. */
   _maybeRotateCover: (songId: number) => void
@@ -1105,6 +1107,7 @@ function buildUserSettings(s: AppStore): UserSettings {
     pause_fade_enabled: s.pauseFadeEnabled,
     prefer_og_version: s.preferOgVersion,
     rotate_suggested_covers: s.rotateSuggestedCovers,
+    era_covers: s.eraCovers,
     media_overlay_enabled: s.mediaOverlayEnabled,
     lastfm_enabled: s.lastfmEnabled,
     auto_report_errors: s.autoReportErrors,
@@ -1717,16 +1720,22 @@ export const useStore = create<AppStore>((set, get, store) => ({
   },
 
   setEraCoverOverride: (era, raw) => {
-    setEraCoverRaw(era, raw)
+    const value = raw?.trim() || null
+    setEraCoverRaw(era, value)
     const nextCovers = { ...get().eraCovers }
-    if (raw) nextCovers[era] = raw
+    if (value) nextCovers[era] = value
     else delete nextCovers[era]
     set({ eraCovers: nextCovers })
-    // Redraw every visible API track this era touches so the change shows up
+    get()._redrawEras(new Set([era]))
+    get()._scheduleProfilePush(['userSettings'])
+  },
+  _redrawEras: (eras) => {
+    if (eras.size === 0) return
+    // Redraw every visible API track these eras touch so the change shows up
     // immediately instead of at the next track change.
     const { queue, currentTrack, currentTrackFull, songPrefs } = get()
     const redraw = (t: Track): Track => {
-      if (t.era !== era) return t
+      if (!t.era || !eras.has(t.era)) return t
       const id = userApi.trackIdToSongId(t.id)
       return id == null ? t : applyPrefToTrack(t, songPrefs[id])
     }
@@ -1988,6 +1997,19 @@ export const useStore = create<AppStore>((set, get, store) => ({
     if (serverSettings.pause_fade_enabled !== undefined && serverSettings.pause_fade_enabled !== s.pauseFadeEnabled) s.setPauseFade(serverSettings.pause_fade_enabled)
     if (serverSettings.prefer_og_version !== undefined && serverSettings.prefer_og_version !== s.preferOgVersion) s.setPreferOgVersion(serverSettings.prefer_og_version)
     if (serverSettings.rotate_suggested_covers !== undefined && serverSettings.rotate_suggested_covers !== s.rotateSuggestedCovers) s.setRotateSuggestedCovers(serverSettings.rotate_suggested_covers)
+    // Era covers follow the account. An account that has never saved any
+    // (no key) keeps this device's picks, and the in-sync check below pushes
+    // them up.
+    if (serverSettings.era_covers !== undefined) {
+      const eraCovers = sanitizeEraCovers(serverSettings.era_covers)
+      if (stableJson(eraCovers) !== stableJson(s.eraCovers)) {
+        const changed = new Set([...Object.keys(eraCovers), ...Object.keys(s.eraCovers)]
+          .filter((era) => eraCovers[era] !== s.eraCovers[era]))
+        replaceEraCovers(eraCovers)
+        set({ eraCovers })
+        get()._redrawEras(changed)
+      }
+    }
     if (serverSettings.media_overlay_enabled !== undefined && serverSettings.media_overlay_enabled !== s.mediaOverlayEnabled) s.setMediaOverlayEnabled(serverSettings.media_overlay_enabled)
     if (serverSettings.lastfm_enabled !== undefined && serverSettings.lastfm_enabled !== s.lastfmEnabled) s.setLastfmEnabled(serverSettings.lastfm_enabled)
     if (serverSettings.auto_report_errors !== undefined && serverSettings.auto_report_errors !== s.autoReportErrors) s.setAutoReportErrors(serverSettings.auto_report_errors)

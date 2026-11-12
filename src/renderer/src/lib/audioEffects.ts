@@ -291,6 +291,30 @@ function buildSaturationCurve(drive: number): Float32Array<ArrayBuffer> {
   return curve
 }
 
+// EQ bands: shelves at the extremes, peaking in between. Shared with the iOS
+// offline render (iosEqRender.ts) so both paths shape the sound identically.
+export function createEqBandFilters(context: BaseAudioContext): BiquadFilterNode[] {
+  return EQ_BANDS.map((freq, i) => {
+    const f = context.createBiquadFilter()
+    if (i === 0) f.type = 'lowshelf'
+    else if (i === EQ_BANDS.length - 1) f.type = 'highshelf'
+    else { f.type = 'peaking'; f.Q.value = 1.1 }
+    f.frequency.value = freq
+    f.gain.value = 0
+    return f
+  })
+}
+
+export function createSafetyLimiter(context: BaseAudioContext): DynamicsCompressorNode {
+  const limiter = context.createDynamicsCompressor()
+  limiter.threshold.value = -1.5
+  limiter.knee.value = 0
+  limiter.ratio.value = 20
+  limiter.attack.value = 0.001
+  limiter.release.value = 0.1
+  return limiter
+}
+
 function ensureGraph(): AudioContext | null {
   if (!EFFECTS_SUPPORTED) return null
   if (ctx) return ctx
@@ -325,16 +349,7 @@ function ensureGraph(): AudioContext | null {
 
   preampGain = ctx.createGain()
 
-  // EQ bands: shelves at the extremes, peaking in between.
-  bandFilters = EQ_BANDS.map((freq, i) => {
-    const f = ctx!.createBiquadFilter()
-    if (i === 0) f.type = 'lowshelf'
-    else if (i === EQ_BANDS.length - 1) f.type = 'highshelf'
-    else { f.type = 'peaking'; f.Q.value = 1.1 }
-    f.frequency.value = freq
-    f.gain.value = 0
-    return f
-  })
+  bandFilters = createEqBandFilters(ctx)
 
   // Mono: forcing the node's channel count to 1 makes Web Audio downmix at
   // its input; the destination upmixes the single channel back to both ears.
@@ -346,12 +361,7 @@ function ensureGraph(): AudioContext | null {
   // Safety limiter - several presets push +5 dB and stacked boosts would
   // otherwise hard-clip. Zero knee + high threshold keeps it transparent
   // until a peak actually exceeds it.
-  const limiter = ctx.createDynamicsCompressor()
-  limiter.threshold.value = -1.5
-  limiter.knee.value = 0
-  limiter.ratio.value = 20
-  limiter.attack.value = 0.001
-  limiter.release.value = 0.1
+  const limiter = createSafetyLimiter(ctx)
 
   // Reverb: parallel dry/wet split after the panner. The convolver's IR is
   // built lazily on first non-zero mix (an 8s stereo buffer is not free).
