@@ -1,34 +1,28 @@
-import { Heart, Code2, ChevronLeft } from 'lucide-react'
+import { useEffect, useState } from 'react'
+import { Heart, Code2, ChevronLeft, Star, Users, Skull, type LucideIcon } from 'lucide-react'
 import { useStorePick } from '../store/useStore'
+import { getThanksPage, resolveThanks, type ThanksPageContent, type ThanksIcon } from '../lib/thanksApi'
 import logo from '../assets/logo.png'
 
-// Placeholder donor list - replace with the real names. Order here is
-// display order (most recent or most generous first, whatever you prefer).
-const DONORS: string[] = [
-  'bye bye @hostile_cat04',
-  'John Smith',
-  'Anonymous',
-]
-
-// Placeholder dev/contributor list - replace with real names/handles.
-const DEVELOPERS: string[] = [
-  'saint', 'hackinhood (X)'
-]
-
-// Placeholder list for the fucking opps
-const OTHERS: string[] = [
-  'Xig (fuck this nigga)',
-  'emzie',
-  'flow',
-  'Pure',
-  "fuckass nigga @yourealtwin"
-]
+// The lists are edited by administrators on the server (Admin -> Thank you,
+// terminal `thanks`). Until the server answers, or when it has no page yet,
+// the built-in copy in thanksApi shows.
+const SECTION_ICONS: Record<ThanksIcon, LucideIcon | null> = {
+  '': null, heart: Heart, code: Code2, star: Star, users: Users, skull: Skull,
+}
 
 export default function ThankYouView(): JSX.Element {
   const { setActiveView, previousView } = useStorePick('setActiveView', 'previousView')
   // Back to wherever this was opened from (Settings, most likely), like the
   // app's other pushed pages.
   const backView = previousView && previousView !== 'thanks' ? previousView : 'wrld'
+  const [page, setPage] = useState<ThanksPageContent>(() => resolveThanks(null))
+
+  useEffect(() => {
+    const ctrl = new AbortController()
+    getThanksPage(ctrl.signal).then((p) => setPage(resolveThanks(p))).catch(() => {})
+    return () => ctrl.abort()
+  }, [])
 
   return (
     <div className="flex-1 flex flex-col min-h-0 overflow-y-auto">
@@ -50,65 +44,38 @@ export default function ThankYouView(): JSX.Element {
             <Heart size={22} />
           </div>
           <h1 className="text-text-primary text-3xl md:text-4xl font-extrabold tracking-tight mb-3">
-            Thank you
+            {page.title}
           </h1>
           <p className="text-text-secondary text-base leading-relaxed max-w-xl mx-auto mb-10">
-            unreleased is free to use and kept running by donations from people like you.
-            Every bit helps cover hosting and keeps the site ad-free. This page is our way
-            of saying thanks.
+            {page.intro}
           </p>
 
-          <div className="rounded-2xl border border-[var(--border)] bg-surface-overlay/40 p-6 md:p-8">
-            <p className="text-text-muted text-xs font-semibold uppercase tracking-wide mb-4">
-              With thanks to
-            </p>
-            <ul className="flex flex-wrap items-center justify-center gap-x-2 gap-y-2">
-              {DONORS.map((name) => (
-                <li
-                  key={name}
-                  className="px-3 py-1.5 rounded-full bg-surface-raised border border-[var(--border)] text-text-primary text-sm font-medium"
-                >
-                  {name}
-                </li>
-              ))}
-            </ul>
-          </div>
-
-          <p className="text-text-muted text-xs mt-8">
-            Donated and don&rsquo;t see your name here? Let us know and we&rsquo;ll add it.
-          </p>
-
-          <div className="rounded-2xl border border-[var(--border)] bg-surface-overlay/40 p-6 md:p-8 mt-6">
-            <p className="text-text-muted text-xs font-semibold uppercase tracking-wide mb-4 flex items-center justify-center gap-1.5">
-              <Code2 size={13} /> Built by
-            </p>
-            <ul className="flex flex-wrap items-center justify-center gap-x-2 gap-y-2">
-              {DEVELOPERS.map((name) => (
-                <li
-                  key={name}
-                  className="px-3 py-1.5 rounded-full bg-surface-raised border border-[var(--border)] text-text-primary text-sm font-medium"
-                >
-                  {name}
-                </li>
-              ))}
-            </ul>
-          </div>
-
-          <div className="rounded-2xl border border-[var(--border)] bg-surface-overlay/40 p-6 md:p-8 mt-6">
-            <p className="text-text-muted text-xs font-semibold uppercase tracking-wide mb-4">
-              Fuck You (opps)
-            </p>
-            <ul className="flex flex-wrap items-center justify-center gap-x-2 gap-y-2">
-              {OTHERS.map((name) => (
-                <li
-                  key={name}
-                  className="px-3 py-1.5 rounded-full bg-surface-raised border border-[var(--border)] text-text-primary text-sm font-medium"
-                >
-                  {name}
-                </li>
-              ))}
-            </ul>
-          </div>
+          {page.sections.map((section, i) => {
+            const Icon = SECTION_ICONS[section.icon] ?? null
+            return (
+              <div key={i}>
+                <div className={`rounded-2xl border border-[var(--border)] bg-surface-overlay/40 p-6 md:p-8 ${i > 0 ? 'mt-6' : ''}`}>
+                  {section.title && (
+                    <p className="text-text-muted text-xs font-semibold uppercase tracking-wide mb-4 flex items-center justify-center gap-1.5">
+                      {Icon && <Icon size={13} />} {section.title}
+                    </p>
+                  )}
+                  <ul className="flex flex-wrap items-center justify-center gap-x-2 gap-y-2">
+                    {section.names.map((name) => (
+                      <li
+                        key={name}
+                        className="px-3 py-1.5 rounded-full bg-surface-raised border border-[var(--border)] text-text-primary text-sm font-medium"
+                      >
+                        {name}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+                {/* The footnote sits under the first list (the donors), as it always has. */}
+                {i === 0 && page.footnote && <p className="text-text-muted text-xs mt-8">{page.footnote}</p>}
+              </div>
+            )
+          })}
         </div>
       </div>
     </div>
