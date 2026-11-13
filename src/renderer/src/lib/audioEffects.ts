@@ -200,35 +200,14 @@ export function sanitizeUserPresets(raw: unknown): EqPreset[] {
     && p.gains.every((g: unknown) => typeof g === 'number' && Number.isFinite(g)))
 }
 
-// ── iOS background-audio guard ──────────────────────────────────────────────
-// On iOS/iPadOS (every browser there is WebKit), a bare <audio> element keeps
-// playing when the tab is backgrounded / the screen locks - that's what drives
-// lock-screen playback. But the moment its output is routed through a Web Audio
-// AudioContext (createMediaElementSource → … → ctx.destination), iOS ties the
-// sound to the context's lifetime and *suspends the context* on background,
-// then tears it down after a couple of minutes of inactivity. Result: music
-// dies ~minutes after the user leaves the app, with no event we can catch - and
-// no gesture available in the background to resume() it. This is architectural,
-// not a bug we can patch with watchdogs (we tried; see Player's interval +
-// visibilitychange handlers), so the only reliable fix is to *not* route
-// through Web Audio on iOS: play the bare element and forfeit EQ/balance/mono/
-// reverb/skip-silence there. Uninterrupted background playback >> effects.
-
-// Whether the Web Audio effects chain can run at all. False on iOS (see above),
-// where attaching would sacrifice background playback - the UI reads this to
-// explain why EQ/balance/reverb are unavailable instead of silently doing
-// nothing.
+// Keep iOS media elements outside Web Audio so background playback remains
+// native. A MediaElementSource cannot be detached again without a reload.
 export const EFFECTS_SUPPORTED = !IS_IOS
 
-// Android is a milder version of the same story: routing through the graph
-// works, but the context gets suspended by doze/screen-off and the page loses
-// the "playing audio" exemption that keeps a backgrounded tab from being
-// frozen - at which point nothing is left running to resume it. A bare element
-// survives all of that. So on mobile the graph is built lazily: elements stay
-// unrouted until the user actually switches an effect on, which is the only
-// point where the trade is worth making. Desktop builds it on the first play
-// (resumeEffectsContext): creating the context and its nodes at mount cost
-// 115-150 ms of every launch, before anything had played.
+// On mobile the graph is built lazily: elements stay unrouted until an effect
+// is switched on, preserving native background playback until effects are used.
+// Desktop builds it on the first play (resumeEffectsContext), avoiding the
+// cost of creating the context and its nodes at mount.
 let effectsWanted = false
 
 let ctx: AudioContext | null = null
@@ -312,12 +291,34 @@ function buildSaturationCurve(drive: number): Float32Array<ArrayBuffer> {
   return curve
 }
 
+// EQ bands: shelves at the extremes, peaking in between. Shared with the iOS
+// offline render (iosEqRender.ts) so both paths shape the sound identically.
+export function createEqBandFilters(context: BaseAudioContext): BiquadFilterNode[] {
+  return EQ_BANDS.map((freq, i) => {
+    const f = context.createBiquadFilter()
+    if (i === 0) f.type = 'lowshelf'
+    else if (i === EQ_BANDS.length - 1) f.type = 'highshelf'
+    else { f.type = 'peaking'; f.Q.value = 1.1 }
+    f.frequency.value = freq
+    f.gain.value = 0
+    return f
+  })
+}
+
+export function createSafetyLimiter(context: BaseAudioContext): DynamicsCompressorNode {
+  const limiter = context.createDynamicsCompressor()
+  limiter.threshold.value = -1.5
+  limiter.knee.value = 0
+  limiter.ratio.value = 20
+  limiter.attack.value = 0.001
+  limiter.release.value = 0.1
+  return limiter
+}
+
 function ensureGraph(): AudioContext | null {
+  if (!EFFECTS_SUPPORTED) return null
   if (ctx) return ctx
-  // iOS: never build the graph - routing through Web Audio would kill
-  // background playback (see IS_IOS above). Elements play bare instead.
-  if (IS_IOS) return null
-  // Android: not until an effect is actually in use (see effectsWanted).
+  // Mobile: not until an effect is actually in use (see effectsWanted).
   if (!effectsWanted) return null
   try {
     ctx = new AudioContext()
@@ -348,16 +349,7 @@ function ensureGraph(): AudioContext | null {
 
   preampGain = ctx.createGain()
 
-  // EQ bands: shelves at the extremes, peaking in between.
-  bandFilters = EQ_BANDS.map((freq, i) => {
-    const f = ctx!.createBiquadFilter()
-    if (i === 0) f.type = 'lowshelf'
-    else if (i === EQ_BANDS.length - 1) f.type = 'highshelf'
-    else { f.type = 'peaking'; f.Q.value = 1.1 }
-    f.frequency.value = freq
-    f.gain.value = 0
-    return f
-  })
+  bandFilters = createEqBandFilters(ctx)
 
   // Mono: forcing the node's channel count to 1 makes Web Audio downmix at
   // its input; the destination upmixes the single channel back to both ears.
@@ -369,12 +361,7 @@ function ensureGraph(): AudioContext | null {
   // Safety limiter - several presets push +5 dB and stacked boosts would
   // otherwise hard-clip. Zero knee + high threshold keeps it transparent
   // until a peak actually exceeds it.
-  const limiter = ctx.createDynamicsCompressor()
-  limiter.threshold.value = -1.5
-  limiter.knee.value = 0
-  limiter.ratio.value = 20
-  limiter.attack.value = 0.001
-  limiter.release.value = 0.1
+  const limiter = createSafetyLimiter(ctx)
 
   // Reverb: parallel dry/wet split after the panner. The convolver's IR is
   // built lazily on first non-zero mix (an 8s stereo buffer is not free).
@@ -633,9 +620,8 @@ export function getCurrentPeak(): number {
 }
 
 // The mixed player signal (pre-EQ, post element volume), for analysis taps
-// like the fullscreen visualizer. Null while the graph isn't built - never on
-// iOS, on Android not until an effect is switched on, on desktop not until the
-// first play - so callers must
+// like the fullscreen visualizer. Null until an effect is switched on on
+// mobile, or until the first play on desktop, so callers must
 // cope without it rather than forcing the graph, which would cost background
 // playback. Read-only by contract: connect analysers to it, never anything
 // that reaches ctx.destination (that plays the audio twice and skips the EQ),

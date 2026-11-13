@@ -31,11 +31,13 @@ const NOT_APPLICABLE = {
   'apiFilesShared.triggerDownload': 'native save wrapper; terminal get covers the download request',
   'lazyViews.LibraryTab': 'lazy import of the on-device library, not an API operation',
   'siriCommands.startSiriCommands': 'native Siri command listener; player, like and search commands cover its requests',
+  'wrldExpand.expandToWrld': 'animates navigation to WRLD from the player bar and makes no API request (open wrld)',
   // Live sockets: the terminal can't hold a streaming screen open as a command.
   'heardleMatchApi.connectMatchSocket': 'live websocket; the REST queue calls are covered',
   // Same request as another function that is covered.
   'userApi.setPlaylistCoverBase64': 'same PATCH as uploadPlaylistCover (drag-drop path)',
   'juicewrldApi.fetchFileText': 'the terminal file tools (ignored module terminalFiles) read with it: nano',
+  'eraCoverFiles.findEraCoverFile': 'looks up an era cover with the same /files/list-all/ walk the terminal file tools make (ls, find); the path goes into a proposal as image_url',
   // Whole modules (`module.*`).
   'lastfm.*': 'Last.fm is a third-party service, not the site API',
   'gifApi.*': 'Tenor/Giphy are third-party services, not the site API',

@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { ChevronRight, MoreHorizontal, Play, Flame, Heart, User, Newspaper, Radio, Music, Search, MicVocal, AudioLines, Bell, BarChart3, ImagePlus } from 'lucide-react'
+import { ChevronRight, MoreHorizontal, Play, Flame, Heart, User, Newspaper, Radio, Music, Search, MicVocal, AudioLines, Bell, BarChart3, ImagePlus, FileAudio } from 'lucide-react'
 import { useStore } from '../store/useStore'
 import * as userApi from '../lib/userApi'
 import { AlbumArtThumbnail } from './AlbumArtThumbnail'
@@ -100,7 +100,7 @@ export default function HomeViewMobile(): JSX.Element {
     account, likedTrackIds, radioFmIsLive, radioFmNowPlaying, setActiveView,
     openProfile, openOwnPublicProfile, showSection, recent, newsItems, games, playlistRow, albumRow,
     totalPlays, distinctSongs, weekPlays, siteStats, openTrack, openNewsItem, openRadioFm,
-  } = useHomeData()
+  } = useHomeData({ mobile: true })
   // Whatever doesn't fit the bottom nav directly - its old in-bar "More" tab
   // moved here, since fitting it AND a Home tab both in the bar pushed the
   // cap down by one more real destination. Mobile-only, so it stays here
@@ -266,7 +266,7 @@ export default function HomeViewMobile(): JSX.Element {
                   <button
                     key={g.view}
                     onClick={() => setActiveView(g.view)}
-                    className={`${TILE} shrink-0 rounded-[20px] bg-[var(--grouped)] px-4 py-3.5 text-left active:bg-[var(--fill-strong)] transition-colors`}
+                    className={`${TILE} glass-card glass-press relative shrink-0 rounded-[20px] px-4 py-3.5 text-left`}
                   >
                     <p className="text-headline text-text-primary truncate">{g.label}</p>
                     {g.kind === 'daily' ? (
@@ -311,7 +311,7 @@ export default function HomeViewMobile(): JSX.Element {
                 <EmptyNote>Play something and your stats will show up here.</EmptyNote>
               ) : (
                 <div className="px-4">
-                  <div className="grid grid-cols-3 rounded-[20px] bg-[var(--grouped)] divide-x divide-[color:var(--separator)]">
+                  <div className="glass-card relative grid grid-cols-3 rounded-[20px] divide-x divide-[color:var(--separator)]">
                     <Stat value={totalPlays.toLocaleString()} label="Plays" />
                     <Stat value={distinctSongs.toLocaleString()} label="Songs" />
                     <Stat value={weekPlays.toLocaleString()} label="This week" />
@@ -365,6 +365,13 @@ export default function HomeViewMobile(): JSX.Element {
                   label="Submit cover art"
                   sub="Send in better art for any song"
                   onClick={() => useStore.getState().openCoverArtSubmit()}
+                />
+                <GroupedRow
+                  icon={FileAudio}
+                  iconColor={PURPLE}
+                  label="Submit a remix or edit"
+                  sub="Share your remix or stem edit in Files"
+                  onClick={() => useStore.getState().openCommunityEditSubmit()}
                 />
                 </>
               )}

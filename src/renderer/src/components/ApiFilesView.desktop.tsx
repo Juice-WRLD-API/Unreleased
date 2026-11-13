@@ -40,6 +40,7 @@ import { useMultiSelect } from '../hooks/useMultiSelect'
 import { useLongPress } from '../hooks/useLongPress'
 import { basename, planDroppedUploads, proposeFileChanges, type CompFileChange } from '../lib/compFileChanges'
 import { showAppToast } from '../lib/appToast'
+import { GlassSegmented } from './GlassSegmented'
 import { SearchHelpButton } from './SearchHelpPopover'
 import { usePendingCompGhosts } from '../hooks/usePendingCompGhosts'
 import { PendingGhostItem, PendingMarker } from './PendingCompGhost'
@@ -608,17 +609,12 @@ export default function ApiFilesView({ embedded = false }: { embedded?: boolean 
             </div>
             <div className="flex items-center gap-3 ml-auto">
               {channels.length > 0 && (
-                <div className="flex items-center bg-surface-overlay rounded-lg p-1 gap-0.5">
-                  {channels.map((ch) => (
-                    <button
-                      key={ch.slug}
-                      onClick={() => onChannelChange(ch.slug)}
-                      disabled={channels.length === 1}
-                      className={`px-2.5 py-1.5 rounded-md text-xs font-medium transition-colors ${activeChannel === ch.slug ? 'bg-surface-raised text-text-primary shadow-sm' : 'text-text-muted hover:text-text-primary'} disabled:opacity-70`}
-                      title={ch.description || ch.name}
-                    >{ch.name}</button>
-                  ))}
-                </div>
+                <GlassSegmented
+                  ariaLabel="File channel"
+                  value={activeChannel}
+                  onChange={onChannelChange}
+                  options={channels.map(ch => ({ value: ch.slug, label: ch.name, title: ch.description || ch.name }))}
+                />
               )}
               {/* Sort controls */}
               <div className="flex items-center gap-1 text-text-muted">
@@ -638,30 +634,23 @@ export default function ApiFilesView({ embedded = false }: { embedded?: boolean 
                   </button>
                 ))}
               </div>
-              {/* Type filter */}
-              <div className="flex items-center bg-surface-overlay rounded-lg p-1 gap-0.5">
-                {MEDIA_FILTERS.map(({ key, label, icon: Icon }) => (
-                  <button
-                    key={key}
-                    onClick={() => setTypeFilter(key)}
-                    className={`p-2 rounded-md transition-colors ${typeFilter === key ? 'bg-surface-raised text-text-primary' : 'text-text-muted hover:text-text-secondary'}`}
-                    title={`Show ${label.toLowerCase()}`}
-                  ><Icon size={14} /></button>
-                ))}
-              </div>
-              {/* View toggle */}
-              <div className="flex items-center bg-surface-overlay rounded-lg p-1 gap-0.5">
-                <button
-                  onClick={() => setViewMode('list')}
-                  className={`p-2 rounded-md transition-colors ${viewMode === 'list' ? 'bg-surface-raised text-text-primary' : 'text-text-muted hover:text-text-secondary'}`}
-                  title="List view"
-                ><LayoutList size={15} /></button>
-                <button
-                  onClick={() => setViewMode('grid')}
-                  className={`p-2 rounded-md transition-colors ${viewMode === 'grid' ? 'bg-surface-raised text-text-primary' : 'text-text-muted hover:text-text-secondary'}`}
-                  title="Grid view"
-                ><LayoutGrid size={15} /></button>
-              </div>
+              <GlassSegmented
+                ariaLabel="File type"
+                value={typeFilter}
+                onChange={setTypeFilter}
+                options={MEDIA_FILTERS.map(({ key, label, icon: Icon }) => ({
+                  value: key, icon: <Icon size={14} />, title: 'Show ' + label.toLowerCase(),
+                }))}
+              />
+              <GlassSegmented
+                ariaLabel="File layout"
+                value={viewMode}
+                onChange={setViewMode}
+                options={[
+                  { value: 'list', icon: <LayoutList size={15} />, title: 'List view' },
+                  { value: 'grid', icon: <LayoutGrid size={15} />, title: 'Grid view' },
+                ]}
+              />
             </div>
           </div>
 
@@ -677,7 +666,7 @@ export default function ApiFilesView({ embedded = false }: { embedded?: boolean 
                 onChange={(e) => setSearch(e.target.value)}
                 onFocus={prefetchSearchIndex}
                 placeholder={searchInFolder && currentPath ? `Search in ${currentPath.slice(currentPath.lastIndexOf('/') + 1)}…` : 'Search files…'}
-                className={`w-full bg-surface-overlay border border-[var(--border)] rounded-lg pl-8 ${currentPath ? (search ? 'pr-20' : 'pr-14') : (search ? 'pr-14' : 'pr-8')} py-1.5 text-sm text-text-primary placeholder:text-text-muted focus:outline-none focus:border-accent/40`}
+                className={`w-full glass-field rounded-full pl-8 ${currentPath ? (search ? 'pr-20' : 'pr-14') : (search ? 'pr-14' : 'pr-8')} py-1.5 text-sm text-text-primary placeholder:text-text-muted focus:outline-none focus:border-accent/40`}
               />
               <div className="absolute right-2 top-1/2 -translate-y-1/2 flex items-center gap-1.5">
                 {search && (
@@ -771,7 +760,7 @@ export default function ApiFilesView({ embedded = false }: { embedded?: boolean 
 
         {/* Content */}
         <div
-          className={`flex-1 overflow-y-auto px-5 pb-4 transition-colors ${fileDragOver ? 'bg-accent/[0.04] ring-2 ring-inset ring-accent/40' : ''}`}
+          className={`flex-1 overflow-y-auto px-5 pb-4 pb-player transition-colors ${fileDragOver ? 'bg-accent/[0.04] ring-2 ring-inset ring-accent/40' : ''}`}
           // Dropping OS files/folders on empty space uploads into the folder
           // being browsed; folder rows handle drops onto themselves.
           onDragOver={e => {
@@ -1106,7 +1095,7 @@ export default function ApiFilesView({ embedded = false }: { embedded?: boolean 
 
         {/* Selection action bar */}
         {selectMode && (
-          <div className="shrink-0 border-t border-[var(--border)] bg-surface px-4 py-2.5 flex items-center gap-2">
+          <div className="shrink-0 files-selection-bar glass-thick glass-specular relative rounded-full mx-4 mb-2 px-4 py-2.5 flex items-center gap-2">
             <span className="text-sm text-text-primary font-medium flex-1">
               {selectedPaths.size} {selectedPaths.size === 1 ? 'item' : 'items'} selected
             </span>
@@ -1180,13 +1169,13 @@ export default function ApiFilesView({ embedded = false }: { embedded?: boolean 
       </div>
 
       {copiedPath && (
-        <div className="fixed bottom-5 left-1/2 -translate-x-1/2 z-50 flex items-center gap-2 bg-surface border border-[var(--border)] rounded-lg shadow-2xl px-3.5 py-2.5 text-xs text-text-primary">
+        <div className="fixed above-player left-1/2 -translate-x-1/2 z-50 flex items-center gap-2 bg-surface border border-[var(--border)] rounded-lg shadow-2xl px-3.5 py-2.5 text-xs text-text-primary">
           <Check size={13} className="text-accent" /> {copiedKind === 'path' ? 'Path copied' : 'Link copied'}
         </div>
       )}
 
       {boostToast && (
-        <div className="fixed bottom-5 left-1/2 -translate-x-1/2 z-50 flex items-center gap-2 bg-surface border border-[var(--border)] rounded-lg shadow-2xl px-3.5 py-2.5 text-xs text-text-primary">
+        <div className="fixed above-player left-1/2 -translate-x-1/2 z-50 flex items-center gap-2 bg-surface border border-[var(--border)] rounded-lg shadow-2xl px-3.5 py-2.5 text-xs text-text-primary">
           <Heart size={13} className="text-pink-400" fill="currentColor" /> Priority routing active
         </div>
       )}
@@ -1195,7 +1184,7 @@ export default function ApiFilesView({ embedded = false }: { embedded?: boolean 
           shows download status while selectMode is active, so this only
           covers the single-folder "Download folder" context-menu action. */}
       {!selectMode && zipStatus !== 'idle' && (
-        <div className="fixed bottom-5 right-5 z-50 flex items-center gap-2 bg-surface border border-[var(--border)] rounded-lg shadow-2xl px-3.5 py-2.5 text-xs text-text-primary">
+        <div className="fixed above-player right-5 z-50 flex items-center gap-2 bg-surface border border-[var(--border)] rounded-lg shadow-2xl px-3.5 py-2.5 text-xs text-text-primary">
           {zipStatus === 'starting' || zipStatus === 'zipping' ? (
             <><Loader2 size={13} className="animate-spin text-accent" /> {zipStatus === 'starting' ? 'Starting…' : zipProgress ? `Zipping folder ${zipProgress.done}/${zipProgress.total}…` : 'Downloading folder…'}</>
           ) : zipStatus === 'done' ? (

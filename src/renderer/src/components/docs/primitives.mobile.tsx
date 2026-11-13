@@ -31,7 +31,7 @@ export function Section({ title, children, defaultOpen = true }: { title: string
   const expanded = query ? true : open
 
   return (
-    <div className="rounded-[20px] overflow-hidden bg-[var(--grouped)]" hidden={!hit}>
+    <div className="glass-card relative rounded-[20px] overflow-hidden" hidden={!hit}>
       <button
         onClick={() => setOpen(o => !o)}
         className="w-full flex items-center justify-between gap-3 px-4 min-h-[48px] py-3 active:bg-[var(--fill)] transition-colors text-left"

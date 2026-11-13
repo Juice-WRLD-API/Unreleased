@@ -49,6 +49,7 @@ function LyricColorRow({ label, presets, value, fallback, onChange }: {
         onChange={onChange}
         className="w-6 h-6 rounded-full"
         title="Custom color"
+        pipette
       />
     </div>
   )

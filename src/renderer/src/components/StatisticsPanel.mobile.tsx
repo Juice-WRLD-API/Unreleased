@@ -26,16 +26,16 @@ export default function StatisticsPanelMobile({ onOpenEra }: { onOpenEra: (eraNa
       <div className="flex-1 min-h-0 overflow-y-auto overscroll-contain pt-3 pb-dock">
         {loading ? (
           <div className="px-4 space-y-3">
-            <div className="h-20 bg-[var(--grouped)] animate-pulse rounded-[20px]" />
-            <div className="h-28 bg-[var(--grouped)] animate-pulse rounded-[20px]" />
-            <div className="h-56 bg-[var(--grouped)] animate-pulse rounded-[20px]" />
+            <div className="h-20 glass-card relative animate-pulse rounded-[20px]" />
+            <div className="h-28 glass-card relative animate-pulse rounded-[20px]" />
+            <div className="h-56 glass-card relative animate-pulse rounded-[20px]" />
           </div>
         ) : loadFailed ? (
           <p className="py-16 px-4 text-center text-subhead text-text-muted">Couldn&apos;t load statistics. Check your connection and open the tab again.</p>
         ) : (
           <>
             {/* Hero */}
-            <div className="mx-4 mb-6 rounded-[20px] bg-[var(--grouped)] flex items-center gap-3 px-4 py-3.5">
+            <div className="glass-card relative mx-4 mb-6 rounded-[20px] flex items-center gap-3 px-4 py-3.5">
               <BarChart3 size={22} className="text-accent shrink-0" />
               <div className="min-w-0 flex-1">
                 <p className="text-title2 text-text-primary tabular-nums truncate">{(stats?.total_songs ?? 0).toLocaleString()}</p>

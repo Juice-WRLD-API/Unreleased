@@ -13,6 +13,7 @@ import * as reportsApi from '../lib/reportsApi'
 import { fetchEraList } from '../lib/erasApi'
 import { fetchCdnStats } from '../lib/cdnAdminApi'
 import { adminCoverArtCounts } from '../lib/coverArtApi'
+import { adminCommunityEditCounts } from '../lib/communityEditsApi'
 import type { AdminTab } from './useAdminQueue'
 import { useCanManage } from './useChannelRoles'
 import { filterCompProposals, compProposalSearchText, type CompFilterTab } from '../components/CompProposalList'
@@ -34,6 +35,7 @@ export interface AdminPreview {
   pendingProposals: number | null
   pendingComp: number | null
   pendingCoverArt: number | null
+  pendingCommunityEdits: number | null
   pendingApplications: number | null
   pendingReports: number | null
   totalUsers: number | null
@@ -285,7 +287,7 @@ export function useEditorProfileView(): {
     Promise.resolve().then(() => {
       if (cancelled) return
       const initial: AdminPreview = {
-        pendingProposals: null, pendingComp: null, pendingCoverArt: null, pendingApplications: null, pendingReports: null,
+        pendingProposals: null, pendingComp: null, pendingCoverArt: null, pendingCommunityEdits: null, pendingApplications: null, pendingReports: null,
         totalUsers: null, totalChannels: channelsRef.current.length, totalEras: null,
         pendingCdnNodes: null, totalPending: null, otpEnabled: isAdmin ? !!account?.otp_enabled : null,
         totalProposals: null, approvedProposals: null, approvalPct: null,
@@ -299,7 +301,7 @@ export function useEditorProfileView(): {
         preview.totalPending = preview.pendingProposals == null || preview.pendingComp == null
           || (isAdmin && (preview.pendingApplications == null || preview.pendingReports == null))
           || (canReviewCoverArt && preview.pendingCoverArt == null)
-          ? null : preview.pendingProposals + preview.pendingComp + (preview.pendingCoverArt ?? 0)
+          ? null : preview.pendingProposals + preview.pendingComp + (preview.pendingCoverArt ?? 0) + (preview.pendingCommunityEdits ?? 0)
             + (preview.pendingApplications ?? 0) + (preview.pendingReports ?? 0)
         setAdminPreview(preview)
       }
@@ -314,6 +316,8 @@ export function useEditorProfileView(): {
       void adminCompProposalCounts(activeChannel).then(counts => publish({ pendingComp: counts.pending })).catch(() => {})
       if (canReviewCoverArt) {
         void adminCoverArtCounts().then(counts => publish({ pendingCoverArt: counts.pending })).catch(() => {})
+        // Not waited for in totalPending: an older server has no community edits endpoint.
+        void adminCommunityEditCounts().then(counts => publish({ pendingCommunityEdits: counts.pending })).catch(() => {})
       }
       if (isAdmin) {
         void adminListApplications('pending').then(apps => publish({ pendingApplications: apps.length })).catch(() => {})

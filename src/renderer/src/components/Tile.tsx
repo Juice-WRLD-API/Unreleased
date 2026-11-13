@@ -17,7 +17,7 @@ export function Tile({ title, icon, action, controls, span = '', children }: {
   return (
     // Phones: an iOS inset-grouped card (no border, sentence-case headline,
     // accent "See all"-style action); desktop keeps the bento tile.
-    <section className={`${span} min-w-0 min-h-0 flex flex-col overflow-hidden rounded-[20px] md:rounded-2xl md:border md:border-[var(--border)] bg-[var(--grouped)] md:bg-[var(--surface-overlay)]/50 p-4`}>
+    <section data-swap className={`${span} min-w-0 min-h-0 flex flex-col overflow-hidden rounded-[20px] md:rounded-2xl glass-pane p-4`}>
       {title && (
         <div className="flex items-center gap-2 mb-3 shrink-0">
           <span className="text-text-muted">{icon}</span>
@@ -45,8 +45,13 @@ export function Tile({ title, icon, action, controls, span = '', children }: {
           (flex-shrink is blocked by min-height:auto otherwise); the
           overflow-y-auto here is now just a fallback for tiles with no
           scrollable region of their own - a no-op once an inner list is
-          properly sized and scrolling itself. */}
-      <div className="flex-1 flex flex-col min-h-0 overflow-y-auto overflow-x-hidden">
+          properly sized and scrolling itself.
+          The p-2 / -m-2 pair is bleed room: this wrapper clips its overflow,
+          and rows with a hover box that sticks out of their cell (`p-1.5
+          -m-1.5`, `-mx-2`) had that box cut off flush with the tile's padding.
+          The padding gives it somewhere to draw and the negative margin keeps
+          the content where it was. */}
+      <div className="flex-1 flex flex-col min-h-0 overflow-y-auto overflow-x-hidden -m-2 p-2">
         {children}
       </div>
     </section>

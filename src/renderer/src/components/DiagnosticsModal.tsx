@@ -69,10 +69,10 @@ function ValuePopup({ label, value, onClose }: { label: string; value: string; o
   return (
     <MotionOverlay
       ref={ref}
-      className="fixed inset-0 z-[70] flex items-center justify-center bg-black/60 backdrop-blur-sm px-4"
+      className="fixed inset-0 z-[70] flex items-center justify-center glass-scrim px-4"
       onClick={(e) => { if (e.target === ref.current) onClose() }}
     >
-      <div className="bg-surface border border-[var(--border)] rounded-2xl shadow-2xl w-full max-w-[420px] max-h-[70vh] flex flex-col overflow-hidden">
+      <div className="relative bg-surface border border-[var(--border)] modal-glass rounded-2xl shadow-2xl w-full max-w-[420px] max-h-[70vh] flex flex-col overflow-hidden">
         <div className="flex items-center justify-between px-4 py-3 border-b border-[var(--border)] shrink-0">
           <span className="text-text-muted text-[10px] font-semibold uppercase tracking-widest">{label}</span>
           <button onClick={onClose} title="Close" className="text-text-muted hover:text-text-primary transition-colors">

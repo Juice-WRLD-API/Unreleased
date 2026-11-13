@@ -144,7 +144,9 @@ export default function AutoHideNav({ position, autoHide = true, pill = false, c
           transform: open ? 'none' : edge.hidden,
           visibility: open ? 'visible' : 'hidden',
           transition: `transform ${SLIDE_MS}ms ease-out, visibility 0s linear ${open ? '0s' : `${SLIDE_MS}ms`}`,
-        } : undefined}
+        // A bottom pill sits above the floating player bar instead of over
+        // its controls (--player-dock: Player.tsx).
+        } : pill && position === 'bottom' ? { bottom: 'max(0px, calc(var(--player-dock, 0px) - 8px))' } : undefined}
       >
         {children}
       </div>

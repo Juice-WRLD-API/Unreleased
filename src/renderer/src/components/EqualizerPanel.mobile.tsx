@@ -5,6 +5,7 @@ import {
   DEFAULT_FX, FX_RANGES, USER_PRESET_PREFIX, USER_PRESET_NAME_MAX, type AudioFx,
 } from '../lib/audioEffects'
 import { formatDuration } from '../lib/format'
+import { IS_IOS } from '../lib/platform'
 import { bandLabel, useEqualizerPanelData } from '../hooks/useEqualizerPanelData'
 
 /** iOS switch, same as Settings' - the knob slides on transform. */
@@ -295,14 +296,11 @@ export default function EqualizerPanel(): JSX.Element {
       <div className="flex items-center justify-between px-5 pb-2">
         <span className="text-subhead text-text-primary">Enabled</span>
         <div className="flex items-center gap-3">
-          {(playbackSpeed !== 1 || pitchShift || (EFFECTS_SUPPORTED && (eqBalance !== 0 || eqMono || skipSilence || reverbEnabled || eqGains.some(g => g !== 0)))) && (
+          {(playbackSpeed !== 1 || pitchShift || eqGains.some(g => g !== 0) || (EFFECTS_SUPPORTED && (eqBalance !== 0 || eqMono || skipSilence || reverbEnabled))) && (
             <button
               onClick={() => {
-                // iOS: only speed/pitch actually apply here. Leave the synced
-                // EQ/effects settings alone so this doesn't flatten them on
-                // the user's other devices too.
+                setEqPreset('flat')
                 if (EFFECTS_SUPPORTED) {
-                  setEqPreset('flat')
                   setEqBalance(0); setEqMono(false); setSkipSilence(false)
                   setReverbEnabled(false); setReverbMix(0.4); setReverbDecay(3)
                 }
@@ -313,17 +311,13 @@ export default function EqualizerPanel(): JSX.Element {
               <RotateCcw size={11} /> Reset all
             </button>
           )}
-          <Toggle on={eqEnabled && EFFECTS_SUPPORTED} onClick={() => { if (EFFECTS_SUPPORTED) setEqEnabled(!eqEnabled) }} />
+          <Toggle on={eqEnabled} onClick={() => setEqEnabled(!eqEnabled)} />
         </div>
       </div>
 
-      {/* iOS: the EQ/balance/mono/reverb chain is disabled so audio keeps
-          playing in the background (routing through Web Audio forfeits that on
-          iOS - see platform IS_IOS). Speed, sleep timer, and community
-          edits below don't use the chain and still work. */}
-      {!EFFECTS_SUPPORTED && (
+      {IS_IOS && (
         <p className="mx-5 mb-2 text-footnote text-text-muted bg-[var(--fill)] rounded-xl px-3 py-2">
-          Equalizer & sound effects are off on iOS so music keeps playing when you leave the app.
+          On iOS the equalizer is applied to each song before it plays, so a change takes a moment to be heard. The other sound effects are unavailable, to keep music playing when you leave the app or lock your phone.
         </p>
       )}
 
@@ -435,11 +429,6 @@ export default function EqualizerPanel(): JSX.Element {
         )}
       </div>
 
-      {/* Graph-dependent effects (EQ bands, balance, mono, skip-silence,
-          reverb) - all routed through the Web Audio chain, so all unavailable
-          on iOS where the chain is off for background playback. */}
-      <div className={!EFFECTS_SUPPORTED ? 'opacity-40 pointer-events-none' : ''}>
-
       {/* Band faders */}
       <div className={`px-5 pb-2 transition-opacity ${eqEnabled ? '' : 'opacity-40 pointer-events-none'}`}>
         <div className="flex justify-between">
@@ -473,6 +462,10 @@ export default function EqualizerPanel(): JSX.Element {
       </div>
 
       <div className="border-t border-[var(--separator)] mx-5" />
+
+      {/* Effects that need the live Web Audio chain (the bands above are
+          rendered ahead of time on iOS - see iosEqRender). */}
+      <div className={!EFFECTS_SUPPORTED ? 'opacity-40 pointer-events-none' : ''}>
 
       {/* Balance */}
       <SliderRow label="Balance" formatted={balanceLabel} dirty={eqBalance !== 0} onReset={() => setEqBalance(0)}>
@@ -595,7 +588,7 @@ export default function EqualizerPanel(): JSX.Element {
 
       {/* A-B loop - repeats a marked portion of the current track. Pure
           audio.currentTime manipulation (no Web Audio graph involved), so it
-          works even where EFFECTS_SUPPORTED is false (iOS) - lives outside
+          lives outside
           that gated block. Hidden during FM: a live stream has no positions
           to mark. One button cycles Set A → Set B → Looping → clear, mirroring
           the classic single-button A-B repeat control. */}

@@ -427,7 +427,7 @@ export default function TierlistView(): JSX.Element {
             <Plus size={16} /> Add tier
           </button>
 
-          <div className="rounded-[20px] bg-[var(--grouped)] p-3">
+          <div className="glass-card relative rounded-[20px] p-3">
             <div className="flex items-center gap-2 mb-3 px-1">
               <span className="text-headline text-text-primary">Unranked</span>
               <span className="text-subhead text-text-secondary tabular-nums">{visiblePool.length}</span>

@@ -67,6 +67,7 @@ function MembersPanel({ channel, users }: { channel: Channel; users: AdminUser[]
           <ThemedSelect
             value={String(addUserId)}
             onChange={setAddUserId}
+            searchable
             placeholder="Add a user…"
             options={addable.map((u) => ({ value: String(u.user_id), label: discordHandle(u) }))}
             className="flex-1 min-w-0 bg-surface-overlay border border-[var(--border)] rounded-lg px-2 py-1.5 text-xs text-text-primary focus:outline-none focus:border-accent/40"

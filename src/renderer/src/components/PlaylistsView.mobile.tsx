@@ -2120,7 +2120,7 @@ export default function PlaylistsView(): JSX.Element {
       {zipState !== 'idle' && (
         <div
           role="status"
-          className="fixed left-1/2 -translate-x-1/2 z-50 flex items-center gap-2 px-4 py-2.5 rounded-full glass text-footnote font-medium text-text-primary"
+          className="fixed left-1/2 -translate-x-1/2 z-50 flex items-center gap-2 px-4 py-2.5 rounded-full glass glass-specular text-footnote font-medium text-text-primary"
           style={{ bottom: 'calc(var(--dock-h, 0px) + 0.5rem)' }}
         >
           {zipState === 'loading' ? <Loader2 size={15} className="animate-spin" />
@@ -2145,7 +2145,7 @@ export default function PlaylistsView(): JSX.Element {
 
       {/* ── Track selection bar ── */}
       {selectMode && inDetail && (
-        <div className="fixed left-3 right-3 z-20 glass rounded-[28px] overflow-hidden" style={{ bottom: 'var(--dock-h, 0px)' }}>
+        <div className="fixed left-3 right-3 z-20 glass glass-specular rounded-[28px] overflow-hidden" style={{ bottom: 'var(--dock-h, 0px)' }}>
           <div className="flex items-center gap-1 pl-1 pr-2 pt-1">
             <button
               onClick={exitSelectMode}
@@ -2183,7 +2183,7 @@ export default function PlaylistsView(): JSX.Element {
 
       {/* ── Playlist selection bar ── */}
       {plSelectMode && !inDetail && !showLiked && (
-        <div className="fixed left-3 right-3 z-20 glass rounded-[28px] overflow-hidden" style={{ bottom: 'var(--dock-h, 0px)' }}>
+        <div className="fixed left-3 right-3 z-20 glass glass-specular rounded-[28px] overflow-hidden" style={{ bottom: 'var(--dock-h, 0px)' }}>
           <div className="flex items-center gap-1 pl-1 pr-2 pt-1">
             <button
               onClick={exitPlaylistSelectMode}

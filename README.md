@@ -28,7 +28,7 @@ The app requires **iOS 15.0 or newer**. Releases are unsigned because the projec
 
 The iOS app carries over the shared player's core experience, including the catalog, streaming, search, playlists, lyrics, Tracker, 999 FM, Heardle, Wordle, Wrapped, skins, fonts, account features, and encrypted chat with device linking.
 
-Downloaded files and exports are saved in **Files → On My iPhone (or iPad) → Unreleased**. Playback uses the device's volume buttons; crossfade and audio effects are unavailable on iOS to preserve background audio.
+Downloaded files and exports are saved in **Files → On My iPhone (or iPad) → Unreleased**. Playback uses the device's volume buttons. On supported streamed songs, the equalizer processes the audio before playback so it can still play in the background. Crossfade and effects that need real-time processing are unavailable.
 
 Some desktop-only integrations are not available on iOS, including format conversion, importing from YouTube or other URLs, Discord Rich Presence, and local metadata editing.
 

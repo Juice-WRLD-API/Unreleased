@@ -240,6 +240,14 @@ function ResizeHandle({ onMouseDown }: { onMouseDown: (e: ReactMouseEvent) => vo
 // the drag handle (dragging from anywhere in the body would break e.g.
 // SongInfoModal's select-to-copy text) while the drag mechanism itself lives
 // here, in one place, instead of being re-derived per modal.
+//
+// Every panel gets the glass rim (.modal-glass in index.css), drawn from an
+// ::after layer over its edges. A panel that scrolls itself would carry that
+// layer away with its content, so those keep their plain border.
+function panelGlass(panelClassName: string): string {
+  return /\boverflow-(?:y-)?(?:auto|scroll)\b/.test(panelClassName) ? '' : ' modal-glass'
+}
+
 export function ModalOverlay({
   onClose,
   floating = false,
@@ -505,7 +513,7 @@ export function ModalOverlay({
     return createPortal(
       <div
         ref={rootRef}
-        className={`fixed inset-0 ${zIndexClassName} flex items-end md:items-center justify-center bg-black/60 backdrop-blur-sm p-0 md:px-4`}
+        className={`fixed inset-0 ${zIndexClassName} flex items-end md:items-center justify-center glass-scrim p-0 md:px-4`}
         onMouseDown={(e) => { pressedBackdrop.current = e.target === e.currentTarget }}
         onClick={(e) => { if (e.target === e.currentTarget && pressedBackdrop.current) onClose() }}
         // Fades out (rather than translating) as the panel is dragged, so the
@@ -517,7 +525,7 @@ export function ModalOverlay({
         }}
       >
         <div
-          className={`relative flex flex-col overflow-hidden ${panelClassName}`}
+          className={`relative flex flex-col overflow-hidden ${panelClassName}${panelGlass(panelClassName)}`}
           style={{
             transform: dragY ? `translateY(${dragY}px)` : undefined,
             transition: dragging ? 'none' : 'transform 0.25s ease-out',
@@ -551,7 +559,7 @@ export function ModalOverlay({
           classes (w-full max-w-*, h-[...]) just lose to panelStyle's explicit
           width/height/maxWidth/maxHeight via inline-style specificity, while
           its border/radius/shadow/bg/overflow-hidden keep applying either way. */}
-      <div ref={panelRef} className={`relative flex flex-col overflow-hidden ${panelClassName}`} style={panelStyle}>
+      <div ref={panelRef} className={`relative flex flex-col overflow-hidden ${panelClassName}${panelGlass(panelClassName)}`} style={panelStyle}>
         {children({ onHandleMouseDown, locked, toggleLock, canLock: true })}
         <ResizeHandle onMouseDown={onResizeHandleMouseDown} />
       </div>

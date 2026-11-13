@@ -297,10 +297,11 @@ export const PLAYER_COMMANDS: TermCommand[] = [
     },
   },
   {
-    name: 'queue', aliases: ['q'], group: 'Player', usage: 'queue [list [filter] | clear | add <song> | next <song> | remove N | jump N|title | history [N|title] | radio]',
-    description: 'Show or change the play queue. <song> is a title or a number from find. list <filter> takes the Tracker search syntax (plain words, field:"value"). history lists what was played before this song (newest first); history N|title replays one; radio switches to random tracker songs',
+    name: 'queue', aliases: ['q'], group: 'Player', usage: 'queue [list [filter] | clear | add <song> | next <song> | remove N | jump N|title | history [N|title] | radio | random [on|off]]',
+    description: 'Show or change the play queue. <song> is a title or a number from find. list <filter> takes the Tracker search syntax (plain words, field:"value"). history lists what was played before this song (newest first); history N|title replays one; radio switches to random tracker songs now; random on keeps this song and plays random ones after it (Random in WRLD), random off stops it',
     complete: (before, partial) => {
-      if (before.length === 0) return ['list', 'clear', 'add', 'next', 'remove', 'jump', 'history', 'radio'].filter((w) => w.startsWith(partial))
+      if (before.length === 0) return ['list', 'clear', 'add', 'next', 'remove', 'jump', 'history', 'radio', 'random'].filter((w) => w.startsWith(partial))
+      if (before.length === 1 && before[0].toLowerCase() === 'random') return ['on', 'off'].filter((w) => w.startsWith(partial))
       return ['add', 'next'].includes(before[0].toLowerCase()) ? completeSongs(before.slice(1), partial) : []
     },
     run: async (args, ctx) => {
@@ -373,7 +374,20 @@ export const PLAYER_COMMANDS: TermCommand[] = [
           ctx.print('📻 radio on - playing random songs', 'ok')
           return
         }
-        default: fail('usage: queue [list | clear | add <song> | next <song> | remove N | jump N|title | history [N|title] | radio]')
+        case 'random': {
+          const mode = rest.toLowerCase()
+          const on = mode === '' ? !(s.radioMode && !s.radioFmActive) : mode === 'on' ? true : mode === 'off' ? false : fail('usage: queue random [on|off]')
+          if (on) {
+            currentTrack()
+            s.setRandomMode(true)
+            ctx.print('🎲 random on - random songs after this one', 'ok')
+          } else {
+            s.setRandomMode(false)
+            ctx.print('random off', 'ok')
+          }
+          return
+        }
+        default: fail('usage: queue [list | clear | add <song> | next <song> | remove N | jump N|title | history [N|title] | radio | random [on|off]]')
       }
     },
   },

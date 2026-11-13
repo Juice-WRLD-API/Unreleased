@@ -75,7 +75,7 @@ export default function PlaylistCard({
       {...(onLongPress ? longPress.bind(onLongPress) : {})}
     >
       <div
-        className={`relative aspect-square rounded-2xl overflow-hidden bg-surface-overlay flex items-center justify-center mb-2.5 shadow-md group-hover:shadow-xl group-hover:-translate-y-1 transition-all duration-200 ${selected ? 'ring-2 ring-accent' : ''} ${isDropTarget ? 'ring-2 ring-accent scale-[1.03]' : ''}`}
+        className={`relative aspect-square rounded-2xl overflow-hidden bg-[var(--fill)] flex items-center justify-center mb-2.5 shadow-md group-hover:shadow-xl group-hover:-translate-y-1 transition-all duration-200 ${selected ? 'ring-2 ring-accent' : ''} ${isDropTarget ? 'ring-2 ring-accent scale-[1.03]' : ''}`}
         // Kept permanently on its own GPU layer (rather than only while
         // hovered) so entering hover just updates this layer's existing
         // transform instead of promoting a fresh one - a late promotion here
@@ -92,7 +92,7 @@ export default function PlaylistCard({
       </div>
 
       {selectMode ? (
-        <div className="absolute top-1.5 left-1.5 z-10 bg-black/60 rounded-md p-0.5">
+        <div className="absolute top-1.5 left-1.5 z-10 bg-black/45 backdrop-blur-md rounded-md p-0.5">
           {selected
             ? <CheckSquare2 size={16} className="text-accent" />
             : <Square size={16} className="text-white/70" />}
@@ -103,10 +103,11 @@ export default function PlaylistCard({
 
       {!selectMode && (
         <button
-          className="absolute top-1.5 right-1.5 md:opacity-0 md:group-hover:opacity-100 p-1 rounded-lg bg-black/60 text-white hover:bg-black/80 transition-opacity"
+          className="absolute top-1.5 right-1.5 md:opacity-0 md:group-hover:opacity-100 w-7 h-7 flex items-center justify-center rounded-full bg-black/40 backdrop-blur-md text-white hover:bg-black/60 transition-opacity"
+          title="More"
           onClick={(e) => { e.stopPropagation(); e.nativeEvent.stopImmediatePropagation(); onMenuButton(e) }}
         >
-          <MoreHorizontal size={13} />
+          <MoreHorizontal size={14} />
         </button>
       )}
 

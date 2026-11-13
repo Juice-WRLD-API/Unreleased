@@ -38,6 +38,7 @@ import CompactVersionRows from './CompactVersionRows'
 import { groupPlaylistBySong, subscribeCompactGroupsInvalidation } from '../lib/compactGroups'
 import type { SongUnit } from '../lib/compactGroups'
 import { versionsEnabled } from '../lib/versionsApi'
+import { baseTitle } from '../lib/onThisDay'
 import { shareOrigin } from '../lib/platform'
 import { useVirtualWindowEl } from '../hooks/useVirtualWindow'
 import PlaylistCard from './PlaylistCard'
@@ -54,11 +55,37 @@ import { downloadBlob, playlistJsonPayload, playlistM3uContent } from '../lib/pl
 import { clickable } from '../lib/a11y'
 import { resolveTrackFile } from '../lib/sessionEditsApi'
 import { fetchImageBlob } from '../lib/coverImage'
+import { SearchHelpButton } from './SearchHelpPopover'
+import { GlassSegmented } from './GlassSegmented'
+import { GLASS_SEARCH, GLASS_SEARCH_WRAP, glassToolButton } from './glassControls'
 
 // One parsed line of an .m3u: a file path, plus the #EXTINF title/duration
 // when the exporter wrote them. Import can either match the path to a local
 // file, or use the name to find the song in the API.
 type M3uEntry = { path: string; title: string | null; duration?: number | null }
+
+// Per-playlist layout, remembered on this device. Only non-list layouts are
+// stored, so the map stays small.
+type PlaylistLayout = 'list' | 'grid' | 'compact'
+const PLAYLIST_LAYOUT_KEY = 'unreleased:playlistLayouts'
+function readPlaylistLayouts(): Record<string, PlaylistLayout> {
+  try {
+    const v = JSON.parse(localStorage.getItem(PLAYLIST_LAYOUT_KEY) || '{}')
+    return v && typeof v === 'object' ? v : {}
+  } catch { return {} }
+}
+function readPlaylistLayout(key: string): PlaylistLayout {
+  const v = readPlaylistLayouts()[key]
+  return v === 'grid' || v === 'compact' ? v : 'list'
+}
+function writePlaylistLayout(key: string, mode: PlaylistLayout): void {
+  try {
+    const all = readPlaylistLayouts()
+    if (mode === 'list') delete all[key]
+    else all[key] = mode
+    localStorage.setItem(PLAYLIST_LAYOUT_KEY, JSON.stringify(all))
+  } catch { /* storage unavailable: layout just won't stick */ }
+}
 
 // ── PlaylistMosaic ────────────────────────────────────────────────────────────
 
@@ -84,18 +111,17 @@ function PlaylistMosaic({ tracks, className = '' }: { tracks: Track[]; className
 }
 
 // ── HeroBackdrop - Apple Music-style full-bleed blurred cover art behind the
-// playlist header, instead of a faint corner blob. Fades into the page's own
-// background at the bottom so the track list below sits on ordinary bg.
+// playlist header. The mask fades the artwork into the ambient backdrop.
 // Independent of the "App gradients" setting - this is the hero's own art,
 // not a decorative accent wash.
 //
 // The darkening overlay was hardcoded to black, which reads as a dark banner
 // slapped onto an otherwise light page on a light skin. Mirror it instead:
 // dark skins darken toward black (unchanged), light skins lighten toward
-// white, both fading into the real --surface either way.
+// white, with the same mask on both.
 function HeroBackdrop({ src, isDarkSkin }: { src?: string | null; isDarkSkin: boolean }): JSX.Element {
   return (
-    <div className="absolute inset-0 overflow-hidden pointer-events-none" style={{ zIndex: 0 }}>
+    <div className="absolute inset-0 overflow-hidden pointer-events-none [mask-image:linear-gradient(to_bottom,#000_45%,transparent)]" style={{ zIndex: 0 }}>
       {src && (
         <img
           // Blurred past recognition, so the degraded copy is indistinguishable
@@ -109,14 +135,7 @@ function HeroBackdrop({ src, isDarkSkin }: { src?: string | null; isDarkSkin: bo
           }}
         />
       )}
-      <div
-        className="absolute inset-0"
-        style={{
-          backgroundImage: isDarkSkin
-            ? 'linear-gradient(to bottom, rgb(0 0 0 / 0.10), rgb(0 0 0 / 0.05), var(--surface))'
-            : 'linear-gradient(to bottom, rgb(255 255 255 / 0.35), rgb(255 255 255 / 0.15), var(--surface))',
-        }}
-      />
+      <div className={`absolute inset-0 ${isDarkSkin ? 'bg-black/10' : 'bg-white/30'}`} />
     </div>
   )
 }
@@ -134,11 +153,24 @@ function HeroPlayButton({ onClick }: { onClick: () => void }): JSX.Element {
     </button>
   )
 }
+// Secondary hero controls: glass circles and pills beside the accent Play.
+const HERO_ROUND = 'glass-field glass-specular relative shrink-0 flex items-center justify-center w-11 h-11 rounded-full text-text-primary focus-visible:outline-none disabled:opacity-40'
+const heroPill = (on: boolean): string => `glass-field glass-specular relative shrink-0 flex items-center gap-1.5 h-11 px-4 rounded-full text-sm font-medium focus-visible:outline-none disabled:opacity-60 ${on ? 'is-on' : 'text-text-primary'}`
+// Buttons in the floating selection bars. The bar is glass already, so these
+// are plain fills (glass on glass reads as mud).
+const BAR_BTN = 'flex items-center gap-1.5 h-8 px-3 rounded-full bg-[var(--fill)] hover:bg-[var(--fill-strong)] text-text-primary text-xs font-medium disabled:opacity-50 transition-colors'
+const BAR_BTN_DANGER = 'flex items-center gap-1.5 h-8 px-3 rounded-full bg-red-500/10 hover:bg-red-500/20 text-red-400 text-xs font-medium disabled:opacity-50 transition-colors'
+const CREATE_FIELD = 'glass-field flex-1 min-w-0 h-10 rounded-full px-4 text-sm text-text-primary placeholder:text-text-muted'
+const CREATE_BTN = 'h-10 px-4 rounded-full bg-accent text-black text-sm font-semibold shrink-0 hover:brightness-105 transition-[filter]'
+const CREATE_CANCEL = 'w-10 h-10 flex items-center justify-center rounded-full text-text-muted hover:text-text-primary hover:bg-[var(--fill)] shrink-0 transition-colors'
+const SECTION_TITLE = 'text-text-primary text-lg font-bold tracking-tight mb-3'
+const BAR_LINK = 'text-xs text-text-secondary hover:text-text-primary px-2 h-8 rounded-full transition-colors'
+
 function HeroShuffleButton({ onClick }: { onClick: () => void }): JSX.Element {
   return (
     <button
       onClick={onClick}
-      className="flex items-center justify-center w-11 h-11 rounded-full bg-surface-overlay hover:bg-surface-raised text-text-primary border border-[var(--border)] transition-colors"
+      className={HERO_ROUND}
       title="Shuffle"
     >
       <Shuffle size={17} />
@@ -171,13 +203,13 @@ function TrackSkeleton(): JSX.Element {
       {Array.from({ length: 5 }).map((_, i) => (
         <div key={i} className="grid items-center gap-3 px-4 py-2" style={{ gridTemplateColumns: '1rem 1.75rem 2.5rem 1fr 3.5rem 2.25rem' }}>
           <span />
-          <div className="w-4 h-3 rounded bg-surface-overlay animate-pulse" />
-          <div className="w-10 h-10 rounded-md bg-surface-overlay animate-pulse" />
+          <div className="w-4 h-3 rounded bg-[var(--fill)] animate-pulse" />
+          <div className="w-10 h-10 rounded-md bg-[var(--fill)] animate-pulse" />
           <div className="space-y-1.5">
-            <div className={`h-3 rounded bg-surface-overlay animate-pulse`} style={{ width: `${55 + (i * 17) % 35}%` }} />
-            <div className="h-2.5 rounded bg-surface-overlay animate-pulse w-1/3" />
+            <div className={`h-3 rounded bg-[var(--fill)] animate-pulse`} style={{ width: `${55 + (i * 17) % 35}%` }} />
+            <div className="h-2.5 rounded bg-[var(--fill)] animate-pulse w-1/3" />
           </div>
-          <div className="h-3 w-8 rounded bg-surface-overlay animate-pulse mx-auto" />
+          <div className="h-3 w-8 rounded bg-[var(--fill)] animate-pulse mx-auto" />
           <span />
         </div>
       ))}
@@ -276,19 +308,19 @@ function PlaylistExpandPanel({ name, subtitle, cover, tracks, loading, onClose, 
 
   return (
     <div
-      className="rounded-2xl overflow-hidden relative bg-surface-raised border border-[var(--border)] p-5 md:p-6"
+      className="rounded-2xl overflow-hidden glass-pane p-5 md:p-6"
       onClick={e => e.stopPropagation()}
     >
       <button
         onClick={onClose}
-        className="absolute top-3.5 right-3.5 w-7 h-7 rounded-full bg-black/10 dark:bg-white/10 hover:bg-black/20 dark:hover:bg-white/20 flex items-center justify-center text-text-muted hover:text-text-primary transition-colors z-10"
+        className="absolute top-3.5 right-3.5 w-7 h-7 rounded-full bg-[var(--fill)] hover:bg-[var(--fill-strong)] flex items-center justify-center text-text-muted hover:text-text-primary transition-colors z-10"
         title="Close"
       >
         <X size={15} />
       </button>
 
       <div className="flex items-center gap-4 mb-5 pr-8">
-        <div className="w-16 h-16 md:w-20 md:h-20 rounded-xl overflow-hidden shrink-0 shadow-lg bg-surface-overlay">{cover}</div>
+        <div className="w-16 h-16 md:w-20 md:h-20 rounded-xl overflow-hidden shrink-0 shadow-lg bg-[var(--fill)]">{cover}</div>
         <div className="min-w-0 flex-1">
           <h3 className="text-text-primary text-base md:text-lg font-bold truncate">{name}</h3>
           <p className="text-text-muted text-sm mt-0.5">{subtitle}</p>
@@ -324,7 +356,7 @@ function PlaylistExpandPanel({ name, subtitle, cover, tracks, loading, onClose, 
                     key={t.id}
                     {...clickable(() => onPlayTrack(t))}
                     onContextMenu={e => { e.preventDefault(); e.stopPropagation(); onTrackContextMenu(t, e) }}
-                    className="flex items-center gap-3 px-1.5 py-1.5 rounded-lg hover:bg-surface-overlay text-left group/track transition-colors cursor-pointer"
+                    className="flex items-center gap-3 px-1.5 py-1.5 rounded-lg hover:bg-[var(--fill)] text-left group/track transition-colors cursor-pointer"
                   >
                     <span className={`w-5 text-xs tabular-nums text-right shrink-0 ${isActive ? 'text-accent' : 'text-text-muted'}`}>
                       {isActive ? '▶' : colIdx * mid + i + 1}
@@ -429,7 +461,7 @@ function layoutGridEntries(entries: GridEntry[], columns: number): JSX.Element[]
 // fade the content. The caret moves on its own full-width transform layer.
 const SLOT_CLOSE_MS = 280 // the 240ms exit, plus a frame
 
-function GridPanelSlot({ contentKey, closing, col, columns, caretClass = 'bg-surface-raised', children }: {
+function GridPanelSlot({ contentKey, closing, col, columns, caretClass = 'is-glass', children }: {
   contentKey: string
   closing: boolean
   col: number
@@ -635,6 +667,7 @@ export default function PlaylistsView(): JSX.Element {
   const [search, setSearch] = useState('')
   const [searchOpen, setSearchOpen] = useState(false)
   const searchInputRef = useRef<HTMLInputElement>(null)
+  const searchToggleRef = useRef<HTMLButtonElement>(null)
 
   // Compact view - the normal list, but one row per SONG: every version of a
   // song the playlist holds collapses into its first entry, and a song with
@@ -649,6 +682,26 @@ export default function PlaylistsView(): JSX.Element {
   const [songUnits, setSongUnits] = useState<SongUnit<Track>[]>([])
   const [loadingCompact, setLoadingCompact] = useState(false)
   const { expanded: expandedGroups, toggle: toggleGroupExpanded, clear: clearExpandedGroups } = useExpandedGroups()
+  // Each playlist remembers its layout (list / grid / compact) across
+  // restarts. Device-local, keyed by which playlist is open.
+  const layoutKey = showLiked ? 'liked'
+    : selectedId != null ? `p:${selectedId}`
+    : localSelectedId != null ? `l:${localSelectedId}`
+    : null
+  const layoutKeyRef = useRef(layoutKey)
+  layoutKeyRef.current = layoutKey
+  useLayoutEffect(() => {
+    if (layoutKey == null) return
+    const mode = readPlaylistLayout(layoutKey)
+    setCompactView(mode === 'compact' && versionsEnabled)
+    setGridView(mode === 'grid')
+    clearExpandedGroups()
+  }, [layoutKey]) // eslint-disable-line react-hooks/exhaustive-deps
+  const setLayout = useCallback((mode: PlaylistLayout): void => {
+    setCompactView(mode === 'compact')
+    setGridView(mode === 'grid')
+    if (layoutKeyRef.current != null) writePlaylistLayout(layoutKeyRef.current, mode)
+  }, [])
 
   // Zip / share / bulk-add
   const [isSharedView, setIsSharedView] = useState(false)
@@ -756,6 +809,17 @@ export default function PlaylistsView(): JSX.Element {
   // Element-state refs (not RefObjects) because the detail view mounts long
   // after this component does - see useVirtualWindowEl.
   const [listScrollEl, setListScrollEl] = useState<HTMLDivElement | null>(null)
+  const [headerMarker, setHeaderMarker] = useState<HTMLDivElement | null>(null)
+  const [headerPinned, setHeaderPinned] = useState(false)
+  useEffect(() => {
+    setHeaderPinned(false)
+    if (!listScrollEl || !headerMarker) return
+    const observer = new IntersectionObserver(([entry]) => {
+      setHeaderPinned(!entry.isIntersecting && entry.boundingClientRect.top < (entry.rootBounds?.top ?? 0))
+    }, { root: listScrollEl, threshold: 0 })
+    observer.observe(headerMarker)
+    return () => observer.disconnect()
+  }, [listScrollEl, headerMarker])
   const [listContentEl, setListContentEl] = useState<HTMLDivElement | null>(null)
   // 56 = px-4 py-2 row wrapping 40px album art at normal scale. Multiplied by
   // the app text-size setting so the virtualized rows (whose height and
@@ -907,6 +971,19 @@ export default function PlaylistsView(): JSX.Element {
   useEffect(() => {
     if (searchOpen) searchInputRef.current?.focus()
   }, [searchOpen])
+
+  // Ctrl+F (focus-search) lands on this playlist's track search while one is
+  // open, expanding it from the icon if needed.
+  useEffect(() => {
+    const h = (e: Event): void => {
+      const input = searchInputRef.current
+      if (!input && !searchToggleRef.current) return
+      e.preventDefault()
+      if (input) { input.focus(); input.select() } else setSearchOpen(true)
+    }
+    window.addEventListener('app:focus-search', h)
+    return () => window.removeEventListener('app:focus-search', h)
+  }, [])
 
   // Auto-open playlist from URL params (e.g. /playlists?id=123&view=shared)
   useEffect(() => {
@@ -1829,7 +1906,7 @@ export default function PlaylistsView(): JSX.Element {
           )}
         </div>
       ) : null
-      return { key: f.id, tile, panel, closing: isClosing, caretClass: 'bg-surface-overlay' }
+      return { key: f.id, tile, panel, closing: isClosing }
     })
   }
 
@@ -1902,7 +1979,7 @@ export default function PlaylistsView(): JSX.Element {
       // HeroBackdrop), both of which want the normal dark-on-light text.
       const heroLight = !!heroSrc && isDarkSkin && playlistHeroEnabled
       return (
-        <div className="flex-1 flex flex-col min-h-0 overflow-y-auto overflow-x-hidden">
+        <div className="flex-1 flex flex-col min-h-0 overflow-y-auto overflow-x-hidden pb-player">
           <div className="relative overflow-hidden px-6 pb-6 shrink-0">
             {playlistHeroEnabled && <HeroBackdrop src={heroSrc} isDarkSkin={isDarkSkin} />}
             <div className="relative z-10 pt-5">
@@ -1911,7 +1988,7 @@ export default function PlaylistsView(): JSX.Element {
               </button>
             </div>
             <div className="relative z-10 flex gap-6 items-end pt-6">
-              <div className="shrink-0 rounded-xl shadow-2xl overflow-hidden bg-surface-overlay flex items-center justify-center" style={{ width: 180, height: 180 }}>
+              <div className="shrink-0 rounded-2xl shadow-2xl overflow-hidden bg-[var(--fill)] flex items-center justify-center" style={{ width: 180, height: 180 }}>
                 {localPl.coverImage
                   ? <img src={localPl.coverImage} alt="" className="w-full h-full object-cover" />
                   : <LocalPlaylistMosaic trackIds={localPl.trackIds} className="w-full h-full" />
@@ -1930,7 +2007,6 @@ export default function PlaylistsView(): JSX.Element {
               )}
             </div>
           </div>
-          <div className="border-t border-[var(--border)] mx-6 mb-3 shrink-0" />
           <div className="px-2 pb-8">
             <div className="grid items-center gap-3 px-4 pb-2 text-text-muted text-xs uppercase tracking-widest" style={{ gridTemplateColumns: '1.75rem 2.5rem 1fr 3.5rem' }}>
               <span className="text-center">#</span><span /><span>Title</span><div className="flex justify-center"><Clock size={12} /></div>
@@ -1938,7 +2014,7 @@ export default function PlaylistsView(): JSX.Element {
             {localTracks.map((lt, i) => {
               const qt = libTrackToTrack(lt)
               return (
-                <div key={lt.id} className="group grid items-center gap-3 px-4 py-2 rounded-lg hover:bg-surface-raised transition-colors cursor-default select-none"
+                <div key={lt.id} className="group grid items-center gap-3 px-4 py-2 rounded-lg hover:bg-[var(--fill)] transition-colors cursor-default select-none"
                   style={{ gridTemplateColumns: '1.75rem 2.5rem 1fr 3.5rem' }}
                   onDoubleClick={() => playTrack(qt, localQTracks)}
                 >
@@ -1962,10 +2038,10 @@ export default function PlaylistsView(): JSX.Element {
       )
     }
     return (
-      <div className="flex-1 flex flex-col min-h-0 overflow-y-auto overflow-x-hidden [scrollbar-gutter:stable]">
+      <div className="flex-1 flex flex-col min-h-0 overflow-y-auto overflow-x-hidden [scrollbar-gutter:stable] pb-player">
         <div className="px-5 pt-5 pb-8">
-          <h1 className="text-text-primary text-xl font-bold mb-1">Your Library</h1>
-          <p className="text-text-muted text-sm mb-6">Local playlists</p>
+          <h1 className="text-text-primary text-3xl font-black tracking-tight">Your Library</h1>
+          <p className="text-text-muted text-sm mt-1 mb-7">Local playlists</p>
           {localPlaylists.length === 0 ? (
             <p className="text-text-muted text-sm">No local playlists yet. Add music to your library first.</p>
           ) : (
@@ -1984,27 +2060,28 @@ export default function PlaylistsView(): JSX.Element {
               </div>
             </>
           )}
-          <div className="flex flex-col items-center text-center gap-3 py-6 border-t border-[var(--border)]">
+          <div className="flex flex-col items-center text-center gap-3 py-6 px-4 mt-4 rounded-2xl glass-pane">
             <p className="text-text-muted text-sm max-w-xs">Log in to create synced playlists and access your full library.</p>
-            <button onClick={() => setShowUserAuth(true)} className="px-5 py-2.5 rounded-xl bg-accent/15 hover:bg-accent/25 text-accent text-sm font-semibold transition-colors">
+            <button onClick={() => setShowUserAuth(true)} className="h-10 px-5 rounded-full bg-accent text-black text-sm font-semibold hover:brightness-105 transition-[filter]">
               Log in
             </button>
           </div>
         </div>
         {plSelectMode && (
-          <div className="sticky bottom-0 shrink-0 border-t border-[var(--border)] bg-surface px-4 py-2.5 flex items-center gap-2 relative z-30" onClick={e => e.stopPropagation()}>
+          <div className="sticky bottom-0 sticky-dock shrink-0 z-30 px-4 pb-3 pt-1 pointer-events-none" onClick={e => e.stopPropagation()}>
+          <div className="pointer-events-auto glass-thick glass-specular relative rounded-full pl-5 pr-2 py-2 flex items-center gap-1.5">
             <span className="text-sm text-text-primary font-medium flex-1">
               {selectedPlaylistKeys.size} {selectedPlaylistKeys.size === 1 ? 'playlist' : 'playlists'} selected
             </span>
             <button
               onClick={() => setSelectedPlaylistKeys(keyMap(localPlaylists.map(lp => `local:${lp.id}`)))}
-              className="text-xs text-text-muted hover:text-text-primary px-2 py-1 rounded transition-colors"
+              className={BAR_LINK}
             >
               Select all
             </button>
             <button
               onClick={() => setSelectedPlaylistKeys(new Map())}
-              className="text-xs text-text-muted hover:text-text-primary px-2 py-1 rounded transition-colors"
+              className={BAR_LINK}
             >
               Clear
             </button>
@@ -2014,7 +2091,7 @@ export default function PlaylistsView(): JSX.Element {
                   ref={plBulkAddBtnRef}
                   onClick={() => setShowPlBulkAddMenu(v => !v)}
                   disabled={selectedPlaylistKeys.size === 0 || bulkAddingPlaylists}
-                  className="flex items-center gap-1.5 px-3 py-1.5 bg-surface-overlay hover:bg-surface-raised text-text-primary rounded-lg text-xs font-medium disabled:opacity-50 transition-colors"
+                  className={BAR_BTN}
                 >
                   {bulkAddingPlaylists ? <Loader2 size={13} className="animate-spin" /> : <FolderInput size={13} />} Add to playlist
                 </button>
@@ -2037,17 +2114,18 @@ export default function PlaylistsView(): JSX.Element {
             <button
               onClick={bulkDeletePlaylists}
               disabled={selectedPlaylistKeys.size === 0 || bulkDeletingPlaylists}
-              className="flex items-center gap-1.5 px-3 py-1.5 bg-surface-overlay hover:bg-red-500/10 text-red-400 rounded-lg text-xs font-medium disabled:opacity-50 transition-colors"
+              className={BAR_BTN_DANGER}
             >
               {bulkDeletingPlaylists ? <Loader2 size={13} className="animate-spin" /> : <Trash2 size={13} />} Delete
             </button>
             <button
               onClick={exitPlaylistSelectMode}
-              className="p-1.5 rounded-lg hover:bg-surface-overlay transition-colors"
+              className="w-8 h-8 flex items-center justify-center rounded-full hover:bg-[var(--fill)] transition-colors"
               title="Exit selection"
             >
               <X size={15} className="text-text-muted" />
             </button>
+          </div>
           </div>
         )}
         {plBulkMenu && (
@@ -2124,8 +2202,10 @@ export default function PlaylistsView(): JSX.Element {
     // view, so compact view's rows are the exact same markup. `queue` is what
     // playing the row plays through; `expander` swaps the drag grip for the
     // arrow that opens a song's versions (compact view only).
-    const renderTrackRow = (track: Track, displayIdx: number, { style, canDrag, queue, songPool, expander }: {
+    const renderTrackRow = (track: Track, displayIdx: number, { style, canDrag, queue, songPool, expander, compact }: {
       style?: React.CSSProperties
+      /** Compact view: the row stands for the song, so drop the "(v5)" tag. */
+      compact?: boolean
       canDrag: boolean
       queue: Track[]
       /** Compact view - see the store's queueSongPool. */
@@ -2150,7 +2230,7 @@ export default function PlaylistsView(): JSX.Element {
           {...trackRowLongPress.bind(() => toggleTrackSelect(track))}
           onContextMenu={e => { e.preventDefault(); e.stopPropagation(); setTrackMenu({ track, songId, x: e.clientX, y: e.clientY }) }}
           className={`group grid items-center gap-3 px-4 py-2 rounded-lg transition-colors cursor-default select-none ${
-            isDragging ? 'opacity-40 bg-surface-raised' : isDropTarget ? 'border-t-2 border-accent bg-surface-overlay' : isSelected ? 'bg-accent/10' : 'hover:bg-surface-raised'
+            isDragging ? 'opacity-40 bg-[var(--fill)]' : isDropTarget ? 'border-t-2 border-accent bg-[var(--fill)]' : isSelected ? 'bg-accent/15' : 'hover:bg-[var(--fill)]'
           }`}
           style={{ gridTemplateColumns: gridCols, height: TRACK_ROW_H, ...style }}
         >
@@ -2180,7 +2260,7 @@ export default function PlaylistsView(): JSX.Element {
           </button>
           <AlbumArtThumbnail track={track} size={40} className="rounded-md" shimmer={false} eager />
           <div className="min-w-0" onDoubleClick={() => { if (!selectMode) playTrack(track, queue, null, null, { songPool }) }}>
-            <p className="text-text-primary text-sm font-medium truncate" title={track.title}>{track.title}</p>
+            <p className="text-text-primary text-sm font-medium truncate" title={track.title}>{compact ? baseTitle(track.title) : track.title}</p>
             <p className="text-text-muted text-xs truncate flex items-center gap-1">
               <span className="truncate">{track.artist}{track.album ? ` · ${track.album}` : ''}</span>
             </p>
@@ -2196,7 +2276,7 @@ export default function PlaylistsView(): JSX.Element {
           </span>
           <div className={`flex items-center justify-end transition-opacity ${selectMode ? 'opacity-0 pointer-events-none' : 'opacity-0 group-hover:opacity-100'}`}>
             <button onClick={e => { e.stopPropagation(); setTrackMenu({ track, songId, x: e.clientX, y: e.clientY }) }}
-              className="p-1.5 text-text-muted hover:text-text-primary rounded-lg hover:bg-surface-overlay transition-colors hidden md:flex" title="More options">
+              className="w-7 h-7 items-center justify-center text-text-muted hover:text-text-primary rounded-full hover:bg-[var(--fill-strong)] transition-colors hidden md:flex" title="More options">
               <MoreHorizontal size={13} />
             </button>
           </div>
@@ -2213,8 +2293,8 @@ export default function PlaylistsView(): JSX.Element {
     // the text has to actually track both.
     const heroLight = !!heroSrc && isDarkSkin && playlistHeroEnabled
     return (
-      <div ref={setListScrollEl} className="relative flex-1 flex flex-col min-h-0 overflow-y-auto overflow-x-hidden" onClick={() => { setTrackMenu(null); setShowHeroMenu(false) }}>
-        {/* ── Hero (shown immediately using summary data) - the backdrop now
+      <div ref={setListScrollEl} className="relative flex-1 flex flex-col min-h-0 overflow-y-auto overflow-x-hidden pb-player" onClick={() => { setTrackMenu(null); setShowHeroMenu(false) }}>
+        {/* ── Hero (shown immediately using summary data) — the backdrop now
             extends behind the back button too, instead of leaving a plain
             theme-background strip above the gradient. ── */}
         <div className="relative overflow-hidden px-6 pb-6 shrink-0">
@@ -2239,12 +2319,12 @@ export default function PlaylistsView(): JSX.Element {
           />
 
           <div className="relative z-10 flex gap-6 items-end pt-6">
-            {/* Cover image - clickable to upload (owner only) */}
-            <div className={`shrink-0 self-start group/cover relative rounded-xl shadow-2xl overflow-hidden ${isSharedView ? "cursor-default" : "cursor-pointer"}`} style={{ width: 180, height: 180 }} {...(isSharedView ? {} : clickable(() => coverInputRef.current?.click()))}>
+            {/* Cover image — clickable to upload (owner only) */}
+            <div className={`shrink-0 self-start group/cover relative rounded-2xl shadow-2xl overflow-hidden ${isSharedView ? "cursor-default" : "cursor-pointer"}`} style={{ width: 180, height: 180 }} onClick={() => !isSharedView && coverInputRef.current?.click()}>
               {loadingDetail && tracks.length === 0 ? (
-                <div className="w-full h-full bg-surface-overlay animate-pulse" />
+                <div className="w-full h-full bg-[var(--fill)] animate-pulse" />
               ) : coverLoading ? (
-                <div className="w-full h-full bg-surface-overlay flex items-center justify-center">
+                <div className="w-full h-full bg-[var(--fill)] flex items-center justify-center">
                   <Loader2 size={28} className="text-text-muted opacity-50 animate-spin" />
                 </div>
               ) : playlistCoverUrl(coverData ?? {}) && !coverImgError ? (
@@ -2284,8 +2364,8 @@ export default function PlaylistsView(): JSX.Element {
               <p className={`text-xs uppercase tracking-widest font-semibold mb-2 ${heroLight ? 'text-white/60' : 'text-text-muted'}`}>Playlist</p>
               {renaming ? (
                 <div className="flex items-center gap-2 mb-3">
-                  <input value={renameValue} onChange={e => setRenameValue(e.target.value)} onKeyDown={e => e.key === 'Enter' && renameSelected()} autoFocus className={`rounded-lg px-3 py-2 text-2xl font-black focus:outline-none focus:border-accent/50 w-full ${heroLight ? 'bg-black/30 border border-white/20 text-white' : 'bg-surface-overlay border border-[var(--border)] text-text-primary'}`} />
-                  <button onClick={renameSelected} title="Save name" className="p-2 rounded-lg bg-accent/15 text-accent shrink-0"><Check size={16} /></button>
+                  <input value={renameValue} onChange={e => setRenameValue(e.target.value)} onKeyDown={e => e.key === 'Enter' && renameSelected()} autoFocus className={`border rounded-lg px-3 py-2 text-2xl font-black focus:outline-none focus:border-accent/50 w-full ${heroLight ? 'bg-black/30 border-white/20 text-white' : 'glass-field border-transparent text-text-primary'}`} />
+                  <button onClick={renameSelected} className="p-2 rounded-lg bg-accent/15 text-accent shrink-0"><Check size={16} /></button>
                   <button onClick={() => setRenaming(false)} className={`p-2 rounded-lg shrink-0 ${heroLight ? 'text-white/60 hover:text-white' : 'text-text-muted hover:text-text-primary'}`}><X size={16} /></button>
                 </div>
               ) : (
@@ -2315,7 +2395,7 @@ export default function PlaylistsView(): JSX.Element {
                     autoFocus
                     rows={2}
                     placeholder="Add a description…"
-                    className={`flex-1 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-accent/50 resize-none ${heroLight ? 'bg-black/30 border border-white/20 text-white placeholder:text-white/40' : 'bg-surface-overlay border border-[var(--border)] text-text-primary placeholder:text-text-muted'}`}
+                    className={`flex-1 border rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-accent/50 resize-none ${heroLight ? 'bg-black/30 border-white/20 text-white placeholder:text-white/40' : 'glass-field border-transparent text-text-primary placeholder:text-text-muted'}`}
                   />
                   <div className="flex flex-col gap-1 shrink-0">
                     <button onClick={saveDescription} title="Save description" className="p-1.5 rounded-lg bg-accent/15 text-accent"><Check size={14} /></button>
@@ -2363,10 +2443,8 @@ export default function PlaylistsView(): JSX.Element {
                         coverUrl: coverData?.cover_image_url ?? coverData?.cover_image ?? null,
                       })
                     }}
-                    title={isFollowingCurrent ? 'Unfollow - stop showing this in your Playlists' : 'Follow - always shows the owner\'s current tracks, kept on this device only'}
-                    className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-sm font-medium transition-colors ${
-                      isFollowingCurrent ? 'text-accent bg-accent/10' : 'text-text-primary bg-surface-raised hover:bg-surface-overlay'
-                    }`}
+                    title={isFollowingCurrent ? 'Unfollow — stop showing this in your Playlists' : 'Follow — always shows the owner\'s current tracks, kept on this device only'}
+                    className={heroPill(isFollowingCurrent)}
                   >
                     {isFollowingCurrent ? <Check size={14} /> : <Rss size={14} />}
                     {isFollowingCurrent ? 'Following' : 'Follow'}
@@ -2377,11 +2455,7 @@ export default function PlaylistsView(): JSX.Element {
                     onClick={handleImportPlaylist}
                     disabled={importState === 'loading' || importState === 'done'}
                     title={importState === 'done' ? 'Saved to library!' : importState === 'error' ? 'Import failed' : 'Save a one-time copy to my library'}
-                    className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-sm font-medium transition-colors disabled:opacity-60 ${
-                      importState === 'done' ? 'text-accent bg-accent/10' :
-                      importState === 'error' ? 'text-red-400 bg-red-400/10' :
-                      'text-text-primary bg-surface-raised hover:bg-surface-overlay'
-                    }`}
+                    className={`${heroPill(importState === 'done')} ${importState === 'error' ? '!text-red-400' : ''}`}
                   >
                     {importState === 'loading' ? <Loader2 size={14} className="animate-spin" /> :
                      importState === 'done' ? <Check size={14} /> :
@@ -2399,11 +2473,7 @@ export default function PlaylistsView(): JSX.Element {
                       ref={heroBtnRef}
                       onClick={e => { e.stopPropagation(); setShowHeroMenu(v => !v) }}
                       title="More"
-                      className={`p-2.5 rounded-full text-sm transition-colors ${
-                        heroLight
-                          ? (showHeroMenu ? 'text-white bg-white/10' : 'text-white/60 hover:text-white hover:bg-white/10')
-                          : (showHeroMenu ? 'text-text-primary bg-surface-overlay' : 'text-text-muted hover:text-text-primary hover:bg-surface-overlay')
-                      }`}
+                      className={`${HERO_ROUND} ${showHeroMenu ? 'is-on' : ''}`}
                     >
                       <MoreHorizontal size={18} />
                     </button>
@@ -2471,7 +2541,6 @@ export default function PlaylistsView(): JSX.Element {
           </div>
         </div>
 
-        <div className="border-t border-[var(--border)] mx-6 mb-3 shrink-0" />
 
         {/* ── Tracklist ── */}
         {loadingDetail ? (
@@ -2488,28 +2557,41 @@ export default function PlaylistsView(): JSX.Element {
                 own full-width row beneath. Sticky so scrolled track rows never
                 reach the top of the scroll container, where they'd render
                 behind the frameless window's fixed min/max/close buttons; the
-                opaque background is what stops that.
+                frosted background appears only once the header is pinned.
                 The controls sit on the LEFT on purpose. Right-aligned they'd
                 land under those window buttons, which forces the 188px gutter
                 the other toolbars carry - and that gutter is pure dead space
                 next to the controls. Nothing here may share the column row
                 either: anything in that grid steals width from the columns and
                 knocks the duration header out of line with the rows.
-                -mx-2 px-6 backs the full container width while keeping the
-                grid's content box lined up with the rows' px-4. */}
-            <div className="sticky top-0 z-20 -mx-2 px-6 pt-2 pb-1 backdrop-blur-md">
-              <div className="flex items-center gap-2 mb-2">
+                -mx-2 px-6 keeps the grid lined up with the track rows. */}
+            <div ref={setHeaderMarker} className="h-px" aria-hidden="true" />
+            <div className={`playlist-track-header sticky top-0 z-20 -mx-2 px-6 pt-3 pb-2 ${headerPinned ? 'playlist-track-header-pinned' : ''}`}>
+              <div className="flex items-center gap-3 mb-4">
                 {searchOpen ? (
-                  <div className="relative w-64">
-                    <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-text-muted pointer-events-none" />
-                    <input
-                      ref={searchInputRef}
-                      value={search}
-                      onChange={e => setSearch(e.target.value)}
-                      onBlur={() => { if (!search) setSearchOpen(false) }}
-                      onKeyDown={e => { if (e.key === 'Escape') { setSearch(''); (e.target as HTMLInputElement).blur() } }}
-                      placeholder={`Search ${tracks.length} tracks…`}
-                      className="w-full bg-surface-overlay border border-[var(--border)] rounded-xl pl-8 pr-8 py-2 text-text-primary text-sm focus:outline-none focus:border-accent/50 placeholder:text-text-muted"
+                  <>
+                    <div className={`${GLASS_SEARCH_WRAP} w-64`}>
+                      <Search size={15} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-text-muted pointer-events-none" />
+                      <input
+                        ref={searchInputRef}
+                        value={search}
+                        onChange={e => setSearch(e.target.value)}
+                        onBlur={() => { if (!search) setSearchOpen(false) }}
+                        onKeyDown={e => { if (e.key === 'Escape') { setSearch(''); (e.target as HTMLInputElement).blur() } }}
+                        placeholder={`Search ${tracks.length} tracks…`}
+                        className={`${GLASS_SEARCH} pl-9 pr-9`}
+                      />
+                      <button
+                        onClick={() => { setSearch(''); setSearchOpen(false) }}
+                        className="absolute right-3 top-1/2 -translate-y-1/2 text-text-muted hover:text-text-primary"
+                        title="Close search"
+                      >
+                        <X size={13} />
+                      </button>
+                    </div>
+                    <SearchHelpButton
+                      size={15}
+                      className={glassToolButton}
                     />
                     <button
                       onClick={() => { setSearch(''); setSearchOpen(false) }}
@@ -2518,43 +2600,30 @@ export default function PlaylistsView(): JSX.Element {
                     >
                       <X size={13} />
                     </button>
-                  </div>
+                  </>
                 ) : (
                   <button
+                    ref={searchToggleRef}
                     onClick={() => setSearchOpen(true)}
-                    className="flex items-center justify-center w-9 h-9 rounded-xl text-text-muted hover:text-text-primary bg-surface-overlay transition-colors"
+                    className={glassToolButton(false)}
                     title="Search tracks"
                   >
                     <Search size={15} />
                   </button>
                 )}
-                <div className="flex items-center bg-surface-overlay rounded-xl p-0.5 shrink-0">
-                  <button
-                    onClick={() => { setCompactView(false); setGridView(false) }}
-                    className={`flex items-center justify-center w-8 h-8 rounded-lg transition-colors ${!compactView && !gridView ? 'bg-surface-raised text-text-primary' : 'text-text-muted hover:text-text-secondary'}`}
-                    title="List view"
-                  >
-                    <Rows3 size={15} />
-                  </button>
-                  <button
-                    onClick={() => { setGridView(true); setCompactView(false) }}
-                    className={`flex items-center justify-center w-8 h-8 rounded-lg transition-colors ${gridView ? 'bg-surface-raised text-text-primary' : 'text-text-muted hover:text-text-secondary'}`}
-                    title="Grid view"
-                  >
-                    <LayoutGrid size={15} />
-                  </button>
-                  {versionsEnabled && (
-                    <button
-                      onClick={() => { setCompactView(true); setGridView(false); clearExpandedGroups() }}
-                      className={`flex items-center justify-center w-8 h-8 rounded-lg transition-colors ${compactView ? 'bg-surface-raised text-text-primary' : 'text-text-muted hover:text-text-secondary'}`}
-                      title="Compact view - one row per song, with its versions under an arrow"
-                    >
-                      <Layers size={15} />
-                    </button>
-                  )}
-                </div>
+                <GlassSegmented
+                  ariaLabel="Layout"
+                  className="shrink-0"
+                  value={compactView ? 'compact' : gridView ? 'grid' : 'list'}
+                  onChange={(v) => { setLayout(v); if (v === 'compact') clearExpandedGroups() }}
+                  options={[
+                    { value: 'list', icon: <Rows3 size={15} />, title: 'List view' },
+                    { value: 'grid', icon: <LayoutGrid size={15} />, title: 'Grid view' },
+                    ...(versionsEnabled ? [{ value: 'compact' as const, icon: <Layers size={15} />, title: 'Compact view — one row per song, with its versions under an arrow' }] : []),
+                  ]}
+                />
                 {compactView && (
-                  <span className="text-text-muted text-xs uppercase tracking-widest ml-1">
+                  <span className="text-text-secondary text-xs tabular-nums ml-1">
                     {loadingCompact ? 'Loading…' : `${compactRows.length} song${compactRows.length === 1 ? '' : 's'}`}
                   </span>
                 )}
@@ -2566,7 +2635,7 @@ export default function PlaylistsView(): JSX.Element {
                   with this table layout at all, so it's hidden wholesale there.
                   Compact view uses the same rows as the list, so every column
                   (and its sort) stays live. */}
-              <div className={`grid items-center gap-3 text-text-muted text-xs uppercase tracking-widest ${gridView ? 'invisible' : ''}`} style={{ gridTemplateColumns: gridCols }}>
+              <div className={`grid items-center gap-3 border-b border-[var(--glass-rim)] pb-2 text-text-secondary text-xs font-medium ${gridView ? 'invisible' : ''}`} style={{ gridTemplateColumns: gridCols }}>
                   {selectMode && (
                     <button
                       onClick={selectAllTracks}
@@ -2613,6 +2682,7 @@ export default function PlaylistsView(): JSX.Element {
                           canDrag: false,
                           queue: compactLeads,
                           songPool: tracks,
+                          compact: true,
                           expander: hasVersions
                             ? { expanded: open, count: unit.versions.length, onToggle: () => toggleGroupExpanded(unit.groupId!) }
                             : undefined,
@@ -2718,26 +2788,27 @@ export default function PlaylistsView(): JSX.Element {
 
         {/* ── Bulk selection action bar ── */}
         {selectMode && (
-          <div className="sticky bottom-0 shrink-0 border-t border-[var(--border)] bg-surface px-4 py-2.5 flex items-center gap-2 relative z-30" onClick={e => e.stopPropagation()}>
+          <div className="sticky bottom-0 sticky-dock shrink-0 z-30 px-4 pb-3 pt-1 pointer-events-none" onClick={e => e.stopPropagation()}>
+          <div className="pointer-events-auto glass-thick glass-specular relative rounded-full pl-5 pr-2 py-2 flex items-center gap-1.5">
             <span className="text-sm text-text-primary font-medium flex-1">
               {selectedTracks.size} {selectedTracks.size === 1 ? 'track' : 'tracks'} selected
             </span>
             <button
               onClick={selectAllTracks}
-              className="text-xs text-text-muted hover:text-text-primary px-2 py-1 rounded transition-colors"
+              className={BAR_LINK}
             >
               Select all
             </button>
             <button
               onClick={clearTrackSelection}
-              className="text-xs text-text-muted hover:text-text-primary px-2 py-1 rounded transition-colors"
+              className={BAR_LINK}
             >
               Clear
             </button>
             <button
               onClick={bulkAddToQueue}
               disabled={selectedTracks.size === 0}
-              className="flex items-center gap-1.5 px-3 py-1.5 bg-surface-overlay hover:bg-surface-raised text-text-primary rounded-lg text-xs font-medium disabled:opacity-50 transition-colors"
+              className={BAR_BTN}
             >
               <ListPlus size={13} /> Add to queue
             </button>
@@ -2747,7 +2818,7 @@ export default function PlaylistsView(): JSX.Element {
                   ref={bulkPlBtnRef}
                   onClick={() => setShowBulkPlaylists(v => !v)}
                   disabled={selectedTracks.size === 0}
-                  className="flex items-center gap-1.5 px-3 py-1.5 bg-surface-overlay hover:bg-surface-raised text-text-primary rounded-lg text-xs font-medium disabled:opacity-50 transition-colors"
+                  className={BAR_BTN}
                 >
                   <Plus size={13} /> Add to playlist
                 </button>
@@ -2767,7 +2838,7 @@ export default function PlaylistsView(): JSX.Element {
                 onClick={bulkEdit}
                 disabled={selectedTracks.size === 0 || bulkEditLoading}
                 title="Edit fields across every selected song"
-                className="flex items-center gap-1.5 px-3 py-1.5 bg-surface-overlay hover:bg-surface-raised text-text-primary rounded-lg text-xs font-medium disabled:opacity-50 transition-colors"
+                className={BAR_BTN}
               >
                 {bulkEditLoading ? <Loader2 size={13} className="animate-spin" /> : <Pencil size={13} />} Edit
               </button>
@@ -2776,18 +2847,19 @@ export default function PlaylistsView(): JSX.Element {
               <button
                 onClick={bulkRemove}
                 disabled={selectedTracks.size === 0 || bulkRemoving}
-                className="flex items-center gap-1.5 px-3 py-1.5 bg-surface-overlay hover:bg-red-500/10 text-red-400 rounded-lg text-xs font-medium disabled:opacity-50 transition-colors"
+                className={BAR_BTN_DANGER}
               >
                 {bulkRemoving ? <Loader2 size={13} className="animate-spin" /> : <Trash2 size={13} />} Remove
               </button>
             )}
             <button
               onClick={exitSelectMode}
-              className="p-1.5 rounded-lg hover:bg-surface-overlay transition-colors"
+              className="w-8 h-8 flex items-center justify-center rounded-full hover:bg-[var(--fill)] transition-colors"
               title="Exit selection"
             >
               <X size={15} className="text-text-muted" />
             </button>
+          </div>
           </div>
         )}
 
@@ -2810,7 +2882,7 @@ export default function PlaylistsView(): JSX.Element {
     const heroLight = !!heroSrc && isDarkSkin && playlistHeroEnabled
 
     return (
-      <div className="flex-1 flex flex-col min-h-0 overflow-y-auto overflow-x-hidden">
+      <div className="flex-1 flex flex-col min-h-0 overflow-y-auto overflow-x-hidden pb-player" onClick={() => setShowHeroMenu(false)}>
         {/* Hero */}
         <div className="relative overflow-hidden px-6 pb-6 shrink-0">
           {playlistHeroEnabled && <HeroBackdrop src={heroSrc} isDarkSkin={isDarkSkin} />}
@@ -2835,7 +2907,7 @@ export default function PlaylistsView(): JSX.Element {
                 <div className="flex items-center gap-2 mb-3">
                   <input value={localRenameVal} onChange={e => setLocalRenameVal(e.target.value)}
                     onKeyDown={e => { if (e.key === 'Enter') { renameLocalPlaylist(localPl.id, localRenameVal.trim() || localPl.name); setLocalRenaming(false) } }}
-                    autoFocus className={`rounded-lg px-3 py-2 text-2xl font-black focus:outline-none focus:border-accent/50 w-full ${heroLight ? 'bg-black/30 border border-white/20 text-white' : 'bg-surface-overlay border border-[var(--border)] text-text-primary'}`} />
+                    autoFocus className={`border rounded-lg px-3 py-2 text-2xl font-black focus:outline-none focus:border-accent/50 w-full ${heroLight ? 'bg-black/30 border-white/20 text-white' : 'glass-field border-transparent text-text-primary'}`} />
                   <button onClick={() => { renameLocalPlaylist(localPl.id, localRenameVal.trim() || localPl.name); setLocalRenaming(false) }} className="p-2 rounded-lg bg-accent/15 text-accent shrink-0"><Check size={16} /></button>
                   <button onClick={() => setLocalRenaming(false)} className={`p-2 rounded-lg shrink-0 ${heroLight ? 'text-white/60 hover:text-white' : 'text-text-muted hover:text-text-primary'}`}><X size={16} /></button>
                 </div>
@@ -2867,12 +2939,31 @@ export default function PlaylistsView(): JSX.Element {
                 <button onClick={() => { deleteLocalPlaylist(localPl.id); setLocalSelectedId(null) }} className={`p-2.5 rounded-full text-sm transition-colors hover:text-red-400 hover:bg-red-500/10 ${heroLight ? 'text-white/60' : 'text-text-muted'}`} title="Delete playlist">
                   <Trash2 size={15} />
                 </button>
+                {showHeroMenu && (() => {
+                  const r = heroBtnRef.current?.getBoundingClientRect()
+                  return (
+                    <ContextMenu
+                      x={r?.left ?? 0}
+                      y={(r?.bottom ?? 0) + 6}
+                      anchor={r ? { top: r.top, bottom: r.bottom } : undefined}
+                      ignoreRef={heroBtnRef}
+                      zIndex={61}
+                      className="w-[210px]"
+                      onClose={() => setShowHeroMenu(false)}
+                      items={[
+                        !localRenaming && { icon: Pencil, label: 'Rename', onSelect: () => { setLocalRenameVal(localPl.name); setLocalRenaming(true) } },
+                        !!localPl.coverImage && { icon: ImageOff, label: 'Remove custom cover', onSelect: () => updateLocalPlaylist(localPl.id, { coverImage: null }) },
+                        'divider',
+                        { icon: Trash2, label: 'Delete playlist', danger: true, onSelect: () => { deleteLocalPlaylist(localPl.id); setLocalSelectedId(null) } },
+                      ]}
+                    />
+                  )
+                })()}
               </div>
             </div>
           </div>
         </div>
 
-        <div className="border-t border-[var(--border)] mx-6 mb-3 shrink-0" />
 
         {/* Track list */}
         {localTracks.length === 0 ? (
@@ -2892,7 +2983,7 @@ export default function PlaylistsView(): JSX.Element {
             {localTracks.map((lt, i) => {
               const qt = libTrackToTrack(lt)
               return (
-                <div key={lt.id} className="group grid items-center gap-3 px-4 py-2 rounded-lg hover:bg-surface-raised transition-colors cursor-default select-none"
+                <div key={lt.id} className="group grid items-center gap-3 px-4 py-2 rounded-lg hover:bg-[var(--fill)] transition-colors cursor-default select-none"
                   style={{ gridTemplateColumns: '1.75rem 2.5rem 1fr 3.5rem' }}
                   onDoubleClick={() => playTrack(qt, localQTracks)}
                 >
@@ -2922,7 +3013,7 @@ export default function PlaylistsView(): JSX.Element {
   // ── Playlist library ───────────────────────────────────────────────────────
 
   return (
-    <div className="flex-1 flex flex-col min-h-0 overflow-y-auto overflow-x-hidden [scrollbar-gutter:stable]" onClick={() => { setCardMenu(null); setFolderMenu(null) }}>
+    <div className="flex-1 flex flex-col min-h-0 overflow-y-auto overflow-x-hidden [scrollbar-gutter:stable] pb-player" onClick={() => { setCardMenu(null); setFolderMenu(null) }}>
       <div className="px-6 pt-6 pb-10">
         <div className="flex items-center justify-between mb-7">
           <div>
@@ -2952,15 +3043,15 @@ export default function PlaylistsView(): JSX.Element {
 
         {creating && (
           <div className="flex items-center gap-2 mb-6 max-w-md">
-            <input value={newName} onChange={e => setNewName(e.target.value)} onKeyDown={e => e.key === 'Enter' && createPlaylist()} placeholder="Playlist name" autoFocus className="flex-1 bg-surface-overlay border border-[var(--border)] rounded-xl px-3.5 py-2.5 text-text-primary text-sm focus:outline-none focus:border-accent/50" />
-            <button onClick={createPlaylist} className="px-4 py-2.5 rounded-xl bg-accent text-black text-sm font-semibold">Create</button>
-            <button onClick={() => { setCreating(false); setNewName('') }} className="p-2.5 rounded-xl text-text-muted hover:text-text-primary"><X size={16} /></button>
+            <input value={newName} onChange={e => setNewName(e.target.value)} onKeyDown={e => e.key === 'Enter' && createPlaylist()} placeholder="Playlist name" autoFocus className={CREATE_FIELD} />
+            <button onClick={createPlaylist} className={CREATE_BTN}>Create</button>
+            <button onClick={() => { setCreating(false); setNewName('') }} title="Cancel" className={CREATE_CANCEL}><X size={16} /></button>
           </div>
         )}
 
         {creatingFolder && (
           <div className="flex items-center gap-2 mb-6 max-w-md">
-            <FolderPlus size={16} className="text-text-muted shrink-0" />
+            <FolderPlus size={18} className="text-text-muted shrink-0" />
             <input
               value={newFolderName}
               onChange={e => setNewFolderName(e.target.value)}
@@ -2970,23 +3061,23 @@ export default function PlaylistsView(): JSX.Element {
               }}
               placeholder="Folder name"
               autoFocus
-              className="flex-1 bg-surface-overlay border border-[var(--border)] rounded-xl px-3.5 py-2.5 text-text-primary text-sm focus:outline-none focus:border-accent/50"
+              className={CREATE_FIELD}
             />
-            <button onClick={() => { const id = createFolder(newFolderName); if (id) { setExpandedKey(null); setPlaylistsOpenFolderId(id) }; setCreatingFolder(false); setNewFolderName('') }} className="px-4 py-2.5 rounded-xl bg-accent text-black text-sm font-semibold">Create</button>
-            <button onClick={() => { setCreatingFolder(false); setNewFolderName('') }} className="p-2.5 rounded-xl text-text-muted hover:text-text-primary"><X size={16} /></button>
+            <button onClick={() => { const id = createFolder(newFolderName); if (id) { setExpandedKey(null); setPlaylistsOpenFolderId(id) }; setCreatingFolder(false); setNewFolderName('')}} className={CREATE_BTN}>Create</button>
+            <button onClick={() => { setCreatingFolder(false); setNewFolderName('') }} title="Cancel" className={CREATE_CANCEL}><X size={16} /></button>
           </div>
         )}
 
         {/* ── Playlists section - folders sit right in the same grid as the
             playlists they group, rather than a separate section above it. ── */}
-        <h2 className="text-text-muted text-xs font-semibold uppercase tracking-widest mb-3">Playlists</h2>
+        <h2 className={SECTION_TITLE}>Playlists</h2>
         <div ref={setMainGridEl} className="grid pl-grid" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(160px, 1fr))' }} {...gridBackgroundDropProps}>
           {layoutGridEntries([
             {
               key: 'liked',
               tile: (
                 <button key="liked" onClick={e => handleCardClick('liked', true, e.detail)} onDoubleClick={() => setShowLiked(true)} className="group text-left cursor-pointer">
-                  <div className={`aspect-square rounded-2xl bg-gradient-to-br from-accent/50 to-accent/10 flex items-center justify-center mb-2.5 shadow-md group-hover:shadow-xl group-hover:-translate-y-1 transition-all duration-200 ${expandedKey === 'liked' ? 'ring-2 ring-accent' : ''}`}>
+                  <div className={`aspect-square rounded-2xl bg-gradient-to-br from-accent/60 to-accent/15 flex items-center justify-center mb-2.5 shadow-md group-hover:shadow-xl group-hover:-translate-y-1 transition-all duration-200 ${expandedKey === 'liked' ? 'ring-2 ring-accent' : ''}`}>
                     <Heart size={44} className="text-accent" fill="currentColor" />
                   </div>
                   <p className="text-text-primary text-sm font-semibold truncate">Liked Songs</p>
@@ -3029,7 +3120,7 @@ export default function PlaylistsView(): JSX.Element {
             else to do with one from here. ── */}
         {followedPlaylists.length > 0 && (
           <>
-            <h2 className="text-text-muted text-xs font-semibold uppercase tracking-widest mb-3 mt-9">Following</h2>
+            <h2 className={`${SECTION_TITLE} mt-10`}>Following</h2>
             <div className="grid gap-x-4 gap-y-6" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(160px, 1fr))' }}>
               {followedPlaylists.map(renderFollowedCard)}
             </div>
@@ -3040,7 +3131,7 @@ export default function PlaylistsView(): JSX.Element {
             mirroring Apple Music's split between iCloud and local library. ── */}
         {ungroupedLocal.length > 0 && (
           <>
-            <h2 className="text-text-muted text-xs font-semibold uppercase tracking-widest mb-3 mt-9">On This Device</h2>
+            <h2 className={`${SECTION_TITLE} mt-10`}>On This Device</h2>
             <div ref={setDeviceGridEl} className="grid pl-grid" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(160px, 1fr))' }} {...gridBackgroundDropProps}>
               {layoutGridEntries(ungroupedLocal.map(lp => localEntry(lp)), deviceGridCols)}
             </div>
@@ -3050,7 +3141,8 @@ export default function PlaylistsView(): JSX.Element {
 
       {/* Bulk playlist-selection action bar */}
       {plSelectMode && (
-        <div className="sticky bottom-0 shrink-0 border-t border-[var(--border)] bg-surface px-4 py-2.5 flex items-center gap-2 relative z-30" onClick={e => e.stopPropagation()}>
+        <div className="sticky bottom-0 sticky-dock shrink-0 z-30 px-4 pb-3 pt-1 pointer-events-none" onClick={e => e.stopPropagation()}>
+        <div className="pointer-events-auto glass-thick glass-specular relative rounded-full pl-5 pr-2 py-2 flex items-center gap-1.5">
           <span className="text-sm text-text-primary font-medium flex-1">
             {selectedPlaylistKeys.size} {selectedPlaylistKeys.size === 1 ? 'playlist' : 'playlists'} selected
           </span>
@@ -3059,13 +3151,13 @@ export default function PlaylistsView(): JSX.Element {
               ...playlists.map(p => `api:${p.id}`),
               ...localPlaylists.map(lp => `local:${lp.id}`),
             ]))}
-            className="text-xs text-text-muted hover:text-text-primary px-2 py-1 rounded transition-colors"
+            className={BAR_LINK}
           >
             Select all
           </button>
           <button
             onClick={() => setSelectedPlaylistKeys(new Map())}
-            className="text-xs text-text-muted hover:text-text-primary px-2 py-1 rounded transition-colors"
+            className={BAR_LINK}
           >
             Clear
           </button>
@@ -3075,7 +3167,7 @@ export default function PlaylistsView(): JSX.Element {
                 ref={plBulkAddBtnRef2}
                 onClick={() => setShowPlBulkAddMenu(v => !v)}
                 disabled={selectedPlaylistKeys.size === 0 || bulkAddingPlaylists}
-                className="flex items-center gap-1.5 px-3 py-1.5 bg-surface-overlay hover:bg-surface-raised text-text-primary rounded-lg text-xs font-medium disabled:opacity-50 transition-colors"
+                className={BAR_BTN}
               >
                 {bulkAddingPlaylists ? <Loader2 size={13} className="animate-spin" /> : <FolderInput size={13} />} Add to playlist
               </button>
@@ -3104,17 +3196,18 @@ export default function PlaylistsView(): JSX.Element {
           <button
             onClick={bulkDeletePlaylists}
             disabled={selectedPlaylistKeys.size === 0 || bulkDeletingPlaylists}
-            className="flex items-center gap-1.5 px-3 py-1.5 bg-surface-overlay hover:bg-red-500/10 text-red-400 rounded-lg text-xs font-medium disabled:opacity-50 transition-colors"
+            className={BAR_BTN_DANGER}
           >
             {bulkDeletingPlaylists ? <Loader2 size={13} className="animate-spin" /> : <Trash2 size={13} />} Delete
           </button>
           <button
             onClick={exitPlaylistSelectMode}
-            className="p-1.5 rounded-lg hover:bg-surface-overlay transition-colors"
+            className="w-8 h-8 flex items-center justify-center rounded-full hover:bg-[var(--fill)] transition-colors"
             title="Exit selection"
           >
             <X size={15} className="text-text-muted" />
           </button>
+        </div>
         </div>
       )}
 

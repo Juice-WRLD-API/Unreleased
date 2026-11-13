@@ -223,8 +223,9 @@ function CoverArtSubmitDialog({ initial, onClose }: { initial: CoverArtTarget; o
           </div>
 
           <p className="text-[11px] text-text-muted leading-relaxed">
-            JPEG, PNG or WebP, up to 20 MB, 300 to 6000 pixels on each side. A manager reviews it before
-            it shows on the song. You can follow it in Settings → Account → My cover art.
+            JPEG, PNG or WebP, up to 20 MB, 300 to 6000 pixels on each side. A manager reviews it, and an
+            approved cover is added to the Community channel in Files. It doesn't replace the
+            song's cover. You can follow it in Settings → Account → My cover art.
           </p>
 
           {error && (

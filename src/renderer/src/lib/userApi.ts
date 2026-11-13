@@ -122,6 +122,9 @@ export interface UserSettings {
   pause_fade_enabled?: boolean
   prefer_og_version?: boolean
   rotate_suggested_covers?: boolean
+  /** Era name → cover pointer (URL or storage path) replacing that era's
+   *  shared placeholder on its unreleased songs. */
+  era_covers?: Record<string, string>
   media_overlay_enabled?: boolean
   lastfm_enabled?: boolean
   auto_report_errors?: boolean

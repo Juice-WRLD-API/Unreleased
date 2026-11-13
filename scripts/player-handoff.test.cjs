@@ -117,6 +117,7 @@ test('iOS starts the next source synchronously on the same element without a ren
     nextTrack: () => { state.currentTrack = { id: 'next' }; return state.currentTrack },
     resolvePlaybackUrl: () => 'next-url', applyRate() {}, playSlot: a => calls.push(['play', a.src]),
     setIsPlaying: v => { state.isPlaying = v }, seekSlot: (a, t) => { a.currentTime = t },
+    iosPrefetch: null,
     handOffToSpare: () => assert.fail('iOS must reuse the unlocked element'),
   }
   const ended = run(block('  const onAudioEnded =', '  const restartCurrentTrack ='), 'onAudioEnded', env)

@@ -16,7 +16,9 @@ import { smallCoverUrl } from '../../lib/juicewrldApi'
  *  to match (see the `heroLight` pattern in PlaylistsView.mobile.tsx). */
 export function HeroBackdrop({ src, isDarkSkin }: { src: string; isDarkSkin: boolean }): JSX.Element {
   return (
-    <div className="absolute inset-0 overflow-hidden pointer-events-none">
+    // The mask fades the art into the ambient backdrop behind the page. A fade
+    // into var(--surface) would draw a solid band where the track list starts.
+    <div className="absolute inset-0 overflow-hidden pointer-events-none [mask-image:linear-gradient(to_bottom,#000_45%,transparent)] [-webkit-mask-image:linear-gradient(to_bottom,#000_45%,transparent)]">
       <img
         // Blurred past recognition, so the degraded copy is indistinguishable
         // from the original and shows up far sooner.
@@ -32,8 +34,8 @@ export function HeroBackdrop({ src, isDarkSkin }: { src: string; isDarkSkin: boo
         className="absolute inset-0"
         style={{
           backgroundImage: isDarkSkin
-            ? 'linear-gradient(to bottom, rgb(0 0 0 / 0.30), rgb(0 0 0 / 0.20), var(--surface))'
-            : 'linear-gradient(to bottom, rgb(255 255 255 / 0.45), rgb(255 255 255 / 0.25), var(--surface))',
+            ? 'linear-gradient(to bottom, rgb(0 0 0 / 0.30), rgb(0 0 0 / 0.20))'
+            : 'linear-gradient(to bottom, rgb(255 255 255 / 0.45), rgb(255 255 255 / 0.25))',
         }}
       />
     </div>
@@ -74,7 +76,7 @@ export function appBarButton(
       onClick={onClick}
       aria-label={label}
       title={label}
-      className={`glass-button w-11 h-11 shrink-0 flex items-center justify-center rounded-full transition-opacity active:opacity-60 ${
+      className={`glass-button glass-specular relative w-11 h-11 shrink-0 flex items-center justify-center rounded-full transition-opacity active:opacity-60 ${
         active ? 'text-accent' : light ? 'text-white' : 'text-text-primary'
       }`}
     >{icon}</button>

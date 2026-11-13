@@ -13,6 +13,7 @@ import { BASE_LOG_FIELDS, LOG_EVENTS, LOG_LEVELS, type LogCategory, type LogEntr
 import { useStore } from '../store/useStore'
 import { MotionDisclosure } from './MotionDisclosure'
 import ThemedSelect from './ThemedSelect'
+import { GlassSegmented } from './GlassSegmented'
 
 // ── Marks ────────────────────────────────────────────────────────────────────
 
@@ -482,6 +483,9 @@ export function Segmented<T extends string>({ value, onChange, options, size = '
   options: { value: T; label: ReactNode }[]
   size?: 'sm' | 'md'
 }): JSX.Element {
+  // The view switch takes the glass control; the small time-window chips
+  // inside panels keep this compact one.
+  if (size === 'md') return <GlassSegmented value={value} onChange={onChange} options={options} />
   return (
     <div className="inline-flex items-center gap-0.5 p-0.5 rounded-xl bg-surface-overlay">
       {options.map((o) => (

@@ -26,6 +26,7 @@ import { hasChatAccess, useChatStore } from '../store/chatStore'
 import ChatDevices from './chat/ChatDevices'
 import MyCdnNodes from './MyCdnNodes'
 import MyCoverArt from './MyCoverArt'
+import MyCommunityEdits from './MyCommunityEdits'
 import ApiKeys from './ApiKeys'
 import ChatKeyTransfer from './chat/ChatKeyTransfer'
 import { orderedNavItems, isNavItemVisible, DEFAULT_NAV_ORDER, DEFAULT_NAV_VISIBILITY, orderedNavControls, isNavControlAvailable, DEFAULT_NAV_CONTROL_ORDER, DEFAULT_NAV_CONTROL_VISIBILITY } from '../lib/navItems'
@@ -931,6 +932,9 @@ export default function Settings(): JSX.Element {
 
                     <p className="text-[10px] font-semibold uppercase tracking-widest text-text-muted mt-4 mb-1.5 px-0.5">My cover art</p>
                     <MyCoverArt />
+
+                    <p className="text-[10px] font-semibold uppercase tracking-widest text-text-muted mt-4 mb-1.5 px-0.5">My remixes &amp; edits</p>
+                    <MyCommunityEdits />
 
                     <p className="text-[10px] font-semibold uppercase tracking-widest text-text-muted mt-4 mb-1.5 px-0.5">My CDN nodes</p>
                     <MyCdnNodes />

@@ -7,7 +7,6 @@ import { usePresence } from '../hooks/usePresence'
 
 const ENTER_MS = 520
 const EXIT_MS = 340
-const GLIDE_MS = 460
 const ENTER_EASE = 'cubic-bezier(0.33, 0, 0.15, 1)'
 const EXIT_EASE = 'cubic-bezier(0.4, 0, 0.6, 1)'
 const reducedMotion = (): boolean => window.matchMedia('(prefers-reduced-motion: reduce)').matches
@@ -42,7 +41,7 @@ function SidePanelSlot({ open, keepMounted = false, slotRef, children }: {
     if (!slot || !(panel instanceof HTMLElement)) return
     panel.getAnimations().forEach(a => a.cancel())
     if (open) {
-      Object.assign(slot.style, { position: '', top: '', bottom: '', left: '', width: '', zIndex: '' })
+      Object.assign(slot.style, { position: '', top: '', bottom: '', right: '', width: '', zIndex: '' })
       if (reducedMotion()) return
       panel.animate(
         [
@@ -54,10 +53,13 @@ function SidePanelSlot({ open, keepMounted = false, slotRef, children }: {
       )
     } else {
       if (reducedMotion()) return
-      // Above the view's own sticky headers while it leaves.
+      // Pinned from the group's right edge: the group is right-anchored and
+      // shrinks as the space is handed back, so a left offset would drift.
+      const group = slot.offsetParent
+      const right = group ? group.clientWidth - slot.offsetLeft - slot.offsetWidth : 0
       Object.assign(slot.style, {
         position: 'absolute', top: '0', bottom: '0', zIndex: '30',
-        left: `${slot.offsetLeft}px`, width: `${slot.offsetWidth}px`,
+        right: `${right}px`, width: `${slot.offsetWidth}px`,
       })
       panel.animate(
         [{ opacity: 0, transform: 'translateX(32px)' }],
@@ -73,7 +75,7 @@ function SidePanelSlot({ open, keepMounted = false, slotRef, children }: {
     if (!open) return
     const slot = slotRef.current
     if (!slot) return
-    if (slot.style.position) Object.assign(slot.style, { position: '', top: '', bottom: '', left: '', width: '', zIndex: '' })
+    if (slot.style.position) Object.assign(slot.style, { position: '', top: '', bottom: '', right: '', width: '', zIndex: '' })
     const panel = slot.firstElementChild
     if (panel instanceof HTMLElement) panel.getAnimations().forEach(a => { if (a.effect?.getTiming().fill === 'forwards') a.cancel() })
   })
@@ -88,14 +90,18 @@ function SidePanelSlot({ open, keepMounted = false, slotRef, children }: {
   )
 }
 
-// The Now Playing and Queue panels beside the main view. Queue sits to the
-// right of Now Playing, so opening or closing it moves Now Playing sideways by
-// the queue's width - glided rather than jumped, the same transform trick.
+const GLIDE_MS = 460
+
+// The Now Playing and Queue panels float over the right edge of the main row
+// (md+) instead of narrowing the view, starting below the frameless window's
+// min/max/close buttons. Queue sits to the right of Now Playing, so opening or
+// closing it moves Now Playing sideways by the queue's width - glided rather
+// than jumped, the same transform trick. On a phone they are fixed sheets.
 export default function SidePanels({ nowPlaying, queue }: { nowPlaying: boolean; queue: boolean }): JSX.Element {
+  const groupRef = useRef<HTMLDivElement>(null)
   const npRef = useRef<HTMLDivElement>(null)
   const queueRef = useRef<HTMLDivElement>(null)
   const prevQueue = useRef(queue)
-
   // Runs after the slots' own effects, so a closing queue has already been
   // lifted out of the layout (at its full width) when this measures it.
   useLayoutEffect(() => {
@@ -113,12 +119,16 @@ export default function SidePanels({ nowPlaying, queue }: { nowPlaying: boolean;
   }, [queue, nowPlaying])
 
   return (
-    <>
+    <div ref={groupRef} className="contents md:flex md:absolute md:right-0 md:inset-y-0 md:z-20">
       <SidePanelSlot open={nowPlaying} slotRef={npRef}><NowPlaying /></SidePanelSlot>
       {/* Kept mounted after its first open: unmounting destroyed every cover
           <img>, so reopening the queue made them all reload/re-decode from
           scratch instead of just reappearing. */}
       <SidePanelSlot open={queue} keepMounted slotRef={queueRef}><QueuePanel /></SidePanelSlot>
-    </>
+      {/* The panels are inset glass cards (ml-2 each); this is the gap between
+          the last one and the window edge. Handed back at once on close, like
+          the panels' own space. Phones show them full-screen instead. */}
+      {(nowPlaying || queue) && <div className="hidden md:block w-2 shrink-0" aria-hidden />}
+    </div>
   )
 }

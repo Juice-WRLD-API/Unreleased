@@ -24,6 +24,7 @@ import { hasChatAccess, useChatStore } from '../store/chatStore'
 import ChatDevices from './chat/ChatDevices'
 import MyCdnNodes from './MyCdnNodes'
 import MyCoverArt from './MyCoverArt'
+import MyCommunityEdits from './MyCommunityEdits'
 import ApiKeys from './ApiKeys'
 import Passkeys from './Passkeys'
 import ChatKeyTransfer from './chat/ChatKeyTransfer'
@@ -1064,6 +1065,9 @@ export default function Settings(): JSX.Element {
                     )}
                     <SettingsCard title="My cover art">
                       <MyCoverArt />
+                    </SettingsCard>
+                    <SettingsCard title="My remixes & edits">
+                      <MyCommunityEdits />
                     </SettingsCard>
                     <SettingsCard title="My CDN nodes">
                       <MyCdnNodes />

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useShallow } from 'zustand/react/shallow'
-import { Monitor, Minimize2, Maximize2, Radio, Settings2, PictureInPicture2 } from 'lucide-react'
+import { Monitor, Minimize2, Maximize2, Radio, Settings2, PictureInPicture2, Dices } from 'lucide-react'
 import { Visualizer, VISUALIZERS, needsWebGL, type VizLayout } from '../lib/viz'
 import { getAnalysisTap, resumeEffectsContext } from '../lib/audioEffects'
 import { smallCoverUrl } from '../lib/juicewrldApi'
@@ -105,6 +105,10 @@ export default function WrldVisualizer({
   // 999 FM plays with isPlaying off; the visualizer stops listening when this is false.
   const isPlaying = useStore((s) => s.isPlaying || s.radioFmActive)
   const lyricsOverride = useStore((s) => s.lyricsOverride)
+  // Random: the queue's own radio (random songs after this one), not 999 FM.
+  const randomOn = useStore((s) => s.radioMode && !s.radioFmActive)
+  const randomDisabled = useStore((s) => !s.currentTrack && !s.radioMode)
+  const setRandomMode = useStore((s) => s.setRandomMode)
   // The screen light's look, while WRLD's Edge light is on.
   const vizEdgeOverlay = useWrldEdgeLook()
   const { activeMode, vizQuality, vizUseArtwork, vizBoost, covered } = useVizStore(useShallow((s) => ({
@@ -413,6 +417,17 @@ export default function WrldVisualizer({
         >
           <Radio size={15} className={fm.active && fm.live ? 'animate-pulse' : ''} />
           <span>{fm.label}</span>
+        </button>
+        <button
+          className={`h-9 px-2.5 flex items-center gap-1.5 rounded-[10px] text-[11px] font-bold tracking-[0.1em] uppercase transition-colors disabled:opacity-30 disabled:pointer-events-none ${randomOn ? toolOn : toolIdle}`}
+          onClick={() => setRandomMode(!randomOn)}
+          disabled={randomDisabled}
+          title={randomOn ? 'Turn off Random' : 'Random: after this song, play random songs'}
+          aria-label={randomOn ? 'Turn off Random' : 'Turn on Random'}
+          aria-pressed={randomOn}
+        >
+          <Dices size={15} />
+          <span>Random</span>
         </button>
         <span className="w-px h-5 mx-1 bg-white/10" />
         {desktopWidgetsSupported && (
