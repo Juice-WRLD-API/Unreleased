@@ -1,27 +1,15 @@
 import type { Element, ElementContent, Root, Text } from 'hast'
-import { EMOJI_IMG, GLYPHS_BY_LENGTH_DESC, NAME_BY_GLYPH } from './emoji'
-
-function escapeRegExp(s: string): string {
-  return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
-}
-
-// Shortcodes (":sob:") take the glyph's own name, since that's how EMOJI_IMG
-// is keyed - so ":sob:" and its glyph both resolve to the same image.
-const SHORTCODE_RE = '(?::[a-z0-9_]+:)'
-const EMOJI_RE = new RegExp(`(${GLYPHS_BY_LENGTH_DESC.map(escapeRegExp).join('|')}|${SHORTCODE_RE})`, 'g')
+import { EMOJI_IMG, splitChatEmoji } from './emoji'
 
 function splitText(node: Text): ElementContent[] {
-  const parts = node.value.split(EMOJI_RE)
-  if (parts.length === 1) return [node]
-  return parts.filter((part) => part !== '').map((part) => {
-    const isShortcode = part.startsWith(':') && part.endsWith(':')
-    const name = isShortcode ? part.slice(1, -1) : NAME_BY_GLYPH[part]
-    const src = name ? EMOJI_IMG[name] : undefined
-    if (!src) return { type: 'text', value: part }
+  const parts = splitChatEmoji(node.value)
+  if (parts.length === 1 && !parts[0].name) return [node]
+  return parts.map(({ text, name }) => {
+    if (!name) return { type: 'text', value: text }
     const img: Element = {
       type: 'element',
       tagName: 'img',
-      properties: { src, alt: `:${name}:`, title: `:${name}:`, 'data-emoji': name },
+      properties: { src: EMOJI_IMG[name], alt: `:${name}:`, title: `:${name}:`, 'data-emoji': name },
       children: [],
     }
     return img

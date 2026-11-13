@@ -1,6 +1,6 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState, type CSSProperties } from 'react'
 import { SkipForward, ThumbsUp, ThumbsDown, X, Radio } from 'lucide-react'
-import { useStorePick } from '../store/useStore'
+import { useStore, useStorePick } from '../store/useStore'
 import { getActiveRadioClient } from '../lib/radioSocketService'
 import { useVizStore } from '../store/vizStore'
 
@@ -9,13 +9,27 @@ import { useVizStore } from '../store/vizStore'
 // page - this floats over every other view so people actually see when it's
 // time to vote. Suppressed on the WRLD view while WRLD shows the vote itself:
 // the old style's FM panel, or the Widgets layout's 999 FM card open on Radio.
-// Folded, on Chat or turned off, the card doesn't show it, so this does.
+// With the Widgets layout's 999 FM card up, the card shows the vote itself:
+// inside the Radio side, or as a card directly under it (WrldFmWidget) when
+// it's folded or on Chat. Only with that card turned off does this float.
 export default function RadioVotePopup(): JSX.Element | null {
+  const activeView = useStore((s) => s.activeView)
+  const wrldShowsVote = useVizStore((s) => !s.wrldWidgets || s.wrldFm)
+  if (activeView === 'wrld' && wrldShowsVote) return null
+  return (
+    <RadioVoteCard
+      className="fixed z-[60] bottom-24 right-4 w-[calc(100vw-2rem)] max-w-xs"
+      style={{ paddingBottom: 'max(1rem, env(safe-area-inset-bottom, 0px))' }}
+    />
+  )
+}
+
+/** The vote card itself; the caller places it. Draws nothing unless a vote is live for a tuned-in listener. */
+export function RadioVoteCard({ className = '', style }: { className?: string; style?: CSSProperties }): JSX.Element | null {
   const {
-    radioFmActive, radioFmVote, activeView,
+    radioFmActive, radioFmVote,
     radioFmVoteDismissed, setRadioFmVoteDismissed,
-  } = useStorePick('radioFmActive', 'radioFmVote', 'activeView', 'radioFmVoteDismissed', 'setRadioFmVoteDismissed')
-  const wrldShowsVote = useVizStore((s) => !s.wrldWidgets || (s.wrldFm && !s.wrldFmCollapsed && s.wrldFmTab === 'radio'))
+  } = useStorePick('radioFmActive', 'radioFmVote', 'radioFmVoteDismissed', 'setRadioFmVoteDismissed')
 
   const [myVote, setMyVote] = useState<'yes' | 'no' | null>(null)
   const [voteError, setVoteError] = useState(false)
@@ -64,9 +78,8 @@ export default function RadioVotePopup(): JSX.Element | null {
 
   useEffect(() => () => { if (countdownRef.current) clearInterval(countdownRef.current) }, [])
 
-  // Only surface for tuned-in listeners, when a vote is live and undismissed,
-  // and not where WRLD already shows it.
-  if (!radioFmActive || !radioFmVote?.active || radioFmVoteDismissed || (activeView === 'wrld' && wrldShowsVote)) return null
+  // Only surface for tuned-in listeners, when a vote is live and undismissed.
+  if (!radioFmActive || !radioFmVote?.active || radioFmVoteDismissed) return null
 
   const isSkip = radioFmVote.kind === 'skip'
   // The server silently drops votes from a socket it hasn't seen listening:true
@@ -79,10 +92,9 @@ export default function RadioVotePopup(): JSX.Element | null {
 
   return (
     <div
-      className="fixed z-[60] bottom-24 right-4 w-[calc(100vw-2rem)] max-w-xs
-        bg-black/85 backdrop-blur-xl border border-white/10 rounded-2xl shadow-2xl
-        p-4 flex flex-col gap-3 animate-[voteIn_0.25s_ease-out]"
-      style={{ paddingBottom: 'max(1rem, env(safe-area-inset-bottom, 0px))' }}
+      className={`${className} bg-black/85 backdrop-blur-xl border border-white/10 rounded-2xl shadow-2xl
+        p-4 flex flex-col gap-3 animate-[voteIn_0.25s_ease-out]`}
+      style={style}
     >
       <style>{`@keyframes voteIn{from{opacity:0;transform:translateY(12px) scale(0.96)}to{opacity:1;transform:none}}`}</style>
 

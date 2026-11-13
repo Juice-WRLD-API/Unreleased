@@ -1,6 +1,6 @@
 # Agent guide: Juice WRLD API and Unreleased
 
-**Version 1.80** · updated 2026-11-14. Bump the version and date whenever you
+**Version 1.82** · updated 2026-11-14. Bump the version and date whenever you
 change this file (minor for fixes and additions, major for rewrites).
 
 **Keep this file current.** If you find something in the docs or this file that
@@ -157,9 +157,10 @@ docs and the server disagree, the backend code in `backend/` wins.
 ### Ids
 
 Every song has two ids. `id` is internal (e.g. 94316): use it for
-`/songs/{id}/`, `/versions/{song_id}/`, favorites, playlists, plays and edit
-proposals. `public_id` (e.g. 2354) is the public number: use it for `?ids=` and
-public track links. Mixing them up fails silently.
+`/songs/{id}/`, `/versions/{song_id}/`, favorites, playlists, plays, edit
+proposals and player links (`/track/<id>`, built by `trackShareUrl`).
+`public_id` (e.g. 2354) is the public number used by `?ids=`. Mixing them up
+fails silently.
 
 ### Auth and roles
 
@@ -213,6 +214,11 @@ staff chat, 999 FM radio, the 999 FM chat and Heardle versus. Auth and events ar
 its own socket (`/ws/radio/chat/`, client `lib/radioChatSocket.ts`): never add
 frame types to `/ws/radio/`, whose text frames older players read as station
 state.
+
+999 FM chat's `slow_down` reply means the line was refused before storage.
+Retry the same nonce after `retry_after` (rounded seconds), keeping later
+lines behind it. The burst limit can require a longer wait than the gap
+between two lines. A lost reply can still mean the line was stored.
 
 ### Staff chat encryption
 

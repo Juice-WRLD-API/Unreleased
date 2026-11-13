@@ -2173,7 +2173,7 @@ export default function Settings({ floating = false }: { floating?: boolean }): 
                       icon={Disc}
                       iconColor="#8b5cf6"
                       label="999 FM in WRLD"
-                      sub="A 999 FM card in WRLD's widgets while it's on: votes, suggestions and chat"
+                      sub="A 999 FM card in WRLD's widgets while it's on, or opened from WRLD's toolbar without tuning in: votes, suggestions and chat"
                     >
                       <Toggle on={wrldFm} onClick={() => setWrldFm(!wrldFm)} />
                     </Row>

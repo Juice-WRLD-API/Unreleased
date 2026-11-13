@@ -14,8 +14,12 @@ import { useStore } from '../store/useStore'
 const RECONNECT_DELAYS_MS = [1000, 2000, 4000, 8000, 15000, 30000]
 const PING_MS = 25_000
 const CLOSE_AFTER_MS = 5_000
+const REPLY_TIMEOUT_MS = 8_000
+const FALLBACK_RETRY_MS = 2_000
 
 type Frame = { type?: string; [key: string]: unknown }
+type SendResult = { ok: true; message: RadioChatMessage } | { ok: false; error: string }
+type QueuedLine = { id: string; payload: string; timeoutMs: number; resolve: (result: SendResult) => void }
 
 let ws: WebSocket | null = null
 let users = 0
@@ -24,6 +28,8 @@ let retryTimer: ReturnType<typeof setTimeout> | null = null
 let pingTimer: ReturnType<typeof setInterval> | null = null
 let closeTimer: ReturnType<typeof setTimeout> | null = null
 let unsubscribeAccount: (() => void) | null = null
+const outbox: QueuedLine[] = []
+let sendTimer: ReturnType<typeof setTimeout> | null = null
 
 function wsUrl(): string {
   const url = new URL(RADIO_API_BASE.replace(/\/$/, ''))
@@ -32,6 +38,56 @@ function wsUrl(): string {
 }
 
 const patch = useRadioChatStore.setState
+
+function clearSendTimer(): void {
+  if (sendTimer !== null) clearTimeout(sendTimer)
+  sendTimer = null
+}
+
+function sendNext(): void {
+  const line = outbox[0]
+  if (!line || sendTimer !== null) return
+  if (ws?.readyState !== WebSocket.OPEN) {
+    failOutbox('Disconnected before sending.')
+    return
+  }
+  try {
+    ws.send(line.payload)
+    sendTimer = setTimeout(() => finishSend({ ok: false, error: 'No reply from the chat.' }), line.timeoutMs)
+  } catch {
+    failOutbox('Not sent.')
+  }
+}
+
+function finishSend(result: SendResult): void {
+  clearSendTimer()
+  const line = outbox.shift()
+  if (!line) return
+  const s = useRadioChatStore.getState()
+  patch(result.ok
+    ? { pending: s.pending.filter((p) => p.nonce !== line.id), messages: mergeLines(s.messages, [result.message]) }
+    : { pending: s.pending.map((p) => p.nonce === line.id ? { ...p, error: result.error } : p) })
+  line.resolve(result)
+  sendNext()
+  scheduleIdleClose()
+}
+
+function failOutbox(error: string): void {
+  clearSendTimer()
+  const failed = outbox.splice(0)
+  const ids = new Set(failed.map((line) => line.id))
+  if (ids.size) patch({ pending: useRadioChatStore.getState().pending.map((p) => ids.has(p.nonce) ? { ...p, error } : p) })
+  for (const line of failed) line.resolve({ ok: false, error })
+  scheduleIdleClose()
+}
+
+function scheduleIdleClose(): void {
+  if (users || outbox.length || closeTimer !== null) return
+  closeTimer = setTimeout(() => {
+    closeTimer = null
+    if (!users && !outbox.length) shutdown()
+  }, CLOSE_AFTER_MS)
+}
 
 function clearTimers(): void {
   if (retryTimer) clearTimeout(retryTimer)
@@ -75,17 +131,25 @@ function onFrame(frame: Frame): void {
       patch({ messages: mergeLines(s.messages, [frame.message as RadioChatMessage]) })
       break
     case 'sent':
-      patch({
+      if (outbox[0]?.id === frame.nonce) finishSend({ ok: true, message: frame.message as RadioChatMessage })
+      else patch({
         pending: s.pending.filter((p) => p.nonce !== frame.nonce),
         messages: mergeLines(s.messages, [frame.message as RadioChatMessage]),
       })
       break
     case 'error':
-      if (frame.nonce) {
-        patch({ pending: s.pending.map((p) => (p.nonce === frame.nonce ? { ...p, error: String(frame.detail ?? 'Not sent.') } : p)) })
-      }
       if (frame.code === 'disabled') patch({ enabled: false, reason: String(frame.detail ?? '') })
       if (frame.code === 'guests_disabled') patch({ guestsEnabled: false })
+      if (!outbox.length || outbox[0].id !== frame.nonce) break
+      if (frame.code === 'slow_down') {
+        clearSendTimer()
+        // The server rounds the seconds to one decimal place.
+        const seconds = frame.retry_after
+        const delay = typeof seconds === 'number' && Number.isFinite(seconds) && seconds >= 0
+          ? seconds * 1000 + 100
+          : FALLBACK_RETRY_MS
+        sendTimer = setTimeout(() => { sendTimer = null; sendNext() }, delay)
+      } else finishSend({ ok: false, error: String(frame.detail ?? 'Not sent.') })
       break
     case 'state':
       patch({ enabled: !!frame.enabled, guestsEnabled: frame.guests_enabled !== false, reason: String(frame.reason ?? ''), links: linksMode(frame.links) })
@@ -135,6 +199,7 @@ function open(): void {
     ws = null
     clearTimers()
     patch({ status: 'closed', me: null, authPending: false })
+    failOutbox('Chat disconnected.')
     scheduleReconnect()
   }
   socket.onerror = () => {}
@@ -165,6 +230,7 @@ export function acquireRadioChat(): () => void {
     // Signing in or out mid-chat reconnects, so lines switch identity at once.
     unsubscribeAccount = useStore.subscribe((s, prev) => {
       if (s.account?.id === prev.account?.id) return
+      failOutbox('Chat account changed.')
       const socket = ws
       if (socket?.readyState === WebSocket.OPEN) {
         if (s.account) void authenticate(socket)
@@ -178,7 +244,7 @@ export function acquireRadioChat(): () => void {
     if (released) return
     released = true
     users = Math.max(0, users - 1)
-    if (users === 0) closeTimer = setTimeout(() => { closeTimer = null; if (users === 0) shutdown() }, CLOSE_AFTER_MS)
+    scheduleIdleClose()
   }
 }
 
@@ -186,23 +252,22 @@ function nonce(): string {
   return (crypto?.randomUUID?.() ?? `${Date.now()}-${Math.random().toString(36).slice(2)}`).slice(0, 64)
 }
 
-/** Post a line. It shows at once as pending; the server's answer confirms it
- *  or marks it refused. False when the socket isn't open. */
-export function sendRadioChat(text: string): boolean {
+function enqueueLine(text: string, timeoutMs: number): { id: string; result: Promise<SendResult> } | null {
   const body = text.trim()
-  const socket = ws
-  if (!body || !socket || socket.readyState !== WebSocket.OPEN) return false
+  if (!body || ws?.readyState !== WebSocket.OPEN) return null
   const s = useRadioChatStore.getState()
   const id = nonce()
   const name = s.me?.name || s.name.trim()
+  const payload = JSON.stringify({ type: 'send', name: s.name.trim() || undefined, text: body, client_id: radioClientId() || undefined, nonce: id })
+  const result = new Promise<SendResult>((resolve) => { outbox.push({ id, payload, timeoutMs, resolve }) })
   patch({ pending: [...s.pending, { nonce: id, name: name || 'you', text: body }] })
-  try {
-    socket.send(JSON.stringify({ type: 'send', name: s.name.trim() || undefined, text: body, client_id: radioClientId() || undefined, nonce: id }))
-    return true
-  } catch {
-    patch({ pending: useRadioChatStore.getState().pending.map((p) => (p.nonce === id ? { ...p, error: 'Not sent.' } : p)) })
-    return false
-  }
+  sendNext()
+  return { id, result }
+}
+
+/** Accept a line into the outbox while the chat is connected. */
+export function sendRadioChat(text: string): boolean {
+  return enqueueLine(text, REPLY_TIMEOUT_MS) !== null
 }
 
 export function dismissRadioChatPending(id: string): void {
@@ -228,7 +293,7 @@ export function dropRadioChatLines(ids: number[]): void {
 }
 
 /** Run a command line's worth of chat: open, wait for the socket, post, close. */
-export async function sayOnceRadioChat(text: string, timeoutMs = 8000): Promise<{ ok: true; message: RadioChatMessage } | { ok: false; error: string }> {
+export async function sayOnceRadioChat(text: string, timeoutMs = REPLY_TIMEOUT_MS): Promise<SendResult> {
   const release = acquireRadioChat()
   try {
     const started = Date.now()
@@ -241,23 +306,11 @@ export async function sayOnceRadioChat(text: string, timeoutMs = 8000): Promise<
       const authStarted = Date.now()
       while (!useRadioChatStore.getState().me && Date.now() - authStarted < 2000) await new Promise((r) => setTimeout(r, 100))
     }
-    const before = new Set(useRadioChatStore.getState().pending.map((p) => p.nonce))
-    if (!sendRadioChat(text)) return { ok: false, error: 'couldn’t send' }
-    const mine = useRadioChatStore.getState().pending.find((p) => !before.has(p.nonce))
+    const mine = enqueueLine(text, timeoutMs)
     if (!mine) return { ok: false, error: 'couldn’t send' }
-    const sentAt = Date.now()
-    while (Date.now() - sentAt < timeoutMs) {
-      const s = useRadioChatStore.getState()
-      const p = s.pending.find((x) => x.nonce === mine.nonce)
-      if (p?.error) { dismissRadioChatPending(p.nonce); return { ok: false, error: p.error } }
-      if (!p) {
-        const last = [...s.messages].reverse().find((m) => m.text === text.trim())
-        if (last) return { ok: true, message: last }
-        return { ok: false, error: 'sent, but no reply came back' }
-      }
-      await new Promise((r) => setTimeout(r, 100))
-    }
-    return { ok: false, error: 'no reply from the chat' }
+    const result = await mine.result
+    if (!result.ok) dismissRadioChatPending(mine.id)
+    return result
   } finally {
     release()
   }

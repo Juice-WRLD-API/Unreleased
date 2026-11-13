@@ -1,5 +1,5 @@
-import { useEffect, useLayoutEffect, useRef, useState } from 'react'
-import { BadgeCheck, Ban, Eraser, Link2, ListX, Loader2, MoreHorizontal, Pencil, Power, Send, ShieldOff, Trash2, UserX, X } from 'lucide-react'
+import { Fragment, memo, useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { BadgeCheck, Ban, Eraser, Link2, ListX, Loader2, MoreHorizontal, Pencil, Power, Send, ShieldOff, SmilePlus, Trash2, UserX, X } from 'lucide-react'
 import ContextMenu from './ContextMenu'
 import type { ContextMenuEntry } from './ContextMenu'
 import { useStore } from '../store/useStore'
@@ -15,7 +15,13 @@ import {
 } from '../lib/radioChatApi'
 import type { RadioChatBan, RadioChatLinks, RadioChatMessage } from '../lib/radioChatApi'
 import { showAppToast } from '../lib/appToast'
+import { loadAllSongs } from '../lib/juicewrldApi'
+import { trackShareUrl } from '../lib/platform'
+import { matchRadioChatSongs } from '../lib/radioChatSongs'
 import { relativeTime } from './adminShared'
+import EmojiImg from './chat/EmojiImg'
+import { emojiGlyph, splitChatEmoji } from './chat/emoji'
+import ReactionPicker from './chat/ReactionPicker'
 
 // The 999 FM live chat, a tab of WRLD's FM panel (desktop and phone). Anyone
 // can read and post; admins get the killswitches (everyone, or guests only),
@@ -40,12 +46,34 @@ const errorText = (e: unknown): string => (e instanceof Error && e.message ? e.m
 
 interface MenuState { x: number; y: number; line: RadioChatMessage }
 
+type MatchSongs = ReturnType<typeof matchRadioChatSongs>
+const plainText: MatchSongs = (text) => [{ text }]
+
+const MessageText = memo(function MessageText({ text, matchSongs }: { text: string; matchSongs: MatchSongs }): JSX.Element {
+  return (
+    <span className="text-white/75">
+      {matchSongs(text).map(({ text, songId }, i) => {
+        const content = splitChatEmoji(text).map(({ text, name }, j) => name
+          ? <EmojiImg key={j} name={name} className="h-[1.5em] w-[1.5em] align-[-0.3em]" />
+          : text)
+        return songId == null ? <Fragment key={i}>{content}</Fragment> : (
+          <a key={i} href={trackShareUrl(songId)} target="_blank" rel="noopener noreferrer" className="text-sky-300 underline decoration-sky-300/60 hover:text-sky-100">
+            {content}
+          </a>
+        )
+      })}
+    </span>
+  )
+})
+
 export default function RadioChatPanel(): JSX.Element {
   const isAdmin = useStore((s) => !!s.account?.is_administrator)
   const signedIn = useStore((s) => !!s.account)
   const setShowUserAuth = useStore((s) => s.setShowUserAuth)
   const { status, enabled, guestsEnabled, reason, links, messages, pending, authPending, name, setName } = useRadioChatStore()
   const [draft, setDraft] = useState('')
+  const [matchSongs, setMatchSongs] = useState<MatchSongs>(() => plainText)
+  const [emojiAt, setEmojiAt] = useState<{ x: number; y: number } | null>(null)
   const [editingName, setEditingName] = useState(false)
   const [nameDraft, setNameDraft] = useState(name)
   const [menu, setMenu] = useState<MenuState | null>(null)
@@ -54,9 +82,17 @@ export default function RadioChatPanel(): JSX.Element {
   // The blocked-words editor: null while closed, '' text while it loads.
   const [words, setWords] = useState<{ text: string; loading: boolean; saving: boolean } | null>(null)
   const listRef = useRef<HTMLDivElement>(null)
+  const inputRef = useRef<HTMLInputElement>(null)
   const stickRef = useRef(true)
 
   useEffect(() => acquireRadioChat(), [])
+  useEffect(() => {
+    let cancelled = false
+    loadAllSongs().then((songs) => {
+      if (!cancelled) setMatchSongs(() => matchRadioChatSongs(songs))
+    }).catch(() => {})
+    return () => { cancelled = true }
+  }, [])
 
   // First paint from REST while the socket is still connecting.
   useEffect(() => {
@@ -79,7 +115,7 @@ export default function RadioChatPanel(): JSX.Element {
   useLayoutEffect(() => {
     const el = listRef.current
     if (el && stickRef.current) el.scrollTop = el.scrollHeight
-  }, [messages, pending, enabled])
+  }, [messages, pending, enabled, matchSongs])
 
   const send = (): void => {
     const text = draft.trim()
@@ -87,6 +123,21 @@ export default function RadioChatPanel(): JSX.Element {
     stickRef.current = true
     if (sendRadioChat(text)) setDraft('')
     else showAppToast('Chat isn’t connected yet. Try again in a moment.')
+  }
+
+  const insertEmoji = (name: string): void => {
+    const input = inputRef.current
+    if (!input) return
+    const start = input.selectionStart ?? draft.length
+    const end = input.selectionEnd ?? start
+    const glyph = emojiGlyph(name)
+    const next = draft.slice(0, start) + glyph + draft.slice(end)
+    if (next.length > RADIO_CHAT_MAX_TEXT) return
+    setDraft(next)
+    requestAnimationFrame(() => {
+      input.focus()
+      input.setSelectionRange(start + glyph.length, start + glyph.length)
+    })
   }
 
   const saveName = (): void => {
@@ -301,7 +352,7 @@ export default function RadioChatPanel(): JSX.Element {
                 {m.role === 'admin' && <span className="text-[9px] font-bold uppercase tracking-wider text-red-300 bg-red-500/20 rounded px-1 py-px">Admin</span>}
                 {m.role === 'mod' && <span className="text-[9px] font-bold uppercase tracking-wider text-amber-300 bg-amber-500/20 rounded px-1 py-px">Mod</span>}
               </span>
-              <span className="text-white/75">{m.text}</span>
+              <MessageText text={m.text} matchSongs={matchSongs} />
               {isAdmin && (
                 <button
                   onClick={(e) => { const r = e.currentTarget.getBoundingClientRect(); setMenu({ x: r.right, y: r.bottom, line: m }) }}
@@ -313,7 +364,7 @@ export default function RadioChatPanel(): JSX.Element {
               )}
             </div>
           ))}
-          {pending.map((p) => <PendingLine key={p.nonce} line={p} />)}
+          {pending.map((p) => <PendingLine key={p.nonce} line={p} matchSongs={matchSongs} />)}
         </div>
       )}
 
@@ -356,6 +407,7 @@ export default function RadioChatPanel(): JSX.Element {
           )}
           <form className="flex items-center gap-1.5" onSubmit={(e) => { e.preventDefault(); send() }}>
             <input
+              ref={inputRef}
               value={draft} maxLength={RADIO_CHAT_MAX_TEXT}
               onChange={(e) => setDraft(e.target.value)}
               placeholder={ready ? 'Say something…' : 'Connecting…'}
@@ -364,6 +416,18 @@ export default function RadioChatPanel(): JSX.Element {
               style={{ colorScheme: 'dark' }}
             />
             <button
+              type="button"
+              onClick={(e) => {
+                const r = e.currentTarget.getBoundingClientRect()
+                setEmojiAt({ x: r.right - 296, y: r.top - 380 })
+              }}
+              aria-label="Emoji"
+              title="Emoji"
+              className="p-2 rounded-xl text-white/60 hover:text-white hover:bg-white/10 transition-colors"
+            >
+              <SmilePlus size={15} />
+            </button>
+            <button
               type="submit" disabled={!draft.trim() || !ready}
               aria-label="Send"
               className="p-2 rounded-xl bg-white/10 text-white/80 hover:bg-white/20 disabled:opacity-30 disabled:pointer-events-none transition-colors"
@@ -371,6 +435,7 @@ export default function RadioChatPanel(): JSX.Element {
               <Send size={15} />
             </button>
           </form>
+          {emojiAt && <ReactionPicker {...emojiAt} forMessage onPick={insertEmoji} onClose={() => setEmojiAt(null)} />}
         </div>
       )}
 
@@ -384,11 +449,11 @@ export default function RadioChatPanel(): JSX.Element {
   )
 }
 
-function PendingLine({ line }: { line: RadioChatPending }): JSX.Element {
+function PendingLine({ line, matchSongs }: { line: RadioChatPending; matchSongs: MatchSongs }): JSX.Element {
   return (
     <div className={`text-sm leading-snug break-words px-2 py-1 -mx-2 ${line.error ? '' : 'opacity-50'}`}>
       <span className="font-semibold mr-1.5 text-white/70">{line.name}</span>
-      <span className="text-white/75">{line.text}</span>
+      <MessageText text={line.text} matchSongs={matchSongs} />
       {line.error && (
         <span className="flex items-center gap-1.5 text-xs text-red-400/85 mt-0.5">
           {line.error}

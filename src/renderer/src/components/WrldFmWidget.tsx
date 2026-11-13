@@ -1,17 +1,21 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
-import { ChevronDown, ChevronUp, Headphones, Radio } from 'lucide-react'
+import { ChevronDown, ChevronUp, Headphones, Radio, X } from 'lucide-react'
 import { useStore } from '../store/useStore'
 import { useVizStore } from '../store/vizStore'
 import { useRadioChatStore } from '../store/radioChatStore'
 import { acquireRadioChat } from '../lib/radioChatSocket'
 import RadioChatPanel from './RadioChatPanel'
 import RadioFmControls from './RadioFmControls'
+import { RadioVoteCard } from './RadioVotePopup'
+import { toggleRadioFm } from '../hooks/useWrldCore'
 
 // 999 FM as a card in WRLD's Widgets layout, where WRLD's own FM panel is
 // hidden: the Radio side (vote, suggest the next song, up next) and the Chat
-// side. Shown while 999 FM is on; dragged by its header, kept where it was
-// left, folded down to the header on request (Settings > Lyrics & WRLD turns
-// it off). React-drawn, unlike the desktop widgets beside it, which are the
+// side. Shown while 999 FM is on, or opened from WRLD's toolbar without
+// tuning in (the station's state and the chat run either way; voting and
+// suggesting need a listener, so the card offers Tune in). Dragged by its
+// header, kept where it was left, folded down to the header on request
+// (Settings > Lyrics & WRLD turns it off). React-drawn, unlike the desktop widgets beside it, which are the
 // desktop's own pages in frames.
 
 const WIDTH = 340
@@ -19,21 +23,25 @@ const HEIGHT = 480
 const HEADER = 48
 /** How far off the tab's edges it is kept. */
 const MARGIN = 12
+/** The vote card's gap under the widget, and its height with a track line (room check only). */
+const VOTE_GAP = 10
+const VOTE_HEIGHT = 168
 
 type Tab = 'radio' | 'chat'
 
 export default function WrldFmWidget(): JSX.Element | null {
   const fmOn = useStore((s) => s.radioFmActive)
   const live = useStore((s) => s.radioFmIsLive === true)
+  const fmOffAir = useStore((s) => s.radioFmIsLive === false)
   const listeners = useStore((s) => s.radioFmListeners)
   const voteWaiting = useStore((s) => !!s.radioFmVote?.active && !s.radioFmVoteDismissed)
   const playlistRight = useStore((s) => s.desktop.playlist.inWrld && s.desktop.playlist.side === 'right')
-  const { wrldFm, wrldFmPlace, wrldFmCollapsed, wrldFmTab, setWrldFmPlace, setWrldFmCollapsed, setWrldFmTab } = useVizStore()
+  const { wrldFm, wrldFmOpen, wrldFmPlace, wrldFmCollapsed, wrldFmTab, setWrldFmOpen, setWrldFmPlace, setWrldFmCollapsed, setWrldFmTab } = useVizStore()
   const layerRef = useRef<HTMLDivElement>(null)
   const [area, setArea] = useState({ width: 0, height: 0 })
   const [moving, setMoving] = useState<{ x: number; y: number } | null>(null)
   const drag = useRef<{ id: number; from: { x: number; y: number }; base: { x: number; y: number } } | null>(null)
-  const shown = fmOn && wrldFm
+  const shown = wrldFm && (fmOn || wrldFmOpen)
 
   useLayoutEffect(() => {
     const layer = layerRef.current
@@ -62,6 +70,8 @@ export default function WrldFmWidget(): JSX.Element | null {
   }, [readingChat, newestId, chatKnown])
   const unseen = readingChat || chatOff ? 0 : messages.filter((m) => m.id > seenId).length
   const voteBadge = voteWaiting && (wrldFmCollapsed || wrldFmTab !== 'radio')
+  // The Radio side shows the vote itself; folded or on Chat it hangs under the card.
+  const voteCard = voteBadge && fmOn
 
   const height = wrldFmCollapsed ? HEADER : Math.min(HEIGHT, Math.max(HEADER, area.height - MARGIN * 2))
   // The default spot keeps clear of the player (center) and the playlist (its side).
@@ -145,15 +155,35 @@ export default function WrldFmWidget(): JSX.Element | null {
                 )}
               </button>
             </div>
+            {!fmOn && (
+              <button
+                onClick={toggleRadioFm}
+                disabled={fmOffAir}
+                title={fmOffAir ? '999 FM is off the air' : 'Tune in to 999 FM'}
+                className="ml-auto px-2 py-1 rounded-lg text-[11px] font-semibold text-white/60 hover:text-white hover:bg-white/10 transition-colors disabled:opacity-30 disabled:pointer-events-none"
+              >
+                Tune in
+              </button>
+            )}
             <button
               onClick={() => setWrldFmCollapsed(!wrldFmCollapsed)}
               title={wrldFmCollapsed ? 'Open 999 FM' : 'Fold 999 FM away'}
               aria-label={wrldFmCollapsed ? 'Open 999 FM' : 'Fold 999 FM away'}
               aria-expanded={!wrldFmCollapsed}
-              className="ml-auto p-1 rounded-lg text-white/40 hover:text-white/80 hover:bg-white/10 transition-colors"
+              className={`${fmOn ? 'ml-auto' : ''} p-1 rounded-lg text-white/40 hover:text-white/80 hover:bg-white/10 transition-colors`}
             >
               {wrldFmCollapsed ? <ChevronUp size={15} /> : <ChevronDown size={15} />}
             </button>
+            {!fmOn && (
+              <button
+                onClick={() => setWrldFmOpen(false)}
+                title="Close 999 FM"
+                aria-label="Close 999 FM"
+                className="p-1 rounded-lg text-white/40 hover:text-white/80 hover:bg-white/10 transition-colors"
+              >
+                <X size={15} />
+              </button>
+            )}
           </div>
           {!wrldFmCollapsed && (
             <div key={wrldFmTab} className="flex-1 min-h-0 flex flex-col animate-wrld-view-in">
@@ -163,6 +193,17 @@ export default function WrldFmWidget(): JSX.Element | null {
             </div>
           )}
         </section>
+      )}
+      {shown && area.width > 0 && voteCard && (
+        <RadioVoteCard
+          className="absolute pointer-events-auto"
+          style={{
+            left, width: WIDTH,
+            // Directly under; above it only where the tab has no room below.
+            top: top + height + VOTE_GAP + VOTE_HEIGHT <= area.height ? top + height + VOTE_GAP : undefined,
+            bottom: top + height + VOTE_GAP + VOTE_HEIGHT <= area.height ? undefined : area.height - top + VOTE_GAP,
+          }}
+        />
       )}
     </div>
   )

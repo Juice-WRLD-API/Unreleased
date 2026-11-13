@@ -5,12 +5,14 @@ import { ClampedMenu } from '../ClampedMenu'
 import EmojiImg from './EmojiImg'
 import { PICKER_GROUPS, recentEmoji, rememberEmoji } from './emoji'
 import { useDismiss } from './ui'
+import './chat.css'
 
-export default function ReactionPicker({ x, y, onPick, onClose }: {
+export default function ReactionPicker({ x, y, onPick, onClose, forMessage = false }: {
   x: number
   y: number
   onPick: (name: string) => void
   onClose: () => void
+  forMessage?: boolean
 }): JSX.Element {
   const ref = useRef<HTMLDivElement>(null)
   // Autofocusing the search box on a phone raises the soft keyboard over the
@@ -21,6 +23,7 @@ export default function ReactionPicker({ x, y, onPick, onClose }: {
   useDismiss(true, onClose, ref)
 
   const recent = recentEmoji()
+  const item = forMessage ? 'emoji' : 'reaction'
   const q = query.trim().toLowerCase().replace(/^:/, '')
   const groups = q
     ? [{ label: 'Results', names: PICKER_GROUPS.flatMap((g) => g.names).filter((n) => n.includes(q)) }]
@@ -45,7 +48,7 @@ export default function ReactionPicker({ x, y, onPick, onClose }: {
               if (first) pick(first)
             }
           }}
-          placeholder="Find a reaction"
+          placeholder={`Find ${forMessage ? 'an' : 'a'} ${item}`}
           className="w-full rounded-lg bg-surface-raised border border-[var(--border)] px-2.5 py-1.5 text-sm text-text-primary placeholder:text-text-muted focus:outline-none focus:border-accent/50"
         />
       </div>
@@ -68,11 +71,11 @@ export default function ReactionPicker({ x, y, onPick, onClose }: {
           </div>
         ))}
         {groups.every((g) => g.names.length === 0) && (
-          <p className="py-6 text-center text-xs text-text-muted">No reactions match &ldquo;{query}&rdquo;</p>
+          <p className="py-6 text-center text-xs text-text-muted">No {forMessage ? 'emojis' : 'reactions'} match &ldquo;{query}&rdquo;</p>
         )}
       </div>
       <div className="h-8 px-3 flex items-center gap-2 border-t border-[var(--border)] text-xs text-text-muted">
-        {hover ? <><EmojiImg name={hover} className="h-5 w-5" /><span>:{hover}:</span></> : 'Pick a reaction'}
+        {hover ? <><EmojiImg name={hover} className="h-5 w-5" /><span>:{hover}:</span></> : `Pick ${forMessage ? 'an' : 'a'} ${item}`}
       </div>
     </ClampedMenu>,
     document.body,

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useShallow } from 'zustand/react/shallow'
-import { Monitor, Minimize2, Maximize2, Radio, Settings2, PictureInPicture2, Dices } from 'lucide-react'
+import { Monitor, Minimize2, Maximize2, Radio, Settings2, PictureInPicture2, Dices, MessagesSquare } from 'lucide-react'
 import { Visualizer, VISUALIZERS, needsWebGL, type VizLayout } from '../lib/viz'
 import { getAnalysisTap, resumeEffectsContext } from '../lib/audioEffects'
 import { smallCoverUrl } from '../lib/juicewrldApi'
@@ -380,6 +380,9 @@ export default function WrldVisualizer({
     announce(vizName(next))
   }, [trackKey, albumKey, announce])
 
+  // The 999 FM card of the Widgets layout (WrldFmWidget); open on its own or while 999 FM is on.
+  const fmCardAvailable = useVizStore((s) => s.wrldWidgets && s.wrldFm)
+  const fmCardShown = useVizStore((s) => fm.active ? !s.wrldFmCollapsed : s.wrldFmOpen)
   const tool = 'w-9 h-9 flex items-center justify-center rounded-[10px] transition-colors disabled:opacity-30 disabled:pointer-events-none'
   const toolIdle = 'text-white/60 hover:text-white hover:bg-white/10'
   const toolOn = 'text-[var(--accent)] bg-[rgb(var(--accent-rgb)/0.16)]'
@@ -421,6 +424,22 @@ export default function WrldVisualizer({
           <Radio size={15} className={fm.active && fm.live ? 'animate-pulse' : ''} />
           <span>{fm.label}</span>
         </button>
+        {fmCardAvailable && (
+          <button
+            className={`${tool} ${fmCardShown ? toolOn : toolIdle}`}
+            onClick={() => {
+              const viz = useVizStore.getState()
+              // While 999 FM is on the card is always up, so the button folds it instead.
+              if (fm.active) viz.setWrldFmCollapsed(!viz.wrldFmCollapsed)
+              else viz.setWrldFmOpen(!viz.wrldFmOpen)
+            }}
+            title={fmCardShown ? (fm.active ? 'Fold the 999 FM card' : 'Close the 999 FM card') : 'Open the 999 FM card: chat, votes and up next, without tuning in'}
+            aria-label="999 FM card"
+            aria-pressed={fmCardShown}
+          >
+            <MessagesSquare size={17} />
+          </button>
+        )}
         <button
           className={`h-9 px-2.5 flex items-center gap-1.5 rounded-[10px] text-[11px] font-bold tracking-[0.1em] uppercase transition-colors disabled:opacity-30 disabled:pointer-events-none ${randomOn ? toolOn : toolIdle}`}
           onClick={() => setRandomMode(!randomOn)}
