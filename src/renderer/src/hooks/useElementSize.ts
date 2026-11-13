@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useLayoutEffect, useState } from 'react'
 
 export interface ElementSize {
   width: number
@@ -17,13 +17,17 @@ export interface ElementSize {
  * and never gets another chance, even once the element shows up for real. A
  * callback ref calls back on every attach and detach, so this one always
  * re-measures and re-subscribes exactly when it should.
+ *
+ * Measured in a layout effect, so the first paint already has the size: Home
+ * used to show its bento stacked for a frame or two and then jump into pairs,
+ * which showed through the tab swipe (lib/dashboardSwap).
  */
 export function useElementSize<T extends HTMLElement>(): [(node: T | null) => void, ElementSize] {
   const [node, setNode] = useState<T | null>(null)
   const [size, setSize] = useState<ElementSize>({ width: 0, height: 0 })
   const ref = useCallback((el: T | null) => setNode(el), [])
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (!node) {
       setSize({ width: 0, height: 0 })
       return

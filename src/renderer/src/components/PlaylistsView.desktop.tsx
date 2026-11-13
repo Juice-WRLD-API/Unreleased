@@ -5,6 +5,7 @@ import { usePlaylistBulkDeletePlaylists, usePlaylistBulkAddPlaylistsTo } from '.
 import React, { useEffect, useState, useCallback, useRef, useMemo, useLayoutEffect } from 'react'
 import { useClosingValue } from '../hooks/usePresence'
 import { useCascade } from '../hooks/useCascade'
+import { PAGE_SWAP_IN_MS } from '../lib/dashboardSwap'
 import { useContentMotion } from '../hooks/useContentMotion'
 import { useListMotion } from '../hooks/useListMotion'
 import { createPortal } from 'react-dom'
@@ -111,7 +112,9 @@ function PlaylistMosaic({ tracks, className = '' }: { tracks: Track[]; className
 }
 
 // ── HeroBackdrop - Apple Music-style full-bleed blurred cover art behind the
-// playlist header. The mask fades the artwork into the ambient backdrop.
+// playlist header. It fades out with a mask rather than into var(--surface):
+// the page under it is the see-through ambient backdrop (glass chrome), so an
+// opaque end stop drew a solid band across the top of the track list.
 // Independent of the "App gradients" setting - this is the hero's own art,
 // not a decorative accent wash.
 //
@@ -119,6 +122,10 @@ function PlaylistMosaic({ tracks, className = '' }: { tracks: Track[]; className
 // slapped onto an otherwise light page on a light skin. Mirror it instead:
 // dark skins darken toward black (unchanged), light skins lighten toward
 // white, with the same mask on both.
+// The image overhangs the box by a fixed 150px on every side: blur samples
+// transparency past an element's edges, and a scale() overhang shrinks with
+// the hero's short height, so the top edge (behind the window buttons) used
+// to fade to nothing.
 function HeroBackdrop({ src, isDarkSkin }: { src?: string | null; isDarkSkin: boolean }): JSX.Element {
   return (
     <div className="absolute inset-0 overflow-hidden pointer-events-none [mask-image:linear-gradient(to_bottom,#000_45%,transparent)]" style={{ zIndex: 0 }}>
@@ -128,10 +135,12 @@ function HeroBackdrop({ src, isDarkSkin }: { src?: string | null; isDarkSkin: bo
           // from the original and shows up far sooner.
           src={smallCoverUrl(src)}
           alt=""
-          className="absolute inset-0 w-full h-full object-cover"
+          className="absolute max-w-none object-cover"
           style={{
+            inset: -150,
+            width: 'calc(100% + 300px)',
+            height: 'calc(100% + 300px)',
             filter: `blur(50px) saturate(1.7) brightness(${isDarkSkin ? 0.5 : 0.85})`,
-            transform: 'scale(1.3)',
           }}
         />
       )}
@@ -153,6 +162,15 @@ function HeroPlayButton({ onClick }: { onClick: () => void }): JSX.Element {
     </button>
   )
 }
+// Playlist detail pages: the hero and the list header stay put and only the
+// track list scrolls. The page box doesn't scroll; the list does, padded for
+// the floating player (.pb-player). Its scrollbar starts at the top of the
+// list (no 40px clearance for the window buttons, which sit over the hero).
+const DETAIL_PAGE = 'relative flex-1 flex flex-col min-h-0 overflow-hidden'
+const LIST_SCROLLER = 'flex-1 min-h-0 overflow-y-auto overflow-x-hidden pb-player'
+const LIST_SCROLLER_STYLE = { '--scroll-top-inset': '0px' } as React.CSSProperties
+// The selection bar floats over the bottom of the list, above the player.
+const SELECT_BAR_DOCK = 'absolute inset-x-0 bottom-0 sticky-dock z-30 px-4 pb-3 pt-1 pointer-events-none'
 // Secondary hero controls: glass circles and pills beside the accent Play.
 const HERO_ROUND = 'glass-field glass-specular relative shrink-0 flex items-center justify-center w-11 h-11 rounded-full text-text-primary focus-visible:outline-none disabled:opacity-40'
 const heroPill = (on: boolean): string => `glass-field glass-specular relative shrink-0 flex items-center gap-1.5 h-11 px-4 rounded-full text-sm font-medium focus-visible:outline-none disabled:opacity-60 ${on ? 'is-on' : 'text-text-primary'}`
@@ -460,6 +478,9 @@ function layoutGridEntries(entries: GridEntry[], columns: number): JSX.Element[]
 // Closing holds that space until the fade finishes; same-row switches only
 // fade the content. The caret moves on its own full-width transform layer.
 const SLOT_CLOSE_MS = 280 // the 240ms exit, plus a frame
+// The view's own entrance after mount: the browse-page swipe, the longer of
+// it and ViewFade's 200ms fade.
+const VIEW_ENTRANCE_MS = PAGE_SWAP_IN_MS
 
 function GridPanelSlot({ contentKey, closing, col, columns, caretClass = 'is-glass', children }: {
   contentKey: string
@@ -809,17 +830,6 @@ export default function PlaylistsView(): JSX.Element {
   // Element-state refs (not RefObjects) because the detail view mounts long
   // after this component does - see useVirtualWindowEl.
   const [listScrollEl, setListScrollEl] = useState<HTMLDivElement | null>(null)
-  const [headerMarker, setHeaderMarker] = useState<HTMLDivElement | null>(null)
-  const [headerPinned, setHeaderPinned] = useState(false)
-  useEffect(() => {
-    setHeaderPinned(false)
-    if (!listScrollEl || !headerMarker) return
-    const observer = new IntersectionObserver(([entry]) => {
-      setHeaderPinned(!entry.isIntersecting && entry.boundingClientRect.top < (entry.rootBounds?.top ?? 0))
-    }, { root: listScrollEl, threshold: 0 })
-    observer.observe(headerMarker)
-    return () => observer.disconnect()
-  }, [listScrollEl, headerMarker])
   const [listContentEl, setListContentEl] = useState<HTMLDivElement | null>(null)
   // 56 = px-4 py-2 row wrapping 40px album art at normal scale. Multiplied by
   // the app text-size setting so the virtualized rows (whose height and
@@ -827,10 +837,14 @@ export default function PlaylistsView(): JSX.Element {
   // inside them - otherwise larger scales clipped rows and shrank the covers.
   const TRACK_ROW_H = Math.round(56 * appTextScale)
   const { start: rowStart, end: rowEnd, totalHeight: rowsTotalHeight } =
-    useVirtualWindowEl(listScrollEl, listContentEl, displayTracks.length, TRACK_ROW_H)
+    // The range moves in 8-row steps (see useFixedWindow), so this whole view
+    // re-renders about once per 450px of scrolling instead of once per row.
+    useVirtualWindowEl(listScrollEl, listContentEl, displayTracks.length, TRACK_ROW_H, 8, 8)
   // Rows cascade in on opening a playlist - each list/grid/compact container
-  // below carries the flag.
-  const rowsCascade = useCascade(displayTracks.length > 0, `${selectedId}|${localSelectedId}|${showLiked}`)
+  // below carries the flag. Not while the view itself is swiping or fading in
+  // (arriving at Playlists with one open, or from the sidebar's playlist
+  // list): the whole page moves as one there, like the Tracker and Files.
+  const rowsCascade = useCascade(displayTracks.length > 0, `${selectedId}|${localSelectedId}|${showLiked}`, VIEW_ENTRANCE_MS)
 
   // Compact view's rows: one per song, in whatever order (search + sort)
   // displayTracks has, led by the song's first visible entry. A track the
@@ -1979,7 +1993,7 @@ export default function PlaylistsView(): JSX.Element {
       // HeroBackdrop), both of which want the normal dark-on-light text.
       const heroLight = !!heroSrc && isDarkSkin && playlistHeroEnabled
       return (
-        <div className="flex-1 flex flex-col min-h-0 overflow-y-auto overflow-x-hidden pb-player">
+        <div className={DETAIL_PAGE}>
           <div className="relative overflow-hidden px-6 pb-6 shrink-0">
             {playlistHeroEnabled && <HeroBackdrop src={heroSrc} isDarkSkin={isDarkSkin} />}
             <div className="relative z-10 pt-5">
@@ -2007,10 +2021,10 @@ export default function PlaylistsView(): JSX.Element {
               )}
             </div>
           </div>
-          <div className="px-2 pb-8">
-            <div className="grid items-center gap-3 px-4 pb-2 text-text-muted text-xs uppercase tracking-widest" style={{ gridTemplateColumns: '1.75rem 2.5rem 1fr 3.5rem' }}>
-              <span className="text-center">#</span><span /><span>Title</span><div className="flex justify-center"><Clock size={12} /></div>
-            </div>
+          <div className="shrink-0 px-6 pb-2 grid items-center gap-3 text-text-muted text-xs uppercase tracking-widest" style={{ gridTemplateColumns: '1.75rem 2.5rem 1fr 3.5rem' }}>
+            <span className="text-center">#</span><span /><span>Title</span><div className="flex justify-center"><Clock size={12} /></div>
+          </div>
+          <div className={`${LIST_SCROLLER} px-2`} style={LIST_SCROLLER_STYLE}>
             {localTracks.map((lt, i) => {
               const qt = libTrackToTrack(lt)
               return (
@@ -2293,7 +2307,7 @@ export default function PlaylistsView(): JSX.Element {
     // the text has to actually track both.
     const heroLight = !!heroSrc && isDarkSkin && playlistHeroEnabled
     return (
-      <div ref={setListScrollEl} className="relative flex-1 flex flex-col min-h-0 overflow-y-auto overflow-x-hidden pb-player" onClick={() => { setTrackMenu(null); setShowHeroMenu(false) }}>
+      <div className={DETAIL_PAGE} onClick={() => { setTrackMenu(null); setShowHeroMenu(false) }}>
         {/* ── Hero (shown immediately using summary data) — the backdrop now
             extends behind the back button too, instead of leaving a plain
             theme-background strip above the gradient. ── */}
@@ -2544,7 +2558,7 @@ export default function PlaylistsView(): JSX.Element {
 
         {/* ── Tracklist ── */}
         {loadingDetail ? (
-          <TrackSkeleton />
+          <div className="flex-1 min-h-0 overflow-hidden"><TrackSkeleton /></div>
         ) : tracks.length === 0 ? (
           <div className="flex flex-col items-center justify-center h-40 gap-2 text-center px-8">
             <Music2 className="text-text-muted opacity-20" size={40} />
@@ -2552,21 +2566,16 @@ export default function PlaylistsView(): JSX.Element {
             <p className="text-text-muted text-xs">Add tracks from the Tracker or Liked Songs.</p>
           </div>
         ) : (
-          <div className="px-2 pb-8">
-            {/* Pinned list header: controls on one row, column labels on their
-                own full-width row beneath. Sticky so scrolled track rows never
-                reach the top of the scroll container, where they'd render
-                behind the frameless window's fixed min/max/close buttons; the
-                frosted background appears only once the header is pinned.
-                The controls sit on the LEFT on purpose. Right-aligned they'd
-                land under those window buttons, which forces the 188px gutter
-                the other toolbars carry - and that gutter is pure dead space
-                next to the controls. Nothing here may share the column row
-                either: anything in that grid steals width from the columns and
-                knocks the duration header out of line with the rows.
-                -mx-2 px-6 keeps the grid lined up with the track rows. */}
-            <div ref={setHeaderMarker} className="h-px" aria-hidden="true" />
-            <div className={`playlist-track-header sticky top-0 z-20 -mx-2 px-6 pt-3 pb-2 ${headerPinned ? 'playlist-track-header-pinned' : ''}`}>
+          <>
+            {/* List header, fixed between the hero and the scrolling rows:
+                controls on one row, column labels on their own full-width row
+                beneath. The controls sit on the LEFT on purpose. Right-aligned
+                they'd land under the window buttons on short windows. Nothing
+                here may share the column row either: anything in that grid
+                steals width from the columns and knocks the duration header
+                out of line with the rows. px-6 lines the grid up with the
+                rows (scroller px-2 + row px-4). */}
+            <div className="shrink-0 px-6 pt-3 pb-2">
               <div className="flex items-center gap-3 mb-4">
                 {searchOpen ? (
                   <>
@@ -2662,6 +2671,7 @@ export default function PlaylistsView(): JSX.Element {
                 </div>
             </div>
 
+            <div ref={setListScrollEl} className={LIST_SCROLLER} style={LIST_SCROLLER_STYLE}>
             {compactView ? (
               loadingCompact && songUnits.length === 0 ? (
                 <div className="flex items-center justify-center h-40 gap-2 text-text-muted">
@@ -2767,7 +2777,8 @@ export default function PlaylistsView(): JSX.Element {
             </div>
               </>
             )}
-          </div>
+            </div>
+          </>
         )}
 
         {/* ── Track context menu ── */}
@@ -2786,9 +2797,10 @@ export default function PlaylistsView(): JSX.Element {
           />
         )}
 
-        {/* ── Bulk selection action bar ── */}
+        {/* ── Bulk selection action bar ── (floats over the bottom of the
+            list; the page itself doesn't scroll) */}
         {selectMode && (
-          <div className="sticky bottom-0 sticky-dock shrink-0 z-30 px-4 pb-3 pt-1 pointer-events-none" onClick={e => e.stopPropagation()}>
+          <div className={SELECT_BAR_DOCK} onClick={e => e.stopPropagation()}>
           <div className="pointer-events-auto glass-thick glass-specular relative rounded-full pl-5 pr-2 py-2 flex items-center gap-1.5">
             <span className="text-sm text-text-primary font-medium flex-1">
               {selectedTracks.size} {selectedTracks.size === 1 ? 'track' : 'tracks'} selected
@@ -2882,7 +2894,7 @@ export default function PlaylistsView(): JSX.Element {
     const heroLight = !!heroSrc && isDarkSkin && playlistHeroEnabled
 
     return (
-      <div className="flex-1 flex flex-col min-h-0 overflow-y-auto overflow-x-hidden pb-player" onClick={() => setShowHeroMenu(false)}>
+      <div className={DETAIL_PAGE} onClick={() => setShowHeroMenu(false)}>
         {/* Hero */}
         <div className="relative overflow-hidden px-6 pb-6 shrink-0">
           {playlistHeroEnabled && <HeroBackdrop src={heroSrc} isDarkSkin={isDarkSkin} />}
@@ -2973,13 +2985,14 @@ export default function PlaylistsView(): JSX.Element {
             <p className="text-text-muted text-xs">Add tracks from the Library tab.</p>
           </div>
         ) : (
-          <div className="px-2 pb-8">
-            <div className="grid items-center gap-3 px-4 pb-2 text-text-muted text-xs uppercase tracking-widest" style={{ gridTemplateColumns: '1.75rem 2.5rem 1fr 3.5rem' }}>
-              <span>#</span>
-              <span />
-              <span>Title</span>
-              <div className="flex justify-center"><Clock size={12} /></div>
-            </div>
+          <>
+          <div className="shrink-0 px-6 pb-2 grid items-center gap-3 text-text-muted text-xs uppercase tracking-widest" style={{ gridTemplateColumns: '1.75rem 2.5rem 1fr 3.5rem' }}>
+            <span>#</span>
+            <span />
+            <span>Title</span>
+            <div className="flex justify-center"><Clock size={12} /></div>
+          </div>
+          <div className={`${LIST_SCROLLER} px-2`} style={LIST_SCROLLER_STYLE}>
             {localTracks.map((lt, i) => {
               const qt = libTrackToTrack(lt)
               return (
@@ -3005,6 +3018,7 @@ export default function PlaylistsView(): JSX.Element {
               )
             })}
           </div>
+          </>
         )}
       </div>
     )

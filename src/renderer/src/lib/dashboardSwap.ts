@@ -6,27 +6,45 @@ import type { ViewType } from '../types'
 // runs swapIn on it); the old one has already unmounted by then, so what
 // slides out is a copy of its DOM taken just before the switch
 // (captureLeaving), laid over the view box and removed once it has run.
-// Home / Tracker / Files / Playlists use the same motion on the whole page, keeping
-// their toolbars and virtual lists together rather than staggering rows.
+// Every other move between the swipe pages (Tracker, Files, Playlists, and
+// those to or from Home or Staff) moves the whole page instead, keeping
+// toolbars and virtual lists together rather than staggering rows.
 
 const TILE_DASHBOARDS: ViewType[] = ['home', 'editor-profile', 'contributor-profile']
-const BROWSE_VIEWS: ViewType[] = ['home', 'api-tracker', 'api-files', 'playlists']
+const SWIPE_VIEWS: ViewType[] = ['home', 'api-tracker', 'api-files', 'playlists', 'editor-profile', 'contributor-profile']
+/** The nav tab a swipe page sits under: both staff dashboards are the Staff tab. */
+const tabOf = (v: ViewType): ViewType => (v === 'contributor-profile' ? 'editor-profile' : v)
+const DEFAULT_ORDER: ViewType[] = ['home', 'api-tracker', 'api-files', 'playlists', 'editor-profile']
 
-const PX = 56
+// Kept quick on purpose (the user's call, 2026-11-13): at 0.63 s a tab
+// switch felt slow. The new page lands in about 0.36 s.
+const PX = 40
 const EASE = 'cubic-bezier(0.4, 0, 0.2, 1)'
 /** The new widgets start this long after the old ones begin to leave. */
-const ENTER_AFTER = 110
+const ENTER_AFTER = 40
+const ENTER_MS = 320
+/** When a whole page swiping in (one widget, no stagger) has landed. */
+export const PAGE_SWAP_IN_MS = ENTER_AFTER + ENTER_MS
 
-/** Browse pages follow Home -> Tracker -> Files -> Playlists; staff dashboards move right
- *  from Home and left coming back. Other moves return 0.
- *  Incoming widgets slide in from that side (1 = from the right)
- *  and outgoing ones leave toward the other. */
-export function dashboardSwap(from: ViewType | null, to: ViewType): 0 | 1 | -1 {
-  if (from && from !== to && BROWSE_VIEWS.includes(from) && BROWSE_VIEWS.includes(to)) {
-    return BROWSE_VIEWS.indexOf(to) > BROWSE_VIEWS.indexOf(from) ? 1 : -1
+/** Which way a move between two swipe pages goes: 1 when `to`'s tab comes
+ *  after `from`'s in the nav (`order`, the user's tab order), -1 when before.
+ *  Other moves return 0. Incoming widgets slide in from that side
+ *  (1 = from the right) and outgoing ones leave toward the other. */
+export function dashboardSwap(from: ViewType | null, to: ViewType, order: readonly ViewType[] = DEFAULT_ORDER): 0 | 1 | -1 {
+  if (!from || from === to || !SWIPE_VIEWS.includes(from) || !SWIPE_VIEWS.includes(to)) return 0
+  // The two staff dashboards share a tab; keep the old editor -> contributor rule.
+  if (tabOf(from) === tabOf(to)) return to === 'contributor-profile' ? 1 : -1
+  const at = (v: ViewType): number => {
+    const i = order.indexOf(tabOf(v))
+    return i >= 0 ? i : order.length + DEFAULT_ORDER.indexOf(tabOf(v))
   }
-  if (!from || from === to || !TILE_DASHBOARDS.includes(from) || !TILE_DASHBOARDS.includes(to)) return 0
-  return to === 'home' ? -1 : 1
+  return at(to) > at(from) ? 1 : -1
+}
+
+/** Whether a swipe moves the whole page (true) or Home's and the staff
+ *  dashboards' tiles one by one (only between two of those). */
+export function isWholePageSwap(from: ViewType | null, to: ViewType): boolean {
+  return !from || !TILE_DASHBOARDS.includes(from) || !TILE_DASHBOARDS.includes(to)
 }
 
 export function reducedMotion(): boolean {
@@ -51,7 +69,7 @@ function readingOrder(els: HTMLElement[]): HTMLElement[] {
     .map(({ el }) => el)
 }
 
-const enterDelay = (i: number): number => ENTER_AFTER + Math.min(i * 40, 280)
+const enterDelay = (i: number): number => ENTER_AFTER + Math.min(i * 25, 150)
 
 /** Slides the new page's widgets in from the `dir` side. fill: 'backwards'
  *  hides each during its delay and leaves nothing on it afterwards.
@@ -65,7 +83,7 @@ export function swapIn(root: HTMLElement, dir: 1 | -1, wholePage = false): void 
   readingOrder(wholePage ? [root] : widgets(root)).forEach((el, i) => {
     runs.set(el, el.animate(
       [{ opacity: 0, transform: `translateX(${dir * PX}px)` }, { opacity: 1, transform: 'none' }],
-      { duration: 520, delay: enterDelay(i), easing: EASE, fill: 'backwards' },
+      { duration: ENTER_MS, delay: enterDelay(i), easing: EASE, fill: 'backwards' },
     ))
   })
   requestAnimationFrame(() => requestAnimationFrame(() => {
@@ -132,12 +150,12 @@ export function captureLeaving(box: HTMLElement, page: Element, dir: 1 | -1, who
 
     const runs = readingOrder(wholePage ? [copy] : widgets(copy)).map((el, i) => el.animate(
       [{ opacity: 1, transform: 'none' }, { opacity: 0, transform: `translateX(${-dir * PX}px)` }],
-      { duration: 380, delay: Math.min(i * 30, 210), easing: EASE, fill: 'forwards' },
+      { duration: 240, delay: Math.min(i * 20, 120), easing: EASE, fill: 'forwards' },
     ))
     // Anything on the page that isn't a widget goes with the last of them.
     runs.push(layer.animate(
       [{ opacity: 1 }, { opacity: 1, offset: 0.7 }, { opacity: 0 }],
-      { duration: 600, easing: 'linear', fill: 'forwards' },
+      { duration: 360, easing: 'linear', fill: 'forwards' },
     ))
     void Promise.all(runs.map((a) => a.finished)).catch(() => undefined).finally(() => {
       layer.remove()

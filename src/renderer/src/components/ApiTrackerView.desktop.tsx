@@ -1940,16 +1940,19 @@ export default function ApiTrackerView(): JSX.Element {
 
   const setViewMode = (v: ViewMode): void => { setViewModeState(v); localStorage.setItem(LS_TRACKER_VIEW, v) }
 
-  // Nothing stored = never picked a sort: default to Date Leaked, newest
-  // first. Clearing the sort stores 'none' so that choice sticks.
+  // No sort picked (or the old 'none' a cleared sort used to store) means the
+  // default: Date Leaked, newest first. Clearing a sort goes back to it, so the
+  // list is never left in the server's alphabetical order.
   const [orderField, setOrderField] = useState<OrderField | null>(() => {
     const stored = localStorage.getItem(LS_TRACKER_ORDER_FIELD)
-    if (stored === null) return 'date_leaked'
     const valid: OrderField[] = ['name', 'credited_artists', 'era__name', 'category', 'length', 'date_added', 'date_leaked']
-    return valid.includes(stored as OrderField) ? (stored as OrderField) : null
+    return valid.includes(stored as OrderField) ? (stored as OrderField) : 'date_leaked'
   })
-  const [orderDir, setOrderDir] = useState<'asc' | 'desc'>(() =>
-    localStorage.getItem(LS_TRACKER_ORDER_FIELD) === null || localStorage.getItem(LS_TRACKER_ORDER_DIR) === 'desc' ? 'desc' : 'asc')
+  const [orderDir, setOrderDir] = useState<'asc' | 'desc'>(() => {
+    const stored = localStorage.getItem(LS_TRACKER_ORDER_FIELD)
+    const picked = stored !== null && stored !== 'none'
+    return !picked || localStorage.getItem(LS_TRACKER_ORDER_DIR) === 'desc' ? 'desc' : 'asc'
+  })
   useEffect(() => {
     safeSetLS(LS_TRACKER_ORDER_FIELD, orderField ?? 'none')
   }, [orderField])
@@ -1971,11 +1974,11 @@ export default function ApiTrackerView(): JSX.Element {
   }, [])
 
   const handleSort = (field: OrderField): void => {
-    // Dates start newest-first; everything else starts ascending. Third click clears.
+    // Dates start newest-first; everything else starts ascending. Third click goes back to the default.
     const first = field === 'date_leaked' ? 'desc' : 'asc'
     if (orderField === field) {
       if (orderDir !== first) {
-        setOrderField(null); setOrderDir('asc'); resetSongs()
+        setOrderField('date_leaked'); setOrderDir('desc'); resetSongs()
       } else {
         setOrderDir(first === 'asc' ? 'desc' : 'asc')
       }
@@ -2770,7 +2773,7 @@ export default function ApiTrackerView(): JSX.Element {
 
             <button
               onClick={() => {
-                if (orderField === 'date_added') { setOrderField(null); setOrderDir('asc'); resetSongs() }
+                if (orderField === 'date_added') { setOrderField('date_leaked'); setOrderDir('desc'); resetSongs() }
                 else { setOrderField('date_added'); setOrderDir('desc'); resetSongs() }
               }}
               title="Sort by recently added - only covers the last ~200 file changes, so older songs may not have a known date"

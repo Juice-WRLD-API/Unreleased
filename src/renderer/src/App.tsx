@@ -11,7 +11,7 @@ import ViewSkeleton from './components/ViewSkeleton'
 import { ViewType } from './types'
 import { ADMIN_PATH_TABS } from './hooks/useAdminQueue'
 import ViewFade from './components/ViewFade'
-import { captureLeaving, dashboardSwap, reducedMotion } from './lib/dashboardSwap'
+import { captureLeaving, dashboardSwap, isWholePageSwap, reducedMotion } from './lib/dashboardSwap'
 
 // Minimum gap between window-focus-triggered refetches (playlists, news) -
 // alt-tabbing back and forth shouldn't refire a request on every focus event.
@@ -178,15 +178,17 @@ export default function App(): JSX.Element {
   const lastViewRef = useRef<ViewType>(activeView)
   const fromViewRef = useRef<ViewType | null>(null)
   const leavingRef = useRef<(() => void) | null>(null)
+  // This switch's swipe direction (dashboardSwap), for the incoming view's ViewFade.
+  const swapDirRef = useRef<0 | 1 | -1>(0)
   if (lastViewRef.current !== activeView) {
     const from = lastViewRef.current
     fromViewRef.current = from
     lastViewRef.current = activeView
-    const dir = isMobileViewport() ? 0 : dashboardSwap(from, activeView)
+    const dir = isMobileViewport() ? 0 : dashboardSwap(from, activeView, useStore.getState().navOrder)
+    swapDirRef.current = dir
     const box = viewBoxRef.current
     const page = box?.querySelector(`:scope [data-view="${from}"]`)?.firstElementChild
-    const wholePage = BROWSE_SWAP_VIEWS.includes(from) || BROWSE_SWAP_VIEWS.includes(activeView)
-    leavingRef.current = dir && box && page && !reducedMotion() ? captureLeaving(box, page, dir, wholePage) : null
+    leavingRef.current = dir && box && page && !reducedMotion() ? captureLeaving(box, page, dir, isWholePageSwap(from, activeView)) : null
   }
   useLayoutEffect(() => {
     const play = leavingRef.current
@@ -416,7 +418,7 @@ export default function App(): JSX.Element {
             {/* ViewFade: each view fades/lifts in as it comes on screen. */}
             {HOLD_UNDER_TERMINAL.map((v) => (bgView === v || heldView === v) && (
               <ViewFade key={v} view={v} active={bgView === v}
-                swap={!isMobile && v === bgView ? dashboardSwap(fromViewRef.current, v) : 0} wholePageSwap>
+                swap={!isMobile && v === bgView ? swapDirRef.current : 0} wholePageSwap={isWholePageSwap(fromViewRef.current, v)}>
                 {v === 'editor' ? <EditorPage />
                   : v === 'contributor' ? <ContributorPage />
                   : v === 'albums-admin' ? <AlbumsAdminView />
@@ -426,8 +428,8 @@ export default function App(): JSX.Element {
               </ViewFade>
             ))}
             {!HOLD_UNDER_TERMINAL.includes(bgView) && (
-            <ViewFade key={bgView} view={bgView} active swap={isMobile ? 0 : dashboardSwap(fromViewRef.current, bgView)}
-              wholePageSwap={BROWSE_SWAP_VIEWS.some(v => v === bgView || v === fromViewRef.current)}>
+            <ViewFade key={bgView} view={bgView} active swap={isMobile ? 0 : swapDirRef.current}
+              wholePageSwap={isWholePageSwap(fromViewRef.current, bgView)}>
               {bgView === 'home' ? <HomeView />
               : bgView === 'api-tracker' ? <ApiTrackerView />
               : bgView === 'api-files' ? <ApiFilesView />

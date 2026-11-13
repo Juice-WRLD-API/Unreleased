@@ -8,8 +8,12 @@ const GHOST: Record<SidebarPosition, string> = {
   left: 'left-3 top-1/2 -translate-y-1/2',
   right: 'right-3 top-1/2 -translate-y-1/2',
   top: 'top-3 left-1/2 -translate-x-1/2',
-  bottom: 'bottom-3 left-1/2 -translate-x-1/2',
+  bottom: 'left-1/2 -translate-x-1/2',
 }
+
+// A bottom pill rests above the floating player bar (AutoHideNav lifts it by
+// --player-dock), so its ghost has to land there too, not behind the player.
+const BOTTOM_GHOST_OFFSET = 'calc(max(0px, calc(var(--player-dock, 0px) - 8px)) + 12px)'
 
 // Nearest window edge to the pointer, by fraction of the window so a wide
 // window doesn't favour top/bottom.
@@ -69,7 +73,7 @@ export default function NavPillGrip({ horizontal }: { horizontal: boolean }): JS
           <div
             className={`absolute rounded-full border-2 border-accent bg-accent/25 ${GHOST[target]}`}
             style={target === 'top' || target === 'bottom'
-              ? { width: size.current.long, height: size.current.short }
+              ? { width: size.current.long, height: size.current.short, ...(target === 'bottom' ? { bottom: BOTTOM_GHOST_OFFSET } : null) }
               : { width: size.current.short, height: size.current.long }}
           />
         </div>,

@@ -5,7 +5,7 @@ import {
   Download, ArrowUpDown, ArrowUp, ArrowDown, Link, Check, Info, ListEnd, ListPlus, Heart,
   X, Pencil, PackageOpen, CheckSquare2, Square, Search,
   Filter, MoreHorizontal, Clipboard, Plus, ListMusic, Replace, Trash2, Tags,
-  FileText, FolderInput, CornerLeftUp, RefreshCw, FolderPlus, FilePlus, Upload, Sparkles, FolderSearch,
+  FileText, FolderInput, CornerLeftUp, RefreshCw, FolderPlus, FilePlus, Upload, Sparkles, FolderSearch, Cloud, Globe,
 } from 'lucide-react'
 import { useStore, useStorePick } from '../store/useStore'
 import * as userApi from '../lib/userApi'
@@ -144,7 +144,11 @@ function ApiImageThumb({ path, size = 36 }: { path: string; size?: number }): JS
   )
 }
 
-export default function ApiFilesView({ embedded = false }: { embedded?: boolean }): JSX.Element {
+export default function ApiFilesView({ embedded = false, onMine }: {
+  embedded?: boolean
+  /** Donors: adds "My files" to the source switch; the parent swaps the page. */
+  onMine?: () => void
+}): JSX.Element {
   const { playTrack, playNext, addToQueue, apiFilesPath, setApiFilesPath, apiFilesLastPath, setApiFilesLastPath, account, setActiveView, setPendingCompProposal, likedTrackIds, toggleLike, playlists, refreshPlaylists, setShowUserAuth, channels, activeChannel, setActiveChannel, loadChannels, openBulkFileEditor } = useStorePick('playTrack', 'playNext', 'addToQueue', 'apiFilesPath', 'setApiFilesPath', 'apiFilesLastPath', 'setApiFilesLastPath', 'account', 'setActiveView', 'setPendingCompProposal', 'likedTrackIds', 'toggleLike', 'playlists', 'refreshPlaylists', 'setShowUserAuth', 'channels', 'activeChannel', 'setActiveChannel', 'loadChannels', 'openBulkFileEditor')
   const isPrimary = isPrimaryChannelSlug(channels, activeChannel)
   const { trackChannel, channelsReady, resolveTrackChannel } = useTrackChannel()
@@ -607,6 +611,17 @@ export default function ApiFilesView({ embedded = false }: { embedded?: boolean 
               )}
             </div>
             <div className="flex items-center gap-3 ml-auto">
+              {onMine && (
+                <GlassSegmented
+                  ariaLabel="Source"
+                  value="api"
+                  onChange={(v) => { if (v === 'mine') onMine() }}
+                  options={[
+                    { value: 'api', label: 'API', icon: <Globe size={12} />, title: 'Browse API files' },
+                    { value: 'mine', label: 'My files', icon: <Cloud size={12} />, title: 'Your own cloud storage' },
+                  ]}
+                />
+              )}
               {channels.length > 0 && (
                 <GlassSegmented
                   ariaLabel="File channel"
@@ -718,7 +733,7 @@ export default function ApiFilesView({ embedded = false }: { embedded?: boolean 
                   <Home size={15} className="text-text-muted" />
                 </button>
                 {jumpOpen ? (
-                  <FolderJumpBox channel={activeChannel} onJump={(p) => navigate(p)} onClose={() => setJumpOpen(false)} />
+                  <FolderJumpBox channel={activeChannel} current={currentPath} onJump={(p) => navigate(p)} onClose={() => setJumpOpen(false)} />
                 ) : (
                 <div
                   className="flex items-center gap-0.5 overflow-hidden ml-1 flex-1 min-w-0 self-stretch cursor-text"

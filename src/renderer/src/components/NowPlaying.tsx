@@ -1,17 +1,11 @@
 import { useState, useEffect } from 'react'
 import { useResizablePanel } from '../hooks/useResizablePanel'
-import { X, Music, ChevronUp, ChevronDown, Pencil, Info, MicVocal } from 'lucide-react'
-import { useStore, useStorePick } from '../store/useStore'
+import { X, Music, ChevronUp, ChevronDown } from 'lucide-react'
+import { useStorePick } from '../store/useStore'
 import LyricsDisplay from './LyricsDisplay'
-import { lazyOverlay } from '../lib/lazyView'
 import { smallCoverUrl } from '../lib/juicewrldApi'
-import { trackIdToSongId } from '../lib/userApi'
 import { ProgressiveCover } from './ProgressiveCover'
-import { useCanEdit } from '../hooks/useChannelRoles'
 import { useLyricsVisible, lyricsLoading } from '../lib/lyrics'
-
-// Pulls in html-to-image for the export - only worth downloading once opened.
-const ShareLyricsModal = lazyOverlay(() => import('./ShareLyricsModal'))
 
 export default function NowPlaying(): JSX.Element {
   const {
@@ -22,7 +16,6 @@ export default function NowPlaying(): JSX.Element {
   } = useStorePick('currentTrack', 'currentTrackFull', 'setShowNowPlaying', 'lyricsOverride')
 
   const [artCollapsed, setArtCollapsed] = useState(false)
-  const [showShareLyrics, setShowShareLyrics] = useState(false)
   const [panelWidth, dragHandle] = useResizablePanel(360, 280, 520)
   const [isMobile, setIsMobile] = useState(window.innerWidth < 768)
 
@@ -32,16 +25,6 @@ export default function NowPlaying(): JSX.Element {
     return () => window.removeEventListener('resize', check)
   }, [])
 
-  // Global infoSongId (not local state) so the info panel survives switching
-  // to another tab (this component itself unmounts when the Wrld tab is
-  // active - see App.tsx). The id is already right there in currentTrack.id
-  // (format 'jw-<id>'), so no fetch is needed just to open it.
-  const songId = currentTrack ? trackIdToSongId(currentTrack.id) : null
-  const handleInfo = (): void => {
-    if (songId != null) useStore.getState().setInfoSongId(songId)
-  }
-
-  const canEdit = useCanEdit()
   const hasLyricsNatural = !!(currentTrackFull?.lyrics || currentTrackFull?.syncedLyrics)
   const hasLyrics = useLyricsVisible(hasLyricsNatural, lyricsOverride, lyricsLoading(currentTrack, currentTrackFull))
 
@@ -76,33 +59,6 @@ export default function NowPlaying(): JSX.Element {
                 title={artCollapsed ? 'Show artwork' : 'Hide artwork'}
               >
                 {artCollapsed ? <ChevronDown size={16} /> : <ChevronUp size={16} />}
-              </button>
-            )}
-            {hasLyrics && (
-              <button
-                onClick={() => setShowShareLyrics(true)}
-                className="text-text-muted hover:text-text-primary transition-colors"
-                title="Share lyrics"
-              >
-                <MicVocal size={16} />
-              </button>
-            )}
-            {songId != null && (
-              <button
-                onClick={handleInfo}
-                className="text-text-muted hover:text-text-primary transition-colors"
-                title="Song info"
-              >
-                <Info size={16} />
-              </button>
-            )}
-            {songId != null && canEdit && (
-              <button
-                onClick={() => useStore.getState().openSongEditor(songId)}
-                className="text-text-muted hover:text-text-primary transition-colors"
-                title="Edit this song"
-              >
-                <Pencil size={15} />
               </button>
             )}
             <button
@@ -170,15 +126,6 @@ export default function NowPlaying(): JSX.Element {
           </div>
         )}
       </div>
-      {showShareLyrics && currentTrack && currentTrackFull && (
-        <ShareLyricsModal
-          title={currentTrack.title}
-          artist={currentTrack.artist}
-          imageUrl={currentTrackFull.albumArt ?? currentTrack.imageUrl}
-          rawLyrics={currentTrackFull.syncedLyrics || currentTrackFull.lyrics}
-          onClose={() => setShowShareLyrics(false)}
-        />
-      )}
     </div>
   )
 }

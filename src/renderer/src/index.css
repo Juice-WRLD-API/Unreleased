@@ -282,7 +282,9 @@ html.wrld-active #root {
    edge, nearly invisible until the pointer is over the page.
    Views that scroll under the window chrome (.scroll-under) get it on their
    .pb-player scroller. The track is shortened with two empty end buttons so
-   it starts below the min/max/close buttons and ends above the player bar. */
+   it starts below the min/max/close buttons and ends above the player bar.
+   A scroller that starts below the window buttons (a list under a fixed
+   header) sets --scroll-top-inset: 0px to drop that clearance. */
 :is(.glass-scroll, .scroll-under .pb-player)::-webkit-scrollbar { width: 14px; height: 14px; }
 :is(.glass-scroll, .scroll-under .pb-player)::-webkit-scrollbar-track { background: transparent; }
 :is(.glass-scroll, .scroll-under .pb-player)::-webkit-scrollbar-thumb {
@@ -300,7 +302,7 @@ html.wrld-active #root {
   background-color: color-mix(in srgb, var(--text-muted) 70%, transparent);
 }
 :is(.glass-scroll, .scroll-under .pb-player)::-webkit-scrollbar-button:vertical:start:decrement {
-  display: block; height: 40px; background: transparent;
+  display: block; height: var(--scroll-top-inset, 40px); background: transparent;
 }
 @media (min-width: 768px) {
   .scroll-under .pb-player::-webkit-scrollbar-button:vertical:end:increment {
@@ -1055,13 +1057,6 @@ input[type='range']:active::-moz-range-thumb {
   -webkit-backdrop-filter: blur(22px) saturate(1.8);
   backdrop-filter: blur(22px) saturate(1.8);
 }
-/* The playlist controls sit on the page; frost only when tracks pass beneath. */
-.playlist-track-header-pinned {
-  background: var(--surface);
-  background: color-mix(in srgb, var(--glass-base) 72%, transparent);
-  -webkit-backdrop-filter: blur(24px);
-  backdrop-filter: blur(24px);
-}
 
 /* Round toolbar buttons: the same glass at button scale, with a lighter
    shadow so a row of them doesn't smudge. */
@@ -1365,7 +1360,7 @@ body, #root, .app-shell {
 .above-player { bottom: calc(var(--player-dock, 0px) + 1.25rem); }
 
 @media (prefers-reduced-transparency: reduce) {
-  .glass, .glass-thick, .glass-bar, .glass-button, .playlist-track-header-pinned {
+  .glass, .glass-thick, .glass-bar, .glass-button {
     background: var(--surface-raised);
     -webkit-backdrop-filter: none;
     backdrop-filter: none;

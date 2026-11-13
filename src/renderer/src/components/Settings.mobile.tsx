@@ -27,6 +27,7 @@ import MyCoverArt from './MyCoverArt'
 import MyCommunityEdits from './MyCommunityEdits'
 import ApiKeys from './ApiKeys'
 import Passkeys from './Passkeys'
+import AccountSignIn from './AccountSignIn'
 import ChatKeyTransfer from './chat/ChatKeyTransfer'
 import { HOME_SECTIONS, DEFAULT_HOME_SECTION_VISIBILITY, isHomeSectionVisible } from '../lib/homeSections'
 import { getToken, CONTRIBUTOR_ENABLED, showStaffProfile, staffProfileLabel } from '../lib/userApi'
@@ -184,6 +185,8 @@ const SETTINGS_SEARCH_INDEX: { tab: Tab; label: string; sub?: string; devOnly?: 
   { tab: 'account', label: 'My cover art', sub: 'Cover art you sent in for songs' },
   { tab: 'account', label: 'My CDN nodes', sub: 'Nodes linked to your account' },
   { tab: 'account', label: 'Two-factor authentication', sub: 'Whether sign-ins ask for an authenticator code' },
+  { tab: 'account', label: 'Username', sub: 'Choose or change the name you sign in with' },
+  { tab: 'account', label: 'Password', sub: 'Add or change a password, Discord accounts too' },
   { tab: 'account', label: 'Passkeys', sub: 'Sign in with your face, fingerprint, PIN, a security key or your phone' },
   { tab: 'account', label: 'API keys', sub: 'Keys for scripts and integrations' },
   { tab: 'about', label: 'Auth Token', sub: 'View and copy your account token' },
@@ -1055,6 +1058,9 @@ export default function Settings(): JSX.Element {
                     {/* Setup is admin-only on the server (GET otp/setup/ answers
                         "Administrator access required."), and Admin already
                         parks an admin without 2FA on its setup panel. */}
+                    <SettingsCard title="Sign-in">
+                      <AccountSignIn account={account} />
+                    </SettingsCard>
                     <SettingsCard title="Security">
                       <Row
                         icon={ShieldCheck}

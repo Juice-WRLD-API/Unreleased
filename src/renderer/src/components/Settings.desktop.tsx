@@ -1,55 +1,49 @@
 import { useState, useEffect, useRef, ReactNode, ElementType, CSSProperties } from 'react'
 import {
-  X, Brush, Palette, Volume2, Zap, Clock, Info, Github, MessageCircle,
-  PenLine, BookOpen, Copy, Eye, EyeOff, ChevronDown, KeyRound, Globe, RefreshCw, DownloadCloud,
-  FolderOpen, Monitor, BellOff, Bell, Minus, Loader2, Plus, AlignLeft, FileText, Trash2, Wrench, FlaskConical,
-  PanelLeft, PanelRight, PanelTop, PanelBottom, Waves, Keyboard, RotateCcw, AppWindow, PictureInPicture2, Minimize2,
-  ListOrdered, GripVertical, CloudUpload, Type, AlignCenter, Menu, Pencil, Upload,
-  ScrollText, ShieldCheck, Disc, Images, Search, LogOut, Bug, House, Heart, History, Music2, User, Check, Radio, Server,
-  AudioLines, SlidersHorizontal, LogIn,
-  Activity, Lightbulb,
+  X, Brush, Palette, Volume2, Zap, Clock, Info, Github, MessageCircle, PenLine, BookOpen, Eye, EyeOff, ChevronDown, Globe, RefreshCw, DownloadCloud, FolderOpen, FolderPlus, Monitor, BellOff, Minus, Loader2, Plus, AlignLeft, FileText, Trash2, Wrench, FlaskConical, PanelLeft, PanelRight, PanelTop, PanelBottom, Waves, Keyboard, RotateCcw, AppWindow, PictureInPicture2, Minimize2, ListOrdered, GripVertical, CloudUpload, Type, AlignCenter, Menu, Pencil, Upload, ScrollText, ShieldCheck, Disc, Images, Search, Cloud, Server, Home, AudioLines, SlidersHorizontal, Bell, Bug, House, Heart, User, Check,
+  Activity, Lightbulb, 
 } from 'lucide-react'
 import { DebugAnonymousToggle, DebugLogOpenButton, DebugRecordButton } from './DebugRecorder'
 import { ADDRESSES as DONATION_ADDRESSES, AddressRow as DonationAddressRow } from './DonationNotice'
-import VizControls, { Pills, Toggle } from './VizControls'
+import VizControls from './VizControls'
 import { useVizStore } from '../store/vizStore'
-import DesktopSettings from './DesktopSettings'
-import Passkeys from './Passkeys'
+import AccountSettings, { type AccountPage } from './AccountSettings'
 import { useStore, useStorePick, type SidebarPosition } from '../store/useStore'
 import { HOTKEY_ACTIONS, HOTKEY_CATEGORIES, effectiveBinding, comboTokens, eventToCombo } from '../lib/hotkeys'
-import { SKINS, getSkin } from '../lib/skins'
+import { SKINS, getSkin, createCustomSkin, parseSkinFile } from '../lib/skins'
 import SkinEditorModal from './SkinEditorModal'
 import { allFonts, addFontFile, addInstalledFont, FONT_ACCEPT } from '../lib/fonts'
 import { deleteFont } from '../lib/fontActions'
 import { useCustomFonts } from '../hooks/useCustomFonts'
-import { hasChatAccess, useChatStore } from '../store/chatStore'
+import { orderedNavItems, isNavItemVisible, DEFAULT_NAV_ORDER, DEFAULT_NAV_VISIBILITY, orderedNavControls, isNavControlAvailable, DEFAULT_NAV_CONTROL_ORDER, DEFAULT_NAV_CONTROL_VISIBILITY } from '../lib/navItems'
+import { HOME_SECTIONS, DEFAULT_HOME_SECTION_VISIBILITY, isHomeSectionVisible } from '../lib/homeSections'
+import { hasChatAccess } from '../store/chatStore'
 import ChatDevices from './chat/ChatDevices'
 import MyCdnNodes from './MyCdnNodes'
 import MyCoverArt from './MyCoverArt'
 import MyCommunityEdits from './MyCommunityEdits'
 import ApiKeys from './ApiKeys'
 import ChatKeyTransfer from './chat/ChatKeyTransfer'
-import { orderedNavItems, isNavItemVisible, DEFAULT_NAV_ORDER, DEFAULT_NAV_VISIBILITY, orderedNavControls, isNavControlAvailable, DEFAULT_NAV_CONTROL_ORDER, DEFAULT_NAV_CONTROL_VISIBILITY } from '../lib/navItems'
-import { HOME_SECTIONS, DEFAULT_HOME_SECTION_VISIBILITY, isHomeSectionVisible } from '../lib/homeSections'
-import { getToken, CONTRIBUTOR_ENABLED, updateDisplayName } from '../lib/userApi'
+import { CONTRIBUTOR_ENABLED, staffProfileLabel, staffProfileView, showStaffProfile } from '../lib/userApi'
 import { APP_VERSION, COMMIT_HASH, useCommitStatus } from '../lib/appVersion'
 import { DEFAULT_JWAPI_BASE, JWAPI_BASE, getServerOverride, setServerOverride, getRouteRules, setRouteRules, cleanRouteRules, KNOWN_ROUTE_PREFIXES, type RouteRule } from '../lib/apiServers'
+import { NOTIFICATION_SOUNDS, getNotificationSoundId, setNotificationSoundId, playNotificationSound } from '../lib/notifications'
+import { useLastfmConnect } from '../hooks/useLastfmConnect'
 import { lastfmConfigured } from '../lib/lastfm'
 import cdnService from '../lib/cdn'
-import { cacheClearAll } from '../lib/apiCache'
-import { NOTIFICATION_SOUNDS } from '../lib/notifications'
-import { formatBytes, accountDisplayName, initial } from '../lib/format'
+import { formatBytes } from '../lib/format'
 import { IS_IOS } from '../lib/platform'
 import type { ViewType } from '../types'
 import LegalModal, { type LegalDoc } from './LegalModal'
 import { ModalOverlay, LockToggle, useSandboxStore } from './Modal'
 import EraCoversSection from './EraCoversSection'
+import ThemedSelect from './ThemedSelect'
+import ThemedColorPicker from './ThemedColorPicker'
+import { Row, Toggle, SettingsGroup, SettingsLink, SettingsTitle } from './SettingsRow'
+import DesktopSettings from './DesktopSettings'
 import { useContentMotion } from '../hooks/useContentMotion'
 import { MotionDisclosure } from './MotionDisclosure'
 import { useSlidingIndicator } from '../hooks/useSlidingIndicator'
-import { useSettingsAccount } from '../hooks/useSettingsAccount'
-import { useSettingsAppearance } from '../hooks/useSettingsAppearance'
-import { useLastfmConnect } from '../hooks/useLastfmConnect'
 
 const ACCENT_PRESETS = [
   '#1db954', '#7c3aed', '#2563eb', '#dc2626',
@@ -83,57 +77,71 @@ const NAV_POSITIONS: { id: SidebarPosition; label: string; icon: ElementType }[]
   { id: 'bottom', label: 'Bottom', icon: PanelBottom },
 ]
 
-type Tab = 'account' | 'appearance' | 'preferences' | 'playback' | 'desktop' | 'shortcuts' | 'developer' | 'about'
+type UpdateState = 'idle' | 'checking' | 'available' | 'latest' | 'downloading' | 'downloaded' | 'error'
+type Tab = 'account' | 'general' | 'appearance' | 'navigation' | 'playback' | 'lyrics' | 'connections' | 'desktop' | 'shortcuts' | 'library' | 'app' | 'developer' | 'about'
+
+// Older links name pages that were split up or merged: Feedback lives under
+// About, and Preferences became General plus Navigation.
+function tabFromLink(t: string): Tab {
+  if (t === 'feedback') return 'about'
+  if (t === 'preferences') return 'general'
+  return t as Tab
+}
 
 // A hand-maintained index of every setting row, used by the search bar to
-// jump straight to the tab a match lives on. `devOnly` mirrors the same gate
-// the rows themselves are rendered behind, so a search never offers to jump
-// somewhere the tab doesn't actually exist.
-const SETTINGS_SEARCH_INDEX: { tab: Tab; label: string; sub?: string; devOnly?: boolean }[] = [
+// jump straight to the tab a match lives on. `electronOnly`/`devOnly` mirror
+// the same gates the rows themselves are rendered behind, so a search never
+// offers to jump somewhere the tab doesn't actually exist.
+// `page` is the Account sub-page a match lives on.
+const SETTINGS_SEARCH_INDEX: { tab: Tab; label: string; sub?: string; electronOnly?: boolean; devOnly?: boolean; page?: AccountPage }[] = [
   // Account
   { tab: 'account', label: 'Display name' },
   { tab: 'account', label: 'Profile photo' },
-  { tab: 'account', label: 'Bio' },
-  { tab: 'account', label: 'Show listening history', sub: 'Visible to anyone with your profile link' },
-  { tab: 'account', label: 'Show public playlists', sub: 'Lists playlists already marked public' },
-  { tab: 'account', label: "Share what you're listening to", sub: "Shows the track you're currently playing on your profile" },
-  { tab: 'account', label: 'My cover art', sub: 'Cover art you sent in for songs' },
-  { tab: 'account', label: 'My CDN nodes', sub: 'Nodes linked to your account' },
-  { tab: 'account', label: 'Two-factor authentication', sub: 'Whether sign-ins ask for an authenticator code' },
-  { tab: 'account', label: 'Passkeys', sub: 'Sign in with your face, fingerprint, PIN, a security key or your phone' },
-  { tab: 'account', label: 'API keys', sub: 'Keys for scripts and integrations' },
-  { tab: 'account', label: 'Auth Token', sub: 'View and copy your account token' },
+  { tab: 'account', label: 'Bio', page: 'profile' },
+  { tab: 'account', label: 'Show listening history', sub: 'Visible to anyone with your profile link', page: 'profile' },
+  { tab: 'account', label: 'Show public playlists', sub: 'Lists playlists already marked public', page: 'profile' },
+  { tab: 'account', label: "Share what you're listening to", sub: "Shows the track you're currently playing on your profile", page: 'profile' },
+  { tab: 'account', label: 'Username', sub: 'Choose or change the name you sign in with', page: 'security' },
+  { tab: 'account', label: 'Password', sub: 'Add or change a password, Discord accounts too', page: 'security' },
+  { tab: 'account', label: 'Two-factor authentication', sub: 'Whether sign-ins ask for an authenticator code', page: 'security' },
+  { tab: 'account', label: 'Passkeys', sub: 'Sign in with your face, fingerprint, PIN, a security key or your phone', page: 'security' },
+  { tab: 'account', label: 'Chat online status and read receipts', page: 'chat' },
+  { tab: 'account', label: 'My cover art', sub: 'Cover art you submitted', page: 'uploads' },
+  { tab: 'account', label: 'My remixes & edits', sub: 'Remixes and edits you submitted', page: 'uploads' },
+  { tab: 'account', label: 'My CDN nodes', sub: 'Nodes linked to your account', page: 'uploads' },
+  { tab: 'account', label: 'API keys', sub: 'Keys for scripts and integrations', page: 'developer' },
+  { tab: 'account', label: 'Auth Token', sub: 'View and copy your account token', page: 'developer' },
   { tab: 'account', label: 'Log out' },
   // Appearance
   { tab: 'appearance', label: 'Skin', sub: 'Custom skin colors and presets' },
   { tab: 'appearance', label: 'Accent color' },
   { tab: 'appearance', label: 'App gradients', sub: 'Accent-tinted gradients behind the app and sidebar' },
   { tab: 'appearance', label: 'Control gradients', sub: 'Accent-tinted gradients on the player bar, toggle groups, search bars, badges, and menus' },
-  { tab: 'appearance', label: 'Theme background in WRLD', sub: "Use the app's theme behind the WRLD tab instead of the playing song's cover" },
-  { tab: 'appearance', label: 'Old WRLD style', sub: "WRLD's own player and lyrics instead of the widgets" },
+  { tab: 'lyrics', label: 'Theme background in WRLD', sub: "Use the app's theme behind the WRLD tab instead of the playing song's cover" },
+  { tab: 'lyrics', label: 'Old WRLD style', sub: "WRLD's own player and lyrics instead of the widgets" },
   { tab: 'appearance', label: 'Playlist header art', sub: "Blurred cover art behind a playlist's header" },
   { tab: 'appearance', label: 'App font' },
-  { tab: 'appearance', label: 'Lyrics font' },
+  { tab: 'lyrics', label: 'Lyrics font' },
   { tab: 'appearance', label: 'Custom fonts' },
   { tab: 'appearance', label: 'App text size' },
-  { tab: 'appearance', label: 'Lyrics text size' },
-  { tab: 'appearance', label: 'Lyrics alignment' },
-  { tab: 'appearance', label: 'Blur inactive lyrics', sub: 'Soften every synced line except the one playing' },
-  { tab: 'appearance', label: 'Lyric colors', sub: 'Current line and other lines' },
-  { tab: 'appearance', label: 'WRLD visualizer', sub: 'Visualizer, Edge light, quality, input boost, auto-switch, artwork colors' },
-  // Preferences
-  { tab: 'preferences', label: 'Full era names', sub: 'Show eras spelled out instead of abbreviated' },
-  { tab: 'preferences', label: 'Add song info to downloads', sub: "Write the song's name, artist, cover and lyrics into downloaded MP3s" },
-  { tab: 'preferences', label: 'Sandbox', sub: 'Dock modals into a collapsible pill instead of a centered popup' },
-  { tab: 'preferences', label: 'Navigation position', sub: 'Where the nav menu sits - left, right, top, bottom' },
-  { tab: 'preferences', label: 'Navigation style', sub: 'Classic or a floating pill' },
-  { tab: 'preferences', label: 'Menu items', sub: 'Reorder or hide sidebar tabs' },
-  { tab: 'preferences', label: 'Menu controls', sub: 'Reorder or hide the buttons at the foot of the menu' },
-  { tab: 'preferences', label: 'Home screen', sub: 'Choose which sections show on the Home tab' },
+  { tab: 'lyrics', label: 'Lyrics text size' },
+  { tab: 'lyrics', label: 'Lyrics alignment' },
+  { tab: 'lyrics', label: 'Blur inactive lyrics', sub: 'Soften every synced line except the one playing' },
+  { tab: 'lyrics', label: 'Lyric colors', sub: 'Current line and other lines' },
+  { tab: 'lyrics', label: 'WRLD visualizer', sub: 'Visualizer, Edge light, quality, input boost, auto-switch, artwork colors' },
+  // General and Navigation
+  { tab: 'general', label: 'Full era names', sub: 'Show eras spelled out instead of abbreviated' },
+  { tab: 'general', label: 'Add song info to downloads', sub: "Write the song's name, artist, cover and lyrics into downloaded MP3s" },
+  { tab: 'navigation', label: 'Auto-hide navigation', sub: 'Hide the nav menu until the pointer reaches its edge' },
+  { tab: 'navigation', label: 'Navigation position', sub: 'Where the nav menu sits — left, right, top, bottom' },
+  { tab: 'navigation', label: 'Navigation style', sub: 'Classic or a floating pill' },
+  { tab: 'navigation', label: 'Home screen', sub: 'Choose which sections show on the Home tab' },
+  { tab: 'navigation', label: 'Menu items', sub: 'Reorder or hide sidebar tabs' },
+  { tab: 'navigation', label: 'Menu controls', sub: 'Reorder or hide the buttons at the foot of the menu' },
   // Playback
   { tab: 'playback', label: 'Audio output' },
   { tab: 'playback', label: 'Remember queue and now playing', sub: 'Restore your queue, current track and position on this device when you reopen. Playback stays paused.' },
-  { tab: 'playback', label: 'Lyrics sync', sub: 'Offset lyrics timing' },
+  { tab: 'lyrics', label: 'Lyrics sync', sub: 'Offset lyrics timing' },
   { tab: 'playback', label: 'Crossfade' },
   // iOS-excluded like the row below (Safari ignores <audio>.volume).
   ...(IS_IOS ? [] : [{ tab: 'playback' as const, label: 'Smooth fade when pausing' }]),
@@ -141,9 +149,9 @@ const SETTINGS_SEARCH_INDEX: { tab: Tab; label: string; sub?: string; devOnly?: 
   { tab: 'playback', label: 'Rotate suggested covers' },
   { tab: 'playback', label: 'Era covers', sub: 'Custom cover art per era, used when a song has no cover of its own' },
   { tab: 'playback', label: 'Sleep timer' },
-  { tab: 'playback', label: 'Notification sound' },
-  { tab: 'playback', label: 'Last.fm scrobbling' },
-  { tab: 'playback', label: 'Distributed CDN downloads', sub: 'Use the peer-to-peer CDN network for faster downloads' },
+  { tab: 'general', label: 'Notification sound' },
+  { tab: 'connections', label: 'Last.fm scrobbling' },
+  { tab: 'connections', label: 'Distributed CDN downloads', sub: 'Use the peer-to-peer CDN network for faster downloads' },
   // Shortcuts
   // Desktop: the lyric styles, WRLD's Edge light and the widgets' looks for WRLD's Widgets layout
   { tab: 'desktop', label: 'Light', sub: 'Snake, Lava, Fireflies, Lyrics Ticker, Fire, Snow… and how WRLD’s Edge light looks' },
@@ -154,17 +162,19 @@ const SETTINGS_SEARCH_INDEX: { tab: Tab; label: string; sub?: string; devOnly?: 
   { tab: 'desktop', label: 'Light colors', sub: 'One or two colors, or the cover’s' },
   { tab: 'desktop', label: 'Lyric style', sub: 'Fisheye, Spread, Karaoke, Typewriter, Neon, Echo, Glitch, Cinema' },
   { tab: 'desktop', label: 'Lyric font', sub: 'A font for each lyric style' },
-  { tab: 'desktop', label: 'Player widget', sub: 'Your queue as glass cards, in WRLD’s Widgets layout' },
-  { tab: 'desktop', label: 'Playlist widget', sub: 'Queue, playlists or liked songs, in WRLD' },
-  { tab: 'desktop', label: 'Clock widget', sub: 'Tall glass digits, in WRLD' },
-  { tab: 'shortcuts', label: 'Skip amount', sub: 'How far skip-forward / skip-backward jump' },
-  { tab: 'shortcuts', label: 'Keyboard shortcuts', sub: 'Rebind any in-app or global hotkey' },
+  { tab: 'desktop', label: 'Player widget', sub: 'Your queue as glass cards, on the desktop or in WRLD’s Widgets layout' },
+  { tab: 'desktop', label: 'Mini player widget' },
+  { tab: 'desktop', label: 'Playlist widget', sub: 'Queue, playlists or liked songs, on the desktop or in WRLD' },
+  { tab: 'desktop', label: 'Clock widget', sub: 'Tall glass digits, on the desktop or in WRLD' },
+  // App
+  { tab: 'general', label: 'Sandbox', sub: 'Dock modals into a collapsible pill instead of a centered popup' },
+  { tab: 'general', label: 'Developer options', sub: 'Shows a Developer tab with API server settings' },
   // Developer
   { tab: 'developer', label: 'API servers', sub: 'Main API and route rules', devOnly: true },
 
   // Feedback / About
   { tab: 'about', label: 'Feedback', sub: 'Report a bug or share an idea' },
-  { tab: 'preferences', label: 'Auto-report app errors', sub: 'Automatically send a crash report when the app hits an unexpected error' },
+  { tab: 'general', label: 'Auto-report app errors', sub: 'Automatically send a crash report when the app hits an unexpected error' },
   { tab: 'about', label: 'Record debug log', sub: 'Record console messages and network requests to a file you can send us' },
   { tab: 'about', label: 'Open debug log', sub: 'View a saved debug log file - requests, errors and console messages' },
   { tab: 'about', label: 'About', sub: 'Version, GitHub, Discord, API links' },
@@ -179,47 +189,10 @@ const SETTINGS_SEARCH_INDEX: { tab: Tab; label: string; sub?: string; devOnly?: 
   { tab: 'about', label: 'FAQ', sub: 'What is this? Who are you? Why did you build this? Technical stuff?' },
 ]
 
-// ── Flat row primitive - no card/box, just an icon + label on the left and
-// a control on the right, separated by a hairline. Used inside each tab's
-// content pane (macOS System Settings' detail-pane idiom, not the boxed
-// inset-grouped list). The icon sits in a colored badge (iOS Settings-style)
-// - a fixed color + white icon reads correctly in both themes, unlike the
-// plain `text-muted` icon this replaced, which nearly disappeared in light
-// mode. ──
-
-function Row({ icon: Icon, iconColor, label, sub, labelExtra, children }: {
-  icon: ElementType
-  iconColor: string
-  label: string
-  sub?: string
-  // Rendered immediately after the label, on the left - for controls that
-  // are conceptually part of the label (e.g. an on/off toggle right next
-  // to "Crossfade"), as opposed to `children`, which sits at the row's
-  // right edge (e.g. the crossfade duration slider).
-  labelExtra?: ReactNode
-  children?: ReactNode
-}): JSX.Element {
-  return (
-    <div className="flex items-center justify-between gap-3 py-3 border-b border-[var(--border)] last:border-b-0">
-      <div className="flex items-center gap-2.5 min-w-0">
-        <div className="w-6 h-6 rounded-md flex items-center justify-center shrink-0" style={{ backgroundColor: iconColor }}>
-          <Icon size={13} className="text-white" strokeWidth={2.25} />
-        </div>
-        <div className="min-w-0">
-          <p className="text-text-primary text-sm truncate">{label}</p>
-          {sub && <p className="text-text-muted text-[11px] truncate">{sub}</p>}
-        </div>
-        {labelExtra}
-      </div>
-      {children}
-    </div>
-  )
-}
-
 // One line of the "Lyric colors" setting: presets + a custom picker, with
-// "Auto" (value === null) meaning "leave it to the surface's own colors" -
+// "Auto" (value === null) meaning "leave it to the surface's own colors" —
 // the theme's text vars in the mini/now-playing lyrics, the cover-art-derived
-// ones in the WRLD tab. The <input type="color"> always needs a concrete hex,
+// ones in the WRLD tab. The color picker always needs a concrete hex,
 // so `fallback` is what it shows while the setting is on Auto.
 function LyricColorRow({ label, presets, value, fallback, onChange }: {
   label: string
@@ -253,17 +226,16 @@ function LyricColorRow({ label, presets, value, fallback, onChange }: {
           title={c}
         />
       ))}
-      <input
-        type="color"
+      <ThemedColorPicker
         value={custom}
-        onChange={(e) => {
-          const next = e.target.value
+        onChange={(next) => {
           setCustom(next)
           if (debounceRef.current) clearTimeout(debounceRef.current)
           debounceRef.current = setTimeout(() => onChange(next), 80)
         }}
-        className="w-6 h-6 rounded-full cursor-pointer border-0 p-0 bg-transparent"
+        className="w-6 h-6 rounded-full"
         title="Custom color"
+        pipette
       />
     </div>
   )
@@ -427,24 +399,35 @@ function CommitFreshnessBulb(): JSX.Element | null {
   )
 }
 
-export default function Settings(): JSX.Element {
-  const [showToken, setShowToken] = useState(false)
+interface AppSettings {
+  downloadPath: string
+  autoDownload: boolean
+  minimizeToTray: boolean
+  minimizeTo: 'taskbar' | 'tray'
+  startupView: string
+  discordRpcEnabled: boolean
+  discordRpcLabel: 'app' | 'artist' | 'song'
+  offlineLibraryPath: string
+  miniPlayerHidesWindows: boolean
+  confirmCloseWhilePlaying: boolean
+  windowTitleNowPlaying: boolean
+  rememberWindowSizes: boolean
+}
+
+// `floating` — rendered as the sole content of a pop-out BrowserWindow (see
+// FloatApp) rather than as an in-app overlay: the panel fills the window, the
+// header doubles as the window's drag handle, closing closes the OS window,
+// and view links (Docs, Editor) navigate the MAIN window instead.
+export default function Settings({ floating = false }: { floating?: boolean }): JSX.Element {
+  // Which Account sub-page is open; kept here so a search result can land on it.
+  const [accountPage, setAccountPage] = useState<AccountPage>('home')
+  const [notificationSound, setNotificationSoundState] = useState(getNotificationSoundId())
+  const chooseNotificationSound = (id: string): void => {
+    setNotificationSoundId(id)
+    setNotificationSoundState(id)
+    playNotificationSound(id)
+  }
   const [cdnEnabled, setCdnEnabled] = useState(cdnService.enabled)
-  const [tokenCopied, setTokenCopied] = useState(false)
-  const avatarInputRef = useRef<HTMLInputElement>(null)
-  const {
-    avatarUploading, avatarError, handleAvatarFile, handleAvatarRemove,
-    bioDraft, setBioDraft, bioSaving, saveBio,
-    privacyError, togglePublicPlayHistory, togglePublicPlaylists, togglePublicNowPlaying,
-  } = useSettingsAccount()
-  const chatPresenceEnabled = useChatStore((s) => s.presenceEnabled)
-  const chatReadEnabled = useChatStore((s) => s.readEnabled)
-  const setChatPresenceEnabled = useChatStore((s) => s.setPresenceEnabled)
-  const setChatReadEnabled = useChatStore((s) => s.setReadEnabled)
-  const [editingName, setEditingName] = useState(false)
-  const [nameInput, setNameInput] = useState('')
-  const [savingName, setSavingName] = useState(false)
-  const [nameError, setNameError] = useState<string | null>(null)
   const [openAbout, setOpenAbout] = useState<string | null>(null)
   const [legalDoc, setLegalDoc] = useState<LegalDoc | null>(null)
   // Re-opening while already docked (sandbox notch collapsed) wouldn't
@@ -501,36 +484,24 @@ export default function Settings(): JSX.Element {
   const wrldWidgets = useVizStore(s => s.wrldWidgets)
   const setWrldWidgets = useVizStore(s => s.setWrldWidgets)
 
-  function startEditName(): void {
-    setNameInput(accountDisplayName(account))
-    setNameError(null)
-    setEditingName(true)
-  }
-
-  const saveDisplayName = async (): Promise<void> => {
-    const trimmed = nameInput.trim()
-    if (!trimmed) { setNameError('Name cannot be empty.'); return }
-    setSavingName(true)
-    setNameError(null)
-    try {
-      const updated = await updateDisplayName(trimmed)
-      useStore.setState({ account: updated })
-      setEditingName(false)
-    } catch {
-      setNameError('Could not save. Try again.')
-    } finally {
-      setSavingName(false)
-    }
-  }
-
-  const {
-    customAccent, setCustomAccent, setAccentDebounced,
-    editingSkinId, setEditingSkinId, skinImportRef, skinImportError, createSkin, importSkinFile,
-    navRows, navIsDefault, resetNav, homeIsDefault, resetHome, moveNavItem,
-    notificationSound, chooseNotificationSound,
-    sleepMinutes, setSleepMinutes,
-    devices,
-  } = useSettingsAppearance()
+  const [devices, setDevices] = useState<MediaDeviceInfo[]>([])
+  const [customAccent, setCustomAccent] = useState(accentColor)
+  const [sleepMinutes, setSleepMinutes] = useState(30)
+  const [updateState, setUpdateState] = useState<UpdateState>('idle')
+  const [updateVersion, setUpdateVersion] = useState<string | null>(null)
+  const [updatePercent, setUpdatePercent] = useState(0)
+  // Sticky companion to updateState === 'error': that state self-clears back to
+  // 'idle' after a few seconds, which is fine for the red flash but useless as a
+  // gate for the recovery button. This stays set until a check actually succeeds,
+  // so someone whose updater is wedged keeps a visible way out.
+  const [updateFailed, setUpdateFailed] = useState(false)
+  const accentDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  // Custom skins — which one the editor modal is open on (null = closed), the
+  // hidden file input for Import, and a transient "that file wasn't a skin"
+  // message shown under the section.
+  const [editingSkinId, setEditingSkinId] = useState<string | null>(null)
+  const skinImportRef = useRef<HTMLInputElement>(null)
+  const [skinImportError, setSkinImportError] = useState<string | null>(null)
   // Custom fonts - the hidden file input, the installed-font name being typed,
   // and the last add error.
   const customFonts = useCustomFonts()
@@ -570,6 +541,65 @@ export default function Settings(): JSX.Element {
   // Same, for the separate "Menu controls" list below.
   const [ctrlDragIdx, setCtrlDragIdx] = useState<number | null>(null)
   const [ctrlOverIdx, setCtrlOverIdx] = useState<number | null>(null)
+
+  // Clone the current look into a new editable skin, make it active (so the
+  // editor previews live), and open the editor on it.
+  const createSkin = (): void => {
+    const skin = createCustomSkin(getSkin(theme), 'My skin')
+    saveCustomSkin(skin)
+    setTheme(skin.id)
+    if (skin.accent) setCustomAccent(skin.accent)
+    setEditingSkinId(skin.id)
+  }
+
+  const importSkinFile = async (file: File): Promise<void> => {
+    setSkinImportError(null)
+    const skin = parseSkinFile(await file.text())
+    if (!skin) { setSkinImportError('That file isn’t a valid skin.'); return }
+    saveCustomSkin(skin)
+    setTheme(skin.id)
+    if (skin.accent) { setAccentColor(skin.accent); setCustomAccent(skin.accent) }
+    setEditingSkinId(skin.id)
+  }
+  const homeIsDefault = HOME_SECTIONS.every((sec) => isHomeSectionVisible(sec.id, homeSectionVisibility) === (DEFAULT_HOME_SECTION_VISIBILITY[sec.id] ?? true))
+  const resetHome = (): void => {
+    for (const sec of HOME_SECTIONS) {
+      const def = DEFAULT_HOME_SECTION_VISIBILITY[sec.id] ?? true
+      if (isHomeSectionVisible(sec.id, homeSectionVisibility) !== def) setHomeSectionVisible(sec.id, def)
+    }
+  }
+
+  // ── Menu items (Appearance) ──────────────────────────────────────────────
+  // Every platform-eligible nav item in saved order — visible ones and the
+  // toggled-off extras alike — so the list is where you both reorder and
+  // show/hide. Web-only tabs (Library) are dropped on web.
+  const navRows = orderedNavItems(navOrder, hasChatAccess(account), showStaffProfile(account)).filter((i) => !i.electronOnly)
+  const navOrderIsDefault = navOrder.length === DEFAULT_NAV_ORDER.length && navOrder.every((v, i) => v === DEFAULT_NAV_ORDER[i])
+  const navVisIsDefault = navRows.every((i) => (navVisibility[i.view] ?? true) === (DEFAULT_NAV_VISIBILITY[i.view] ?? true))
+  const navIsDefault = navOrderIsDefault && navVisIsDefault
+  const resetNav = (): void => {
+    setNavOrder(DEFAULT_NAV_ORDER)
+    for (const item of navRows) {
+      const def = DEFAULT_NAV_VISIBILITY[item.view] ?? true
+      if ((navVisibility[item.view] ?? true) !== def) setNavItemVisible(item.view, def)
+    }
+  }
+  // Move a row to sit adjacent to a target row. Reordering happens on the FULL
+  // order (including any web-hidden items) so their relative spots are preserved
+  // even when a web user rearranges the visible ones.
+  const moveNavItem = (fromRow: number, toRow: number): void => {
+    if (fromRow === toRow) return
+    const full = orderedNavItems(navOrder, true, true).map((i) => i.view)
+    const dragView = navRows[fromRow].view
+    const targetView = navRows[toRow].view
+    const from = full.indexOf(dragView)
+    const next = [...full]
+    next.splice(from, 1)
+    const targetIdx = next.indexOf(targetView)
+    next.splice(toRow > fromRow ? targetIdx + 1 : targetIdx, 0, dragView)
+    setNavOrder(next)
+  }
+
 
   // ── Menu controls - the foot-of-menu buttons (Profile, Uploads, Diagnostics,
   // Download, Settings). Same reorder/hide model, filtered to the controls
@@ -635,22 +665,27 @@ export default function Settings(): JSX.Element {
     return () => window.removeEventListener('keydown', onKey, true)
   }, [recording, setHotkeyBinding])
 
-  const [tab, setTab] = useState<Tab>((settingsTab as Tab) ?? 'account')
+  const [tab, setTab] = useState<Tab>(settingsTab ? tabFromLink(settingsTab) : 'general')
   const { containerRef: categoryRef, indicatorRef: categoryIndicatorRef } = useSlidingIndicator<HTMLDivElement>(tab)
   const { containerRef: mobileCategoryRef, indicatorRef: mobileCategoryIndicatorRef } = useSlidingIndicator<HTMLDivElement>(tab)
   const contentRef = useRef<HTMLDivElement>(null)
-  const tabs: { id: Tab; label: string; icon: ElementType }[] = [
-    { id: 'account', label: 'Account', icon: User },
-    { id: 'appearance', label: 'Appearance', icon: Palette },
-    { id: 'preferences', label: 'Preferences', icon: SlidersHorizontal },
-    { id: 'playback', label: 'Playback', icon: Volume2 },
-    { id: 'desktop' as Tab, label: 'Desktop', icon: Lightbulb },
-    { id: 'shortcuts', label: 'Shortcuts', icon: Keyboard },
-    ...(developerMode ? [{ id: 'developer' as Tab, label: 'Developer', icon: Wrench }] : []),
-    { id: 'about', label: 'About', icon: Info },
+  // Sidebar order, iOS Settings style: a colored badge per page, and `gap`
+  // starting a new cluster.
+  const tabs: { id: Tab; label: string; icon: ElementType; color: string; gap?: boolean }[] = [
+    { id: 'account', label: 'Account', icon: User, color: '#64748b' },
+    { id: 'general', label: 'General', icon: SlidersHorizontal, color: '#6b7280', gap: true },
+    { id: 'appearance', label: 'Appearance', icon: Palette, color: '#ec4899' },
+    { id: 'navigation', label: 'Navigation', icon: PanelLeft, color: '#0d9488' },
+    { id: 'playback', label: 'Playback', icon: Volume2, color: '#ef4444', gap: true },
+    { id: 'lyrics', label: 'Lyrics & WRLD', icon: AlignLeft, color: '#8b5cf6' },
+    { id: 'connections', label: 'Connections', icon: Cloud, color: '#2563eb' },
+    { id: 'desktop', label: 'Desktop', icon: Lightbulb, color: '#f59e0b', gap: true },
+    { id: 'shortcuts', label: 'Shortcuts', icon: Keyboard, color: '#475569' },
+    ...(developerMode ? [{ id: 'developer' as Tab, label: 'Developer', icon: Wrench, color: '#374151' }] : []),
+    { id: 'about', label: 'About', icon: Info, color: '#0ea5e9', gap: true },
   ]
   useEffect(() => {
-    if (tab === 'developer' && !developerMode) setTab('preferences')
+    if (tab === 'developer' && !developerMode) setTab('general')
   }, [tab, developerMode])
 
   // ── Settings search - a flat filter over SETTINGS_SEARCH_INDEX rather than
@@ -666,8 +701,9 @@ export default function Settings(): JSX.Element {
         (r.label.toLowerCase().includes(settingsQueryTrimmed) || r.sub?.toLowerCase().includes(settingsQueryTrimmed))
       )
     : []
-  const jumpToResult = (t: Tab): void => {
+  const jumpToResult = (t: Tab, page?: AccountPage): void => {
     setTab(t)
+    if (t === 'account') setAccountPage(page ?? 'home')
     setSettingsQuery('')
   }
 
@@ -676,8 +712,7 @@ export default function Settings(): JSX.Element {
   // the user last was rather than snapping back here.
   useEffect(() => {
     if (!settingsTab) return
-    // Feedback used to be its own tab; it now lives under About.
-    setTab(((settingsTab as string) === 'feedback' ? 'about' : settingsTab) as Tab)
+    setTab(tabFromLink(settingsTab))
     setSettingsTab(null)
   }, [settingsTab, setSettingsTab])
 
@@ -690,8 +725,8 @@ export default function Settings(): JSX.Element {
     <ModalOverlay
       onClose={closeSettings}
       zIndexClassName="z-50"
-      panelClassName="bg-surface border border-[var(--border)] rounded-3xl shadow-2xl w-full max-w-[760px] h-[600px] max-h-[85vh]"
-      minWidth={520} minHeight={420}
+      panelClassName="bg-surface border border-[var(--border)] rounded-3xl shadow-2xl w-full max-w-[1060px] h-[800px] max-h-[90vh]"
+      minWidth={600} minHeight={480}
     >
       {({ onHandleMouseDown, locked, toggleLock, canLock }) => (
       <>
@@ -719,22 +754,22 @@ export default function Settings(): JSX.Element {
         {/* Search - a flat filter over every setting row (see
             SETTINGS_SEARCH_INDEX), not just the current tab, since the row
             you're after might live somewhere you're not currently looking. */}
-        <div className="shrink-0 px-4 sm:px-3 pt-3 pb-2 border-b border-[var(--border)]">
-          <div className="relative">
-            <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-text-muted pointer-events-none" />
+        <div className="shrink-0 px-4 sm:px-5 pt-3 pb-3 border-b border-[var(--border)]">
+          <div className="relative rounded-full glass-specular">
+            <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-text-muted pointer-events-none" />
             <input
               type="text"
               value={settingsQuery}
               onChange={(e) => setSettingsQuery(e.target.value)}
               placeholder="Search settings"
               autoComplete="off"
-              className="w-full bg-[var(--surface-overlay)] text-text-primary text-sm rounded-lg pl-8 pr-8 py-1.5 border border-[var(--border)] placeholder:text-text-muted focus:outline-none focus:border-[var(--accent)] transition-colors"
+              className="glass-field w-full h-9 text-text-primary text-sm rounded-full pl-9 pr-9 placeholder:text-text-muted"
             />
             {settingsQuery && (
               <button
                 onClick={() => setSettingsQuery('')}
                 title="Clear search"
-                className="absolute right-2 top-1/2 -translate-y-1/2 text-text-muted hover:text-text-primary transition-colors"
+                className="absolute right-3 top-1/2 -translate-y-1/2 text-text-muted hover:text-text-primary transition-colors"
               >
                 <X size={14} />
               </button>
@@ -764,24 +799,27 @@ export default function Settings(): JSX.Element {
         {/* Body - sidebar category list + flat content pane, mirroring
             macOS System Settings / Apple Music's own preferences window. */}
         <div className="flex flex-1 min-h-0">
-          <div ref={categoryRef} className="relative isolate w-[180px] shrink-0 border-r border-[var(--border)] py-3 px-2 overflow-y-auto hidden sm:block">
-            {tabs.map((t) => (
+          <div ref={categoryRef} className="relative isolate w-[230px] shrink-0 border-r border-[var(--border)] py-4 px-3 overflow-y-auto hidden sm:block">
+            {tabs.map((t, i) => (
               <button
                 key={t.id}
                 data-indicator-key={t.id}
-                onClick={() => { setTab(t.id); setSettingsQuery('') }}
-                className={`w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-sm font-medium transition-colors mb-0.5 ${
-                  tab === t.id ? 'text-accent' : 'text-text-muted hover:text-text-primary hover:bg-[var(--surface-overlay)]'
+                onClick={() => { setTab(t.id); if (t.id === 'account') setAccountPage('home'); setSettingsQuery('') }}
+                className={`w-full flex items-center gap-3 px-2.5 py-2 rounded-xl text-sm font-medium transition-colors mb-0.5 ${t.gap && i > 0 ? 'mt-3' : ''} ${
+                  tab === t.id ? 'text-text-primary' : 'text-text-secondary hover:text-text-primary hover:bg-[var(--fill)]'
                 }`}
               >
-                <t.icon size={15} className="shrink-0" />
-                {t.label}
+                <span className="w-7 h-7 rounded-lg flex items-center justify-center shrink-0 shadow-sm" style={{ backgroundColor: t.color }}>
+                  <t.icon size={15} className="text-white" strokeWidth={2.25} />
+                </span>
+                <span className="truncate">{t.label}</span>
               </button>
             ))}
-            <div ref={categoryIndicatorRef} aria-hidden="true" className="nav-indicator rounded-lg bg-accent/15" />
+            <div ref={categoryIndicatorRef} aria-hidden="true" className="nav-indicator rounded-xl glass-specular bg-[var(--glass-pane)] shadow-[inset_0_0_0_0.5px_var(--glass-rim),0_2px_8px_rgb(0_0_0/0.12)]" />
           </div>
 
-          <div key={tab} ref={contentRef} className="flex-1 min-w-0 overflow-y-auto px-6 py-5">
+          <div key={tab} ref={contentRef} className="flex-1 min-w-0 overflow-y-auto px-5 sm:px-10 py-7">
+            <div className="max-w-[760px] mx-auto">
 
             {/* ── Search results ── shown instead of the active tab's content
                 whenever there's a query; picking one jumps to its tab. */}
@@ -797,7 +835,7 @@ export default function Settings(): JSX.Element {
                   {searchResults.map((r, i) => (
                     <button
                       key={`${r.tab}-${r.label}-${i}`}
-                      onClick={() => jumpToResult(r.tab)}
+                      onClick={() => jumpToResult(r.tab, r.page)}
                       className="flex items-center justify-between gap-3 py-3 border-b border-[var(--border)] last:border-b-0 text-left hover:bg-[var(--surface-overlay)] -mx-2 px-2 rounded-lg transition-colors"
                     >
                       <div className="min-w-0">
@@ -815,930 +853,514 @@ export default function Settings(): JSX.Element {
 
             {/* ── Account ── */}
             {!settingsQueryTrimmed && tab === 'account' && (
+              <AccountSettings page={accountPage} setPage={setAccountPage} openMainView={openMainView} />
+            )}
+
+            {/* ── General ── */}
+            {!settingsQueryTrimmed && tab === 'general' && (
               <div>
-                <h3 className="text-text-primary text-lg font-bold mb-3">Account</h3>
-                {account ? (
-                  <>
-                    <div className="flex items-center gap-3 mb-4">
-                      <input
-                        ref={avatarInputRef}
-                        type="file"
-                        accept="image/*"
-                        className="hidden"
-                        onChange={(e) => { const f = e.target.files?.[0]; if (f) void handleAvatarFile(f); e.target.value = '' }}
-                      />
-                      <button
-                        type="button"
-                        onClick={() => avatarInputRef.current?.click()}
-                        disabled={avatarUploading}
-                        className="relative w-16 h-16 shrink-0 rounded-full group"
-                      >
-                        {account.avatar ? (
-                          <img src={account.avatar} alt="" className="w-16 h-16 rounded-full object-cover ring-2 ring-[var(--border)]" />
-                        ) : (
-                          <div className="w-16 h-16 rounded-full bg-accent/20 text-accent flex items-center justify-center text-xl font-bold">
-                            {initial(accountDisplayName(account))}
-                          </div>
-                        )}
-                        <span className="absolute bottom-0 right-0 w-6 h-6 rounded-full bg-accent text-white flex items-center justify-center ring-2 ring-surface opacity-0 group-hover:opacity-100 transition-opacity">
-                          {avatarUploading ? <Loader2 size={12} className="animate-spin" /> : <Pencil size={12} />}
-                        </span>
-                      </button>
+                <SettingsTitle>General</SettingsTitle>
+                <SettingsGroup title="Browsing">
+                  <Row
+                    icon={BookOpen}
+                    iconColor="#0891b2"
+                    label="Full era names"
+                    sub='Show eras spelled out ("WRLD On Drugs") instead of abbreviated ("WOD")'
+                    labelExtra={<div className="ml-2 translate-y-[3px]"><Toggle on={fullEraNames} onClick={() => setFullEraNames(!fullEraNames)} /></div>}
+                  />
+                  <Row
+                    icon={FileText}
+                    iconColor="#8b5cf6"
+                    label="Add song info to downloads"
+                    sub="When you download an MP3, write the song's name, artist, album, cover and lyrics (synced too, if it has them) into the file's tags - a cover you set for the song replaces the one in the file"
+                  >
+                    <Toggle on={embedSongInfoOnDownload} onClick={() => setEmbedSongInfoOnDownload(!embedSongInfoOnDownload)} />
+                  </Row>
+                </SettingsGroup>
+                <SettingsGroup title="Notifications">
+                  <div className="py-3 border-b border-[var(--border)] last:border-b-0">
+                    <div className="flex items-center gap-2.5 mb-2.5">
+                      <div className="w-6 h-6 rounded-md flex items-center justify-center shrink-0" style={{ backgroundColor: '#f59e0b' }}>
+                        <Bell size={13} className="text-white" strokeWidth={2.25} />
+                      </div>
                       <div className="min-w-0 flex-1">
-                        {avatarError && <p className="text-[11px] text-red-400 mb-0.5">{avatarError}</p>}
-                        {editingName ? (
-                          <div className="flex items-center gap-1">
-                            <input
-                              autoFocus
-                              value={nameInput}
-                              onChange={(e) => setNameInput(e.target.value)}
-                              onKeyDown={(e) => {
-                                if (e.key === 'Enter') saveDisplayName()
-                                if (e.key === 'Escape') setEditingName(false)
-                              }}
-                              maxLength={50}
-                              disabled={savingName}
-                              className="min-w-0 w-48 bg-[var(--surface-raised)] border border-[var(--border)] rounded-md px-1.5 py-0.5 text-text-primary text-sm font-bold focus:outline-none focus:ring-1 focus:ring-accent"
-                            />
-                            <button onClick={saveDisplayName} disabled={savingName} className="p-1 rounded text-accent hover:bg-accent/15 transition-colors disabled:opacity-40" title="Save">
-                              {savingName ? <Loader2 size={13} className="animate-spin" /> : <Check size={13} />}
-                            </button>
-                            <button onClick={() => setEditingName(false)} disabled={savingName} className="p-1 rounded text-text-muted hover:bg-[var(--surface-raised)] transition-colors disabled:opacity-40" title="Cancel">
-                              <X size={13} />
-                            </button>
-                          </div>
-                        ) : (
-                          <button onClick={startEditName} className="flex items-center gap-1.5 group/name">
-                            <span className="text-text-primary text-base font-bold truncate">{accountDisplayName(account)}</span>
-                            <Pencil size={11} className="text-text-muted opacity-0 group-hover/name:opacity-100 transition-opacity shrink-0" />
+                        <span className="text-text-primary text-sm">Notification sound</span>
+                        <p className="text-text-muted text-[11px]">Plays when a chat message or news post notification fires - click one to preview it</p>
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-1.5 flex-wrap pl-[34px]">
+                      {NOTIFICATION_SOUNDS.map((s) => {
+                        const active = notificationSound === s.id
+                        return (
+                          <button
+                            key={s.id}
+                            onClick={() => chooseNotificationSound(s.id)}
+                            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-[11px] font-medium border transition-colors ${
+                              active
+                                ? 'bg-accent/15 text-accent border-[var(--accent)]'
+                                : 'text-text-secondary border-transparent bg-[var(--fill)] hover:text-text-primary hover:bg-[var(--fill-strong)]'
+                            }`}
+                          >
+                            {s.notes.length > 0 ? <Volume2 size={11} /> : <BellOff size={11} />}
+                            {s.label}
                           </button>
-                        )}
-                        {nameError && <p className="text-[11px] text-red-400 mt-0.5">{nameError}</p>}
-                        <p className="text-text-muted text-xs mt-0.5">{account.discord_id ? 'Signed in with Discord' : 'Signed in'}</p>
-                      </div>
+                        )
+                      })}
                     </div>
-
-                    {account.is_donor && (
-                      <div className="flex items-center gap-2.5 mb-4 px-3 py-2.5 rounded-xl border border-pink-500/20 bg-pink-500/5">
-                        <Heart size={16} className="text-pink-400 shrink-0" fill="currentColor" />
-                        <div className="min-w-0">
-                          <p className="text-text-primary text-xs font-semibold">
-                            Donor{account.donor_since ? ` since ${new Date(account.donor_since).toLocaleDateString()}` : ''}
-                          </p>
-                          <p className="text-text-muted text-[11px]">Priority CDN downloads — your files get matched to faster nodes first</p>
-                        </div>
-                      </div>
-                    )}
-
-                    <p className="text-[10px] font-semibold uppercase tracking-widest text-text-muted mb-1.5 px-0.5">Bio</p>
-                    <textarea
-                      value={bioDraft}
-                      onChange={(e) => setBioDraft(e.target.value.slice(0, 500))}
-                      onBlur={() => void saveBio()}
-                      placeholder="Tell people about yourself"
-                      rows={3}
-                      className="w-full px-3 py-2 rounded-xl bg-[var(--surface-raised)] border border-[var(--border)] text-text-primary text-sm placeholder:text-text-muted resize-none focus:outline-none focus:border-accent/50"
-                    />
-                    <div className="flex items-center justify-between px-0.5 mb-4">
-                      <span className="text-text-muted text-[11px]">{bioSaving ? 'Saving…' : `${bioDraft.length}/500`}</span>
-                    </div>
-
-                    <p className="text-[10px] font-semibold uppercase tracking-widest text-text-muted mb-1.5 px-0.5">Public profile</p>
-                    <Row icon={History} iconColor="#0f766e" label="Show listening history" sub="Visible to anyone with your profile link">
-                      <Toggle on={!!account.public_play_history} onClick={() => void togglePublicPlayHistory()} />
-                    </Row>
-                    <Row icon={Music2} iconColor="#0f766e" label="Show public playlists" sub="Lists playlists already marked public">
-                      <Toggle on={!!account.public_playlists} onClick={() => void togglePublicPlaylists()} />
-                    </Row>
-                    <Row icon={Radio} iconColor="#0f766e" label="Share what you're listening to" sub="Shows the track you're currently playing on your profile">
-                      <Toggle on={!!account.public_now_playing} onClick={() => void togglePublicNowPlaying()} />
-                    </Row>
-                    {privacyError && <p className="text-red-400 text-[11px] mt-1">{privacyError}</p>}
-
-                    {hasChatAccess(account) && (
-                      <>
-                        <p className="text-[10px] font-semibold uppercase tracking-widest text-text-muted mt-4 mb-1.5 px-0.5">Chat privacy</p>
-                        <Row icon={Radio} iconColor="#0f766e" label="Online status" sub="Turn off to stop requesting and showing who's online">
-                          <Toggle on={chatPresenceEnabled} onClick={() => setChatPresenceEnabled(!chatPresenceEnabled)} />
-                        </Row>
-                        <Row icon={Check} iconColor="#0f766e" label="Read receipts" sub="Turn off to stop sending read marks to the server">
-                          <Toggle on={chatReadEnabled} onClick={() => setChatReadEnabled(!chatReadEnabled)} />
-                        </Row>
-                        <p className="text-[10px] font-semibold uppercase tracking-widest text-text-muted mt-4 mb-1.5 px-0.5">Chat devices</p>
-                        <ChatDevices userId={account.id} />
-                        <ChatKeyTransfer userId={account.id} />
-                      </>
-                    )}
-
-                    <p className="text-[10px] font-semibold uppercase tracking-widest text-text-muted mt-4 mb-1.5 px-0.5">My cover art</p>
-                    <MyCoverArt />
-
-                    <p className="text-[10px] font-semibold uppercase tracking-widest text-text-muted mt-4 mb-1.5 px-0.5">My remixes &amp; edits</p>
-                    <MyCommunityEdits />
-
-                    <p className="text-[10px] font-semibold uppercase tracking-widest text-text-muted mt-4 mb-1.5 px-0.5">My CDN nodes</p>
-                    <MyCdnNodes />
-
-                    <p className="text-[10px] font-semibold uppercase tracking-widest text-text-muted mt-4 mb-1.5 px-0.5">Security</p>
-                    {/* Setup is admin-only on the server (GET otp/setup/ answers
-                        "Administrator access required."), and Admin already
-                        parks an admin without 2FA on its setup panel. */}
-                    <Row
-                      icon={ShieldCheck}
-                      iconColor={account.otp_enabled ? '#059669' : '#6b7280'}
-                      label="Two-factor authentication"
-                      sub={account.otp_enabled
-                        ? 'Sign-ins ask for a code from your authenticator app'
-                        : account.is_administrator ? 'Required for admin tools' : 'Not turned on for this account'}
-                    >
-                      {account.otp_enabled ? (
-                        <span className="shrink-0 text-[11px] font-semibold text-emerald-500">On</span>
-                      ) : account.is_administrator ? (
-                        <button onClick={() => openMainView('admin')} className="shrink-0 text-[11px] font-semibold text-accent hover:underline">Set up</button>
-                      ) : (
-                        <span className="shrink-0 text-[11px] font-semibold text-text-muted">Off</span>
-                      )}
-                    </Row>
-
-                    <p className="text-[10px] font-semibold uppercase tracking-widest text-text-muted mt-4 mb-1.5 px-0.5">Passkeys</p>
-                    <Passkeys />
-
-                    <p className="text-[10px] font-semibold uppercase tracking-widest text-text-muted mt-4 mb-1.5 px-0.5">API keys</p>
-                    <ApiKeys />
-
-                    <div className="mt-4 rounded-xl border border-[var(--border)] overflow-hidden">
-                      <button
-                        onClick={() => setShowToken(v => !v)}
-                        className="flex items-center gap-2 w-full px-3 py-2.5 bg-[var(--surface-raised)] hover:bg-[var(--surface-overlay)] text-text-secondary text-sm font-medium transition-colors"
-                      >
-                        <KeyRound size={15} />
-                        <span className="flex-1 text-left">Auth Token</span>
-                        {showToken ? <EyeOff size={14} className="text-text-muted" /> : <Eye size={14} className="text-text-muted" />}
-                      </button>
-                      {showToken && (
-                        <button
-                          onClick={() => {
-                            const t = getToken()
-                            if (t) {
-                              navigator.clipboard.writeText(t)
-                              setTokenCopied(true)
-                              setTimeout(() => setTokenCopied(false), 2000)
-                            }
-                          }}
-                          className="flex items-center gap-2 w-full px-3 py-2.5 bg-[var(--surface)] hover:bg-[var(--surface-raised)] transition-colors border-t border-[var(--border)] group"
-                          title="Click to copy"
-                        >
-                          <code className="flex-1 text-left text-[10px] font-mono text-text-muted truncate">
-                            {getToken() ?? '&#8212;'}
-                          </code>
-                          <span className={`flex-shrink-0 flex items-center gap-1 text-[10px] font-medium transition-colors ${tokenCopied ? 'text-emerald-500' : 'text-text-muted group-hover:text-text-primary'}`}>
-                            {tokenCopied ? 'Copied!' : <><Copy size={11} /> Copy</>}
-                          </span>
-                        </button>
-                      )}
-                    </div>
-
-                    <button
-                      onClick={() => logoutAccount()}
-                      className="flex items-center gap-2 w-full px-3 py-2.5 rounded-xl bg-[var(--surface-raised)] hover:bg-red-500/10 border border-[var(--border)] hover:border-red-500/25 text-text-secondary hover:text-red-400 text-sm font-medium transition-colors mt-2"
-                    >
-                      <LogOut size={15} />
-                      Log out
-                    </button>
-                  </>
-                ) : (
-                  <div className="flex flex-col items-start gap-3">
-                    <p className="text-text-muted text-sm max-w-sm">
-                      Log in to save favorite tracks and playlists that follow you on every device.
-                    </p>
-                    <button
-                      onClick={() => setShowUserAuth(true)}
-                      className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-accent text-white text-sm font-semibold hover:opacity-90 transition-opacity"
-                    >
-                      <LogIn size={15} />
-                      Log in
-                    </button>
                   </div>
-                )}
+                </SettingsGroup>
+                <SettingsGroup title="Diagnostics">
+                  <Row
+                    icon={Bug}
+                    iconColor="#ef4444"
+                    label="Auto-report app errors"
+                    sub="When the app hits an unexpected error, send a crash report automatically instead of asking first"
+                  >
+                    <Toggle on={autoReportErrors} onClick={() => setAutoReportErrors(!autoReportErrors)} />
+                  </Row>
+                </SettingsGroup>
+                <SettingsGroup title="Advanced">
+                  <Row
+                    icon={FlaskConical}
+                    iconColor="#f59e0b"
+                    label="Sandbox"
+                    sub="Dock modals into a collapsible pill at the top of the window instead of a centered popup. Off restores the plain popup for every modal."
+                  >
+                    <Toggle on={sandboxEnabled} onClick={() => setSandboxEnabled(!sandboxEnabled)} />
+                  </Row>
+                  <Row icon={Wrench} iconColor="#6b7280" label="Developer options" sub="Shows a Developer tab with API server settings">
+                    <Toggle on={developerMode} onClick={() => setDeveloperMode(!developerMode)} />
+                  </Row>
+                </SettingsGroup>
               </div>
             )}
 
             {/* ── Appearance ── */}
             {!settingsQueryTrimmed && tab === 'appearance' && (
               <div>
-                <h3 className="text-text-primary text-lg font-bold mb-4">Appearance</h3>
-                <div className="py-3 border-b border-[var(--border)]">
-                  <div className="flex items-center gap-2.5 mb-2.5">
-                    <div className="w-6 h-6 rounded-md flex items-center justify-center shrink-0" style={{ backgroundColor: '#4b5563' }}>
-                      <Brush size={13} className="text-white" strokeWidth={2.25} />
+                <SettingsTitle>Appearance</SettingsTitle>
+                <SettingsGroup title="Theme">
+                  <div className="py-3 border-b border-[var(--border)]">
+                    <div className="flex items-center gap-2.5 mb-2.5">
+                      <div className="w-6 h-6 rounded-md flex items-center justify-center shrink-0" style={{ backgroundColor: '#4b5563' }}>
+                        <Brush size={13} className="text-white" strokeWidth={2.25} />
+                      </div>
+                      <div className="min-w-0 flex-1">
+                        <span className="text-text-primary text-sm">Skin</span>
+                        <p className="text-text-muted text-[11px]">Skins with a signature color also set the accent — or build your own below</p>
+                      </div>
+                      <button
+                        onClick={() => skinImportRef.current?.click()}
+                        className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-[11px] font-medium text-text-secondary hover:text-text-primary hover:bg-[var(--surface-overlay)] transition-colors shrink-0"
+                        title="Import a skin file"
+                      >
+                        <Upload size={13} /> Import
+                      </button>
+                      <input
+                        ref={skinImportRef}
+                        type="file"
+                        accept="application/json,.json"
+                        className="hidden"
+                        onChange={(e) => {
+                          const file = e.target.files?.[0]
+                          if (file) importSkinFile(file)
+                          e.target.value = ''
+                        }}
+                      />
                     </div>
-                    <div className="min-w-0 flex-1">
-                      <span className="text-text-primary text-sm">Skin</span>
-                      <p className="text-text-muted text-[11px]">Skins with a signature color also set the accent - or build your own below</p>
-                    </div>
-                    <button
-                      onClick={() => skinImportRef.current?.click()}
-                      className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-[11px] font-medium text-text-secondary hover:text-text-primary hover:bg-[var(--surface-overlay)] transition-colors shrink-0"
-                      title="Import a skin file"
-                    >
-                      <Upload size={13} /> Import
-                    </button>
-                    <input
-                      ref={skinImportRef}
-                      type="file"
-                      accept="application/json,.json"
-                      className="hidden"
-                      onChange={(e) => {
-                        const file = e.target.files?.[0]
-                        if (file) importSkinFile(file)
-                        e.target.value = ''
-                      }}
-                    />
-                  </div>
-                  {skinImportError && (
-                    <p className="text-red-400 text-[11px] mb-2 pl-[34px]">{skinImportError}</p>
-                  )}
-                  <div className="grid grid-cols-2 sm:grid-cols-[repeat(auto-fill,minmax(110px,1fr))] gap-2 pl-[34px]">
-                    {[...SKINS, ...customSkins].map((skin) => {
-                      const active = theme === skin.id
-                      return (
-                        <div key={skin.id} className="relative group">
-                          <button
-                            onClick={() => {
-                              setTheme(skin.id)
-                              if (skin.accent) { setAccentColor(skin.accent); setCustomAccent(skin.accent) }
-                            }}
-                            onDoubleClick={() => { if (skin.custom) setEditingSkinId(skin.id) }}
-                            className="w-full text-left"
-                            title={skin.dynamic ? 'Palette follows the current song’s cover art' : skin.name}
-                          >
-                            {/* Mini app mock: sidebar strip, two "text" lines, and a
-                                player bar with the skin's accent - a live swatch of
-                                the actual palette values, not approximations. */}
-                            <div
-                              className="h-14 rounded-lg overflow-hidden flex border transition-transform group-hover:scale-[1.03] group-active:scale-[0.98]"
-                              style={{
-                                background: skin.vars['--surface'],
-                                borderColor: active ? 'var(--accent)' : 'var(--border)',
-                                boxShadow: active ? '0 0 0 1px var(--accent)' : undefined,
+                    {skinImportError && (
+                      <p className="text-red-400 text-[11px] mb-2 pl-[34px]">{skinImportError}</p>
+                    )}
+                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 pl-[34px]">
+                      {[...SKINS, ...customSkins].map((skin) => {
+                        const active = theme === skin.id
+                        return (
+                          <div key={skin.id} className="relative group">
+                            <button
+                              onClick={() => {
+                                setTheme(skin.id)
+                                if (skin.accent) { setAccentColor(skin.accent); setCustomAccent(skin.accent) }
                               }}
+                              onDoubleClick={() => { if (skin.custom) setEditingSkinId(skin.id) }}
+                              className="w-full text-left"
+                              title={skin.dynamic ? 'Palette follows the current song’s cover art' : skin.name}
                             >
-                              <div className="w-1/4 h-full border-r" style={{ background: skin.vars['--sidebar'], borderColor: skin.vars['--border'] }} />
-                              <div className="flex-1 p-1.5 flex flex-col gap-1 min-w-0">
-                                <div className="h-1.5 rounded-full w-3/4" style={{ background: skin.vars['--text-primary'] }} />
-                                <div className="h-1.5 rounded-full w-1/2" style={{ background: skin.vars['--text-secondary'], opacity: 0.7 }} />
-                                <div className="mt-auto flex items-center gap-1">
-                                  <div
-                                    className="w-2.5 h-2.5 rounded-full shrink-0"
-                                    style={{
-                                      // Dynamic skin has no fixed accent - a color wheel
-                                      // signals "follows the song's cover art".
-                                      background: skin.dynamic
-                                        ? 'conic-gradient(#f43f5e, #f59e0b, #10b981, #38bdf8, #a78bfa, #f43f5e)'
-                                        : skin.accent ?? accentColor,
-                                    }}
-                                  />
-                                  <div className="h-1 flex-1 rounded-full" style={{ background: skin.vars['--surface-highest'] }} />
+                              {/* Mini app mock: sidebar strip, two "text" lines, and a
+                                  player bar with the skin's accent — a live swatch of
+                                  the actual palette values, not approximations. */}
+                              <div
+                                className="h-14 rounded-lg overflow-hidden flex border transition-transform group-hover:scale-[1.03] group-active:scale-[0.98]"
+                                style={{
+                                  background: skin.vars['--surface'],
+                                  borderColor: active ? 'var(--accent)' : 'var(--border)',
+                                  boxShadow: active ? '0 0 0 1px var(--accent)' : undefined,
+                                }}
+                              >
+                                <div className="w-1/4 h-full border-r" style={{ background: skin.vars['--sidebar'], borderColor: skin.vars['--border'] }} />
+                                <div className="flex-1 p-1.5 flex flex-col gap-1 min-w-0">
+                                  <div className="h-1.5 rounded-full w-3/4" style={{ background: skin.vars['--text-primary'] }} />
+                                  <div className="h-1.5 rounded-full w-1/2" style={{ background: skin.vars['--text-secondary'], opacity: 0.7 }} />
+                                  <div className="mt-auto flex items-center gap-1">
+                                    <div
+                                      className="w-2.5 h-2.5 rounded-full shrink-0"
+                                      style={{
+                                        // Dynamic skin has no fixed accent — a color wheel
+                                        // signals "follows the song's cover art".
+                                        background: skin.dynamic
+                                          ? 'conic-gradient(#f43f5e, #f59e0b, #10b981, #38bdf8, #a78bfa, #f43f5e)'
+                                          : skin.accent ?? accentColor,
+                                      }}
+                                    />
+                                    <div className="h-1 flex-1 rounded-full" style={{ background: skin.vars['--surface-highest'] }} />
+                                  </div>
                                 </div>
                               </div>
-                            </div>
-                            <p className={`mt-1 text-[11px] font-medium text-center transition-colors ${active ? 'text-accent' : 'text-text-muted group-hover:text-text-primary'}`}>
-                              {skin.name}
-                            </p>
-                          </button>
-                          {/* Custom skins get an edit button (sibling, not nested,
-                              to keep the markup button-in-button free). */}
-                          {skin.custom && (
-                            <button
-                              onClick={() => setEditingSkinId(skin.id)}
-                              className="absolute top-1 right-1 p-1 rounded-md bg-black/45 text-white opacity-0 group-hover:opacity-100 focus:opacity-100 hover:bg-black/65 transition-opacity"
-                              title="Edit skin"
-                            >
-                              <Pencil size={11} />
+                              <p className={`mt-1 text-[11px] font-medium text-center transition-colors ${active ? 'text-accent' : 'text-text-muted group-hover:text-text-primary'}`}>
+                                {skin.name}
+                              </p>
                             </button>
-                          )}
-                        </div>
-                      )
-                    })}
-                    {/* Create-a-skin tile */}
-                    <button
-                      onClick={createSkin}
-                      className="group text-left"
-                      title="Create a new skin"
-                    >
-                      <div className="h-14 rounded-lg border border-dashed border-[var(--border)] flex flex-col items-center justify-center gap-0.5 text-text-muted group-hover:text-accent group-hover:border-accent transition-colors">
-                        <Plus size={16} />
-                      </div>
-                      <p className="mt-1 text-[11px] font-medium text-center text-text-muted group-hover:text-text-primary transition-colors">
-                        Create
-                      </p>
-                    </button>
-                  </div>
-                </div>
-                <div className="py-3 border-b border-[var(--border)] last:border-b-0">
-                  <div className="flex items-center gap-2.5 mb-2.5">
-                    <div className="w-6 h-6 rounded-md flex items-center justify-center shrink-0" style={{ backgroundColor: '#ec4899' }}>
-                      <Palette size={13} className="text-white" strokeWidth={2.25} />
-                    </div>
-                    <span className="text-text-primary text-sm">Accent color</span>
-                  </div>
-                  <div className="flex items-center gap-2 flex-wrap pl-[34px]">
-                    {ACCENT_PRESETS.map((c) => (
+                            {/* Custom skins get an edit button (sibling, not nested,
+                                to keep the markup button-in-button free). */}
+                            {skin.custom && (
+                              <button
+                                onClick={() => setEditingSkinId(skin.id)}
+                                className="absolute top-1 right-1 p-1 rounded-md bg-black/45 text-white opacity-0 group-hover:opacity-100 focus:opacity-100 hover:bg-black/65 transition-opacity"
+                                title="Edit skin"
+                              >
+                                <Pencil size={11} />
+                              </button>
+                            )}
+                          </div>
+                        )
+                      })}
+                      {/* Create-a-skin tile */}
                       <button
-                        key={c}
-                        onClick={() => { setAccentColor(c); setCustomAccent(c) }}
-                        className="w-7 h-7 rounded-full transition-transform hover:scale-110"
-                        style={{ backgroundColor: c, outline: accentColor === c ? `2px solid ${c}` : 'none', outlineOffset: '2px' }}
-                      />
-                    ))}
-                    <input
-                      type="color"
-                      value={customAccent}
-                      onChange={(e) => {
-                        setCustomAccent(e.target.value)
-                        setAccentDebounced(e.target.value)
-                      }}
-                      className="w-7 h-7 rounded-full cursor-pointer border-0 p-0 bg-transparent"
-                      title="Custom color"
-                    />
-                  </div>
-                </div>
-                <Row
-                  icon={Waves}
-                  iconColor="#8b5cf6"
-                  label="App gradients"
-                  sub="Accent-tinted gradients behind the app and sidebar"
-                >
-                  <Toggle on={gradientsEnabled} onClick={() => setGradientsEnabled(!gradientsEnabled)} />
-                </Row>
-                <Row
-                  icon={Waves}
-                  iconColor="#8b5cf6"
-                  label="Control gradients"
-                  sub="Accent-tinted gradients on the player bar, toggle groups, search bars, badges, and menus"
-                >
-                  <Toggle on={surfaceGradientsEnabled} onClick={() => setSurfaceGradientsEnabled(!surfaceGradientsEnabled)} />
-                </Row>
-                <Row
-                  icon={Disc}
-                  iconColor="#8b5cf6"
-                  label="Theme background in WRLD"
-                  sub="Use the app's theme behind the WRLD tab instead of the playing song's cover"
-                >
-                  <Toggle on={wrldThemeBackground} onClick={() => setWrldThemeBackground(!wrldThemeBackground)} />
-                </Row>
-                <Row
-                  icon={Disc}
-                  iconColor="#8b5cf6"
-                  label="Old WRLD style"
-                  sub="WRLD's own player and lyrics instead of the widgets"
-                >
-                  <Toggle on={!wrldWidgets} onClick={() => setWrldWidgets(!wrldWidgets)} />
-                </Row>
-                <Row
-                  icon={Images}
-                  iconColor="#8b5cf6"
-                  label="Playlist header art"
-                  sub="Full-bleed blurred cover art behind a playlist's header - off falls back to a plain header. Tracked separately for light and dark skins."
-                >
-                  {/* Tracked per skin darkness (playlistHeroEnabledDark/Light)
-                      rather than one flag, so a choice made on a dark skin
-                      doesn't silently carry over to a light one and vice
-                      versa - this toggle always shows/writes the value for
-                      whichever skin is active right now. */}
-                  {(() => {
-                    const heroOn = getSkin(theme).dark ? playlistHeroEnabledDark : playlistHeroEnabledLight
-                    return <Toggle on={heroOn} onClick={() => setPlaylistHeroEnabled(!heroOn)} />
-                  })()}
-                </Row>
-                <div className="py-3 border-b border-[var(--border)] last:border-b-0">
-                  <div className="flex items-center gap-2.5 mb-2.5">
-                    <div className="w-6 h-6 rounded-md flex items-center justify-center shrink-0" style={{ backgroundColor: '#7c3aed' }}>
-                      <Type size={13} className="text-white" strokeWidth={2.25} />
-                    </div>
-                    <div className="min-w-0">
-                      <span className="text-text-primary text-sm">App font</span>
-                      <p className="text-text-muted text-[11px]">Typeface for the whole app - each option previews in its own font</p>
-                    </div>
-                  </div>
-                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 pl-[34px]">
-                    {allFontChoices.map((font) => {
-                      const active = appFont === font.id
-                      return (
-                        <button
-                          key={font.id}
-                          onClick={() => setAppFont(font.id)}
-                          title={font.name}
-                          className={`px-2.5 py-2 rounded-lg border text-left transition-colors ${
-                            active
-                              ? 'bg-accent/15 border-[var(--accent)]'
-                              : 'border-[var(--border)] hover:bg-[var(--surface-overlay)]'
-                          }`}
-                        >
-                          {/* Specimen renders in the stack it selects, so the
-                              list previews itself without applying anything. */}
-                          <span
-                            className={`block text-base leading-tight truncate ${active ? 'text-accent' : 'text-text-primary'}`}
-                            style={{ fontFamily: font.stack }}
-                          >
-                            Ag
-                          </span>
-                          <span className={`block text-[11px] mt-0.5 truncate ${active ? 'text-accent' : 'text-text-muted'}`}>
-                            {font.name}
-                          </span>
-                        </button>
-                      )
-                    })}
-                  </div>
-                </div>
-                <div className="py-3 border-b border-[var(--border)] last:border-b-0">
-                  <div className="flex items-center gap-2.5 mb-2.5">
-                    <div className="w-6 h-6 rounded-md flex items-center justify-center shrink-0" style={{ backgroundColor: '#e11d48' }}>
-                      <Type size={13} className="text-white" strokeWidth={2.25} />
-                    </div>
-                    <div className="min-w-0">
-                      <span className="text-text-primary text-sm">Lyrics font</span>
-                      <p className="text-text-muted text-[11px]">Used only in the lyric panels, so lyrics can differ from the rest of the app</p>
-                    </div>
-                  </div>
-                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 pl-[34px]">
-                    {allFontChoices.map((font) => {
-                      const active = lyricsFont === font.id
-                      return (
-                        <button
-                          key={font.id}
-                          onClick={() => setLyricsFont(font.id)}
-                          title={font.name}
-                          className={`px-2.5 py-2 rounded-lg border text-left transition-colors ${
-                            active
-                              ? 'bg-accent/15 border-[var(--accent)]'
-                              : 'border-[var(--border)] hover:bg-[var(--surface-overlay)]'
-                          }`}
-                        >
-                          <span
-                            className={`block text-base leading-tight truncate ${active ? 'text-accent' : 'text-text-primary'}`}
-                            style={{ fontFamily: font.stack }}
-                          >
-                            Ag
-                          </span>
-                          <span className={`block text-[11px] mt-0.5 truncate ${active ? 'text-accent' : 'text-text-muted'}`}>
-                            {font.name}
-                          </span>
-                        </button>
-                      )
-                    })}
-                  </div>
-                </div>
-                <div className="py-3 border-b border-[var(--border)] last:border-b-0">
-                  <div className="flex items-center gap-2.5 mb-2.5">
-                    <div className="w-6 h-6 rounded-md flex items-center justify-center shrink-0" style={{ backgroundColor: '#0d9488' }}>
-                      <Type size={13} className="text-white" strokeWidth={2.25} />
-                    </div>
-                    <div className="min-w-0 flex-1">
-                      <span className="text-text-primary text-sm">Custom fonts</span>
-                      <p className="text-text-muted text-[11px]">Import a font file, or use one already installed on this computer — they show up in both lists above</p>
-                    </div>
-                    <button
-                      onClick={() => fontImportRef.current?.click()}
-                      disabled={fontBusy}
-                      className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-[11px] font-medium text-text-secondary hover:text-text-primary hover:bg-[var(--surface-overlay)] transition-colors shrink-0 disabled:opacity-50"
-                      title="Import a .ttf, .otf, .woff or .woff2 file"
-                    >
-                      {fontBusy ? <Loader2 size={13} className="animate-spin" /> : <Upload size={13} />} Import file
-                    </button>
-                    <input
-                      ref={fontImportRef}
-                      type="file"
-                      accept={FONT_ACCEPT}
-                      className="hidden"
-                      onChange={(e) => {
-                        const file = e.target.files?.[0]
-                        if (file) void importFontFile(file)
-                        e.target.value = ''
-                      }}
-                    />
-                  </div>
-                  <div className="pl-[34px]">
-                    <form
-                      className="flex items-center gap-2"
-                      onSubmit={(e) => { e.preventDefault(); addInstalled() }}
-                    >
-                      <input
-                        type="text"
-                        value={installedFontName}
-                        onChange={(e) => { setInstalledFontName(e.target.value); setFontError(null) }}
-                        placeholder="Installed font name, e.g. Comic Sans MS"
-                        maxLength={64}
-                        className="flex-1 min-w-0 h-8 rounded-lg bg-[var(--surface-highest)] text-text-primary text-xs px-2.5 outline-none focus:ring-1 focus:ring-accent/50 transition-shadow placeholder:text-text-muted"
-                      />
-                      <button
-                        type="submit"
-                        disabled={!installedFontName.trim()}
-                        className="flex items-center gap-1.5 px-2.5 h-8 rounded-lg text-[11px] font-medium text-text-secondary hover:text-text-primary hover:bg-[var(--surface-overlay)] transition-colors shrink-0 disabled:opacity-40"
+                        onClick={createSkin}
+                        className="group text-left"
+                        title="Create a new skin"
                       >
-                        <Plus size={13} /> Add
+                        <div className="h-14 rounded-lg border border-dashed border-[var(--border)] flex flex-col items-center justify-center gap-0.5 text-text-muted group-hover:text-accent group-hover:border-accent transition-colors">
+                          <Plus size={16} />
+                        </div>
+                        <p className="mt-1 text-[11px] font-medium text-center text-text-muted group-hover:text-text-primary transition-colors">
+                          Create
+                        </p>
                       </button>
-                    </form>
-                    {fontError && <p className="text-red-400 text-[11px] mt-2">{fontError}</p>}
-                    {customFonts.length > 0 && (
-                      <div className="mt-2.5 flex flex-col gap-1">
-                        {customFonts.map((font) => (
-                          <div key={font.id} className="flex items-center gap-2 px-2.5 py-1.5 rounded-lg border border-[var(--border)]">
-                            <span className="flex-1 min-w-0 truncate text-sm text-text-primary" style={{ fontFamily: allFontChoices.find((f) => f.id === font.id)?.stack }}>
+                    </div>
+                  </div>
+                  <div className="py-3 border-b border-[var(--border)] last:border-b-0">
+                    <div className="flex items-center gap-2.5 mb-2.5">
+                      <div className="w-6 h-6 rounded-md flex items-center justify-center shrink-0" style={{ backgroundColor: '#ec4899' }}>
+                        <Palette size={13} className="text-white" strokeWidth={2.25} />
+                      </div>
+                      <span className="text-text-primary text-sm">Accent color</span>
+                    </div>
+                    <div className="flex items-center gap-2 flex-wrap pl-[34px]">
+                      {ACCENT_PRESETS.map((c) => (
+                        <button
+                          key={c}
+                          onClick={() => { setAccentColor(c); setCustomAccent(c) }}
+                          className="w-7 h-7 rounded-full transition-transform hover:scale-110"
+                          style={{ backgroundColor: c, outline: accentColor === c ? `2px solid ${c}` : 'none', outlineOffset: '2px' }}
+                        />
+                      ))}
+                      <ThemedColorPicker
+                        value={customAccent}
+                        onChange={(next) => {
+                          setCustomAccent(next)
+                          if (accentDebounceRef.current) clearTimeout(accentDebounceRef.current)
+                          accentDebounceRef.current = setTimeout(() => setAccentColor(next), 80)
+                        }}
+                        className="w-7 h-7 rounded-full"
+                        title="Custom color"
+                        pipette
+                      />
+                    </div>
+                  </div>
+                </SettingsGroup>
+                <SettingsGroup title="Effects">
+                  <Row
+                    icon={Waves}
+                    iconColor="#8b5cf6"
+                    label="App gradients"
+                    sub="Accent-tinted gradients behind the app and sidebar"
+                  >
+                    <Toggle on={gradientsEnabled} onClick={() => setGradientsEnabled(!gradientsEnabled)} />
+                  </Row>
+                  <Row
+                    icon={Waves}
+                    iconColor="#8b5cf6"
+                    label="Control gradients"
+                    sub="Accent-tinted gradients on the player bar, toggle groups, search bars, badges, and menus"
+                  >
+                    <Toggle on={surfaceGradientsEnabled} onClick={() => setSurfaceGradientsEnabled(!surfaceGradientsEnabled)} />
+                  </Row>
+                  <Row
+                    icon={Images}
+                    iconColor="#8b5cf6"
+                    label="Playlist header art"
+                    sub="Full-bleed blurred cover art behind a playlist's header - off falls back to a plain header. Tracked separately for light and dark skins."
+                  >
+                    {/* Tracked per skin darkness (playlistHeroEnabledDark/Light)
+                        rather than one flag, so a choice made on a dark skin
+                        doesn't silently carry over to a light one and vice
+                        versa - this toggle always shows/writes the value for
+                        whichever skin is active right now. */}
+                    {(() => {
+                      const heroOn = getSkin(theme).dark ? playlistHeroEnabledDark : playlistHeroEnabledLight
+                      return <Toggle on={heroOn} onClick={() => setPlaylistHeroEnabled(!heroOn)} />
+                    })()}
+                  </Row>
+                </SettingsGroup>
+                <SettingsGroup title="Text">
+                  <div className="py-3 border-b border-[var(--border)] last:border-b-0">
+                    <div className="flex items-center gap-2.5 mb-2.5">
+                      <div className="w-6 h-6 rounded-md flex items-center justify-center shrink-0" style={{ backgroundColor: '#7c3aed' }}>
+                        <Type size={13} className="text-white" strokeWidth={2.25} />
+                      </div>
+                      <div className="min-w-0">
+                        <span className="text-text-primary text-sm">App font</span>
+                        <p className="text-text-muted text-[11px]">Typeface for the whole app — each option previews in its own font</p>
+                      </div>
+                    </div>
+                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 pl-[34px]">
+                      {allFontChoices.map((font) => {
+                        const active = appFont === font.id
+                        return (
+                          <button
+                            key={font.id}
+                            onClick={() => setAppFont(font.id)}
+                            title={font.name}
+                            className={`px-3 py-2.5 rounded-xl border text-left transition-colors ${
+                              active
+                                ? 'bg-accent/15 border-[var(--accent)]'
+                                : 'border-transparent bg-[var(--fill)] hover:bg-[var(--fill-strong)]'
+                            }`}
+                          >
+                            {/* Specimen renders in the stack it selects, so the
+                                list previews itself without applying anything. */}
+                            <span
+                              className={`block text-base leading-tight truncate ${active ? 'text-accent' : 'text-text-primary'}`}
+                              style={{ fontFamily: font.stack }}
+                            >
+                              Ag
+                            </span>
+                            <span className={`block text-[11px] mt-0.5 truncate ${active ? 'text-accent' : 'text-text-muted'}`}>
                               {font.name}
                             </span>
-                            <span className="text-[10px] text-text-muted shrink-0">{font.kind === 'file' ? 'Imported file' : 'Installed'}</span>
-                            <button
-                              onClick={() => void deleteFont(font.id)}
-                              className="p-1 rounded-md text-text-muted hover:text-red-400 hover:bg-[var(--surface-overlay)] transition-colors shrink-0"
-                              title={`Remove ${font.name}`}
-                              aria-label={`Remove ${font.name}`}
-                            >
-                              <Trash2 size={13} />
-                            </button>
-                          </div>
-                        ))}
+                          </button>
+                        )
+                      })}
+                    </div>
+                  </div>
+                  <div className="py-3 border-b border-[var(--border)] last:border-b-0">
+                    <div className="flex items-center gap-2.5 mb-2.5">
+                      <div className="w-6 h-6 rounded-md flex items-center justify-center shrink-0" style={{ backgroundColor: '#ca8a04' }}>
+                        <Type size={13} className="text-white" strokeWidth={2.25} />
                       </div>
-                    )}
-                  </div>
-                </div>
-                <div className="py-3 border-b border-[var(--border)] last:border-b-0">
-                  <div className="flex items-center gap-2.5 mb-2.5">
-                    <div className="w-6 h-6 rounded-md flex items-center justify-center shrink-0" style={{ backgroundColor: '#ca8a04' }}>
-                      <Type size={13} className="text-white" strokeWidth={2.25} />
+                      <div className="min-w-0">
+                        <span className="text-text-primary text-sm">App text size</span>
+                        <p className="text-text-muted text-[11px]">Scales text across the whole app</p>
+                      </div>
                     </div>
-                    <div className="min-w-0">
-                      <span className="text-text-primary text-sm">App text size</span>
-                      <p className="text-text-muted text-[11px]">Scales text across the whole app</p>
-                    </div>
-                  </div>
-                  <div className="flex items-center gap-2 flex-wrap pl-[34px]">
-                    {APP_TEXT_SIZES.map(({ label, value }) => {
-                      const active = appTextScale === value
-                      return (
-                        <button
-                          key={value}
-                          onClick={() => setAppTextScale(value)}
-                          className={`px-3 py-1.5 rounded-lg text-xs font-medium border transition-colors ${
-                            active
-                              ? 'bg-accent/15 text-accent border-[var(--accent)]'
-                              : 'text-text-muted border-[var(--border)] hover:text-text-primary hover:bg-[var(--surface-overlay)]'
-                          }`}
-                        >
-                          {label}
-                        </button>
-                      )
-                    })}
-                  </div>
-                </div>
-                <div className="py-3 border-b border-[var(--border)] last:border-b-0">
-                  <div className="flex items-center gap-2.5 mb-2.5">
-                    <div className="w-6 h-6 rounded-md flex items-center justify-center shrink-0" style={{ backgroundColor: '#db2777' }}>
-                      <FileText size={13} className="text-white" strokeWidth={2.25} />
-                    </div>
-                    <div className="min-w-0">
-                      <span className="text-text-primary text-sm">Lyrics text size</span>
-                      <p className="text-text-muted text-[11px]">Synced and plain lyrics everywhere - WRLD tab, now playing, mini player</p>
+                    <div className="flex items-center gap-2 flex-wrap pl-[34px]">
+                      {APP_TEXT_SIZES.map(({ label, value }) => {
+                        const active = appTextScale === value
+                        return (
+                          <button
+                            key={value}
+                            onClick={() => setAppTextScale(value)}
+                            className={`px-3.5 py-1.5 rounded-full text-xs font-medium border transition-colors ${
+                              active
+                                ? 'bg-accent/15 text-accent border-[var(--accent)]'
+                                : 'text-text-secondary border-transparent bg-[var(--fill)] hover:text-text-primary hover:bg-[var(--fill-strong)]'
+                            }`}
+                          >
+                            {label}
+                          </button>
+                        )
+                      })}
                     </div>
                   </div>
-                  <div className="flex items-center gap-2 flex-wrap pl-[34px]">
-                    {LYRIC_TEXT_SIZES.map(({ label, value }) => {
-                      const active = lyricsScale === value
-                      return (
-                        <button
-                          key={value}
-                          onClick={() => setLyricsScale(value)}
-                          className={`px-3 py-1.5 rounded-lg text-xs font-medium border transition-colors ${
-                            active
-                              ? 'bg-accent/15 text-accent border-[var(--accent)]'
-                              : 'text-text-muted border-[var(--border)] hover:text-text-primary hover:bg-[var(--surface-overlay)]'
-                          }`}
-                        >
-                          {label}
-                        </button>
-                      )
-                    })}
-                  </div>
-                </div>
-                <div className="py-3 border-b border-[var(--border)] last:border-b-0">
-                  <div className="flex items-center gap-2.5 mb-2.5">
-                    <div className="w-6 h-6 rounded-md flex items-center justify-center shrink-0" style={{ backgroundColor: '#0ea5e9' }}>
-                      <AlignCenter size={13} className="text-white" strokeWidth={2.25} />
-                    </div>
-                    <div className="min-w-0">
-                      <span className="text-text-primary text-sm">Lyrics alignment</span>
-                      <p className="text-text-muted text-[11px]">How lyric lines line up</p>
-                    </div>
-                  </div>
-                  <div className="flex items-center gap-2 flex-wrap pl-[34px]">
-                    {([
-                      { id: 'left' as const, label: 'Left', icon: AlignLeft },
-                      { id: 'center' as const, label: 'Center', icon: AlignCenter },
-                    ]).map(({ id, label, icon: AlignIcon }) => {
-                      const active = lyricsAlign === id
-                      return (
-                        <button
-                          key={id}
-                          onClick={() => setLyricsAlign(id)}
-                          className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium border transition-colors ${
-                            active
-                              ? 'bg-accent/15 text-accent border-[var(--accent)]'
-                              : 'text-text-muted border-[var(--border)] hover:text-text-primary hover:bg-[var(--surface-overlay)]'
-                          }`}
-                        >
-                          <AlignIcon size={14} className="shrink-0" />
-                          {label}
-                        </button>
-                      )
-                    })}
-                  </div>
-                </div>
-                <Row
-                  icon={Eye}
-                  iconColor="#64748b"
-                  label="Blur inactive lyrics"
-                  sub="Soften every synced line except the one playing"
-                  labelExtra={<div className="ml-2 translate-y-[3px]"><Toggle on={lyricsBlur} onClick={() => setLyricsBlur(!lyricsBlur)} /></div>}
-                >
-                  {lyricsBlur && (
-                    <div className="flex items-center gap-2">
+                  <div className="py-3 border-b border-[var(--border)] last:border-b-0">
+                    <div className="flex items-center gap-2.5 mb-2.5">
+                      <div className="w-6 h-6 rounded-md flex items-center justify-center shrink-0" style={{ backgroundColor: '#0d9488' }}>
+                        <Type size={13} className="text-white" strokeWidth={2.25} />
+                      </div>
+                      <div className="min-w-0 flex-1">
+                        <span className="text-text-primary text-sm">Custom fonts</span>
+                        <p className="text-text-muted text-[11px]">Import a font file, or use one already installed on this computer — they show up in the app and lyrics font lists</p>
+                      </div>
+                      <button
+                        onClick={() => fontImportRef.current?.click()}
+                        disabled={fontBusy}
+                        className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-[11px] font-medium text-text-secondary hover:text-text-primary hover:bg-[var(--surface-overlay)] transition-colors shrink-0 disabled:opacity-50"
+                        title="Import a .ttf, .otf, .woff or .woff2 file"
+                      >
+                        {fontBusy ? <Loader2 size={13} className="animate-spin" /> : <Upload size={13} />} Import file
+                      </button>
                       <input
-                        type="range" min={0.25} max={4} step={0.25}
-                        value={lyricsBlurAmount}
-                        onChange={(e) => setLyricsBlurAmount(parseFloat(e.target.value))}
-                        className="w-20 accent-[var(--accent)]"
+                        ref={fontImportRef}
+                        type="file"
+                        accept={FONT_ACCEPT}
+                        className="hidden"
+                        onChange={(e) => {
+                          const file = e.target.files?.[0]
+                          if (file) void importFontFile(file)
+                          e.target.value = ''
+                        }}
                       />
-                      <span className="text-text-muted text-xs tabular-nums w-10 text-right">{lyricsBlurAmount}×</span>
                     </div>
-                  )}
-                </Row>
-                <div className="py-3 border-b border-[var(--border)] last:border-b-0">
-                  <div className="flex items-center gap-2.5 mb-2.5">
-                    <div className="w-6 h-6 rounded-md flex items-center justify-center shrink-0" style={{ backgroundColor: '#9333ea' }}>
-                      <Palette size={13} className="text-white" strokeWidth={2.25} />
-                    </div>
-                    <div className="min-w-0">
-                      <span className="text-text-primary text-sm">Lyric colors</span>
-                      <p className="text-text-muted text-[11px]">Color the line being sung and the ones that aren't - WRLD tab, now playing, mini player</p>
+                    <div className="pl-[34px]">
+                      <form
+                        className="flex items-center gap-2"
+                        onSubmit={(e) => { e.preventDefault(); addInstalled() }}
+                      >
+                        <input
+                          type="text"
+                          value={installedFontName}
+                          onChange={(e) => { setInstalledFontName(e.target.value); setFontError(null) }}
+                          placeholder="Installed font name, e.g. Comic Sans MS"
+                          maxLength={64}
+                          className="flex-1 min-w-0 h-8 rounded-lg bg-[var(--surface-highest)] text-text-primary text-xs px-2.5 outline-none focus:ring-1 focus:ring-accent/50 transition-shadow placeholder:text-text-muted"
+                        />
+                        <button
+                          type="submit"
+                          disabled={!installedFontName.trim()}
+                          className="flex items-center gap-1.5 px-2.5 h-8 rounded-lg text-[11px] font-medium text-text-secondary hover:text-text-primary hover:bg-[var(--surface-overlay)] transition-colors shrink-0 disabled:opacity-40"
+                        >
+                          <Plus size={13} /> Add
+                        </button>
+                      </form>
+                      {fontError && <p className="text-red-400 text-[11px] mt-2">{fontError}</p>}
+                      {customFonts.length > 0 && (
+                        <div className="mt-2.5 flex flex-col gap-1">
+                          {customFonts.map((font) => (
+                            <div key={font.id} className="flex items-center gap-2 px-2.5 py-1.5 rounded-lg border border-[var(--border)]">
+                              <span className="flex-1 min-w-0 truncate text-sm text-text-primary" style={{ fontFamily: allFontChoices.find((f) => f.id === font.id)?.stack }}>
+                                {font.name}
+                              </span>
+                              <span className="text-[10px] text-text-muted shrink-0">{font.kind === 'file' ? 'Imported file' : 'Installed'}</span>
+                              <button
+                                onClick={() => void deleteFont(font.id)}
+                                className="p-1 rounded-md text-text-muted hover:text-red-400 hover:bg-[var(--surface-overlay)] transition-colors shrink-0"
+                                title={`Remove ${font.name}`}
+                                aria-label={`Remove ${font.name}`}
+                              >
+                                <Trash2 size={13} />
+                              </button>
+                            </div>
+                          ))}
+                        </div>
+                      )}
                     </div>
                   </div>
-                  <div className="flex flex-col gap-2.5 pl-[34px]">
-                    <LyricColorRow
-                      label="Current line"
-                      presets={LYRIC_ACTIVE_PRESETS}
-                      value={lyricsColorActive}
-                      fallback="#ffffff"
-                      onChange={setLyricsColorActive}
-                    />
-                    <LyricColorRow
-                      label="Other lines"
-                      presets={LYRIC_INACTIVE_PRESETS}
-                      value={lyricsColorInactive}
-                      fallback="#9ca3af"
-                      onChange={setLyricsColorInactive}
-                    />
-                  </div>
-                </div>
-                <VizSettings />
+                </SettingsGroup>
               </div>
             )}
 
-            {/* ── Preferences ── */}
-            {!settingsQueryTrimmed && tab === 'preferences' && (
+            {/* ── Navigation ── */}
+            {!settingsQueryTrimmed && tab === 'navigation' && (
               <div>
-                <h3 className="text-text-primary text-lg font-bold mb-4">Preferences</h3>
-                <Row
-                  icon={BookOpen}
-                  iconColor="#0891b2"
-                  label="Full era names"
-                  sub='Show eras spelled out ("WRLD On Drugs") instead of abbreviated ("WOD")'
-                  labelExtra={<div className="ml-2 translate-y-[3px]"><Toggle on={fullEraNames} onClick={() => setFullEraNames(!fullEraNames)} /></div>}
-                />
-                <Row
-                  icon={FileText}
-                  iconColor="#8b5cf6"
-                  label="Add song info to downloads"
-                  sub="When you download an MP3, write the song's name, artist, album, cover and lyrics (synced too, if it has them) into the file's tags - a cover you set for the song replaces the one in the file"
-                >
-                  <Toggle on={embedSongInfoOnDownload} onClick={() => setEmbedSongInfoOnDownload(!embedSongInfoOnDownload)} />
-                </Row>
-                <Row
-                  icon={Bug}
-                  iconColor="#ef4444"
-                  label="Auto-report app errors"
-                  sub="When the app hits an unexpected error, send a crash report automatically instead of asking first"
-                >
-                  <Toggle on={autoReportErrors} onClick={() => setAutoReportErrors(!autoReportErrors)} />
-                </Row>
-                <Row
-                  icon={Wrench}
-                  iconColor="#6b7280"
-                  label="Developer options"
-                  sub="Shows a Developer tab with API server settings"
-                >
-                  <Toggle on={developerMode} onClick={() => setDeveloperMode(!developerMode)} />
-                </Row>
-                <Row
-                  icon={FlaskConical}
-                  iconColor="#f59e0b"
-                  label="Sandbox"
-                  sub="Dock modals into a collapsible pill at the top of the window instead of a centered popup. Off restores the plain popup for every modal."
-                >
-                  <Toggle on={sandboxEnabled} onClick={() => setSandboxEnabled(!sandboxEnabled)} />
-                </Row>
-                <div className="py-3 border-b border-[var(--border)] last:border-b-0">
-                  <div className="flex items-center gap-2.5 mb-2.5">
-                    <div className="w-6 h-6 rounded-md flex items-center justify-center shrink-0" style={{ backgroundColor: '#0d9488' }}>
-                      <PanelLeft size={13} className="text-white" strokeWidth={2.25} />
+                <SettingsTitle>Navigation</SettingsTitle>
+                <SettingsGroup title="Layout">
+                  <div className="py-3 border-b border-[var(--border)] last:border-b-0">
+                    <div className="flex items-center gap-2.5 mb-2.5">
+                      <div className="w-6 h-6 rounded-md flex items-center justify-center shrink-0" style={{ backgroundColor: '#0d9488' }}>
+                        <PanelLeft size={13} className="text-white" strokeWidth={2.25} />
+                      </div>
+                      <div className="min-w-0">
+                        <span className="text-text-primary text-sm">Navigation position</span>
+                        <p className="text-text-muted text-[11px]">Where the nav menu sits on desktop — phones keep the bottom tabs</p>
+                      </div>
                     </div>
-                    <div className="min-w-0">
-                      <span className="text-text-primary text-sm">Navigation position</span>
-                      <p className="text-text-muted text-[11px]">Where the nav menu sits on desktop - phones keep the bottom tabs</p>
+                    <div className="flex items-center gap-2 flex-wrap pl-[34px]">
+                      {NAV_POSITIONS.map(({ id, label, icon: PosIcon }) => {
+                        const active = sidebarPosition === id
+                        return (
+                          <button
+                            key={id}
+                            onClick={() => setSidebarPosition(id)}
+                            className={`flex items-center gap-1.5 px-3.5 py-1.5 rounded-full text-xs font-medium border transition-colors ${
+                              active
+                                ? 'bg-accent/15 text-accent border-[var(--accent)]'
+                                : 'text-text-secondary border-transparent bg-[var(--fill)] hover:text-text-primary hover:bg-[var(--fill-strong)]'
+                            }`}
+                          >
+                            <PosIcon size={14} className="shrink-0" />
+                            {label}
+                          </button>
+                        )
+                      })}
                     </div>
                   </div>
-                  <div className="flex items-center gap-2 flex-wrap pl-[34px]">
-                    {NAV_POSITIONS.map(({ id, label, icon: PosIcon }) => {
-                      const active = sidebarPosition === id
-                      return (
+                  <div className="py-3 border-b border-[var(--border)] last:border-b-0">
+                    <div className="flex items-center gap-2.5 mb-2.5">
+                      <div className="w-6 h-6 rounded-md flex items-center justify-center shrink-0" style={{ backgroundColor: '#0d9488' }}>
+                        <PanelLeft size={13} className="text-white" strokeWidth={2.25} />
+                      </div>
+                      <div className="min-w-0">
+                        <span className="text-text-primary text-sm">Navigation style</span>
+                        <p className="text-text-muted text-[11px]">Classic docks the menu to an edge; Pill floats a compact rounded bar over the page. Follows the position and auto-hide settings. Desktop only.</p>
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-2 flex-wrap pl-[34px]">
+                      {([['classic', 'Classic'], ['pill', 'Pill']] as const).map(([id, label]) => (
                         <button
                           key={id}
-                          onClick={() => setSidebarPosition(id)}
-                          className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium border transition-colors ${
-                            active
+                          onClick={() => setNavStyle(id)}
+                          className={`px-3.5 py-1.5 rounded-full text-xs font-medium border transition-colors ${
+                            navStyle === id
                               ? 'bg-accent/15 text-accent border-[var(--accent)]'
-                              : 'text-text-muted border-[var(--border)] hover:text-text-primary hover:bg-[var(--surface-overlay)]'
+                              : 'text-text-secondary border-transparent bg-[var(--fill)] hover:text-text-primary hover:bg-[var(--fill-strong)]'
                           }`}
                         >
-                          <PosIcon size={14} className="shrink-0" />
                           {label}
                         </button>
-                      )
-                    })}
-                  </div>
-                </div>
-                <div className="py-3 border-b border-[var(--border)] last:border-b-0">
-                  <div className="flex items-center gap-2.5 mb-2.5">
-                    <div className="w-6 h-6 rounded-md flex items-center justify-center shrink-0" style={{ backgroundColor: '#0d9488' }}>
-                      <PanelLeft size={13} className="text-white" strokeWidth={2.25} />
-                    </div>
-                    <div className="min-w-0">
-                      <span className="text-text-primary text-sm">Navigation style</span>
-                      <p className="text-text-muted text-[11px]">Classic docks the menu to an edge; Pill floats a compact rounded bar over the page. Follows the position and auto-hide settings. Desktop only.</p>
+                      ))}
                     </div>
                   </div>
-                  <div className="flex items-center gap-2 flex-wrap pl-[34px]">
-                    {([['classic', 'Classic'], ['pill', 'Pill']] as const).map(([id, label]) => (
-                      <button
-                        key={id}
-                        onClick={() => setNavStyle(id)}
-                        className={`px-3 py-1.5 rounded-lg text-xs font-medium border transition-colors ${
-                          navStyle === id
-                            ? 'bg-accent/15 text-accent border-[var(--accent)]'
-                            : 'text-text-muted border-[var(--border)] hover:text-text-primary hover:bg-[var(--surface-overlay)]'
-                        }`}
-                      >
-                        {label}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-                <Row
-                  icon={Minimize2}
-                  iconColor="#0d9488"
-                  label="Auto-hide navigation"
-                  sub="Hide the nav menu until you move the pointer to the edge of the window it sits on, like an auto-hiding taskbar. Desktop only."
-                >
-                  <Toggle on={autoHideNav && navStyle !== 'pill'} locked={navStyle === 'pill'} onClick={() => setAutoHideNav(!autoHideNav)} />
-                </Row>
-                {autoHideNav && navStyle !== 'pill' && (
                   <Row
                     icon={Minimize2}
                     iconColor="#0d9488"
-                    label="Reveal area"
-                    sub="How close to the edge the pointer needs to get to bring the menu back"
+                    label="Auto-hide navigation"
+                    sub="Hide the nav menu until you move the pointer to the edge of the window it sits on, like an auto-hiding taskbar. Desktop only."
                   >
-                    <div className="flex items-center gap-2">
-                      <input
-                        type="range" min={4} max={120} step={4}
-                        value={autoHideNavZone}
-                        onChange={(e) => setAutoHideNavZone(parseInt(e.target.value))}
-                        className="w-28 accent-[var(--accent)]"
-                      />
-                      <span className="text-text-muted text-xs tabular-nums w-10 text-right">{autoHideNavZone}px</span>
-                    </div>
+                    <Toggle on={autoHideNav && navStyle !== 'pill'} locked={navStyle === 'pill'} onClick={() => setAutoHideNav(!autoHideNav)} />
                   </Row>
-                )}
-                <div className="py-3 border-b border-[var(--border)] last:border-b-0">
-                  <div className="flex items-center gap-2.5 mb-2.5">
-                    <div className="w-6 h-6 rounded-md flex items-center justify-center shrink-0" style={{ backgroundColor: '#6366f1' }}>
-                      <ListOrdered size={13} className="text-white" strokeWidth={2.25} />
-                    </div>
-                    <div className="min-w-0 flex-1">
-                      <span className="text-text-primary text-sm">Menu items</span>
-                      <p className="text-text-muted text-[11px]">Drag to reorder · tap the eye to show or hide a tab</p>
-                    </div>
-                    {!navIsDefault && (
-                      <button
-                        onClick={resetNav}
-                        title="Restore the default menu items and order"
-                        className="flex items-center gap-1 text-[11px] text-text-muted hover:text-text-primary transition-colors shrink-0"
-                      >
-                        <RotateCcw size={11} /> Reset
-                      </button>
-                    )}
-                  </div>
-                  <div className="pl-[34px] space-y-1.5">
-                    {navRows.map((item, idx) => {
-                      const shown = isNavItemVisible(item, navVisibility, false)
-                      return (
-                        <div
-                          key={item.view}
-                          draggable
-                          onDragStart={(e) => { setNavDragIdx(idx); e.dataTransfer.effectAllowed = 'move' }}
-                          onDragOver={(e) => { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; setNavOverIdx(idx) }}
-                          onDrop={(e) => { e.preventDefault(); if (navDragIdx !== null) moveNavItem(navDragIdx, idx); setNavDragIdx(null); setNavOverIdx(null) }}
-                          onDragEnd={() => { setNavDragIdx(null); setNavOverIdx(null) }}
-                          className={`flex items-center gap-2.5 px-2.5 py-2 rounded-lg border cursor-grab active:cursor-grabbing transition-colors ${
-                            navDragIdx === idx
-                              ? 'opacity-50 border-[var(--accent)] bg-[var(--surface-overlay)]'
-                              : navOverIdx === idx
-                                ? 'border-[var(--accent)] bg-accent/10'
-                                : 'border-[var(--border)] bg-[var(--surface-overlay)]'
-                          }`}
-                        >
-                          <GripVertical size={14} className="text-text-muted shrink-0" />
-                          <span className={`w-6 h-6 shrink-0 flex items-center justify-center transition-opacity ${shown ? 'text-text-secondary' : 'opacity-40'}`}>{item.icon}</span>
-                          <span className={`text-sm truncate transition-colors ${shown ? 'text-text-primary' : 'text-text-muted'}`}>{item.label}</span>
-                          {item.alwaysVisible ? (
-                            <span className="ml-auto shrink-0 text-[10px] font-semibold uppercase tracking-widest text-text-muted">
-                              Always shown
-                            </span>
-                          ) : (
-                            <button
-                              onClick={() => setNavItemVisible(item.view, !shown)}
-                              title={shown ? 'Hide from menu' : 'Add to menu'}
-                              className="ml-auto shrink-0 p-1 rounded-md text-text-muted hover:text-text-primary hover:bg-[var(--surface-raised)] transition-colors"
-                            >
-                              {shown ? <Eye size={15} /> : <EyeOff size={15} />}
-                            </button>
-                          )}
-                        </div>
-                      )
-                    })}
-                  </div>
-                </div>
-                <div className="py-3 border-b border-[var(--border)] last:border-b-0">
-                  <div className="flex items-center gap-2.5 mb-2.5">
-                    <div className="w-6 h-6 rounded-md flex items-center justify-center shrink-0" style={{ backgroundColor: '#059669' }}>
-                      <House size={13} className="text-white" strokeWidth={2.25} />
-                    </div>
-                    <div className="min-w-0 flex-1">
-                      <span className="text-text-primary text-sm">Home screen</span>
-                      <p className="text-text-muted text-[11px]">Choose which sections show on the Home tab</p>
-                    </div>
-                    {!homeIsDefault && (
-                      <button
-                        onClick={resetHome}
-                        title="Restore all Home sections"
-                        className="flex items-center gap-1 text-[11px] text-text-muted hover:text-text-primary transition-colors shrink-0"
-                      >
-                        <RotateCcw size={11} /> Reset
-                      </button>
-                    )}
-                  </div>
-                  <div className="pl-[34px] space-y-1.5">
-                    {HOME_SECTIONS.filter((section) => (!section.staffOnly || hasChatAccess(account))).map((section) => {
-                      const shown = isHomeSectionVisible(section.id, homeSectionVisibility)
-                      return (
-                        <div key={section.id} className="flex items-center gap-2.5 px-2.5 py-2 rounded-lg border border-[var(--border)] bg-[var(--surface-overlay)]">
-                          <span className={`w-6 h-6 shrink-0 flex items-center justify-center transition-opacity ${shown ? 'text-text-secondary' : 'opacity-40'}`}>{section.icon}</span>
-                          <span className={`text-sm truncate transition-colors ${shown ? 'text-text-primary' : 'text-text-muted'}`}>{section.label}</span>
-                          <button
-                            onClick={() => setHomeSectionVisible(section.id, !shown)}
-                            title={shown ? 'Hide from Home' : 'Show on Home'}
-                            className="ml-auto shrink-0 p-1 rounded-md text-text-muted hover:text-text-primary hover:bg-[var(--surface-raised)] transition-colors"
-                          >
-                            {shown ? <Eye size={15} /> : <EyeOff size={15} />}
-                          </button>
-                        </div>
-                      )
-                    })}
-                  </div>
-                </div>
-                {ctrlRows.length > 0 && (
+                  {autoHideNav && navStyle !== 'pill' && (
+                    <Row
+                      icon={Minimize2}
+                      iconColor="#0d9488"
+                      label="Reveal area"
+                      sub="How close to the edge the pointer needs to get to bring the menu back"
+                    >
+                      <div className="flex items-center gap-2">
+                        <input
+                          type="range" min={4} max={120} step={4}
+                          value={autoHideNavZone}
+                          onChange={(e) => setAutoHideNavZone(parseInt(e.target.value))}
+                          className="w-28 accent-[var(--accent)]"
+                        />
+                        <span className="text-text-muted text-xs tabular-nums w-10 text-right">{autoHideNavZone}px</span>
+                      </div>
+                    </Row>
+                  )}
+                </SettingsGroup>
+                <SettingsGroup title="Menu">
                   <div className="py-3 border-b border-[var(--border)] last:border-b-0">
                     <div className="flex items-center gap-2.5 mb-2.5">
-                      <div className="w-6 h-6 rounded-md flex items-center justify-center shrink-0" style={{ backgroundColor: '#8b5cf6' }}>
+                      <div className="w-6 h-6 rounded-md flex items-center justify-center shrink-0" style={{ backgroundColor: '#6366f1' }}>
                         <ListOrdered size={13} className="text-white" strokeWidth={2.25} />
                       </div>
                       <div className="min-w-0 flex-1">
-                        <span className="text-text-primary text-sm">Menu controls</span>
-                        <p className="text-text-muted text-[11px]">The buttons at the foot of the menu - reorder or hide them</p>
+                        <span className="text-text-primary text-sm">Menu items</span>
+                        <p className="text-text-muted text-[11px]">Drag to reorder · tap the eye to show or hide a tab</p>
                       </div>
-                      {!ctrlIsDefault && (
+                      {!navIsDefault && (
                         <button
-                          onClick={resetControls}
-                          title="Restore the default controls and order"
+                          onClick={resetNav}
+                          title="Restore the default menu items and order"
                           className="flex items-center gap-1 text-[11px] text-text-muted hover:text-text-primary transition-colors shrink-0"
                         >
                           <RotateCcw size={11} /> Reset
@@ -1746,30 +1368,131 @@ export default function Settings(): JSX.Element {
                       )}
                     </div>
                     <div className="pl-[34px] space-y-1.5">
-                      {ctrlRows.map((ctrl, idx) => {
-                        const shown = navControlVisibility[ctrl.id] ?? true
+                      {navRows.map((item, idx) => {
+                        const shown = isNavItemVisible(item, navVisibility, false)
                         return (
                           <div
-                            key={ctrl.id}
+                            key={item.view}
                             draggable
-                            onDragStart={(e) => { setCtrlDragIdx(idx); e.dataTransfer.effectAllowed = 'move' }}
-                            onDragOver={(e) => { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; setCtrlOverIdx(idx) }}
-                            onDrop={(e) => { e.preventDefault(); if (ctrlDragIdx !== null) moveNavControl(ctrlDragIdx, idx); setCtrlDragIdx(null); setCtrlOverIdx(null) }}
-                            onDragEnd={() => { setCtrlDragIdx(null); setCtrlOverIdx(null) }}
-                            className={`flex items-center gap-2.5 px-2.5 py-2 rounded-lg border cursor-grab active:cursor-grabbing transition-colors ${
-                              ctrlDragIdx === idx
+                            onDragStart={(e) => { setNavDragIdx(idx); e.dataTransfer.effectAllowed = 'move' }}
+                            onDragOver={(e) => { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; setNavOverIdx(idx) }}
+                            onDrop={(e) => { e.preventDefault(); if (navDragIdx !== null) moveNavItem(navDragIdx, idx); setNavDragIdx(null); setNavOverIdx(null) }}
+                            onDragEnd={() => { setNavDragIdx(null); setNavOverIdx(null) }}
+                            className={`flex items-center gap-2.5 px-2.5 py-2 rounded-xl border cursor-grab active:cursor-grabbing transition-colors ${
+                              navDragIdx === idx
                                 ? 'opacity-50 border-[var(--accent)] bg-[var(--surface-overlay)]'
-                                : ctrlOverIdx === idx
+                                : navOverIdx === idx
                                   ? 'border-[var(--accent)] bg-accent/10'
-                                  : 'border-[var(--border)] bg-[var(--surface-overlay)]'
+                                  : 'border-transparent bg-[var(--fill)]'
                             }`}
                           >
                             <GripVertical size={14} className="text-text-muted shrink-0" />
-                            <span className={`w-6 h-6 shrink-0 flex items-center justify-center transition-opacity ${shown ? 'text-text-secondary' : 'opacity-40'}`}>{ctrl.icon}</span>
-                            <span className={`text-sm truncate transition-colors ${shown ? 'text-text-primary' : 'text-text-muted'}`}>{ctrl.label}</span>
+                            <span className={`w-6 h-6 shrink-0 flex items-center justify-center transition-opacity ${shown ? 'text-text-secondary' : 'opacity-40'}`}>{item.icon}</span>
+                            <span className={`text-sm truncate transition-colors ${shown ? 'text-text-primary' : 'text-text-muted'}`}>{item.label}</span>
+                            {item.alwaysVisible ? (
+                              <span className="ml-auto shrink-0 text-[10px] font-semibold uppercase tracking-widest text-text-muted">
+                                Always shown
+                              </span>
+                            ) : (
+                              <button
+                                onClick={() => setNavItemVisible(item.view, !shown)}
+                                title={shown ? 'Hide from menu' : 'Add to menu'}
+                                className="ml-auto shrink-0 p-1 rounded-md text-text-muted hover:text-text-primary hover:bg-[var(--surface-raised)] transition-colors"
+                              >
+                                {shown ? <Eye size={15} /> : <EyeOff size={15} />}
+                              </button>
+                            )}
+                          </div>
+                        )
+                      })}
+                    </div>
+                  </div>
+                  {ctrlRows.length > 0 && (
+                    <div className="py-3 border-b border-[var(--border)] last:border-b-0">
+                      <div className="flex items-center gap-2.5 mb-2.5">
+                        <div className="w-6 h-6 rounded-md flex items-center justify-center shrink-0" style={{ backgroundColor: '#8b5cf6' }}>
+                          <ListOrdered size={13} className="text-white" strokeWidth={2.25} />
+                        </div>
+                        <div className="min-w-0 flex-1">
+                          <span className="text-text-primary text-sm">Menu controls</span>
+                          <p className="text-text-muted text-[11px]">The buttons at the foot of the menu — reorder or hide them</p>
+                        </div>
+                        {!ctrlIsDefault && (
+                          <button
+                            onClick={resetControls}
+                            title="Restore the default controls and order"
+                            className="flex items-center gap-1 text-[11px] text-text-muted hover:text-text-primary transition-colors shrink-0"
+                          >
+                            <RotateCcw size={11} /> Reset
+                          </button>
+                        )}
+                      </div>
+                      <div className="pl-[34px] space-y-1.5">
+                        {ctrlRows.map((ctrl, idx) => {
+                          const shown = navControlVisibility[ctrl.id] ?? true
+                          return (
+                            <div
+                              key={ctrl.id}
+                              draggable
+                              onDragStart={(e) => { setCtrlDragIdx(idx); e.dataTransfer.effectAllowed = 'move' }}
+                              onDragOver={(e) => { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; setCtrlOverIdx(idx) }}
+                              onDrop={(e) => { e.preventDefault(); if (ctrlDragIdx !== null) moveNavControl(ctrlDragIdx, idx); setCtrlDragIdx(null); setCtrlOverIdx(null) }}
+                              onDragEnd={() => { setCtrlDragIdx(null); setCtrlOverIdx(null) }}
+                              className={`flex items-center gap-2.5 px-2.5 py-2 rounded-xl border cursor-grab active:cursor-grabbing transition-colors ${
+                                ctrlDragIdx === idx
+                                  ? 'opacity-50 border-[var(--accent)] bg-[var(--surface-overlay)]'
+                                  : ctrlOverIdx === idx
+                                    ? 'border-[var(--accent)] bg-accent/10'
+                                    : 'border-transparent bg-[var(--fill)]'
+                              }`}
+                            >
+                              <GripVertical size={14} className="text-text-muted shrink-0" />
+                              <span className={`w-6 h-6 shrink-0 flex items-center justify-center transition-opacity ${shown ? 'text-text-secondary' : 'opacity-40'}`}>{ctrl.icon}</span>
+                              <span className={`text-sm truncate transition-colors ${shown ? 'text-text-primary' : 'text-text-muted'}`}>{ctrl.label}</span>
+                              <button
+                                onClick={() => setNavControlVisible(ctrl.id, !shown)}
+                                title={shown ? 'Hide from menu' : 'Show in menu'}
+                                className="ml-auto shrink-0 p-1 rounded-md text-text-muted hover:text-text-primary hover:bg-[var(--surface-raised)] transition-colors"
+                              >
+                                {shown ? <Eye size={15} /> : <EyeOff size={15} />}
+                              </button>
+                            </div>
+                          )
+                        })}
+                      </div>
+                    </div>
+                  )}
+                </SettingsGroup>
+                <SettingsGroup title="Home">
+                  <div className="py-3 border-b border-[var(--border)] last:border-b-0">
+                    <div className="flex items-center gap-2.5 mb-2.5">
+                      <div className="w-6 h-6 rounded-md flex items-center justify-center shrink-0" style={{ backgroundColor: '#0ea5e9' }}>
+                        <Home size={13} className="text-white" strokeWidth={2.25} />
+                      </div>
+                      <div className="min-w-0 flex-1">
+                        <span className="text-text-primary text-sm">Home screen</span>
+                        <p className="text-text-muted text-[11px]">Choose which sections show on the Home tab</p>
+                      </div>
+                      {!homeIsDefault && (
+                        <button
+                          onClick={resetHome}
+                          title="Restore all Home sections"
+                          className="flex items-center gap-1 text-[11px] text-text-muted hover:text-text-primary transition-colors shrink-0"
+                        >
+                          <RotateCcw size={11} /> Reset
+                        </button>
+                      )}
+                    </div>
+                    <div className="pl-[34px] space-y-1.5">
+                      {HOME_SECTIONS.filter((section) => !section.staffOnly || hasChatAccess(account)).map((section) => {
+                        const shown = isHomeSectionVisible(section.id, homeSectionVisibility)
+                        return (
+                          <div key={section.id} className="flex items-center gap-2.5 px-2.5 py-2 rounded-xl border border-transparent bg-[var(--fill)]">
+                            <span className={`w-6 h-6 shrink-0 flex items-center justify-center transition-opacity ${shown ? 'text-text-secondary' : 'opacity-40'}`}>{section.icon}</span>
+                            <span className={`text-sm truncate transition-colors ${shown ? 'text-text-primary' : 'text-text-muted'}`}>{section.label}</span>
                             <button
-                              onClick={() => setNavControlVisible(ctrl.id, !shown)}
-                              title={shown ? 'Hide from menu' : 'Show in menu'}
+                              onClick={() => setHomeSectionVisible(section.id, !shown)}
+                              title={shown ? 'Hide from Home' : 'Show on Home'}
                               className="ml-auto shrink-0 p-1 rounded-md text-text-muted hover:text-text-primary hover:bg-[var(--surface-raised)] transition-colors"
                             >
                               {shown ? <Eye size={15} /> : <EyeOff size={15} />}
@@ -1779,225 +1502,429 @@ export default function Settings(): JSX.Element {
                       })}
                     </div>
                   </div>
-                )}
+                  {/* Editor/admin-only tabs on the mobile bottom bar (Albums, and
+                      the Editor/Admin profile tab). They aren't part of the
+                      NAV_ITEMS registry above (which drives the desktop side
+                      menu) — desktop reaches those views via the profile avatar /
+                      "Edit albums" button — so they get their own toggle here,
+                      shown only to editors/admins on the web build where the
+                      bottom bar exists. Reuses the shared navVisibility map. */}
+                  {showStaffProfile(account) && (
+                    <div className="py-3 border-b border-[var(--border)] last:border-b-0">
+                      <div className="flex items-center gap-2.5 mb-2.5">
+                        <div className="w-6 h-6 rounded-md flex items-center justify-center shrink-0" style={{ backgroundColor: '#f59e0b' }}>
+                          <ShieldCheck size={13} className="text-white" strokeWidth={2.25} />
+                        </div>
+                        <div className="min-w-0 flex-1">
+                          <span className="text-text-primary text-sm">Staff tabs (mobile)</span>
+                          <p className="text-text-muted text-[11px]">Show or hide staff tabs in the mobile bottom bar</p>
+                        </div>
+                      </div>
+                      <div className="pl-[34px] space-y-1.5">
+                        {([
+                          // Albums stays editor/admin-only; the profile tab keys
+                          // off the same helpers BottomNav routes with, so the
+                          // toggle can't end up pointing at a different view than
+                          // the tab it's meant to hide.
+                          ...((account?.is_editor || account?.is_administrator)
+                            ? [{ view: 'albums-admin' as ViewType, label: 'Albums', icon: <Disc size={18} /> }]
+                            : []),
+                          { view: staffProfileView(account), label: staffProfileLabel(account), icon: <ShieldCheck size={18} /> },
+                        ]).map((item) => {
+                          const shown = navVisibility[item.view] ?? true
+                          return (
+                            <div key={item.view} className="flex items-center gap-2.5 px-2.5 py-2 rounded-xl border border-transparent bg-[var(--fill)]">
+                              <span className={`w-6 h-6 shrink-0 flex items-center justify-center transition-opacity ${shown ? 'text-text-secondary' : 'opacity-40'}`}>{item.icon}</span>
+                              <span className={`text-sm truncate transition-colors ${shown ? 'text-text-primary' : 'text-text-muted'}`}>{item.label}</span>
+                              <button
+                                onClick={() => setNavItemVisible(item.view, !shown)}
+                                title={shown ? 'Hide from menu' : 'Show in menu'}
+                                className="ml-auto shrink-0 p-1 rounded-md text-text-muted hover:text-text-primary hover:bg-[var(--surface-raised)] transition-colors"
+                              >
+                                {shown ? <Eye size={15} /> : <EyeOff size={15} />}
+                              </button>
+                            </div>
+                          )
+                        })}
+                      </div>
+                    </div>
+                  )}
+                </SettingsGroup>
               </div>
             )}
 
             {/* ── Playback ── */}
             {!settingsQueryTrimmed && tab === 'playback' && (
               <div>
-                <h3 className="text-text-primary text-lg font-bold mb-4">Playback</h3>
-                <Row
-                  icon={ListOrdered}
-                  iconColor="#7c3aed"
-                  label="Remember queue and now playing"
-                  sub="Restore your queue, current track and position on this device when you reopen. Playback stays paused."
-                >
-                  <Toggle on={rememberQueue} onClick={() => setRememberQueue(!rememberQueue)} />
-                </Row>
-                {devices.length > 0 && (
-                  <Row icon={Volume2} iconColor="#2563eb" label="Audio output">
-                    <select
-                      value={audioOutput}
-                      onChange={(e) => setAudioOutput(e.target.value)}
-                      className="bg-[var(--surface-overlay)] text-text-primary text-xs rounded-lg px-2 py-1.5 border border-[var(--border)] max-w-[180px] truncate"
-                    >
-                      <option value="">Default</option>
-                      {devices.map((d) => (
-                        <option key={d.deviceId} value={d.deviceId}>{d.label || `Device ${d.deviceId.slice(0, 6)}`}</option>
-                      ))}
-                    </select>
-                  </Row>
-                )}
-                {/* Playback speed moved to the player bar's Equalizer panel */}
-                <Row icon={AlignLeft} iconColor="#0891b2" label="Lyrics sync">
-                  <div className="flex items-center gap-2">
-                    <button
-                      onClick={() => setLyricsOffset(Math.round((lyricsOffset - 0.1) * 10) / 10)}
-                      title="Shift lyrics earlier"
-                      className="w-7 h-7 flex items-center justify-center rounded-lg bg-[var(--surface-overlay)] border border-[var(--border)] text-text-secondary hover:text-text-primary transition-colors"
-                    >
-                      <Minus size={13} />
-                    </button>
-                    <span className="text-text-muted text-xs tabular-nums w-12 text-center">
-                      {lyricsOffset > 0 ? '+' : ''}{lyricsOffset.toFixed(1)}s
-                    </span>
-                    <button
-                      onClick={() => setLyricsOffset(Math.round((lyricsOffset + 0.1) * 10) / 10)}
-                      title="Shift lyrics later"
-                      className="w-7 h-7 flex items-center justify-center rounded-lg bg-[var(--surface-overlay)] border border-[var(--border)] text-text-secondary hover:text-text-primary transition-colors"
-                    >
-                      <Plus size={13} />
-                    </button>
-                    {lyricsOffset !== 0 && (
-                      <button
-                        onClick={() => setLyricsOffset(0)}
-                        title="Reset to 0"
-                        className="text-text-muted hover:text-text-primary text-xs transition-colors"
-                      >
-                        Reset
-                      </button>
-                    )}
-                  </div>
-                </Row>
-                <Row
-                  icon={Zap}
-                  iconColor="#7c3aed"
-                  label="Crossfade"
-                  labelExtra={<div className="ml-2 translate-y-[3px]"><Toggle on={crossfadeEnabled} onClick={() => setCrossfade(!crossfadeEnabled, crossfadeDuration)} /></div>}
-                >
-                  {crossfadeEnabled && (
-                    <div className="flex items-center gap-2">
-                      <input
-                        type="range" min={1} max={12} step={1}
-                        value={crossfadeDuration}
-                        onChange={(e) => setCrossfade(true, parseInt(e.target.value))}
-                        className="w-20 accent-[var(--accent)]"
-                      />
-                      <span className="text-text-muted text-xs tabular-nums w-10 text-right">{crossfadeDuration}s</span>
-                    </div>
-                  )}
-                </Row>
-                {/* Hidden on iOS (iPads can land on this layout): Safari ignores
-                    <audio>.volume, so the fade ramp has nothing to animate. */}
-                {!IS_IOS && (
+                <SettingsTitle>Playback</SettingsTitle>
+                <SettingsGroup title="Playback">
                   <Row
-                    icon={Waves}
-                    iconColor="#0ea5e9"
-                    label="Smooth fade when pausing"
-                    labelExtra={<div className="ml-2 translate-y-[3px]"><Toggle on={pauseFadeEnabled} onClick={() => setPauseFade(!pauseFadeEnabled)} /></div>}
-                  />
-                )}
-                <Row
-                  icon={FileText}
-                  iconColor="#059669"
-                  label="Prefer OG version"
-                  labelExtra={<div className="ml-2 translate-y-[3px]"><Toggle on={preferOgVersion} onClick={() => setPreferOgVersion(!preferOgVersion)} /></div>}
-                />
-                <Row
-                  icon={Images}
-                  iconColor="#d946ef"
-                  label="Rotate suggested covers"
-                  sub="Songs without a custom cover show a different cover from the API files each play"
-                  labelExtra={<div className="ml-2 translate-y-[3px]"><Toggle on={rotateSuggestedCovers} onClick={() => setRotateSuggestedCovers(!rotateSuggestedCovers)} /></div>}
-                />
-                <div className="py-2">
-                  <EraCoversSection />
-                </div>
-                <Row icon={Clock} iconColor="#4f46e5" label="Sleep timer">
-                  <div className="flex items-center gap-2">
-                    {sleepTimerEnd ? (
-                      <span className="text-accent text-xs font-medium">
-                        {Math.max(0, Math.ceil((sleepTimerEnd - Date.now()) / 60000))} min left
-                      </span>
-                    ) : (
-                      <select
-                        value={sleepMinutes}
-                        onChange={(e) => setSleepMinutes(parseInt(e.target.value))}
-                        className="bg-[var(--surface-overlay)] text-text-primary text-xs rounded-lg px-2 py-1.5 border border-[var(--border)]"
-                      >
-                        {[15, 30, 45, 60, 90].map((m) => <option key={m} value={m}>{m} min</option>)}
-                      </select>
+                    icon={ListOrdered}
+                    iconColor="#7c3aed"
+                    label="Remember queue and now playing"
+                    sub="Restore your queue, current track and position on this device when you reopen. Playback stays paused."
+                  >
+                    <Toggle on={rememberQueue} onClick={() => setRememberQueue(!rememberQueue)} />
+                  </Row>
+                  {devices.length > 0 && (
+                    <Row icon={Volume2} iconColor="#2563eb" label="Audio output">
+                      <ThemedSelect
+                        value={audioOutput}
+                        onChange={setAudioOutput}
+                        options={[
+                          { value: '', label: 'Default' },
+                          ...devices.map((d) => ({ value: d.deviceId, label: d.label || `Device ${d.deviceId.slice(0, 6)}` })),
+                        ]}
+                        className="bg-[var(--fill)] text-text-primary text-xs rounded-full px-3 py-1.5 border border-transparent min-w-0 max-w-[180px]"
+                      />
+                    </Row>
+                  )}
+                  <Row
+                    icon={Zap}
+                    iconColor="#7c3aed"
+                    label="Crossfade"
+                    labelExtra={<div className="ml-2 translate-y-[3px]"><Toggle on={crossfadeEnabled} onClick={() => setCrossfade(!crossfadeEnabled, crossfadeDuration)} /></div>}
+                  >
+                    {crossfadeEnabled && (
+                      <div className="flex items-center gap-2">
+                        <input
+                          type="range" min={1} max={12} step={1}
+                          value={crossfadeDuration}
+                          onChange={(e) => setCrossfade(true, parseInt(e.target.value))}
+                          className="w-20 accent-[var(--accent)]"
+                        />
+                        <span className="text-text-muted text-xs tabular-nums w-10 text-right">{crossfadeDuration}s</span>
+                      </div>
                     )}
-                    <button
-                      onClick={toggleSleepTimer}
-                      className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-colors ${
-                        sleepTimerEnd ? 'bg-red-500/15 text-red-400 hover:bg-red-500/25' : 'bg-accent/15 text-accent hover:bg-accent/25'
-                      }`}
-                    >
-                      {sleepTimerEnd ? 'Cancel' : 'Start'}
-                    </button>
+                  </Row>
+                  {/* Safari ignores <audio>.volume, so there is nothing to fade on iOS. */}
+                  {!IS_IOS && (
+                    <Row
+                      icon={Waves}
+                      iconColor="#0ea5e9"
+                      label="Smooth fade when pausing"
+                      labelExtra={<div className="ml-2 translate-y-[3px]"><Toggle on={pauseFadeEnabled} onClick={() => setPauseFade(!pauseFadeEnabled)} /></div>}
+                    />
+                  )}
+                </SettingsGroup>
+                <SettingsGroup title="Songs">
+                  <Row
+                    icon={FileText}
+                    iconColor="#059669"
+                    label="Prefer OG version"
+                    labelExtra={<div className="ml-2 translate-y-[3px]"><Toggle on={preferOgVersion} onClick={() => setPreferOgVersion(!preferOgVersion)} /></div>}
+                  />
+                  <Row
+                    icon={Images}
+                    iconColor="#d946ef"
+                    label="Rotate suggested covers"
+                    sub="Songs without a custom cover show a different cover from the API files each play"
+                    labelExtra={<div className="ml-2 translate-y-[3px]"><Toggle on={rotateSuggestedCovers} onClick={() => setRotateSuggestedCovers(!rotateSuggestedCovers)} /></div>}
+                  />
+                  <div className="py-2">
+                    <EraCoversSection />
                   </div>
-                </Row>
-                <div className="py-3 border-b border-[var(--border)] last:border-b-0">
-                  <div className="flex items-center gap-2.5 mb-2.5">
-                    <div className="w-6 h-6 rounded-md flex items-center justify-center shrink-0" style={{ backgroundColor: '#f59e0b' }}>
-                      <Bell size={13} className="text-white" strokeWidth={2.25} />
+                </SettingsGroup>
+                <SettingsGroup title="Sleep timer">
+                  <Row icon={Clock} iconColor="#4f46e5" label="Sleep timer">
+                    <div className="flex items-center gap-2">
+                      {sleepTimerEnd ? (
+                        <span className="text-accent text-xs font-medium">
+                          {Math.max(0, Math.ceil((sleepTimerEnd - Date.now()) / 60000))} min left
+                        </span>
+                      ) : (
+                        <ThemedSelect
+                          value={String(sleepMinutes)}
+                          onChange={(v) => setSleepMinutes(parseInt(v))}
+                          options={[15, 30, 45, 60, 90].map((m) => ({ value: String(m), label: `${m} min` }))}
+                          className="bg-[var(--fill)] text-text-primary text-xs rounded-full px-3 py-1.5 border border-transparent"
+                        />
+                      )}
+                      <button
+                        onClick={toggleSleepTimer}
+                        className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-colors ${
+                          sleepTimerEnd ? 'bg-red-500/15 text-red-400 hover:bg-red-500/25' : 'bg-accent/15 text-accent hover:bg-accent/25'
+                        }`}
+                      >
+                        {sleepTimerEnd ? 'Cancel' : 'Start'}
+                      </button>
                     </div>
-                    <div className="min-w-0 flex-1">
-                      <span className="text-text-primary text-sm">Notification sound</span>
-                      <p className="text-text-muted text-[11px]">Plays when a chat message or news post notification fires - click one to preview it</p>
-                    </div>
-                  </div>
-                  <div className="flex items-center gap-1.5 flex-wrap pl-[34px]">
-                    {NOTIFICATION_SOUNDS.map((s) => {
-                      const active = notificationSound === s.id
-                      return (
+                  </Row>
+                </SettingsGroup>
+              </div>
+            )}
+
+            {/* ── Lyrics & WRLD ── */}
+            {!settingsQueryTrimmed && tab === 'lyrics' && (
+              <div>
+                <SettingsTitle>Lyrics &amp; WRLD</SettingsTitle>
+                <SettingsGroup title="Lyrics">
+                  <Row icon={AlignLeft} iconColor="#0891b2" label="Lyrics sync">
+                    <div className="flex items-center gap-2">
+                      <button
+                        onClick={() => setLyricsOffset(Math.round((lyricsOffset - 0.1) * 10) / 10)}
+                        title="Shift lyrics earlier"
+                        className="w-7 h-7 flex items-center justify-center rounded-lg bg-[var(--fill)] hover:bg-[var(--fill-strong)] text-text-secondary hover:text-text-primary transition-colors"
+                      >
+                        <Minus size={13} />
+                      </button>
+                      <span className="text-text-muted text-xs tabular-nums w-12 text-center">
+                        {lyricsOffset > 0 ? '+' : ''}{lyricsOffset.toFixed(1)}s
+                      </span>
+                      <button
+                        onClick={() => setLyricsOffset(Math.round((lyricsOffset + 0.1) * 10) / 10)}
+                        title="Shift lyrics later"
+                        className="w-7 h-7 flex items-center justify-center rounded-lg bg-[var(--fill)] hover:bg-[var(--fill-strong)] text-text-secondary hover:text-text-primary transition-colors"
+                      >
+                        <Plus size={13} />
+                      </button>
+                      {lyricsOffset !== 0 && (
                         <button
-                          key={s.id}
-                          onClick={() => chooseNotificationSound(s.id)}
-                          className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-[11px] font-medium border transition-colors ${
-                            active
-                              ? 'bg-accent/15 text-accent border-[var(--accent)]'
-                              : 'text-text-muted border-[var(--border)] hover:text-text-primary hover:bg-[var(--surface-overlay)]'
-                          }`}
+                          onClick={() => setLyricsOffset(0)}
+                          title="Reset to 0"
+                          className="text-text-muted hover:text-text-primary text-xs transition-colors"
                         >
-                          {s.notes.length > 0 ? <Volume2 size={11} /> : <BellOff size={11} />}
-                          {s.label}
+                          Reset
+                        </button>
+                      )}
+                    </div>
+                  </Row>
+                  <div className="py-3 border-b border-[var(--border)] last:border-b-0">
+                    <div className="flex items-center gap-2.5 mb-2.5">
+                      <div className="w-6 h-6 rounded-md flex items-center justify-center shrink-0" style={{ backgroundColor: '#e11d48' }}>
+                        <Type size={13} className="text-white" strokeWidth={2.25} />
+                      </div>
+                      <div className="min-w-0">
+                        <span className="text-text-primary text-sm">Lyrics font</span>
+                        <p className="text-text-muted text-[11px]">Used only in the lyric panels, so lyrics can differ from the rest of the app</p>
+                      </div>
+                    </div>
+                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 pl-[34px]">
+                      {allFontChoices.map((font) => {
+                        const active = lyricsFont === font.id
+                        return (
+                          <button
+                            key={font.id}
+                            onClick={() => setLyricsFont(font.id)}
+                            title={font.name}
+                            className={`px-3 py-2.5 rounded-xl border text-left transition-colors ${
+                              active
+                                ? 'bg-accent/15 border-[var(--accent)]'
+                                : 'border-transparent bg-[var(--fill)] hover:bg-[var(--fill-strong)]'
+                            }`}
+                          >
+                            <span
+                              className={`block text-base leading-tight truncate ${active ? 'text-accent' : 'text-text-primary'}`}
+                              style={{ fontFamily: font.stack }}
+                            >
+                              Ag
+                            </span>
+                            <span className={`block text-[11px] mt-0.5 truncate ${active ? 'text-accent' : 'text-text-muted'}`}>
+                              {font.name}
+                            </span>
+                          </button>
+                        )
+                      })}
+                    </div>
+                  </div>
+                  <div className="py-3 border-b border-[var(--border)] last:border-b-0">
+                    <div className="flex items-center gap-2.5 mb-2.5">
+                      <div className="w-6 h-6 rounded-md flex items-center justify-center shrink-0" style={{ backgroundColor: '#db2777' }}>
+                        <FileText size={13} className="text-white" strokeWidth={2.25} />
+                      </div>
+                      <div className="min-w-0">
+                        <span className="text-text-primary text-sm">Lyrics text size</span>
+                        <p className="text-text-muted text-[11px]">Synced and plain lyrics everywhere — WRLD tab, now playing, mini player</p>
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-2 flex-wrap pl-[34px]">
+                      {LYRIC_TEXT_SIZES.map(({ label, value }) => {
+                        const active = lyricsScale === value
+                        return (
+                          <button
+                            key={value}
+                            onClick={() => setLyricsScale(value)}
+                            className={`px-3.5 py-1.5 rounded-full text-xs font-medium border transition-colors ${
+                              active
+                                ? 'bg-accent/15 text-accent border-[var(--accent)]'
+                                : 'text-text-secondary border-transparent bg-[var(--fill)] hover:text-text-primary hover:bg-[var(--fill-strong)]'
+                            }`}
+                          >
+                            {label}
+                          </button>
+                        )
+                      })}
+                    </div>
+                  </div>
+                  <div className="py-3 border-b border-[var(--border)] last:border-b-0">
+                    <div className="flex items-center gap-2.5 mb-2.5">
+                      <div className="w-6 h-6 rounded-md flex items-center justify-center shrink-0" style={{ backgroundColor: '#0ea5e9' }}>
+                        <AlignCenter size={13} className="text-white" strokeWidth={2.25} />
+                      </div>
+                      <div className="min-w-0">
+                        <span className="text-text-primary text-sm">Lyrics alignment</span>
+                        <p className="text-text-muted text-[11px]">How lyric lines line up</p>
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-2 flex-wrap pl-[34px]">
+                      {([
+                        { id: 'left' as const, label: 'Left', icon: AlignLeft },
+                        { id: 'center' as const, label: 'Center', icon: AlignCenter },
+                      ]).map(({ id, label, icon: AlignIcon }) => {
+                        const active = lyricsAlign === id
+                        return (
+                          <button
+                            key={id}
+                            onClick={() => setLyricsAlign(id)}
+                            className={`flex items-center gap-1.5 px-3.5 py-1.5 rounded-full text-xs font-medium border transition-colors ${
+                              active
+                                ? 'bg-accent/15 text-accent border-[var(--accent)]'
+                                : 'text-text-secondary border-transparent bg-[var(--fill)] hover:text-text-primary hover:bg-[var(--fill-strong)]'
+                            }`}
+                          >
+                            <AlignIcon size={14} className="shrink-0" />
+                            {label}
+                          </button>
+                        )
+                      })}
+                    </div>
+                  </div>
+                  <Row
+                    icon={Eye}
+                    iconColor="#64748b"
+                    label="Blur inactive lyrics"
+                    sub="Soften every synced line except the one playing"
+                    labelExtra={<div className="ml-2 translate-y-[3px]"><Toggle on={lyricsBlur} onClick={() => setLyricsBlur(!lyricsBlur)} /></div>}
+                  >
+                    {lyricsBlur && (
+                      <div className="flex items-center gap-2">
+                        <input
+                          type="range" min={0.25} max={4} step={0.25}
+                          value={lyricsBlurAmount}
+                          onChange={(e) => setLyricsBlurAmount(parseFloat(e.target.value))}
+                          className="w-20 accent-[var(--accent)]"
+                        />
+                        <span className="text-text-muted text-xs tabular-nums w-10 text-right">{lyricsBlurAmount}×</span>
+                      </div>
+                    )}
+                  </Row>
+                  <div className="py-3 border-b border-[var(--border)] last:border-b-0">
+                    <div className="flex items-center gap-2.5 mb-2.5">
+                      <div className="w-6 h-6 rounded-md flex items-center justify-center shrink-0" style={{ backgroundColor: '#9333ea' }}>
+                        <Palette size={13} className="text-white" strokeWidth={2.25} />
+                      </div>
+                      <div className="min-w-0">
+                        <span className="text-text-primary text-sm">Lyric colors</span>
+                        <p className="text-text-muted text-[11px]">Color the line being sung and the ones that aren't — WRLD tab, now playing, mini player</p>
+                      </div>
+                    </div>
+                    <div className="flex flex-col gap-2.5 pl-[34px]">
+                      <LyricColorRow
+                        label="Current line"
+                        presets={LYRIC_ACTIVE_PRESETS}
+                        value={lyricsColorActive}
+                        fallback="#ffffff"
+                        onChange={setLyricsColorActive}
+                      />
+                      <LyricColorRow
+                        label="Other lines"
+                        presets={LYRIC_INACTIVE_PRESETS}
+                        value={lyricsColorInactive}
+                        fallback="#9ca3af"
+                        onChange={setLyricsColorInactive}
+                      />
+                    </div>
+                  </div>
+                </SettingsGroup>
+                <SettingsGroup title="WRLD">
+                  <Row
+                    icon={Disc}
+                    iconColor="#8b5cf6"
+                    label="Theme background in WRLD"
+                    sub="Use the app's theme behind the WRLD tab instead of the playing song's cover"
+                  >
+                    <Toggle on={wrldThemeBackground} onClick={() => setWrldThemeBackground(!wrldThemeBackground)} />
+                  </Row>
+                  <Row
+                    icon={Disc}
+                    iconColor="#8b5cf6"
+                    label="Old WRLD style"
+                    sub="WRLD's own player and lyrics instead of the widgets"
+                  >
+                    <Toggle on={!wrldWidgets} onClick={() => setWrldWidgets(!wrldWidgets)} />
+                  </Row>
+                  <VizSettings />
+                </SettingsGroup>
+              </div>
+            )}
+
+            {/* ── Connections ── */}
+            {!settingsQueryTrimmed && tab === 'connections' && (
+              <div>
+                <SettingsTitle>Connections</SettingsTitle>
+                <SettingsGroup title="Last.fm">
+                  <Row
+                    icon={CloudUpload}
+                    iconColor="#d51007"
+                    label="Last.fm scrobbling"
+                    sub={
+                      !lastfmConfigured() ? 'Unavailable — this build has no Last.fm API key'
+                      : lastfmError ? lastfmError
+                      : lastfmUser ? `Connected as ${lastfmUser}`
+                      : lastfmWaiting ? 'Approve access on last.fm, then come back here'
+                      : 'Send what you listen to, to your Last.fm profile'
+                    }
+                    labelExtra={lastfmUser
+                      ? <div className="ml-2 translate-y-[3px]"><Toggle on={lastfmEnabled} onClick={() => setLastfmEnabled(!lastfmEnabled)} /></div>
+                      : undefined}
+                  >
+                    {lastfmConfigured() && (
+                      lastfmUser ? (
+                        <button
+                          onClick={disconnectLastfm}
+                          className="px-3 py-1.5 rounded-lg text-xs font-medium transition-colors bg-red-500/15 text-red-400 hover:bg-red-500/25"
+                        >
+                          Disconnect
+                        </button>
+                      ) : lastfmWaiting ? (
+                        <div className="flex items-center gap-2">
+                          <Loader2 size={14} className="animate-spin text-text-muted" />
+                          <button
+                            onClick={stopLastfmPoll}
+                            className="px-3 py-1.5 rounded-lg text-xs font-medium transition-colors bg-[var(--surface-overlay)] text-text-secondary hover:text-text-primary border border-[var(--border)]"
+                          >
+                            Cancel
+                          </button>
+                        </div>
+                      ) : (
+                        <button
+                          onClick={connectLastfm}
+                          disabled={lastfmBusy}
+                          className="px-3 py-1.5 rounded-lg text-xs font-medium transition-colors bg-accent/15 text-accent hover:bg-accent/25 disabled:opacity-50"
+                        >
+                          Connect
                         </button>
                       )
-                    })}
-                  </div>
-                </div>
-                <Row
-                  icon={CloudUpload}
-                  iconColor="#d51007"
-                  label="Last.fm scrobbling"
-                  sub={
-                    !lastfmConfigured() ? 'Unavailable - this build has no Last.fm API key'
-                    : lastfmError ? lastfmError
-                    : lastfmUser ? `Connected as ${lastfmUser}`
-                    : lastfmWaiting ? 'Approve access on last.fm, then come back here'
-                    : 'Send what you listen to, to your Last.fm profile'
-                  }
-                  labelExtra={lastfmUser
-                    ? <div className="ml-2 translate-y-[3px]"><Toggle on={lastfmEnabled} onClick={() => setLastfmEnabled(!lastfmEnabled)} /></div>
-                    : undefined}
-                >
-                  {lastfmConfigured() && (
-                    lastfmUser ? (
-                      <button
-                        onClick={disconnectLastfm}
-                        className="px-3 py-1.5 rounded-lg text-xs font-medium transition-colors bg-red-500/15 text-red-400 hover:bg-red-500/25"
-                      >
-                        Disconnect
-                      </button>
-                    ) : lastfmWaiting ? (
-                      <div className="flex items-center gap-2">
-                        <Loader2 size={14} className="animate-spin text-text-muted" />
-                        <button
-                          onClick={stopLastfmPoll}
-                          className="px-3 py-1.5 rounded-lg text-xs font-medium transition-colors bg-[var(--surface-overlay)] text-text-secondary hover:text-text-primary border border-[var(--border)]"
-                        >
-                          Cancel
-                        </button>
-                      </div>
-                    ) : (
-                      <button
-                        onClick={connectLastfm}
-                        disabled={lastfmBusy}
-                        className="px-3 py-1.5 rounded-lg text-xs font-medium transition-colors bg-accent/15 text-accent hover:bg-accent/25 disabled:opacity-50"
-                      >
-                        Connect
-                      </button>
-                    )
-                  )}
-                </Row>
-                <Row
-                  icon={Server}
-                  iconColor="#0ea5e9"
-                  label="Distributed CDN downloads"
-                  sub="Use the peer-to-peer CDN network for faster downloads when available. Turning this off always downloads from the origin server."
-                >
-                  <Toggle
-                    on={cdnEnabled}
-                    onClick={() => {
-                      const next = !cdnEnabled
-                      cdnService.setEnabled(next)
-                      setCdnEnabled(next)
-                    }}
-                  />
-                </Row>
+                    )}
+                  </Row>
+                </SettingsGroup>
+                <SettingsGroup title="Downloads">
+                  <Row
+                    icon={Server}
+                    iconColor="#0ea5e9"
+                    label="Distributed CDN downloads"
+                    sub="Use the peer-to-peer CDN network for faster downloads when available. Turning this off always downloads from the origin server."
+                  >
+                    <Toggle
+                      on={cdnEnabled}
+                      onClick={() => {
+                        const next = !cdnEnabled
+                        cdnService.setEnabled(next)
+                        setCdnEnabled(next)
+                      }}
+                    />
+                  </Row>
+                </SettingsGroup>
               </div>
             )}
 
@@ -2006,45 +1933,40 @@ export default function Settings(): JSX.Element {
             {/* ── Shortcuts ── */}
             {!settingsQueryTrimmed && tab === 'shortcuts' && (
               <div>
-                <div className="flex items-center justify-between mb-1">
-                  <h3 className="text-text-primary text-lg font-bold">Keyboard Shortcuts</h3>
+                <SettingsTitle action={
                   <button
                     onClick={() => { setRecording(null); resetHotkeyBindings() }}
-                    className="flex items-center gap-1.5 text-xs text-text-muted hover:text-text-primary transition-colors px-2.5 py-1.5 rounded-lg bg-[var(--surface-overlay)] hover:bg-[var(--surface-raised)] border border-[var(--border)] shrink-0"
+                    className="flex items-center gap-1.5 text-xs text-text-muted hover:text-text-primary transition-colors px-2.5 py-1.5 rounded-lg bg-[var(--fill)] hover:bg-[var(--fill-strong)] border border-transparent shrink-0"
                     title="Restore every shortcut to its default"
                   >
                     <RotateCcw size={12} /> Reset to defaults
                   </button>
-                </div>
-                <p className="text-text-muted text-[11px] mb-3">
-                  Click a shortcut, then press the keys. Esc cancels · Backspace clears. Shortcuts work while the app window is focused.
-                </p>
-
-                <Row icon={Clock} iconColor="#4f46e5" label="Skip amount" sub="How far skip-forward / skip-backward jump">
-                  <select
-                    value={hotkeySeekSeconds}
-                    onChange={(e) => setHotkeySeekSeconds(parseInt(e.target.value))}
-                    className="bg-[var(--surface-overlay)] text-text-primary text-xs rounded-lg px-2 py-1.5 border border-[var(--border)]"
-                  >
-                    {[5, 10, 15, 30, 60].map((s) => <option key={s} value={s}>{s} seconds</option>)}
-                  </select>
-                </Row>
-
+                }>Keyboard shortcuts</SettingsTitle>
+                <SettingsGroup footer='Click a shortcut, then press the keys. Esc cancels · Backspace clears. Shortcuts work while the app window is focused.'>
+                  <Row icon={Clock} iconColor="#4f46e5" label="Skip amount" sub="How far skip-forward / skip-backward jump">
+                    <ThemedSelect
+                      value={String(hotkeySeekSeconds)}
+                      onChange={(v) => setHotkeySeekSeconds(parseInt(v))}
+                      options={[5, 10, 15, 30, 60].map((s) => ({ value: String(s), label: `${s} seconds` }))}
+                      className="bg-[var(--fill)] text-text-primary text-xs rounded-full px-3 py-1.5 border border-transparent"
+                    />
+                  </Row>
+                </SettingsGroup>
                 {HOTKEY_CATEGORIES.map((category) => {
                   const actions = HOTKEY_ACTIONS.filter((a) => a.category === category && (developerMode || !a.devModeOnly))
                   if (actions.length === 0) return null
                   return (
-                    <div key={category} className="mt-4 first:mt-3">
-                      <div className="flex items-center gap-2 mb-1.5 px-0.5">
-                        <p className="flex-1 min-w-0 text-[10px] font-semibold uppercase tracking-widest text-text-muted">{category}</p>
+                    <div key={category} className="mb-6 last:mb-0">
+                      <div className="flex items-center gap-2 mb-1.5 px-4">
+                        <p className="flex-1 min-w-0 text-[11px] font-semibold uppercase tracking-wider text-text-muted">{category}</p>
                       </div>
-                      <div className="rounded-xl border border-[var(--border)] overflow-hidden divide-y divide-[var(--border)]">
+                      <div className="glass-pane rounded-2xl divide-y divide-[var(--border)]">
                         {actions.map((action) => {
                           const appBinding = effectiveBinding(action.id, hotkeyBindings)
                           const appTokens = comboTokens(appBinding)
                           const isRecordingApp = recording?.id === action.id
                           return (
-                            <div key={action.id} className="flex items-center gap-2 px-3 py-2 bg-[var(--surface)]">
+                            <div key={action.id} className="flex items-center gap-2 px-4 py-2">
                               <span className="flex-1 min-w-0 text-text-secondary text-sm truncate">{action.label}</span>
                               <div className="shrink-0 flex items-center gap-1 w-[134px]">
                                 <button
@@ -2095,110 +2017,78 @@ export default function Settings(): JSX.Element {
             {/* ── Developer ── */}
             {!settingsQueryTrimmed && tab === 'developer' && developerMode && (
               <div>
-                <h3 className="text-text-primary text-lg font-bold mb-4">Developer</h3>
-                <div className="mb-4 rounded-xl border border-[var(--border)] p-3">
-                  <div className="flex items-center gap-1.5 text-text-secondary text-xs font-medium mb-2">
-                    <Server size={13} />
-                    API servers
+                <SettingsTitle>Developer</SettingsTitle>
+                <SettingsGroup title="API servers" footer={<>Each rule sends requests under a path (like <code className="font-mono">/cdn</code> or <code className="font-mono">/chat</code>) to another API base; everything else uses the main API. The longest matching path wins. Changes take effect after a reload.</>}>
+                  <div className="py-3">
+                    <ApiServerRow />
+                    <RouteRulesEditor />
                   </div>
-                  <ApiServerRow />
-                  <RouteRulesEditor />
-                  <p className="text-text-muted text-[11px] mt-2.5">
-                    Each rule sends requests under a path (like <code className="font-mono">/cdn</code> or <code className="font-mono">/chat</code>) to another API base; everything else uses the main API. The longest matching path wins. Changes take effect after a reload.
-                  </p>
-                </div>
+                </SettingsGroup>
               </div>
             )}
 
             {/* ── About ── */}
             {!settingsQueryTrimmed && tab === 'about' && (
               <div>
-                <h3 className="text-text-primary text-lg font-bold mb-3">About</h3>
-                <p className="text-text-muted text-xs mb-1">
-                  unreleased v{APP_VERSION} &mdash; powered by{' '}
-                  <a href="https://juicewrldapi.com" target="_blank" rel="noopener noreferrer" className="text-accent hover:underline">
-                    juicewrldapi.com
-                  </a>
-                </p>
-                <p className="text-text-muted text-xs mb-3 flex items-center gap-1.5">
-                  <span>
-                    Last updated to commit{' '}
-                    <a
-                      href={`https://github.com/Juice-WRLD-API/Unreleased/commit/${COMMIT_HASH}`}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="text-accent font-mono hover:underline"
-                    >
-                      {COMMIT_HASH}
-                    </a>
-                  </span>
-                  <CommitFreshnessBulb />
-                </p>
-                <div className="flex flex-wrap gap-2 mb-4">
-                  <a
-                    href="https://github.com/Juice-WRLD-API/Unreleased"
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="flex items-center gap-1.5 text-xs text-text-muted hover:text-text-primary transition-colors px-3 py-1.5 rounded-full bg-[var(--surface-overlay)] hover:bg-[var(--surface-raised)] border border-[var(--border)]"
-                  >
-                    <Github size={13} />
-                    GitHub
-                  </a>
-                  <a
-                    href="https://discord.gg/jwa"
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="flex items-center gap-1.5 text-xs text-text-muted hover:text-text-primary transition-colors px-3 py-1.5 rounded-full bg-[var(--surface-overlay)] hover:bg-[var(--surface-raised)] border border-[var(--border)]"
-                  >
-                    <MessageCircle size={13} />
-                    Discord
-                  </a>
-                  <a
-                    href="https://juicewrldapi.com"
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="flex items-center gap-1.5 text-xs text-text-muted hover:text-text-primary transition-colors px-3 py-1.5 rounded-full bg-[var(--surface-overlay)] hover:bg-[var(--surface-raised)] border border-[var(--border)]"
-                  >
-                    <Globe size={13} />
-                    API
-                  </a>
+                <SettingsTitle>About</SettingsTitle>
+                <div className="glass-pane rounded-2xl p-5 mb-6 flex items-start gap-4">
+                  <div className="w-14 h-14 rounded-2xl bg-accent text-white flex items-center justify-center shrink-0 shadow-lg">
+                    <Disc size={28} />
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <p className="text-text-primary text-lg font-bold leading-tight">Unreleased</p>
+                    <p className="text-text-muted text-xs mt-0.5">
+                      Version {APP_VERSION} · powered by{' '}
+                      <a href="https://juicewrldapi.com" target="_blank" rel="noopener noreferrer" className="text-accent hover:underline">juicewrldapi.com</a>
+                    </p>
+                    <p className="text-text-muted text-xs mt-0.5 flex items-center gap-1.5">
+                      <span>
+                        Commit{' '}
+                        <a
+                          href={`https://github.com/Juice-WRLD-API/Unreleased/commit/${COMMIT_HASH}`}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="text-accent font-mono hover:underline"
+                        >
+                          {COMMIT_HASH}
+                        </a>
+                      </span>
+                      <CommitFreshnessBulb />
+                    </p>
+                    <div className="flex flex-wrap gap-2 mt-3">
+                      {([
+                        { href: 'https://github.com/Juice-WRLD-API/Unreleased', label: 'GitHub', icon: Github },
+                        { href: 'https://discord.gg/jwa', label: 'Discord', icon: MessageCircle },
+                        { href: 'https://juicewrldapi.com', label: 'API', icon: Globe },
+                      ]).map(({ href, label, icon: LinkIcon }) => (
+                        <a
+                          key={label}
+                          href={href}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="flex items-center gap-1.5 text-xs font-medium text-text-secondary hover:text-text-primary transition-colors px-3 py-1.5 rounded-full bg-[var(--fill)] hover:bg-[var(--fill-strong)]"
+                        >
+                          <LinkIcon size={13} />
+                          {label}
+                        </a>
+                      ))}
+                    </div>
+                  </div>
                 </div>
 
-                {(!account || (!account.is_editor && !account.is_administrator)) && (
-                  <button
-                    onClick={() => openMainView('editor')}
-                    className="flex items-center gap-2 w-full px-3 py-2.5 rounded-xl bg-accent/10 hover:bg-accent/15 border border-accent/25 text-accent text-sm font-medium transition-colors mt-2"
-                  >
-                    <PenLine size={15} />
-                    Become an Editor
-                  </button>
-                )}
-                {CONTRIBUTOR_ENABLED && (!account || (!account.is_contributor && !account.is_administrator)) && (
-                  <button
-                    onClick={() => openMainView('contributor')}
-                    className="flex items-center gap-2 w-full px-3 py-2.5 rounded-xl bg-sky-500/10 hover:bg-sky-500/15 border border-sky-500/25 text-sky-400 text-sm font-medium transition-colors mt-2"
-                  >
-                    <FolderOpen size={15} />
-                    Become a Contributor
-                  </button>
-                )}
-                <button
-                  onClick={() => openMainView('docs')}
-                  className="flex items-center gap-2 w-full px-3 py-2.5 rounded-xl bg-[var(--surface-raised)] hover:bg-[var(--surface-overlay)] border border-[var(--border)] text-text-secondary text-sm font-medium transition-colors mt-2"
-                >
-                  <BookOpen size={15} />
-                  API Docs
-                </button>
+                <SettingsGroup flush>
+                  {(!account || (!account.is_editor && !account.is_administrator)) && (
+                    <SettingsLink icon={PenLine} color="#2563eb" label="Become an editor" sub="Help keep song info right" onClick={() => openMainView('editor')} />
+                  )}
+                  {CONTRIBUTOR_ENABLED && (!account || (!account.is_contributor && !account.is_administrator)) && (
+                    <SettingsLink icon={FolderOpen} color="#0284c7" label="Become a contributor" sub="Help keep the file archive complete" onClick={() => openMainView('contributor')} />
+                  )}
+                  <SettingsLink icon={BookOpen} color="#0d9488" label="API docs" onClick={() => openMainView('docs')} />
+                  <SettingsLink icon={MessageCircle} color="#7c3aed" label="Send feedback" sub="Report a bug or share an idea" onClick={() => useStore.getState().openReport({ kind: 'feedback' })} />
+                  <SettingsLink icon={Heart} color="#db2777" label="Thank you" sub="Donors and contributors" onClick={() => openMainView('thanks')} />
+                </SettingsGroup>
 
-                <button
-                  onClick={() => useStore.getState().openReport({ kind: 'feedback' })}
-                  className="flex items-center gap-2 w-full px-3 py-2.5 rounded-xl bg-[var(--surface-raised)] hover:bg-[var(--surface-overlay)] border border-[var(--border)] text-text-secondary text-sm font-medium transition-colors mt-2"
-                >
-                  <MessageCircle size={15} />
-                  Send Feedback
-                </button>
-
-                <div className="mt-2 px-3 rounded-xl bg-[var(--surface-raised)] border border-[var(--border)]">
+                <SettingsGroup title="Debug log">
                   <Row
                     icon={Activity}
                     iconColor="#dc2626"
@@ -2218,44 +2108,20 @@ export default function Settings(): JSX.Element {
                   >
                     <DebugAnonymousToggle />
                   </Row>
-                </div>
+                </SettingsGroup>
 
-                <button
-                  onClick={() => openMainView('thanks')}
-                  className="flex items-center gap-2 w-full px-3 py-2.5 rounded-xl bg-[var(--surface-raised)] hover:bg-[var(--surface-overlay)] border border-[var(--border)] text-text-secondary text-sm font-medium transition-colors mt-2"
-                >
-                  <Heart size={15} />
-                  Thank You
-                </button>
-
-                <div className="mt-2 px-3 py-2.5 rounded-xl bg-[var(--surface-raised)] border border-[var(--border)]">
-                  <p className="flex items-center gap-2 text-text-secondary text-xs mb-2">
-                    <Heart size={13} className="text-accent shrink-0" />
-                    Enjoying the app? Donations help keep it running.
-                  </p>
-                  <div className="flex flex-col gap-1.5">
+                <SettingsGroup title="Support the app" footer="Donations help keep the servers running.">
+                  <div className="flex flex-col gap-1.5 py-3">
                     {DONATION_ADDRESSES.map(a => <DonationAddressRow key={a.label} label={a.label} value={a.value} />)}
                   </div>
-                </div>
+                </SettingsGroup>
 
-                <div className="grid grid-cols-2 gap-2 mt-2">
-                  <button
-                    onClick={() => openLegal('terms')}
-                    className="flex items-center gap-2 px-3 py-2.5 rounded-xl bg-[var(--surface-raised)] hover:bg-[var(--surface-overlay)] border border-[var(--border)] text-text-secondary text-sm font-medium transition-colors"
-                  >
-                    <ScrollText size={15} />
-                    Terms of Service
-                  </button>
-                  <button
-                    onClick={() => openLegal('privacy')}
-                    className="flex items-center gap-2 px-3 py-2.5 rounded-xl bg-[var(--surface-raised)] hover:bg-[var(--surface-overlay)] border border-[var(--border)] text-text-secondary text-sm font-medium transition-colors"
-                  >
-                    <ShieldCheck size={15} />
-                    Privacy Policy
-                  </button>
-                </div>
+                <SettingsGroup title="Legal" flush>
+                  <SettingsLink icon={ScrollText} color="#6b7280" label="Terms of Service" onClick={() => openLegal('terms')} />
+                  <SettingsLink icon={ShieldCheck} color="#6b7280" label="Privacy Policy" onClick={() => openLegal('privacy')} />
+                </SettingsGroup>
 
-                <div className="mt-4 rounded-xl border border-[var(--border)] overflow-hidden divide-y divide-[var(--border)]">
+                <SettingsGroup title="FAQ" flush>
                   {([
                     {
                       q: 'What is this?',
@@ -2275,16 +2141,16 @@ export default function Settings(): JSX.Element {
                       a: 'The Juice WRLD API is built with Django and PostgreSQL. This player (unreleased) is built with React, TypeScript, Vite, and Tailwind CSS.',
                     },
                   ] as { q: string; a: string; link?: { text: string } }[]).map(({ q, a, link }) => (
-                    <div key={q}>
+                    <div key={q} className="border-b border-[var(--border)] last:border-b-0">
                       <button
                         onClick={() => setOpenAbout(openAbout === q ? null : q)}
                         aria-expanded={openAbout === q}
-                        className="flex items-center justify-between w-full px-3 py-2.5 hover:bg-[var(--surface-raised)] transition-colors text-left"
+                        className="flex items-center justify-between w-full px-4 py-3 hover:bg-[var(--fill)] transition-colors text-left"
                       >
-                        <span className="text-text-secondary text-xs font-medium">{q}</span>
+                        <span className="text-text-primary text-sm">{q}</span>
                         <ChevronDown size={12} className={`text-text-muted control-motion shrink-0 ml-2 ${openAbout === q ? 'rotate-180' : ''}`} />
                       </button>
-                      <MotionDisclosure open={openAbout === q} className="px-3 pb-3 pt-0">
+                      <MotionDisclosure open={openAbout === q} className="px-4 pb-3 pt-0">
                         <p className="text-text-muted text-xs leading-relaxed">{a}</p>
                         {link && (
                           <button
@@ -2296,9 +2162,10 @@ export default function Settings(): JSX.Element {
                       </MotionDisclosure>
                     </div>
                   ))}
-                </div>
+                </SettingsGroup>
               </div>
             )}
+            </div>
           </div>
         </div>
       </div>

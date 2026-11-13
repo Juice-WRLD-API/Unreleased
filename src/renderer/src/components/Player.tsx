@@ -2839,16 +2839,17 @@ export default function Player(): JSX.Element {
           renders Player inside <main>), with views scrolling under it. The
           glass is a ::before layer: SongContextMenu's panels can be fixed
           without a portal, and backdrop-filter on the bar itself would pin
-          them to it. Expanding (the chevron or the cover) grows the bar into
-          WRLD, see expandToWrld. */}
+          them to it. Expanding (the chevron) grows the bar into WRLD, see
+          expandToWrld; the cover opens the Now Playing panel (999 FM has none,
+          so there it still opens WRLD). */}
       {barShown && (
       <div ref={dockRef} className={`app-player hidden md:flex glass-backdrop glass-specular glass-lift absolute z-30 left-2 right-2 bottom-2 mx-auto max-w-[1080px] items-center h-[88px] rounded-[22px] px-4 gap-4`} data-wrld-expand="bar" onContextMenu={(e) => { e.preventDefault(); if (currentTrack) { setCtxMenuPos({ x: e.clientX, y: e.clientY }); setShowContextMenu(true) } }}>
         {/* Track info */}
         <div className="flex items-center gap-3 w-72 min-w-[8rem] basis-[28%]">
           <button
             className="w-14 h-14 rounded-[10px] bg-surface-overlay shrink-0 overflow-hidden hover:ring-2 ring-accent transition-all"
-            onClick={expandToWrld}
-            title={radioFmActive ? '999FM' : 'Open WRLD'}
+            onClick={radioFmActive ? expandToWrld : () => setShowNowPlaying(!showNowPlaying)}
+            title={radioFmActive ? '999FM' : 'Now Playing'}
           >
             {radioFmActive ? (
               radioFmMatchedSong?.imageUrl

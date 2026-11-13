@@ -1,4 +1,5 @@
 import type { ElementType, ReactNode } from 'react'
+import { ChevronRight } from 'lucide-react'
 
 // ── Flat row primitive — no card/box, just an icon + label on the left and
 // a control on the right, separated by a hairline. Used inside each tab's
@@ -7,6 +8,70 @@ import type { ElementType, ReactNode } from 'react'
 // — a fixed color + white icon reads correctly in both themes, unlike the
 // plain `text-muted` icon this replaced, which nearly disappeared in light
 // mode. ──
+
+/** A titled glass card of rows, iOS Settings' inset-grouped list on the glass
+ *  chrome: a docked `.glass-pane`, so fields inside become plain fills of it.
+ *  Rows draw their own hairlines; the last child's is dropped here. `flush`
+ *  leaves out the side padding for rows that fill the card edge to edge. */
+export function SettingsGroup({ title, footer, children, flush, action }: {
+  title?: string
+  footer?: ReactNode
+  children: ReactNode
+  flush?: boolean
+  /** A small control on the title line, e.g. Reset. */
+  action?: ReactNode
+}): JSX.Element {
+  return (
+    <section className="mb-6 last:mb-0">
+      {(title || action) && (
+        <div className="flex items-end justify-between gap-3 mb-1.5 px-4">
+          {title && <h4 className="text-[11px] font-semibold uppercase tracking-wider text-text-muted">{title}</h4>}
+          {action}
+        </div>
+      )}
+      <div className={`glass-pane rounded-2xl [&>*:last-child]:border-b-0 ${flush ? '' : 'px-4'}`}>{children}</div>
+      {footer && <div className="text-text-muted text-[11px] leading-relaxed mt-1.5 px-4">{footer}</div>}
+    </section>
+  )
+}
+
+/** A row that opens something (a page, a view, a dialog), with a chevron.
+ *  For `flush` groups: it fills the card edge to edge. */
+export function SettingsLink({ icon: Icon, color, label, sub, onClick, tone }: {
+  icon: ElementType
+  color: string
+  label: string
+  sub?: string
+  onClick: () => void
+  tone?: 'danger'
+}): JSX.Element {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className="w-full flex items-center gap-3 px-4 py-2.5 text-left border-b border-[var(--border)] first:rounded-t-2xl last:rounded-b-2xl hover:bg-[var(--fill)] transition-colors"
+    >
+      <span className="w-7 h-7 rounded-lg flex items-center justify-center shrink-0" style={{ backgroundColor: color }}>
+        <Icon size={15} className="text-white" strokeWidth={2.25} />
+      </span>
+      <span className="min-w-0 flex-1">
+        <span className={`block text-sm ${tone === 'danger' ? 'text-red-400' : 'text-text-primary'}`}>{label}</span>
+        {sub && <span className="block text-text-muted text-[11px] truncate">{sub}</span>}
+      </span>
+      <ChevronRight size={16} className="text-text-muted shrink-0" />
+    </button>
+  )
+}
+
+/** The big title at the top of a Settings page. */
+export function SettingsTitle({ children, action }: { children: ReactNode; action?: ReactNode }): JSX.Element {
+  return (
+    <div className="flex items-center justify-between gap-3 mb-5">
+      <h3 className="text-text-primary text-2xl font-bold tracking-tight">{children}</h3>
+      {action}
+    </div>
+  )
+}
 
 export function Row({ icon: Icon, iconColor, label, sub, labelExtra, children }: {
   icon: ElementType

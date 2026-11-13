@@ -102,7 +102,8 @@ export type NavStyle = 'classic' | 'pill'
 // The Settings dialog's tabs - the union Settings.tsx keys its content off, and
 // the target for a deep-link open (see settingsTab). Keep in sync with the
 // `tab` state there.
-export type SettingsTab = 'account' | 'appearance' | 'preferences' | 'playback' | 'desktop' | 'shortcuts' | 'app' | 'developer' | 'feedback' | 'about'
+// 'preferences' and 'feedback' are older names Settings still accepts (now General and About).
+export type SettingsTab = 'account' | 'general' | 'appearance' | 'navigation' | 'playback' | 'lyrics' | 'connections' | 'desktop' | 'shortcuts' | 'app' | 'developer' | 'about' | 'preferences' | 'feedback'
 
 // ─── Non-queue state ──────────────────────────────────────────────────────────
 
@@ -1379,8 +1380,8 @@ export const useStore = create<AppStore>((set, get, store) => ({
   // persisted custom skin id resolves (getSkin) instead of falling back to the default skin.
   customSkins: hydrateCustomSkins(),
   theme: getSkin(ls.get<string>('theme') ?? DEFAULT_SKIN_ID).id,
-  sidebarPosition: ls.get<SidebarPosition>('sidebarPosition') ?? 'left',
-  navStyle: ls.get<NavStyle>('navStyle') ?? 'classic',
+  sidebarPosition: ls.get<SidebarPosition>('sidebarPosition') ?? 'bottom',
+  navStyle: ls.get<NavStyle>('navStyle') ?? 'pill',
   autoHideNav: ls.get<boolean>('autoHideNav') ?? false,
   autoHideNavZone: ls.get<number>('autoHideNavZone') ?? 24,
   navOrder: (() => {

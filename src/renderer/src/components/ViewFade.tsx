@@ -21,7 +21,7 @@ export default function ViewFade({ view, active, swap = 0, wholePageSwap = false
     if (swap && (wholePageSwap || el.querySelector('[data-swap]'))) { swapIn(el, swap, wholePageSwap); return }
     el.animate(
       [{ opacity: 0, transform: 'translateY(8px)' }, { opacity: 1, transform: 'none' }],
-      { duration: 280, easing: 'cubic-bezier(0.33, 0, 0.15, 1)' },
+      { duration: 200, easing: 'cubic-bezier(0.33, 0, 0.15, 1)' },
     )
     // Read at mount only, like the fade itself.
     // eslint-disable-next-line react-hooks/exhaustive-deps

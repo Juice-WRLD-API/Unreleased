@@ -24,7 +24,7 @@ const VIEWS: Record<string, ViewType> = {
   heardle: 'heardle', wordle: 'wordle', tierlist: 'tierlist', thanks: 'thanks', editor: 'editor', contributor: 'contributor',
   albums: 'albums', 'albums-admin': 'albums-admin',
 }
-const SETTINGS_TABS: SettingsTab[] = ['account', 'appearance', 'preferences', 'playback', 'desktop', 'shortcuts', 'app', 'developer', 'feedback', 'about']
+const SETTINGS_TABS: SettingsTab[] = ['account', 'general', 'appearance', 'navigation', 'playback', 'lyrics', 'connections', 'desktop', 'shortcuts', 'app', 'developer', 'about']
 const ADMIN_TABS: AdminTab[] = ['proposals', 'comp-proposals', 'comp-replace', 'cover-art', 'community-edits', 'applications', 'reports', 'feedback', 'users', 'stats', 'channels', 'news-channels', 'eras', 'cdn-nodes', 'beta', 'lyrics', 'thanks', 'logs']
 const OPEN_TARGETS = [...Object.keys(VIEWS), 'settings', 'profile', 'admin', 'queue', 'eq', 'diagnostics', 'identify', 'notifications', 'user', 'song']
 // `notifications` filters, by the names the notification area shows.

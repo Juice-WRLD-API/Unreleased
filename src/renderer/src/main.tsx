@@ -7,12 +7,14 @@ import { installTranslateDomGuard } from './lib/translateDomGuard'
 import { installDebugRecorder } from './lib/debugRecorder'
 import { installHoverScrollTruncated } from './lib/hoverScrollTruncated'
 import { installImageFade } from './lib/imageFade'
+import { installSmoothWheel } from './lib/smoothWheel'
 
 installDebugRecorder()
 installGlobalErrorLogging()
 installTranslateDomGuard()
 installHoverScrollTruncated()
 installImageFade()
+installSmoothWheel()
 
 // iOS home-screen apps have shipped several WebKit versions that size the
 // viewport as if Safari's bottom toolbar could still appear - chrome that

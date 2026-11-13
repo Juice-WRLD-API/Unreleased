@@ -153,7 +153,9 @@ function EqBars({ paused }: { paused: boolean }): JSX.Element {
 
 // ─── View ─────────────────────────────────────────────────────────────────────
 
-export default function ApiFilesView({ embedded = false }: { embedded?: boolean }): JSX.Element {
+// `onMine` is the desktop browser's "My files" source button; phones keep the
+// switch the wrapper draws above this page.
+export default function ApiFilesView({ embedded = false }: { embedded?: boolean; onMine?: () => void }): JSX.Element {
   const {
     playTrack, playNext, addToQueue, apiFilesPath, setApiFilesPath, apiFilesLastPath, setApiFilesLastPath,
     account, setActiveView, setPendingEditorSongId, setPendingCompProposal, likedTrackIds,

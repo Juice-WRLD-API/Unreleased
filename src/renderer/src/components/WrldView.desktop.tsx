@@ -2085,6 +2085,16 @@ const ProgressBar = memo(function ProgressBar({ txtPri, txtTer, trackBg }: { txt
   // Buffer the scrub position visually while dragging - only call seekAudio
   // on release, since seeking on every mousemove makes playback glitch/stutter.
   const [dragPct, setDragPct] = useState<number | null>(null)
+  // The right-hand time flips between time left and the song's length; the choice sticks.
+  const [showLeft, setShowLeft] = useState(() => {
+    try { return localStorage.getItem('wrldTimeLeft') !== '0' } catch { return true }
+  })
+  const toggleTimeEnd = useCallback(() => {
+    setShowLeft((v) => {
+      try { localStorage.setItem('wrldTimeLeft', v ? '0' : '1') } catch { /* private mode */ }
+      return !v
+    })
+  }, [])
 
   const pctFromClientX = useCallback((clientX: number): number | null => {
     const bar = barRef.current
@@ -2159,7 +2169,13 @@ const ProgressBar = memo(function ProgressBar({ txtPri, txtTer, trackBg }: { txt
       </div>
       <div className="flex justify-between">
         <span className="text-[10px] tabular-nums" style={{ color: txtTer }}>{formatDuration(displayTime)}</span>
-        <span className="text-[10px] tabular-nums" style={{ color: txtTer }}>{duration > 0 ? `-${formatDuration(remaining)}` : '--:--'}</span>
+        <button
+          type="button"
+          onClick={toggleTimeEnd}
+          title={showLeft ? 'Show song length' : 'Show time left'}
+          className="text-[10px] tabular-nums rounded px-1 -mx-1 transition-opacity hover:opacity-70 active:opacity-50"
+          style={{ color: txtTer }}
+        >{duration > 0 ? (showLeft ? `-${formatDuration(remaining)}` : formatDuration(duration)) : '--:--'}</button>
       </div>
     </div>
   )

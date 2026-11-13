@@ -31,6 +31,13 @@ export interface AccountUser {
   // see Username + Password Auth docs). discord_username is empty for the
   // latter, so this is the fallback wherever a handle must never be blank.
   username?: string
+  // false while `username` is still the `discord_<id>` placeholder. Optional:
+  // older servers and cached profiles omit these sign-in fields.
+  username_chosen?: boolean
+  has_password?: boolean
+  username_changed_at?: string | null
+  // When the next rename is allowed; null when it is allowed now.
+  username_next_change_at?: string | null
   discord_avatar: string
   avatar?: string
   bio?: string
@@ -468,6 +475,42 @@ export async function registerAccount(payload: {
     method: 'POST',
     body: JSON.stringify(payload),
   }, false)
+}
+
+export interface UsernameCheck {
+  username: string
+  available: boolean
+  reason: string | null
+}
+
+/** Live availability check for the sign-up and rename forms (no auth). */
+export async function checkUsername(username: string): Promise<UsernameCheck> {
+  const url = new URL(`${ACCOUNT_BASE}/auth/username-available/`)
+  url.searchParams.set('username', username)
+  return request(url.toString(), { method: 'GET' }, false)
+}
+
+/** Pick a username (Discord accounts start without one) or change it; once every 14 days. */
+export async function changeUsername(username: string): Promise<AccountUser> {
+  const result = await request<AccountUser>(`${ACCOUNT_BASE}/account/username/`, {
+    method: 'POST',
+    body: JSON.stringify({ username }),
+  })
+  cacheSet(ME_URL, result)
+  return result
+}
+
+/** Add a first password (no current one needed) or change it. A change signs other devices out. */
+export async function changePassword(payload: {
+  new_password: string
+  current_password?: string
+}): Promise<{ user: AccountUser; signed_out: number }> {
+  const result = await request<{ user: AccountUser; signed_out: number }>(`${ACCOUNT_BASE}/account/password/`, {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  })
+  cacheSet(ME_URL, result.user)
+  return result
 }
 
 export async function passwordLogin(payload: {
