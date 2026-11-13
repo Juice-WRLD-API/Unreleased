@@ -105,6 +105,18 @@ function currentIosEq(): IosEqSettings | null {
 
 function startIosPrefetch(streamUrl: string): void {
   if (iosPrefetch?.streamUrl === streamUrl) return
+  // The entry being replaced is usually the song that's playing right now (it
+  // was reached through this prefetch). Dropping it revokes the blob URL the
+  // element is still reading from: Safari then runs out of data partway
+  // through the tail and the native loop wraps early, which reads as the song
+  // ending - a skip somewhere in its last 90 seconds. Hand that copy to
+  // iosEqCurrent instead, which holds it until the song changes.
+  const held = iosPrefetch
+  if (held?.blobUrl && held.streamUrl === useStore.getState().currentTrack?.streamUrl
+    && iosEqCurrent?.streamUrl !== held.streamUrl) {
+    setIosEqCurrent({ streamUrl: held.streamUrl, source: held.source, blobUrl: held.blobUrl, eqKey: held.eqKey })
+    iosPrefetch = null
+  }
   dropIosPrefetch()
   const eq = currentIosEq()
   const entry: NonNullable<typeof iosPrefetch> = { streamUrl, blobUrl: null, ctrl: new AbortController(), source: null, eqKey: iosEqKey(eq) }
@@ -591,7 +603,10 @@ export default function Player(): JSX.Element {
   const observeNativeLoop = (audio: HTMLAudioElement): boolean => {
     const previous = loopPositions.get(audio)
     loopPositions.set(audio, { src: audio.src, time: audio.currentTime })
-    return !!(audio.loop && previous?.src === audio.src && audio.currentTime < previous.time)
+    // A wrap lands near zero from near the end. Safari's clock can also step
+    // back a few milliseconds after a rebuffer or an audio route change, and
+    // that must not count as the song ending.
+    return !!(audio.loop && previous?.src === audio.src && previous.time - audio.currentTime > 0.5)
   }
   // Explicit seeks must not look like the browser wrapping a native loop.
   const seekSlot = (audio: HTMLAudioElement, time: number): void => {
@@ -2041,6 +2056,9 @@ export default function Player(): JSX.Element {
     // the switch. This is a background-continuity workaround, not gapless audio.
     if (looped && !abLooping) {
       if (useStore.getState().repeat === 'one') return // already restarted natively
+      // Logged with the position it wrapped from: a wrap well short of the
+      // length is a skip, and this is the only trace of where it happened.
+      runLog('playback', `iOS loop wrap on "${currentTrack?.title}" from ${lastProgressTime.current.toFixed(1)}s of ${dur.toFixed(1)}s - advancing`)
       onAudioEnded(audio)
       return
     }
