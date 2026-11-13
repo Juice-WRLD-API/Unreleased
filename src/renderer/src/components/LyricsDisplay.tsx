@@ -7,6 +7,7 @@ import { trackIdToSongId } from '../lib/userApi'
 import { isDonorStreamUrl } from '../lib/donorPlayback'
 import { seekAudio, getAudioCurrentTime } from './Player'
 import ContextMenu from './ContextMenu'
+import WordLyricLine from './WordLyricLine'
 
 interface LyricsDisplayProps {
   /** Playback-clock source for synced-line highlighting. Defaults to the live
@@ -187,7 +188,9 @@ export default memo(function LyricsDisplay({ getTime, onSeek, compact, override 
               className="lyric-line leading-snug cursor-pointer font-bold"
               style={lineStyle}
             >
-              {splitAdLibs(line.text).map((seg, si) => (
+              {line.words ? (
+                <WordLyricLine words={line.words} active={isActive} getTime={getTime ?? getAudioCurrentTime} offset={lyricsOffset} />
+              ) : splitAdLibs(line.text).map((seg, si) => (
                 <span key={si} style={seg.adLib ? { opacity: ADLIB_OPACITY } : undefined}>
                   {splitColorWords(seg.text).map((cseg, ci) => (
                     cseg.color

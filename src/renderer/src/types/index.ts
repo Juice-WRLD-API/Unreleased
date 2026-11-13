@@ -158,9 +158,18 @@ export interface OfflinePlaylistEntry {
   updatedAt: number
 }
 
+export interface SyncedLyricWord {
+  text: string
+  start: number // seconds
+  end: number
+}
+
 export interface SyncedLyricLine {
   time: number // seconds
   text: string
+  /** Word times from enhanced LRC (`<0:06.88>No,`), when the line has them.
+   *  Joined with single spaces, the words' text is `text`. */
+  words?: SyncedLyricWord[]
 }
 
 export type ViewType = 'home' | 'api-tracker' | 'api-files' | 'editor' | 'admin' | 'contributor' | 'contributor-profile' | 'liked' | 'playlists' | 'shared-playlist' | 'public-profile' | 'editor-profile' | 'docs' | 'wrld' | 'albums' | 'albums-admin' | 'news' | 'heardle' | 'wordle' | 'tierlist' | 'stats' | 'statistics' | 'download' | 'thanks' | 'settings' | 'chat' | 'terminal' | 'track' | 'not-found'

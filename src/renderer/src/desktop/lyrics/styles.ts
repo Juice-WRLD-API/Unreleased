@@ -87,8 +87,8 @@ interface KaraokeRow { el: HTMLDivElement; sharp: HTMLCanvasElement; soft: HTMLC
 /** How long the column stays where the reader scrolled it before it goes back to the line sung. */
 const BROWSE_TIME = 4000
 
-/** A sing-along: the lines in a column gliding up, the one sung large and bright, lit whole as it begins - not word
- *  by word; the others smaller, faint, the near ones softly out of focus. Every word as written, adlibs too, in the
+/** A sing-along: the lines in a column gliding up, the one sung large and bright, lit whole as it begins - or word by
+ *  word, as each is sung, when the lyrics time their words; the others smaller, faint, the near ones softly out of focus. Every word as written, adlibs too, in the
  *  app's lyric size and colors. The wheel scrolls the column, every line readable while it's away, and a click on a
  *  line plays the song from it (when the host gives the scene a way to seek). */
 export class KaraokeScene extends LyricScene {
@@ -194,10 +194,16 @@ export class KaraokeScene extends LyricScene {
       before.lit = []
     }
     const sungRow = this.current != null ? this.rows.get(this.current) : undefined
+    const byWord = this.current != null && !!this.lines[this.current]?.wordTimed
     if (this.current != null && sungRow && !sungRow.lit.length) {
       const lit = this.light(this.current, sungRow.el)
       sungRow.lit = lit
-      if (animated) lit.forEach((el) => this.animate(el, [{ opacity: 0 }, { opacity: 1 }], { duration: 0.25 }))
+      // Word-timed: every bright word waits, dark, for sing to light it.
+      if (byWord) lit.forEach((el) => { el.style.opacity = '0' })
+      else if (animated) lit.forEach((el) => this.animate(el, [{ opacity: 0 }, { opacity: 1 }], { duration: 0.25 }))
+    } else if (byWord && sungRow && !animated) {
+      // Set again (a jump within the line): dark until sing says which words are sung by now.
+      sungRow.lit.forEach((el) => { el.getAnimations().forEach((a) => a.cancel()); el.style.opacity = '0' })
     }
     this.settle(animated)
     this.slide(animated)
@@ -375,6 +381,15 @@ export class KaraokeScene extends LyricScene {
     // Reading with the pointer on the lines keeps the column where it is.
     el.addEventListener('pointermove', () => { if (this.browse != null) this.waitToFollow() })
     return { el, sharp, soft, lit: [] }
+  }
+
+  /** A word of a word-timed line lit as it's sung; a line timed only as a whole was lit whole already. */
+  sing(index: number, line: SceneLine, delay: number, animated: boolean): void {
+    if (!line.wordTimed || line.index !== this.current) return
+    const el = this.rows.get(line.index)?.lit[index]
+    if (!el) return
+    if (animated) this.animate(el, [{ opacity: 0 }, { opacity: 1 }], { duration: 0.18, delay })
+    else el.style.opacity = '1'
   }
 
   /** The line sung, lit whole as it begins: its words the dim ones' bright copies, glowing. */

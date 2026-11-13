@@ -209,6 +209,8 @@ interface AppState {
   radioFmVoteDismissed: boolean
   radioFmUpNext: import('../lib/radioLive').RadioTrack | null
   radioFmQueuePreview: string[]
+  /** Everyone tuned in (site and Discord), as the station last said; null until it has. */
+  radioFmListeners: number | null
   radioFmMatchedSong: { songId: number | null; imageUrl: string | null; path: string | null; lyrics: string | null; syncedLyrics: string | null; era: string | null } | null
   theme: SkinId
   // User-created skins (built in the in-app editor or imported). Local-first
@@ -592,6 +594,7 @@ interface AppActions {
   setRadioFmVoteDismissed: (dismissed: boolean) => void
   setRadioFmUpNext: (track: import('../lib/radioLive').RadioTrack | null) => void
   setRadioFmQueuePreview: (preview: string[]) => void
+  setRadioFmListeners: (count: number | null) => void
   setRadioFmMatchedSong: (song: { songId: number | null; imageUrl: string | null; path: string | null; lyrics: string | null; syncedLyrics: string | null; era: string | null } | null) => void
   setShowSettings: (show: boolean) => void
   setSettingsTab: (tab: SettingsTab | null) => void
@@ -1375,6 +1378,7 @@ export const useStore = create<AppStore>((set, get, store) => ({
   radioFmVoteDismissed: false,
   radioFmUpNext: null,
   radioFmQueuePreview: [],
+  radioFmListeners: null,
   radioFmMatchedSong: null,
   // Seeds lib/skins' cache as a side effect - MUST stay above `theme` so a
   // persisted custom skin id resolves (getSkin) instead of falling back to the default skin.
@@ -1491,6 +1495,7 @@ export const useStore = create<AppStore>((set, get, store) => ({
   setRadioFmVoteDismissed: (radioFmVoteDismissed) => set({ radioFmVoteDismissed }),
   setRadioFmUpNext: (radioFmUpNext) => set({ radioFmUpNext }),
   setRadioFmQueuePreview: (radioFmQueuePreview) => set({ radioFmQueuePreview }),
+  setRadioFmListeners: (radioFmListeners) => set({ radioFmListeners }),
   setRadioFmMatchedSong: (radioFmMatchedSong) => set({ radioFmMatchedSong }),
   setShowSettings: (show) => {
     const s = get()

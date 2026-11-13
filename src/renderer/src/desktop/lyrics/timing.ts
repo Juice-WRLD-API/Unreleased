@@ -1,5 +1,6 @@
-// The app's lyrics, timed word by word for the lyric styles. Unreleased times its lyrics line by line (LRC), so each
-// line's words are spread over the time it's sung, by syllables, never slower than an easy pace; lyrics with no
+// The app's lyrics, timed word by word for the lyric styles. Most of Unreleased's lyrics are timed line by line (LRC),
+// so a line without word times of its own (enhanced LRC) has its words spread over the time it's sung, by syllables,
+// never slower than an easy pace; lyrics with no
 // timing at all are given an even pace over the song. "(yeah)" and "[uh]" are adlibs, kept apart from the words -
 // though a style may sing every word as written instead (Karaoke).
 // Pure logic, so it can be checked on its own.
@@ -12,6 +13,8 @@ export interface TimedLine {
   adlibs: TimedWord[]
   /** Every word as written, the adlibs in their place: for a style that sings them in the line. */
   all?: TimedWord[]
+  /** The words' times are the lyrics' own (enhanced LRC), not spread over the line. */
+  wordTimed?: boolean
 }
 export interface TimedLyrics { lines: TimedLine[]; isSynced: boolean }
 
@@ -63,15 +66,22 @@ export function separate(words: TimedWord[]): { words: TimedWord[]; adlibs: Time
   return { words: kept, adlibs }
 }
 
-/** Line-timed lyrics (the app's SyncedLyricLine), shifted by the lyrics offset, timed word by word. */
-export function timedFromLines(lines: readonly { time: number; text: string }[], offset = 0): TimedLyrics {
-  const sorted = lines.map((l) => ({ time: l.time + offset, text: l.text })).sort((a, b) => a.time - b.time)
+/** Line-timed lyrics (the app's SyncedLyricLine), shifted by the lyrics offset, timed word by word. A line with word
+ *  times of its own (enhanced LRC) keeps them; the rest are spread. */
+export function timedFromLines(lines: readonly { time: number; text: string; words?: readonly TimedWord[] }[], offset = 0): TimedLyrics {
+  const sorted = lines
+    .map((l) => ({
+      time: l.time + offset,
+      text: l.text,
+      words: l.words?.length ? l.words.map((w) => ({ text: w.text, start: w.start + offset, end: w.end + offset })) : null,
+    }))
+    .sort((a, b) => a.time - b.time)
   return {
     isSynced: true,
     lines: sorted.map((line, i) => {
       const next = sorted[i + 1] ? sorted[i + 1].time : null
-      const all = spread(line.text, line.time, next)
-      return { time: line.time, text: line.text, all, ...separate(all) }
+      const all = line.words ?? spread(line.text, line.time, next)
+      return { time: line.time, text: line.text, all, ...separate(all), ...(line.words ? { wordTimed: true } : {}) }
     }),
   }
 }

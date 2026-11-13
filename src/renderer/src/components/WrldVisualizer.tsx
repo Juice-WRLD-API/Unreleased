@@ -94,7 +94,7 @@ interface Props {
   /** 999 FM toggle, shown in the toolbar. */
   fm: { active: boolean; live: boolean; label: string; disabled: boolean; toggle: () => void
     /** Which panel the FM column shows. */
-    tab: 'radio' | 'lyrics'; setTab: (t: 'radio' | 'lyrics') => void }
+    tab: 'radio' | 'chat' | 'lyrics'; setTab: (t: 'radio' | 'chat' | 'lyrics') => void }
   onEnter: () => void
   onExit: () => void
 }
@@ -326,7 +326,7 @@ export default function WrldVisualizer({
   // app's "Toggle lyrics" hotkey; this only follows the stores to announce it.
   const showQueue = useStore((s) => s.showQueue)
   const lyricsVisible = fm.active ? !lyricsOverride : hasLyrics !== lyricsOverride
-  const panel: 'off' | 'lyrics' | 'queue' | 'radio' = fm.active
+  const panel: 'off' | 'lyrics' | 'queue' | 'radio' | 'chat' = fm.active
     ? (lyricsVisible ? fm.tab : 'off')
     : showQueue ? 'queue' : lyricsVisible ? 'lyrics' : 'off'
 
@@ -334,7 +334,7 @@ export default function WrldVisualizer({
   useEffect(() => {
     if (seenPanel.current === panel) return
     seenPanel.current = panel
-    announce(panel === 'queue' ? 'Queue' : panel === 'radio' ? 'Radio' : panel === 'lyrics' ? 'Lyrics' : 'Panel off')
+    announce(panel === 'queue' ? 'Queue' : panel === 'radio' ? 'Radio' : panel === 'chat' ? 'Chat' : panel === 'lyrics' ? 'Lyrics' : 'Panel off')
   }, [panel, announce])
   // ←/→ and V. Capture phase so these run before the Player's document-level
   // hotkeys and stop them for the keys handled here; anything else (Space,
@@ -489,7 +489,7 @@ export default function WrldVisualizer({
             )}
             {IS_ELECTRON && settingsTab === 'desktop' ? <DesktopSettings heading={false} /> : (
               <>
-                <VizControls modes={false} />
+                <VizControls modes={false} wrldStyle />
                 <p className="mt-4 mb-3 pt-4 border-t border-[var(--border)] text-text-secondary text-xs font-semibold">Lyrics</p>
                 <LyricsControls />
               </>

@@ -75,6 +75,7 @@ export default function AmbientBackdrop(): JSX.Element {
           className={`app-ambient-art${l.shown ? ' is-shown' : ''}`}
           onLoad={() => show(l.id, l.src)}
           onError={() => drop(l.id)}
+          stallMs={4000}
         />
       ))}
       <div className="app-ambient-tint" />

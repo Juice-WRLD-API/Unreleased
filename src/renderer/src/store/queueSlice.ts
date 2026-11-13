@@ -60,6 +60,10 @@ export interface QueueSlice {
   queue: Track[]
   queueIndex: number
   currentTrack: Track | null
+  /** Id of the current track while its preferred-version check is still
+   *  running. Player loads nothing for it until this clears, so a song that
+   *  swaps (to its session, say) never plays the queued copy first. */
+  versionSwapPending: string | null
   isPlaying: boolean
   progress: number
   currentTime: number
@@ -349,9 +353,26 @@ async function resolveVersionSwap(track: Track, preferOg: boolean): Promise<Trac
  *  per-song default, no exclusions, and the global toggle off - rather than
  *  pay a /versions/ round trip on every track change for the common case. */
 function preferredVersionOf(track: Track, preferOg: boolean): Promise<Track | null> {
-  if (!preferOg && !hasAnyDefaultVersion() && !hasAnyExcludedVersion()) return Promise.resolve(null)
+  if (!mightSwapVersion(preferOg)) return Promise.resolve(null)
   return resolveVersionSwap(track, preferOg)
 }
+
+function mightSwapVersion(preferOg: boolean): boolean {
+  return preferOg || hasAnyDefaultVersion() || hasAnyExcludedVersion()
+}
+
+/** Track ids whose version check already ran before they became current (the
+ *  up-next look-ahead, radio's pick), so reaching them doesn't hold the audio
+ *  for the check a second time. */
+const versionChecked = new Set<string>()
+function markVersionChecked(id: string): void {
+  if (versionChecked.size > 500) versionChecked.clear()
+  versionChecked.add(id)
+}
+
+/** Longest the audio waits on a version check before playing the queued copy
+ *  anyway (a hung request). The swap still lands if the check finishes later. */
+const VERSION_HOLD_MAX_MS = 5000
 
 // ─── Slice factory ────────────────────────────────────────────────────────────
 
@@ -391,6 +412,7 @@ export const createQueueSlice: StateCreator<any, [], [], QueueSlice> = (set, get
     if (!next || next.id === prev.queue[prev.queueIndex + 1]?.id) return
     preferredVersionOf(next, get().preferOgVersion)
       .then((swapped) => {
+        markVersionChecked((swapped ?? next).id)
         if (!swapped) return
         const now: QueueSlice = get()
         if (now.queue[i]?.id !== next.id || now.queueIndex + 1 !== i) return
@@ -416,6 +438,7 @@ export const createQueueSlice: StateCreator<any, [], [], QueueSlice> = (set, get
   queue: [],
   queueIndex: -1,
   currentTrack: null,
+  versionSwapPending: null,
   isPlaying: false,
   progress: 0,
   currentTime: 0,
@@ -920,6 +943,7 @@ export const createQueueSlice: StateCreator<any, [], [], QueueSlice> = (set, get
       // instead of the picked one playing for a moment and then switching.
       const track = (await preferredVersionOf(picked, get().preferOgVersion).catch(() => null)) ?? picked
       if (!live()) return
+      markVersionChecked(track.id)
       clearTimeout(timeout)
       const wasWaiting = get()._radioWaiting
       set({ radioNext: track, _radioWaiting: false })
@@ -992,19 +1016,33 @@ export const createQueueSlice: StateCreator<any, [], [], QueueSlice> = (set, get
 
   // ── Preferred-version swap ─────────────────────────────────────────────────
   _maybeSwapToPreferredVersion: (track) => {
-    preferredVersionOf(track, get().preferOgVersion)
+    const preferOg = get().preferOgVersion
+    if (!mightSwapVersion(preferOg)) return
+    // Hold the audio until the check answers, unless it already ran ahead -
+    // otherwise the queued copy played for the few seconds the lookup took
+    // and then cut over to the preferred version.
+    const hold = !versionChecked.has(track.id)
+    const release = (): void => {
+      if (get().versionSwapPending === track.id) set({ versionSwapPending: null })
+    }
+    const timer = hold ? setTimeout(release, VERSION_HOLD_MAX_MS) : null
+    if (hold) set({ versionSwapPending: track.id })
+    resolveVersionSwap(track, preferOg)
       .then((swapped) => {
-        if (!swapped) return
+        if (!swapped) { markVersionChecked(track.id); release(); return }
         const state = get()
         // Bail if the user has since moved on to a different track.
-        if (state.currentTrack?.id !== track.id) return
+        if (state.currentTrack?.id !== track.id) { release(); return }
+        markVersionChecked(swapped.id)
         withoutPlayHistory(() => set({
           currentTrack: swapped,
           currentTrackFull: null,
+          versionSwapPending: null,
           queue: state.queue.map((t: Track) => (t.id === track.id ? swapped : t)),
         }))
       })
-      .catch(() => {})
+      .catch(release)
+      .finally(() => { if (timer) clearTimeout(timer) })
   },
   }
 }

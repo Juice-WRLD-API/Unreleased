@@ -1,7 +1,7 @@
 // The Lyrics Ticker's line: the one being sung now, else the song's name and artist - between lines, before the words
 // come, and when they aren't timed. Read from the app's own lyrics (FM's matched song while 999 FM plays).
 import { useStore } from '../store/useStore'
-import { getAudioCurrentTime } from '../components/Player'
+import { playingSeconds } from './playClock'
 import { getCurrentLineIndex, isLrcFormat, parseLrc } from '../lib/lyrics'
 import type { SyncedLyricLine } from '../types'
 
@@ -19,6 +19,6 @@ export function tickerLine(): string {
     : (s.currentTrackFull && s.currentTrackFull.id === s.currentTrack?.id ? s.currentTrackFull.syncedLyrics || s.currentTrackFull.lyrics : null)
   if (!raw || !isLrcFormat(raw)) return name
   if (raw !== parsedFor) { parsedFor = raw; parsed = parseLrc(raw) }
-  const i = getCurrentLineIndex(parsed, getAudioCurrentTime() - s.lyricsOffset)
+  const i = getCurrentLineIndex(parsed, playingSeconds() - s.lyricsOffset)
   return (i >= 0 ? parsed[i]?.text?.trim() : '') || name
 }

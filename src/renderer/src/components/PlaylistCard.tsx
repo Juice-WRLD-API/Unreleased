@@ -1,5 +1,5 @@
-import { ReactNode } from 'react'
-import { Play, MoreHorizontal, CheckSquare2, Square } from 'lucide-react'
+import { ReactNode, useEffect, useRef, useState } from 'react'
+import { Play, MoreHorizontal, CheckSquare2, Square, Loader2 } from 'lucide-react'
 import { useLongPress } from '../hooks/useLongPress'
 
 // One playlist tile in the library grid. Presentational only - the caller owns
@@ -8,15 +8,31 @@ import { useLongPress } from '../hooks/useLongPress'
 // this markup three times. Extracted from PlaylistsView when folders needed a
 // third place to draw the exact same tile.
 
-function CardPlayOverlay({ onPlay }: { onPlay: () => void }): JSX.Element {
+// A synced playlist's Play has to fetch the playlist first, which can take a
+// second or two on a big one. While its promise is pending the button spins and
+// stays visible, so the click doesn't look dead.
+function CardPlayOverlay({ onPlay }: { onPlay: () => void | Promise<unknown> }): JSX.Element {
+  const [pending, setPending] = useState(false)
+  const mounted = useRef(true)
+  useEffect(() => () => { mounted.current = false }, [])
+  const handle = (): void => {
+    if (pending) return
+    const result = onPlay()
+    if (!(result instanceof Promise)) return
+    setPending(true)
+    void result.catch(() => {}).finally(() => { if (mounted.current) setPending(false) })
+  }
   return (
     <div className="absolute inset-0 bg-black/0 group-hover:bg-black/20 transition-colors">
       <button
-        onClick={(e) => { e.stopPropagation(); e.nativeEvent.stopImmediatePropagation(); onPlay() }}
-        className="absolute bottom-2 right-2 w-9 h-9 rounded-full bg-accent text-black shadow-lg flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity hover:scale-110"
-        title="Play"
+        onClick={(e) => { e.stopPropagation(); e.nativeEvent.stopImmediatePropagation(); handle() }}
+        className={`absolute bottom-2 right-2 w-9 h-9 rounded-full bg-accent text-black shadow-lg flex items-center justify-center transition-opacity hover:scale-110 ${pending ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'}`}
+        title={pending ? 'Loading…' : 'Play'}
+        aria-busy={pending}
       >
-        <Play size={15} fill="currentColor" className="ml-0.5" />
+        {pending
+          ? <Loader2 size={15} className="animate-spin" />
+          : <Play size={15} fill="currentColor" className="ml-0.5" />}
       </button>
     </div>
   )
@@ -44,7 +60,8 @@ export default function PlaylistCard({
   onLongPress?: () => void
   /** The always-visible "⋯" button (distinct from right-click). */
   onMenuButton: (e: React.MouseEvent) => void
-  onPlay: () => void
+  /** Return a promise to show a spinner on the button until it settles. */
+  onPlay: () => void | Promise<unknown>
   /** Drag-to-move-into-a-folder support - all optional so cards that are
    *  neither draggable nor droppable (e.g. the "Liked Songs" tile) don't
    *  need to pass any of this. */

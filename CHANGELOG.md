@@ -10,6 +10,10 @@ Releases before 1.20.9 were built from the same code as the desktop app. Their n
 
 ## [Unreleased]
 
+- **New** **999 FM chat**: a live chat beside the radio. In WRLD, a 999 FM card joins the widgets while the radio is on, showing how many people are listening, with a Radio side (vote to skip or queue, suggest the next song, up next) and a Chat side; drag it anywhere, fold it to its header, or turn it off in Settings → Lyrics & WRLD. The old WRLD style's 999 FM panel gets a Chat tab. No account needed: pick a name and talk. Signed in, your lines carry your username and a verified mark. Admins can turn the whole chat off in one click, or just guests (people without an account) so signed-in listeners keep talking, and can clear it, delete lines and ban people. The terminal has `fmchat` and, for admins, `fmmod`
+- **Improve** 999 FM votes: when a vote ends, listeners get a short note saying whether it passed, with the tally. On WRLD the vote card now pops up whenever the 999 FM card isn't showing the vote (folded, on Chat, or turned off); before, WRLD's default layout showed no vote at all
+- **Fix** A song set to play a preferred version (its session, say) starts as that version, instead of playing the playlist's copy for a few seconds and then switching
+- **Fix** Switching to Playlists with a big playlist open no longer freezes the app for a second or two in the compact and grid layouts, which now only draw the rows on screen, like the list layout
 - **New** **Desktop**, in Settings → Desktop: the lyric styles, an Edge light and the widgets for the WRLD tab, following what you play. Everything starts off
   - **Widgets in WRLD**: the player, playlist and clock inside the WRLD tab, over the visualizer, from the toolbar's Widgets button or Layout → Widgets in the visualizer settings. Drag them about the tab; each can be left out in Settings → Desktop
   - **Lyric styles** for the WRLD tab: Fisheye, Spread, Karaoke, Typewriter, Neon, Echo, Glitch and Cinema, sung word by word, each in a font of your choice, with a note through instrumental breaks

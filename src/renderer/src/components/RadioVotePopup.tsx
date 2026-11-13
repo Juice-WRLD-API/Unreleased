@@ -2,16 +2,20 @@ import { useEffect, useRef, useState } from 'react'
 import { SkipForward, ThumbsUp, ThumbsDown, X, Radio } from 'lucide-react'
 import { useStorePick } from '../store/useStore'
 import { getActiveRadioClient } from '../lib/radioSocketService'
+import { useVizStore } from '../store/vizStore'
 
 // App-wide 999 FM vote popup. The WRLD view has its own inline vote panel, but
 // a skip/queue vote is time-limited and listeners aren't always looking at that
 // page - this floats over every other view so people actually see when it's
-// time to vote. Suppressed on the WRLD view itself to avoid a double control.
+// time to vote. Suppressed on the WRLD view while WRLD shows the vote itself:
+// the old style's FM panel, or the Widgets layout's 999 FM card open on Radio.
+// Folded, on Chat or turned off, the card doesn't show it, so this does.
 export default function RadioVotePopup(): JSX.Element | null {
   const {
     radioFmActive, radioFmVote, activeView,
     radioFmVoteDismissed, setRadioFmVoteDismissed,
   } = useStorePick('radioFmActive', 'radioFmVote', 'activeView', 'radioFmVoteDismissed', 'setRadioFmVoteDismissed')
+  const wrldShowsVote = useVizStore((s) => !s.wrldWidgets || (s.wrldFm && !s.wrldFmCollapsed && s.wrldFmTab === 'radio'))
 
   const [myVote, setMyVote] = useState<'yes' | 'no' | null>(null)
   const [voteError, setVoteError] = useState(false)
@@ -61,8 +65,8 @@ export default function RadioVotePopup(): JSX.Element | null {
   useEffect(() => () => { if (countdownRef.current) clearInterval(countdownRef.current) }, [])
 
   // Only surface for tuned-in listeners, when a vote is live and undismissed,
-  // and not on the WRLD view (its inline panel already covers this).
-  if (!radioFmActive || !radioFmVote?.active || radioFmVoteDismissed || activeView === 'wrld') return null
+  // and not where WRLD already shows it.
+  if (!radioFmActive || !radioFmVote?.active || radioFmVoteDismissed || (activeView === 'wrld' && wrldShowsVote)) return null
 
   const isSkip = radioFmVote.kind === 'skip'
   // The server silently drops votes from a socket it hasn't seen listening:true

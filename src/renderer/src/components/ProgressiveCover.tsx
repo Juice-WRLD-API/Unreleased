@@ -86,7 +86,7 @@ function Progressive({ src: rawSrc, alt = '', className = '', onError, lazy = fa
  *  1024px cap (fullCoverUrl) like every other full-size cover, since a custom
  *  cover's original can be a 20MB+ PNG - falling back to that whenever
  *  `small=1` flaked turned a ~5KB request into the whole file. */
-export function FallbackImg({ sources, alt = '', className, style, onError, lazy = false, onLoad }: {
+export function FallbackImg({ sources, alt = '', className, style, onError, lazy = false, onLoad, stallMs }: {
   sources: (string | null | undefined)[]
   alt?: string
   className?: string
@@ -94,10 +94,21 @@ export function FallbackImg({ sources, alt = '', className, style, onError, lazy
   onError?: ReactEventHandler<HTMLImageElement>
   lazy?: boolean
   onLoad?: () => void
+  /** Move on to the next source when this one hasn't loaded by then. A request
+   *  the API never answers fires neither load nor error, and a cover waiting
+   *  on it stays blank for the whole song. Leave unset for lazy images. */
+  stallMs?: number
 }): JSX.Element | null {
   const [failed, setFailed] = useState<string[]>([])
+  const [loaded, setLoaded] = useState<string | null>(null)
   const remaining = [...new Set(sources.map(fullCoverUrl).filter((s): s is string => !!s && !failed.includes(s)))]
   const showing = remaining[0]
+  const hasNext = remaining.length > 1
+  useEffect(() => {
+    if (!stallMs || !showing || !hasNext || loaded === showing) return
+    const t = setTimeout(() => setFailed((f) => (f.includes(showing) ? f : [...f, showing])), stallMs)
+    return () => clearTimeout(t)
+  }, [stallMs, showing, hasNext, loaded])
   if (!showing) return null
   return (
     <img
@@ -106,7 +117,7 @@ export function FallbackImg({ sources, alt = '', className, style, onError, lazy
       className={className}
       style={style}
       {...(lazy ? imageLoadAttrs(showing, true) : { decoding: imageLoadAttrs(showing, false).decoding })}
-      onLoad={() => { markImageLoaded(showing); onLoad?.() }}
+      onLoad={() => { markImageLoaded(showing); setLoaded(showing); onLoad?.() }}
       onError={(e: SyntheticEvent<HTMLImageElement>) => {
         if (remaining.length <= 1) onError?.(e)
         setFailed((f) => [...f, showing])

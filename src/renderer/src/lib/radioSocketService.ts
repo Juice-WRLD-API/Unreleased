@@ -8,7 +8,7 @@ const CLIENT_ID_KEY = 'radioClientId'
 // A durable id for this browser profile. Without it the server can only identify
 // a listener by socket, so every reload looks like a new voter and every extra
 // tab like another one - which quietly inflates the vote threshold.
-function radioClientId(): string {
+export function radioClientId(): string {
   try {
     const existing = localStorage.getItem(CLIENT_ID_KEY)
     if (existing) return existing
@@ -81,6 +81,16 @@ export class RadioStreamClient {
 
   isListening(): boolean {
     return this.listening
+  }
+
+  /** How far what this listener hears trails the live edge, in ms. The station's `elapsed_ms` is
+   *  the song's position at the live edge, while the audio plays from up to LIVE_LAG_SEC behind it
+   *  (more over HTTP, where the server's prebuffer starts each listener in the past). */
+  listenLagMs(): number {
+    const el = this.audioEl
+    if (!this.listening || !el || !el.buffered.length) return 0
+    const lag = el.buffered.end(el.buffered.length - 1) - el.currentTime
+    return lag > 0 && lag < 60 ? lag * 1000 : 0
   }
 
   connect(): void {
