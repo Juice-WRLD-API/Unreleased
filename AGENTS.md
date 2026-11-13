@@ -1,6 +1,6 @@
 # Agent guide: Juice WRLD API and Unreleased
 
-**Version 1.66** · updated 2026-11-12. Bump the version and date whenever you
+**Version 1.73** · updated 2026-11-13. Bump the version and date whenever you
 change this file (minor for fixes and additions, major for rewrites).
 
 **Keep this file current.** If you find something in the docs or this file that
@@ -168,6 +168,12 @@ public track links. Mixing them up fails silently.
   in the page, the Windows desktop app uses a helper window, and the mobile builds
   and the CLI can only list, rename and remove them. See `lib/passkeyApi.ts` and
   `docs/08-accounts.md`.
+- `/account/me/` returns `username`, which is the `discord_<id>` placeholder
+  until a Discord account picks one (`username_chosen: false`). Never show it
+  as a handle in that state. Any account can pick a username and add a
+  password (`/account/username/`, `/account/password/`; Settings → Account →
+  Sign-in, terminal `username` / `password`). Renames are allowed once every
+  14 days (`username_next_change_at`).
 - Two "who am I" endpoints: `/accounts/account/me/` (any user; also holds
   preferences, settings, playlist folders) and `/accounts/me/` (editor/admin
   dashboards).
@@ -468,13 +474,32 @@ Node 22.
 - **Animation**: gentle-start curves (e.g. `cubic-bezier(0.4,0,0.2,1)`, about
   0.45–0.65 s), transform and opacity only, no animating width/height/left on
   heavy elements, no scaling text, no child entrance stacked inside a parent's,
-  respect `prefers-reduced-motion`. No expo-out curves.
+  respect `prefers-reduced-motion`. No expo-out curves. Page changes are
+  the exception and stay quick: the tab swipe (`lib/dashboardSwap.ts`) lands
+  in about 0.36 s and ViewFade takes 0.2 s, since at 0.63 s tab switching felt
+  slow (the user's call, 2026-11-13).
+- **Wheel scrolling** glides, iOS-style, in every scroller of every window:
+  `lib/smoothWheel.ts` (installed in `main.tsx`) takes mouse-wheel events at
+  the window and eases the scroller under the pointer. Trackpads, ctrl+wheel
+  and reduced motion stay native. A wheel handler of your own must call
+  `preventDefault` to keep the wheel; a scroller that needs native wheel
+  steps (snap points, custom wheel logic) takes `data-native-wheel`. Scroll
+  snapping and `scroll-behavior: smooth` scrollers are skipped already.
 - **Palette changes**: never transition the skin variables on `<html>`
   (`--surface`, `--accent`…). Every element restyles on every frame and skin
   switches lag. Write them through `paintPalette` in `lib/themeEffects.ts`,
   which cross-fades with a view transition.
-- **Glass chrome (desktop, `app` and `web`)**: the iOS-style glass look is the default on
-  every skin, with no toggle (the user's call, 2026-11-12). The desktop player
+- **Glass chrome (`app` and `web`, phones included)**: the iOS-style glass look is the default on
+  every skin, with no toggle (the user's call, 2026-11-12; phones followed on
+  2026-11-13). On `web` the glass tokens, `.glass*` fills, `.app-ambient` and
+  the see-through `body` / `#root` / `.app-shell` apply at every width, and
+  `AmbientBackdrop` renders on phones too (lighter blur, stronger tint). Phone
+  screens use `.glass-card` (inset-grouped lists, tiles, grid cards; add
+  `relative` yourself, a positioning class would beat a card a virtualized grid
+  places `absolute`) and `.glass-track` (search field, segmented track) in
+  place of `bg-[var(--grouped)]` / `bg-[var(--fill)]`; both turn into plain
+  fills inside a pane or card. Detail-page hero art fades with a mask, not into
+  `var(--surface)`. The rest of this bullet is about the desktop shell. The desktop player
   bar floats over the bottom of `<main>` and publishes `--player-dock`. A view
   on `SCROLL_UNDER` in `App.tsx` runs under it and must pad every scroller it
   can show with `.pb-player` (a `sticky bottom-0` bar also takes
@@ -495,6 +520,13 @@ Node 22.
   `glassPillButton` from `components/glassControls.ts` for search fields and
   buttons. Inside a `.glass-pane` they turn into plain fills by themselves.
   Dialogs keep their own controls: the veil is see-through.
+- **Settings pages** (`app`, and `web` desktop and phone, 2026-11-13) are iOS-style grouped glass cards:
+  `SettingsTitle`, `SettingsGroup` and `SettingsLink` in
+  `components/SettingsRow.tsx`. Put a new row inside the right group, not
+  loose on the page, and give it a `SETTINGS_SEARCH_INDEX` entry with the
+  page it is on. Controls inside a group use `--fill` / `--fill-strong`, not
+  `--surface-overlay` with a border. Old tab ids still open the right page
+  (`tabFromLink`: Preferences became General and Navigation).
 - **backdrop-filter pins fixed children**: it makes its element the containing
   block for `position: fixed` descendants, the way `transform` does. Put it
   straight on an element only if nothing inside is a fixed popover without a
@@ -532,6 +564,23 @@ Node 22.
 
 Newest first. One entry each: date, what went wrong, what to do instead. Delete
 entries that stop being true.
+
+- 2026-11-13: Fuzzy patching (`patch -F3`, `git apply --3way`) put the grouped
+  Settings hunks on the wrong rows of `web`, whose `Settings.desktop.tsx` is a
+  fork 800 lines shorter than `Settings.tsx`. Merge a forked file with
+  `git merge-file <web copy> <app HEAD copy> <app working copy>`, then take the
+  app side, drop the Electron-only pages (Library, App, pop-outs, updater) and
+  restore what only web has: Sandbox and Developer options live under General →
+  Advanced there, Smooth fade is hidden on iOS. `npx tsc --noEmit` on web lists
+  every reference the merge left dangling. Web files are CRLF in the working
+  tree and LF in git; strip the CRs (`sed -i 's/$//'`) before scripted edits.
+
+- 2026-11-13: Every pinned ffmpeg checksum in `FFMPEG_SHA256` (`main.js`)
+  was one or two characters short since v2.0.0, so the on-demand ffmpeg
+  download always failed with "Checksum mismatch" and ALAC files could not
+  play. Take pinned hashes from the release itself
+  (`gh api repos/<owner>/<repo>/releases/tags/<tag> --jq '.assets[] | "\(.name) \(.digest)"'`),
+  never retype them; `electron/toolChecksums.test.js` checks the length.
 
 - 2026-11-12: The first glass relay treated the renderer work as Electron-only
   and missed the web desktop shell, Home and staff dashboards, WRLD entrance

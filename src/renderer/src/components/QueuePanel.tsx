@@ -167,7 +167,7 @@ export default function QueuePanel(): JSX.Element {
         )}
 
         {/* Scrollable body */}
-        <div className="flex-1 overflow-y-auto" style={{ scrollbarWidth: 'thin' }}>
+        <div className="flex-1 overflow-y-auto glass-scroll" style={{ '--scroll-top-inset': '0px' } as React.CSSProperties}>
 
           {/* ── History ── (collapsible, above now playing) */}
           {history.length > 0 && (

@@ -143,7 +143,8 @@ export type AppMenuPosition = 'title-bar' | 'sidebar' | 'hidden'
 // The Settings dialog's tabs � the union Settings.tsx keys its content off, and
 // the target for a deep-link open (see settingsTab). Keep in sync with the
 // `tab` state there.
-export type SettingsTab = 'account' | 'appearance' | 'preferences' | 'playback' | 'desktop' | 'shortcuts' | 'library' | 'app' | 'developer' | 'feedback' | 'about'
+// 'preferences' and 'feedback' are older names Settings still accepts (now General and About).
+export type SettingsTab = 'account' | 'general' | 'appearance' | 'navigation' | 'playback' | 'lyrics' | 'connections' | 'desktop' | 'shortcuts' | 'library' | 'app' | 'developer' | 'about' | 'preferences' | 'feedback'
 
 // The detached ("pop-out") BrowserWindows the desktop build can open instead of
 // rendering a view inline (see FloatApp). Each can be turned off individually:
@@ -1534,9 +1535,9 @@ export const useStore = create<AppStore>((set, get, store) => ({
   customSkins: hydrateCustomSkins(),
   // getSkin() maps unknown persisted ids (renamed/removed skins) back to dark.
   theme: getSkin(ls.get<string>('theme') ?? DEFAULT_SKIN_ID).id,
-  sidebarPosition: ls.get<SidebarPosition>('sidebarPosition') ?? 'left',
+  sidebarPosition: ls.get<SidebarPosition>('sidebarPosition') ?? 'bottom',
   appMenuPosition: ls.get<AppMenuPosition>('appMenuPosition') ?? 'sidebar',
-  navStyle: ls.get<NavStyle>('navStyle') ?? 'classic',
+  navStyle: ls.get<NavStyle>('navStyle') ?? 'pill',
   autoHideNav: ls.get<boolean>('autoHideNav') ?? false,
   autoHideNavZone: ls.get<number>('autoHideNavZone') ?? 24,
   navOrder: (() => {

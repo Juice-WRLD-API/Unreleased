@@ -9,7 +9,7 @@ import {
   X, Pencil, PackageOpen, CheckSquare2, Square, MonitorSmartphone, Globe, Search,
   Filter, MoreHorizontal, Clipboard, Plus, ListMusic, Replace, Trash2, Tags,
   FolderPlus, FilePlus, ExternalLink, FileText, RefreshCw, Upload,
-  FolderInput, CornerLeftUp, Sparkles, FolderSearch,
+  FolderInput, CornerLeftUp, Sparkles, FolderSearch, Cloud,
 } from 'lucide-react'
 import { FolderJumpBox } from './FolderJumpBox'
 import { LocalPathBox } from './LocalPathBox'
@@ -198,7 +198,13 @@ function LocalCoverThumb({ path, size = 36, fill = false }: { path: string; size
   )
 }
 
-export default function ApiFilesBrowser({ embedded = false }: { embedded?: boolean } = {}): JSX.Element {
+export default function ApiFilesBrowser({ embedded = false, startLocal = false, onMine }: {
+  embedded?: boolean
+  /** Open on this computer's files (coming back from My files). */
+  startLocal?: boolean
+  /** Donors: adds "My files" to the source switch; the parent swaps the page. */
+  onMine?: () => void
+} = {}): JSX.Element {
   const { playTrack, playNext, addToQueue, apiFilesPath, setApiFilesPath, apiFilesLastPath, setApiFilesLastPath, account, setActiveView, setPendingEditorSongId, setPendingCompProposal, likedTrackIds, toggleLike, playlists, setShowUserAuth, channels, activeChannel, setActiveChannel, loadChannels, openBulkFileEditor } = useStorePick('playTrack', 'playNext', 'addToQueue', 'apiFilesPath', 'setApiFilesPath', 'apiFilesLastPath', 'setApiFilesLastPath', 'account', 'setActiveView', 'setPendingEditorSongId', 'setPendingCompProposal', 'likedTrackIds', 'toggleLike', 'playlists', 'setShowUserAuth', 'channels', 'activeChannel', 'setActiveChannel', 'loadChannels', 'openBulkFileEditor')
   const isPrimary = isPrimaryChannelSlug(channels, activeChannel)
   const canEdit = userApi.isChannelEditor(account, activeChannel, isPrimary)
@@ -271,7 +277,7 @@ export default function ApiFilesBrowser({ embedded = false }: { embedded?: boole
 
   // Local files mode (Electron only)
   const isElectron = navigator.userAgent.includes('Electron')
-  const [localMode, setLocalMode] = useState(false)
+  const [localMode, setLocalMode] = useState(startLocal && navigator.userAgent.includes('Electron'))
   const [localPath, setLocalPath] = useState('')
   const [localEntries, setLocalEntries] = useState<LocalEntry[]>([])
   const [localLoading, setLocalLoading] = useState(false)
@@ -937,15 +943,16 @@ export default function ApiFilesBrowser({ embedded = false }: { embedded?: boole
                   { value: 'grid', icon: <LayoutGrid size={15} />, title: 'Grid view' },
                 ]}
               />
-              {/* API / Local toggle (Electron only) */}
-              {isElectron && (
+              {/* API / Local (Electron only) / My files (donors) */}
+              {(isElectron || onMine) && (
                 <GlassSegmented
                   ariaLabel="Source"
                   value={localMode ? 'local' : 'api'}
-                  onChange={(v) => setLocalMode(v === 'local')}
+                  onChange={(v) => { if (v === 'mine') onMine?.(); else setLocalMode(v === 'local') }}
                   options={[
                     { value: 'api', label: 'API', icon: <Globe size={12} />, title: 'Browse API files' },
-                    { value: 'local', label: 'Local', icon: <MonitorSmartphone size={12} />, title: 'Browse local files' },
+                    ...(isElectron ? [{ value: 'local', label: 'Local', icon: <MonitorSmartphone size={12} />, title: 'Browse local files' }] : []),
+                    ...(onMine ? [{ value: 'mine', label: 'My files', icon: <Cloud size={12} />, title: 'Your own cloud storage' }] : []),
                   ]}
                 />
               )}
@@ -1018,7 +1025,7 @@ export default function ApiFilesBrowser({ embedded = false }: { embedded?: boole
                   <Home size={15} className="text-text-muted" />
                 </button>
                 {jumpOpen ? (
-                  <FolderJumpBox channel={activeChannel} onJump={(p) => navigate(p)} onClose={() => setJumpOpen(false)} />
+                  <FolderJumpBox channel={activeChannel} current={currentPath} onJump={(p) => navigate(p)} onClose={() => setJumpOpen(false)} />
                 ) : (
                 <div
                   className="flex items-center gap-0.5 overflow-hidden ml-1 flex-1 min-w-0 self-stretch cursor-text"

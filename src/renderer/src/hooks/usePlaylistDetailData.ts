@@ -18,9 +18,16 @@ export function usePlaylistDetailData(selectedId: number | null, isSharedView: b
   setCoverImgError: React.Dispatch<React.SetStateAction<boolean>>
   loadDetail: (id: number, shared?: boolean) => Promise<void>
 } {
-  const [detail, setDetail] = useState<PlaylistDetail | null>(null)
+  // Seeded from the cache on mount, so a playlist that's open when the view
+  // swipes in (lib/dashboardSwap) is the finished page in that first frame,
+  // not an empty one whose tracks pop in mid-swipe once loadDetail runs.
+  const [detail, setDetail] = useState<PlaylistDetail | null>(() =>
+    selectedId != null ? userApi.peekPlaylistDetail(selectedId) ?? null : null)
   const [loadingDetail, setLoadingDetail] = useState(false)
-  const [coverData, setCoverData] = useState<CoverData | null>(null)
+  const [coverData, setCoverData] = useState<CoverData | null>(() => {
+    const c = selectedId != null ? userApi.peekPlaylistCover(selectedId) : undefined
+    return c ? { cover_image: c.cover_image, cover_image_url: c.cover_image_url } : null
+  })
   const [coverLoading, setCoverLoading] = useState(false)
   const [coverImgError, setCoverImgError] = useState(false)
 

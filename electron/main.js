@@ -606,7 +606,7 @@ let skipCloseConfirm = false
 // song swaps the open info window's content rather than stacking windows).
 // Store state is mirrored between windows by the 'window-sync' relay below.
 const FLOAT_SIZES = {
-  settings:      { width: 860,  height: 640, minWidth: 520, minHeight: 420 },
+  settings:      { width: 1080, height: 800, minWidth: 600, minHeight: 480 },
   'song-info':   { width: 540,  height: 760, minWidth: 420, minHeight: 480 },
   editor:        { width: 1000, height: 760, minWidth: 700, minHeight: 520 },
   // Wider than the API editor: the local tag editor carries more field cards
@@ -3254,11 +3254,11 @@ ipcMain.handle('download-to-library', async (_, { url, songName, artist, songPat
 // different binary without the checksum catching it before it's ever chmod'd
 // or executed.
 const FFMPEG_SHA256 = {
-  'win32-x64': '8883a3dffbd0a16cf4ef95206ea05283f78908dbfb118f73c83f4951dcc06d7',
-  'darwin-x64': '929b375c1182d956c51f7ac25e0b2b0411fb01f6f407aa15c9758efeb424210',
-  'darwin-arm64': '8923876afa8db5585022d7860ec7e589af192f441c56793971276d450ed3bb',
-  'linux-x64': 'bfe8a8fc511530457b528c48d77b5737527b504a3797a9bc4866aeca69c2dff',
-  'linux-arm64': '754a678672298bc68156adff58aa7385a592c2b30b1d0ae8750c45c915c4bac',
+  'win32-x64': '8883a3dffbd0a16cf4ef95206ea05283f78908dbfb118f73c83f4951dcc06d77',
+  'darwin-x64': '929b375c1182d956c51f7ac25e0b2b0411fb01f6f407aa15c9758efeb4242106',
+  'darwin-arm64': '8923876afa8db5585022d7860ec7e589af192f441c56793971276d450ed3bbfa',
+  'linux-x64': 'bfe8a8fc511530457b528c48d77b5737527b504a3797a9bc4866aeca69c2dffa',
+  'linux-arm64': '754a678672298bc68156adff58aa7385a592c2b30b1d0ae8750c45c915c4bac0',
 }
 
 const TOOL_SPECS = {

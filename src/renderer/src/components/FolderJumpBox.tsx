@@ -9,19 +9,26 @@ import type { JWApiFileEntry } from '../lib/juicewrldApi'
 // a path) and jump straight there, anywhere in the channel's tree. Matches
 // come from the channel's full file index; while the server is still
 // building it, the plain search fills in.
-export function FolderJumpBox({ channel, onJump, onClose }: {
+export function FolderJumpBox({ channel, current = '', onJump, onClose }: {
   channel: string
+  // The folder being browsed. The box opens holding it, selected, so it can be
+  // copied; typing or pasting replaces it.
+  current?: string
   onJump: (path: string) => void
   onClose: () => void
 }): JSX.Element {
-  const [query, setQuery] = useState('')
+  const [query, setQuery] = useState(current)
+  const [edited, setEdited] = useState(false)
   const [results, setResults] = useState<JWApiFileEntry[]>([])
   const [loading, setLoading] = useState(false)
   const [active, setActive] = useState(0)
+  const inputRef = useRef<HTMLInputElement>(null)
   const listRef = useRef<HTMLDivElement>(null)
 
+  useEffect(() => { inputRef.current?.select() }, [])
+
   useEffect(() => {
-    if (!query.trim()) { setResults([]); setLoading(false); return }
+    if (!edited || !query.trim()) { setResults([]); setLoading(false); return }
     let cancelled = false
     setLoading(true)
     const t = setTimeout(() => {
@@ -34,7 +41,7 @@ export function FolderJumpBox({ channel, onJump, onClose }: {
         .finally(() => { if (!cancelled) setLoading(false) })
     }, 80)
     return () => { cancelled = true; clearTimeout(t) }
-  }, [query, channel])
+  }, [query, channel, edited])
 
   useEffect(() => {
     listRef.current?.querySelector(`[data-index="${active}"]`)?.scrollIntoView({ block: 'nearest' })
@@ -50,9 +57,11 @@ export function FolderJumpBox({ channel, onJump, onClose }: {
     <div className="relative flex-1 min-w-0 ml-1">
       <FolderSearch size={13} className="absolute left-2 top-1/2 -translate-y-1/2 text-text-muted pointer-events-none" />
       <input
+        ref={inputRef}
         autoFocus
         value={query}
-        onChange={(e) => setQuery(e.target.value)}
+        spellCheck={false}
+        onChange={(e) => { setQuery(e.target.value); setEdited(true) }}
         onBlur={onClose}
         onKeyDown={(e) => {
           if (e.key === 'Escape') { e.preventDefault(); onClose() }
@@ -64,7 +73,7 @@ export function FolderJumpBox({ channel, onJump, onClose }: {
         className="w-full bg-surface-overlay border border-accent/40 rounded-md pl-7 pr-7 py-1 text-xs text-text-primary placeholder:text-text-muted focus:outline-none"
       />
       {loading && <Loader2 size={12} className="absolute right-2 top-1/2 -translate-y-1/2 text-text-muted animate-spin" />}
-      {query.trim() && !loading && (
+      {edited && query.trim() && !loading && (
         <PopLayer
           ref={listRef}
           className="absolute left-0 right-0 top-full mt-1 z-40 max-h-72 overflow-y-auto bg-surface border border-[var(--border)] rounded-lg shadow-2xl py-1 animate-menu-pop"

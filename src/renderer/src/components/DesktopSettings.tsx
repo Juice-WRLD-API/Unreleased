@@ -12,7 +12,7 @@ import { listenToMeter } from '../desktop/meter'
 import { desktopApi, desktopWindowsSupported, type DesktopDisplay } from '../desktop/api'
 import { lazyOverlay } from '../lib/lazyView'
 import ThemedSelect from './ThemedSelect'
-import { Row, Toggle } from './SettingsRow'
+import { Row, Toggle, SettingsTitle } from './SettingsRow'
 
 // Settings > Desktop: what came over from iJWA. The groups open one at a time, so the tab never grows past the
 // window, and the one left open is open next time. Everything that draws outside the app window (the light round the
@@ -23,8 +23,9 @@ const DesktopPicker = lazyOverlay(() => import('./DesktopPicker'))
 
 type GroupId = 'light' | 'colors' | 'lyrics' | 'player' | 'playlist' | 'clock' | 'displays'
 
-const SELECT_CLASS = 'bg-[var(--surface-overlay)] text-text-primary text-xs rounded-lg px-2 py-1.5 border border-[var(--border)] min-w-0 max-w-[180px]'
-const BUTTON_CLASS = 'flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-[var(--surface-overlay)] hover:bg-[var(--surface-raised)] border border-[var(--border)] text-text-secondary hover:text-text-primary text-xs font-medium transition-colors shrink-0'
+const SELECT_CLASS = 'bg-[var(--fill)] text-text-primary text-xs rounded-full px-3 py-1.5 border border-transparent min-w-0 max-w-[180px]'
+const CARD_CLASS = 'glass-pane rounded-2xl px-4 mb-6 [&>*:last-child]:border-b-0'
+const BUTTON_CLASS = 'flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-[var(--fill)] hover:bg-[var(--fill-strong)] text-text-secondary hover:text-text-primary text-xs font-medium transition-colors shrink-0'
 
 function Group({ id, open, onToggle, icon: Icon, color, title, sub, children }: {
   id: GroupId
@@ -304,23 +305,27 @@ export default function DesktopSettings({ heading = true }: { heading?: boolean 
 
   return (
     <div>
-      {heading && <h3 className="text-text-primary text-lg font-bold mb-1">Desktop</h3>}
-      <p className="text-text-muted text-xs mb-3">
+      {heading && <SettingsTitle>Desktop</SettingsTitle>}
+      <p className={`text-text-muted text-xs ${heading ? 'mb-5 px-1 leading-relaxed' : 'mb-3'}`}>
         {windows
           ? 'Light round your screens, a player, playlist and clock on the desktop, and new lyric styles. Everything follows what Unreleased plays.'
           : 'New lyric styles and an Edge light for the WRLD tab. The light round the screen and the desktop widgets are on Windows.'}
       </p>
 
       {windows && (
-        <>
+        <div className={heading ? CARD_CLASS : undefined}>
           <Row icon={Sparkles} iconColor="#0f766e" label="Clear desk" sub="Covers each display showing the desktop, its icons and taskbar too; a display with an app open is left as it is, and an app coming forward under it brings it all back">
             <button onClick={() => desktopApi()?.clearDesk()} className={BUTTON_CLASS}>Clear desk</button>
           </Row>
           <Row icon={AudioWaveform} iconColor="#7c3aed" label="Visualizer on the cleared desk" sub="WRLD's visualizer behind the widgets instead of the wallpaper">
             <Toggle on={desktop.clear.visualizer} onClick={() => set({ clear: { visualizer: !desktop.clear.visualizer } })} />
           </Row>
-        </>
+        </div>
       )}
+
+      {/* In Settings every section is one row of a glass card; in WRLD's
+          settings popup they stay a plain list. */}
+      <div className={heading ? CARD_CLASS : undefined}>
 
       <Group id="light" open={open === 'light'} onToggle={toggle} icon={Sun} color="#f59e0b" title={windows ? 'Light' : 'Edge light'}
         sub={windows ? 'A glow round your screens that moves with the music' : 'The light round the WRLD visualizer, and how it looks'}>
@@ -437,6 +442,7 @@ export default function DesktopSettings({ heading = true }: { heading?: boolean 
           </Group>
         </>
       )}
+      </div>
 
       {picker && (
         <DesktopPicker

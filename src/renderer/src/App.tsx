@@ -10,7 +10,7 @@ import { lazyOverlay, lazyView } from './lib/lazyView'
 import { preloadAllViews } from './lib/lazyViews'
 import { ViewType } from './types'
 import ViewFade from './components/ViewFade'
-import { captureLeaving, dashboardSwap, reducedMotion } from './lib/dashboardSwap'
+import { captureLeaving, dashboardSwap, isWholePageSwap, reducedMotion } from './lib/dashboardSwap'
 import { useWrldExpandUnder } from './lib/wrldExpand'
 
 // Views that stay mounted (hidden) underneath the terminal so their local
@@ -242,15 +242,17 @@ export default function App(): JSX.Element {
   const lastViewRef = useRef<ViewType>(activeView)
   const fromViewRef = useRef<ViewType | null>(null)
   const leavingRef = useRef<(() => void) | null>(null)
+  // This switch's swipe direction (dashboardSwap), for the incoming view's ViewFade.
+  const swapDirRef = useRef<0 | 1 | -1>(0)
   if (lastViewRef.current !== activeView) {
     const from = lastViewRef.current
     fromViewRef.current = from
     lastViewRef.current = activeView
-    const dir = dashboardSwap(from, activeView)
+    const dir = dashboardSwap(from, activeView, useStore.getState().navOrder)
+    swapDirRef.current = dir
     const box = viewBoxRef.current
     const page = box?.querySelector(`:scope [data-view="${from}"]`)?.firstElementChild
-    const wholePage = from === 'api-tracker' || from === 'api-files' || from === 'playlists' || activeView === 'api-tracker' || activeView === 'api-files' || activeView === 'playlists'
-    leavingRef.current = dir && box && page && !reducedMotion() ? captureLeaving(box, page, dir, wholePage) : null
+    leavingRef.current = dir && box && page && !reducedMotion() ? captureLeaving(box, page, dir, isWholePageSwap(from, activeView)) : null
   }
   useLayoutEffect(() => {
     const play = leavingRef.current
@@ -478,7 +480,7 @@ export default function App(): JSX.Element {
             {/* ViewFade: each view fades/lifts in as it comes on screen. */}
             {HOLD_UNDER_TERMINAL.map((v) => (activeView === v || heldView === v || wrldUnder === v) && (
               <ViewFade key={v} view={v} active={activeView === v || wrldUnder === v}
-                swap={v === activeView ? dashboardSwap(fromViewRef.current, v) : 0} wholePageSwap>
+                swap={v === activeView ? swapDirRef.current : 0} wholePageSwap={isWholePageSwap(fromViewRef.current, v)}>
                 {v === 'editor' ? <EditorPage />
                   : v === 'contributor' ? <ContributorPage />
                   : v === 'albums-admin' ? <AlbumsAdminView />
@@ -491,8 +493,8 @@ export default function App(): JSX.Element {
                 fills the box absolutely, with its own Suspense, so that page
                 stays on screen while WRLD's chunk loads. */}
             {shownViews.map((v) => (
-            <ViewFade key={v} view={v} active swap={v === activeView ? dashboardSwap(fromViewRef.current, v) : 0}
-              wholePageSwap={v === 'api-tracker' || v === 'api-files' || v === 'playlists' || fromViewRef.current === 'api-tracker' || fromViewRef.current === 'api-files' || fromViewRef.current === 'playlists'}>
+            <ViewFade key={v} view={v} active swap={v === activeView ? swapDirRef.current : 0}
+              wholePageSwap={isWholePageSwap(fromViewRef.current, v)}>
               {v === 'wrld' ? (
                 <div className={`absolute inset-0 flex ${wrldUnder ? 'z-10' : ''}`}>
                   <Suspense fallback={null}><WrldView /></Suspense>

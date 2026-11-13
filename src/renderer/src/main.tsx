@@ -11,12 +11,14 @@ import { installDebugRecorder } from './lib/debugRecorder'
 import { initDebugRecorderSync } from './components/DebugRecorder'
 import { installHoverScrollTruncated } from './lib/hoverScrollTruncated'
 import { installImageFade } from './lib/imageFade'
+import { installSmoothWheel } from './lib/smoothWheel'
 
 installDebugRecorder()
 installGlobalErrorLogging()
 installTranslateDomGuard()
 installHoverScrollTruncated()
 installImageFade()
+installSmoothWheel()
 
 // Pop-out windows boot this same bundle with ?float=<view> (see main.js
 // createFloatWindow) and mount a single view instead of the full app. Every

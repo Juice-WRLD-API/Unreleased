@@ -82,13 +82,21 @@ function useFixedWindow(
   rowCount: number,
   rowStride: number,
   overscan: number,
+  chunk = 1,
 ): VirtualWindow {
   const rangeAt = useCallback((top: number, height: number): Range => {
     if (rowStride <= 0 || rowCount === 0) return { start: 0, end: rowCount }
-    const start = Math.min(rowCount, Math.max(0, Math.floor(top / rowStride) - overscan))
-    const end = Math.min(rowCount, Math.ceil((top + height) / rowStride) + overscan)
+    // A chunk above 1 snaps both ends outward to multiples of it, so the
+    // range (and the list's render) changes once every `chunk` rows rather
+    // than on every row that crosses the edge. For lists inside big views,
+    // where a render per row drops frames mid-scroll.
+    const step = Math.max(1, chunk)
+    const first = Math.floor(top / rowStride) - overscan
+    const last = Math.ceil((top + height) / rowStride) + overscan
+    const start = Math.min(rowCount, Math.max(0, Math.floor(first / step) * step))
+    const end = Math.min(rowCount, Math.ceil(last / step) * step)
     return { start, end: Math.max(start, end) }
-  }, [rowCount, rowStride, overscan])
+  }, [rowCount, rowStride, overscan, chunk])
   return useWindowRange(scroll, content, rangeAt, rowCount, Math.max(0, rowCount * rowStride))
 }
 
@@ -110,8 +118,9 @@ export function useVirtualWindowEl(
   rowCount: number,
   rowStride: number,
   overscan = 4,
+  chunk = 1,
 ): VirtualWindow {
-  return useFixedWindow(scrollEl, contentEl, rowCount, rowStride, overscan)
+  return useFixedWindow(scrollEl, contentEl, rowCount, rowStride, overscan, chunk)
 }
 
 /** Variable-height rows described by a prefix sum, including the final edge. */

@@ -1,7 +1,7 @@
 import { useStore } from '../../store/useStore'
 import { getSongById } from '../juicewrldApi'
 import {
-  compressImageFile, decideLoginApproval, getFavorites, getMe, getOtpSetup, listLoginApprovals, pollLoginApproval,
+  changePassword, changeUsername, checkUsername, compressImageFile, decideLoginApproval, getFavorites, getMe, getOtpSetup, listLoginApprovals, pollLoginApproval,
   confirmOtpSetup, removeAvatar, requestLoginApproval, updateAvatar, updateBio, updateDisplayName,
   updateNowPlaying, updatePrivacySettings, updateUserSettings, type AccountUser,
   API_KEY_SCOPES, createApiKey, isManagerAnywhere, deleteApiKey, listApiKeys, updateApiKey, type ApiKeyScope, type UserApiKey,
@@ -10,7 +10,7 @@ import { addPasskey, deletePasskey, getPasskeySupport, listPasskeys, renamePassk
 import { relativeTime } from '../../components/adminShared'
 import { pickLocalFile } from './pick'
 import { songFromArg, completeSongs } from './player'
-import { asJson, confirmAction, fail, oneLine, parseArgs, parseBool, parseJsonArg, table, type TermCommand, type TermCtx } from './types'
+import { asJson, confirmAction, fail, oneLine, parseArgs, parseBool, parseJsonArg, table, takeYes, type TermCommand, type TermCtx } from './types'
 
 // Everything the sign-in modal, the Settings account section and the
 // sign-in-approval prompt do. Passwords are asked for with a masked prompt so
@@ -25,7 +25,15 @@ const sleep = (ms: number, signal: AbortSignal): Promise<void> =>
     signal.addEventListener('abort', () => { window.clearTimeout(t); reject(new Error('cancelled')) }, { once: true })
   })
 
-const who = (a: AccountUser): string => a.username || a.discord_username || a.display_name
+// `username` is the `discord_<id>` placeholder until a Discord account picks one.
+const who = (a: AccountUser): string => (a.username_chosen !== false && a.username) || a.discord_username || a.display_name
+
+const signInLine = (a: AccountUser): string => {
+  if (a.username_chosen === undefined && a.has_password === undefined) return ''
+  const name = a.username_chosen === false ? 'no username yet' : `username ${a.username}`
+  const next = a.username_next_change_at ? ` (next change ${new Date(a.username_next_change_at).toLocaleDateString()})` : ''
+  return `sign-in     ${[a.discord_id && 'discord', `${name}${next}`, a.has_password ? 'password set' : 'no password'].filter(Boolean).join(' · ')}`
+}
 
 // The login "approve on another device" flow: the request shows a code, a
 // signed-in device approves it, and this polls until it is decided.
@@ -70,7 +78,8 @@ function describeMe(a: AccountUser): string {
     `roles       ${roles.length ? roles.join(', ') : 'listener'}${a.otp_enabled ? '  ·  2FA on' : ''}`,
     `bio         ${oneLine(a.bio, 120) || '-'}`,
     `public      history ${a.public_play_history ? 'on' : 'off'} · playlists ${a.public_playlists ? 'on' : 'off'} · now playing ${a.public_now_playing ? 'on' : 'off'}`,
-  ].join('\n')
+    signInLine(a),
+  ].filter(Boolean).join('\n')
 }
 
 // `read,write` -> validated scope list in canonical order. Like the Settings
@@ -196,6 +205,59 @@ export const ACCOUNT_COMMANDS: TermCommand[] = [
       if (password !== (await ctx.ask('again: ', { secret: true }))) fail('the passwords don’t match')
       await st().signupWithPassword(username, password, value.get('name'))
       ctx.print(`account created - signed in as ${who(signedIn())}`, 'ok')
+    },
+  },
+  {
+    name: 'username', group: 'Account', usage: 'username [<new name> [-y] | check <name>]',
+    description: 'Show, choose or change your sign-in username (once every 14 days), or check whether a name is free',
+    covers: ['userApi.changeUsername', 'userApi.checkUsername'],
+    run: async (args, ctx) => {
+      const { text, yes } = takeYes(args)
+      const [first, second] = text.trim().split(/\s+/).filter(Boolean)
+      if (first === 'check') {
+        if (!second) fail('usage: username check <name>')
+        const r = await checkUsername(second)
+        ctx.print(r.available ? `${r.username} is free` : `${r.username}: ${r.reason}`, r.available ? 'ok' : 'error')
+        return
+      }
+      const a = signedIn()
+      if (!first) {
+        ctx.print(a.username_chosen === false
+          ? 'no username yet - choose one with: username <name>'
+          : `${a.username}${a.username_next_change_at ? `  (can change again ${new Date(a.username_next_change_at).toLocaleDateString()})` : ''}`)
+        return
+      }
+      if (a.username_next_change_at) fail(`you can change your username again on ${new Date(a.username_next_change_at).toLocaleDateString()}`)
+      const action = a.username_chosen === false ? `choose ${first} as your username` : `change your username from ${a.username} to ${first}`
+      if (!confirmAction(ctx, `${action}? It can't change again for 14 days.`, yes)) return
+      const updated = await changeUsername(first)
+      useStore.setState({ account: updated })
+      ctx.print(`username is now ${updated.username}`, 'ok')
+    },
+  },
+  {
+    name: 'password', aliases: ['passwd'], group: 'Account', usage: 'password',
+    description: 'Add a password to your account (Discord accounts pick a username first) or change it; a change signs your other devices out',
+    covers: ['userApi.changePassword'],
+    run: async (_args, ctx) => {
+      let a = signedIn()
+      if (a.username_chosen === false) {
+        const name = (await ctx.ask('choose a username: ')).trim()
+        if (!name) fail('a username is required to sign in with a password')
+        a = await changeUsername(name)
+        useStore.setState({ account: a })
+        ctx.print(`username is now ${a.username}`, 'ok')
+      }
+      const current = a.has_password ? await ctx.ask('current password: ', { secret: true }) : undefined
+      if (a.has_password && !current) fail('the current password is required')
+      const next = await ctx.ask('new password: ', { secret: true })
+      if (!next) fail('a password is required')
+      if (next !== (await ctx.ask('again: ', { secret: true }))) fail('the passwords don’t match')
+      const res = await changePassword({ new_password: next, ...(current ? { current_password: current } : {}) })
+      useStore.setState({ account: res.user })
+      ctx.print(a.has_password
+        ? `password changed${res.signed_out ? ` - signed out of ${res.signed_out} other device${res.signed_out === 1 ? '' : 's'}` : ''}`
+        : `password added - you can sign in as ${res.user.username} with it`, 'ok')
     },
   },
   {
