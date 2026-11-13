@@ -1,6 +1,6 @@
 import { RADIO_API_BASE } from './apiServers'
-import { fetchRadioChatTicket } from './radioChatApi'
-import type { RadioChatMessage } from './radioChatApi'
+import { RADIO_CHAT_LINK_MODES, fetchRadioChatTicket } from './radioChatApi'
+import type { RadioChatLinks, RadioChatMessage } from './radioChatApi'
 import { radioClientId } from './radioSocketService'
 import { getToken } from './userApi'
 import { mergeLines, useRadioChatStore } from '../store/radioChatStore'
@@ -53,6 +53,11 @@ async function authenticate(socket: WebSocket): Promise<void> {
   }
 }
 
+/** The server's links setting; older servers send none and act as 'signed_in'. */
+export function linksMode(value: unknown): RadioChatLinks {
+  return RADIO_CHAT_LINK_MODES.some((m) => m.mode === value) ? (value as RadioChatLinks) : 'signed_in'
+}
+
 function onFrame(frame: Frame): void {
   const s = useRadioChatStore.getState()
   switch (frame.type) {
@@ -61,6 +66,7 @@ function onFrame(frame: Frame): void {
         enabled: !!frame.enabled,
         guestsEnabled: frame.guests_enabled !== false,
         reason: String(frame.reason ?? ''),
+        links: linksMode(frame.links),
         // A reconnect replaces the list: lines hidden while we were away must go.
         messages: mergeLines([], (frame.messages as RadioChatMessage[]) ?? []),
       })
@@ -82,7 +88,7 @@ function onFrame(frame: Frame): void {
       if (frame.code === 'guests_disabled') patch({ guestsEnabled: false })
       break
     case 'state':
-      patch({ enabled: !!frame.enabled, guestsEnabled: frame.guests_enabled !== false, reason: String(frame.reason ?? '') })
+      patch({ enabled: !!frame.enabled, guestsEnabled: frame.guests_enabled !== false, reason: String(frame.reason ?? ''), links: linksMode(frame.links) })
       break
     case 'deleted': {
       const ids = new Set((frame.ids as number[]) ?? [])
@@ -210,6 +216,10 @@ export function applyRadioChatState(enabled: boolean, reason = ''): void {
 
 export function applyRadioChatGuests(guestsEnabled: boolean): void {
   patch({ guestsEnabled })
+}
+
+export function applyRadioChatLinks(links: RadioChatLinks): void {
+  patch({ links })
 }
 
 export function dropRadioChatLines(ids: number[]): void {
