@@ -46,6 +46,7 @@ const NOT_APPLICABLE = {
   'coverArtImages.*': 'caches coverArtApi.fetchCoverArtImage (coverart image)',
   'heardleMatchApi.*': 'live versus match runs over a websocket; the REST queue calls are covered by daily versus',
   'notificationSocket.*': 'live notification websocket, not a request/response call',
+  'radioChatSocket.*': 'live 999 FM chat websocket; `fmchat say` posts through it',
   // Loaders and wrappers over endpoints that have their own command.
   'juicewrldApi.listFilesRecursive': 'wrapper over /files/browse (ls, tree, find)',
   'juicewrldApi.listSubtree': 'wrapper over /files/browse (ls, tree, find)',

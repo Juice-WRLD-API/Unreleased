@@ -66,9 +66,10 @@ export function Toggle({ on, onClick }: { on: boolean; onClick: () => void }): J
 /**
  * Every visualizer control, shared by Settings and the WRLD toolbar's popup.
  * The popup leaves out the mode picker: the toolbar's mode name, right beside
- * it, opens the same list.
+ * it, opens the same list. It adds the Old WRLD style switch, which Settings
+ * keeps as a row of its own.
  */
-export default function VizControls({ modes = true }: { modes?: boolean }): JSX.Element {
+export default function VizControls({ modes = true, wrldStyle = false }: { modes?: boolean; wrldStyle?: boolean }): JSX.Element {
   const s = useVizStore()
   const gl = webglAvailable()
   const [browsing, setBrowsing] = useState<'viz' | 'overlay' | 'lyrics' | null>(null)
@@ -148,6 +149,12 @@ export default function VizControls({ modes = true }: { modes?: boolean }): JSX.
         <span className="text-text-muted text-[11px] w-[86px] shrink-0">Artwork colors</span>
         <Toggle on={s.vizUseArtwork} onClick={() => s.setVizUseArtwork(!s.vizUseArtwork)} />
       </div>
+      {wrldStyle && (
+        <div className="flex items-center gap-2" title="WRLD's own player and lyrics instead of the widgets">
+          <span className="text-text-muted text-[11px] w-[86px] shrink-0">Old WRLD style</span>
+          <Toggle on={!s.wrldWidgets} onClick={() => s.setWrldWidgets(!s.wrldWidgets)} />
+        </div>
+      )}
     </div>
   )
 }

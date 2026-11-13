@@ -23,6 +23,7 @@ import GifPicker from './GifPicker'
 import ReactionPicker from './ReactionPicker'
 import { emojiGlyph, EMOJI_IMG } from './emoji'
 import { EVERYONE_HANDLE, mentionIdsIn } from './people'
+import { autoApproveApplies } from '../../hooks/useAdminUsersList'
 
 const EMOJI_NAMES = Object.keys(EMOJI_IMG).sort()
 import { ChatAvatar, errorText, formatBytes, useChatToast } from './ui'
@@ -698,9 +699,10 @@ const Composer = forwardRef<ComposerHandle, {
     const { user, label } = await loadSiteUser(first)
     const kind = APPROVE_LABEL[flag]
     // Same visibility rule as the Manage panel: edit auto-approve belongs to
-    // editors, comp auto-approve to contributors.
-    if (on && flag === 'auto_approve_proposals' && user.role !== 'editor') throw new Error(`${label} isn't an editor, so edit auto-approve doesn't apply`)
-    if (on && flag === 'auto_approve_comp_proposals' && !user.contributor_enabled) throw new Error(`${label} isn't a contributor, so comp auto-approve doesn't apply`)
+    // editors, comp auto-approve to contributors, both to administrators.
+    const applies = autoApproveApplies(user)
+    if (on && flag === 'auto_approve_proposals' && !applies.edits) throw new Error(`${label} isn't an editor, so edit auto-approve doesn't apply`)
+    if (on && flag === 'auto_approve_comp_proposals' && !applies.comp) throw new Error(`${label} isn't a contributor, so comp auto-approve doesn't apply`)
     if (!!user[flag] === on) { report('Auto-approve', `Auto-approve for ${kind} proposals is already ${on ? 'on' : 'off'} for ${label}`, share); return }
     await adminUpdateUser(user.user_id, { [flag]: on })
     report('Auto-approve', `Auto-approve for ${kind} proposals ${on ? 'enabled' : 'disabled'} for ${label}`, share)

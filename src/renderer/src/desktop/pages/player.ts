@@ -210,7 +210,12 @@ class Bar {
       this.volumeTouched = true
       this.paintVolume(Number(this.slider.value))
       window.clearTimeout(this.pendingVolume)
-      this.pendingVolume = window.setTimeout(() => page.command('volume', Number(this.slider.value)), 80)
+      // Held only while it's being moved: once the change is sent and has come back, the slider follows the
+      // app's volume again, so a change from the player bar or a hotkey shows here too.
+      this.pendingVolume = window.setTimeout(() => {
+        page.command('volume', Number(this.slider.value))
+        this.pendingVolume = window.setTimeout(() => { this.volumeTouched = false }, 400)
+      }, 80)
     })
     const strip = $('.strip', host)
     strip.addEventListener('pointerenter', () => { this.hovered = true; this.paintTime(); this.timeLeft.classList.add('shown'); this.progress.classList.add('thick') })
@@ -286,7 +291,7 @@ class Bar {
     this.wasLiked = !!state.liked
     // The song's menu: there while something plays.
     $('[data-action="more"]', this.host).classList.toggle('gone', !t)
-    if (this.volumeOpen && !this.volumeTouched && typeof state.volume === 'number') { this.slider.value = String(state.volume); this.paintVolume(state.volume) }
+    if (!this.volumeTouched && typeof state.volume === 'number') { this.slider.value = String(state.volume); this.paintVolume(state.volume) }
     this.restartLine()
   }
 

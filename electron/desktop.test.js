@@ -100,6 +100,19 @@ test('a line\'s words are spread over it in order, and adlibs kept apart', () =>
   assert.ok(first.words[first.words.length - 1].end <= 12.5)
 })
 
+test('a line with its own word times keeps them, shifted by the offset, and is marked word-timed', () => {
+  const words = [{ text: 'No,', start: 6.88, end: 7.2 }, { text: 'no', start: 7.2, end: 8.1 }, { text: '(yeah)', start: 8.1, end: 8.5 }]
+  const lyrics = timing.timedFromLines([{ time: 6.88, text: 'No, no (yeah)', words }, { time: 10, text: 'plain line' }], 1)
+  const [timed, plain] = lyrics.lines
+  assert.equal(timed.wordTimed, true)
+  assert.deepEqual(timed.all.map((w) => [w.text, w.start, w.end]), [['No,', 7.88, 8.2], ['no', 8.2, 9.1], ['(yeah)', 9.1, 9.5]])
+  assert.deepEqual(timed.adlibs.map((a) => a.text), ['yeah'])
+  assert.equal(plain.wordTimed, undefined)
+  const { LyricScene } = loadTs(path.join(RENDERER, 'desktop/lyrics/scene.ts'))
+  const lines = LyricScene.linesOf({ id: 'x', title: '', artist: '', lyrics }, true)
+  assert.deepEqual(lines.map((l) => l.wordTimed), [true, undefined])
+})
+
 test('an adlib never closed counts as the line\'s own words', () => {
   const { words, adlibs } = timing.separate(timing.spread('one (two three', 0, 2))
   assert.deepEqual(words.map((w) => w.text), ['one', '(two', 'three'])

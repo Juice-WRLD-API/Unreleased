@@ -46,7 +46,7 @@ export interface LyricRenderer {
   scrollBy?(dy: number): void
 }
 
-export interface SceneLine { index: number; words: TimedWord[] }
+export interface SceneLine { index: number; words: TimedWord[]; wordTimed?: boolean }
 export interface Block { css: string; size: number; spots: { x: number; y: number }[]; width: number; height: number; row: number; letters: number }
 
 /** The time now, in the epoch seconds a clock is told in. */
@@ -244,8 +244,8 @@ export class LyricScene implements LyricRenderer {
 
   /** The song's timed lines with their words: the adlibs left out, or `withAdlibs` sung where they're written. */
   static linesOf(song: StageSong | null, withAdlibs = false): SceneLine[] {
-    return (song?.lyrics?.lines || []).map((l) => (withAdlibs ? l.all ?? l.words : l.text?.trim() ? l.words : []))
-      .filter((words) => words?.length).map((words, index) => ({ index, words }))
+    return (song?.lyrics?.lines || []).map((l) => ({ words: withAdlibs ? l.all ?? l.words : l.text?.trim() ? l.words : [], wordTimed: l.wordTimed }))
+      .filter((l) => l.words?.length).map(({ words, wordTimed }, index) => ({ index, words, ...(wordTimed ? { wordTimed } : {}) }))
   }
 
   get titleLine(): SceneLine {

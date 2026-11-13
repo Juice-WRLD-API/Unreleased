@@ -6,6 +6,335 @@ All notable changes to this project are documented here.
 
 ---
 
+## [2.6.45] — 2026-11-14
+
+Changes since 2.6.44:
+
+- **New** **999 FM chat**: a live chat beside the radio. In WRLD, a 999 FM card joins the widgets while the radio is on, showing how many people are listening, with a Radio side (vote to skip or queue, suggest the next song, up next) and a Chat side; drag it anywhere, fold it to its header, or turn it off in Settings → Lyrics & WRLD. The old WRLD style's 999 FM panel gets a Chat tab. No account needed: pick a name and talk. Signed in, your lines carry your username and a verified mark. Admins can turn the whole chat off in one click, or just guests (people without an account) so signed-in listeners keep talking, and can clear it, delete lines and ban people. The terminal has `fmchat` and, for admins, `fmmod`
+- **Improve** 999 FM votes: when a vote ends, listeners get a short note saying whether it passed, with the tally. On WRLD the vote card now pops up whenever the 999 FM card isn't showing the vote (folded, on Chat, or turned off); before, WRLD's default layout showed no vote at all
+- **Fix** A song set to play a preferred version (its session, say) starts as that version, instead of playing the playlist's copy for a few seconds and then switching
+- **Fix** Switching to Playlists with a big playlist open no longer freezes the app for a second or two in the compact and grid layouts, which now only draw the rows on screen, like the list layout
+
+---
+
+## [2.6.44] — 2026-11-13
+
+Changes since 2.6.43:
+
+- **New** **Settings** are iOS-style grouped pages: Account, General, Appearance, Navigation, Playback, Lyrics & WRLD, Connections, Desktop, Shortcuts, Library, App, Developer and About. The Settings window opens larger
+- **New** **Sign-in** lets any account choose a username and add a password, Discord accounts included, so you can sign in either way. Usernames can change once every 14 days. The terminal has `username` and `password`
+- **Improve** The sign-in dialog is rebuilt with Log in and Sign up tabs, a live username check, a password strength meter and an optional display name. After a Discord sign-in on an account with no username or password it offers to set both once
+- **Improve** Switching between Home, Tracker, Files, Playlists and Staff swipes in the direction of your menu order and lands in about 0.36 s; other page changes fade in 0.2 s
+- **Improve** Mouse-wheel scrolling glides in every scroller. Trackpads and Ctrl+wheel stay native
+- **Improve** Playlist pages keep their header fixed above the scrolling track list
+- **Improve** The Files source switch (API, Local, My files) moves into the browser's header, and Go to folder opens on the folder you're in
+- **Improve** Clicking the player's cover opens the Now Playing panel; the chevron still opens WRLD
+- **Improve** The bottom pill is the default navigation for new installs
+- **Fix** The on-demand ffmpeg download no longer fails with "Checksum mismatch", so ALAC files play again
+
+---
+
+## [2.6.43] — 2026-11-12
+
+Changes since 2.6.42:
+
+- **Improve** Staff dashboards keep their Quick actions compact, with the explanations in tooltips, and the identity tile no longer stretches
+- **Improve** Home, Tracker, Files, Playlists and the staff dashboards move as whole pages when you switch between them
+- **Improve** The desktop glass controls and the playlist header are refined
+
+---
+
+## [2.6.42] — 2026-11-12
+
+Changes since 2.6.41:
+
+- **New** The iOS-style **glass** look is the default on desktop for every skin: a floating player bar, a glass sidebar and panels, and a blurred, tinted backdrop made from the playing cover
+- **New** Home has a hero. Home and the staff dashboards swipe between each other, and WRLD expands out of the player bar
+- **New** Statistics shows a **song chart** in place of Most played songs; the terminal has `charts`
+- **New** The Thank you page is read from the server and edited from a new Admin tab; the terminal has `thanks`
+- **Improve** The WRLD visualizer and Edge light slow down while a picker is open instead of freezing
+- **Fix** The playlist header's blurred cover fades out instead of drawing a solid band across the top of the track list
+
+---
+
+## [2.6.41] — 2026-11-12
+
+Changes since 2.6.40:
+
+- **Improve** The add-song dialog's Image URL has a Browse button, and Bitrate is a two-line field with an example
+
+---
+
+## [2.6.40] — 2026-11-12
+
+Changes since 2.6.39:
+
+- **Improve** The propose-new-song dialog shows every field at once in a wide dialog, grouped, with multiline inputs, date pickers and BPM and Key rows
+- **New** Image URL has a From era button that fills in the era's cover
+
+---
+
+## [2.6.39] — 2026-11-12
+
+Changes since 2.6.38:
+
+- **New** **Discord sign-in** opens in your default browser, where Discord is usually signed in already, and the app picks the result up. A window in the app is still available (`login discord --window`)
+- **New** **Random** in WRLD plays a random song (`queue random` in the terminal)
+- **New** Era covers follow your account across devices. Settings shows the defaults and the terminal has `era-covers`
+- **Improve** The Changes panel and the `changes` command load more as you scroll
+- **Fix** Donor and session-edit files that can't load are skipped instead of stopping the queue
+
+---
+
+## [2.6.38] — 2026-11-11
+
+Changes since 2.6.37:
+
+- **New** **Remixes & edits**: submit one from Home → Tools, review them in a new Admin tab, and see your own in Settings. The terminal has `remix`. An upload that sounds too similar to an existing edit or song is refused with the match it was close to
+- **New** Approved cover art is filed into Files
+- **Improve** Select menus use the themed picker
+
+---
+
+## [2.6.37] — 2026-11-08
+
+Changes since 2.6.36:
+
+- **New** Albums can be multi-selected, with a selection bar and menu
+- **Improve** Each playlist remembers its own layout (list, grid or compact) on this device, and the compact view drops version tags
+- **Improve** The desktop playlist widget and its menu have small tweaks
+
+---
+
+## [2.6.36] — 2026-11-05
+
+Changes since 2.6.35:
+
+- **New** **ALAC** `.m4a` files play on desktop: the app detects the codec and plays a FLAC transcode through the on-demand ffmpeg
+- **Fix** Album and artist lists load every page, so edition rows past the first page appear
+- **Fix** Discord presence counts from the live playhead and is sent again when Discord reconnects, instead of showing a frozen position
+- **Fix** An unreadable offline library index is left alone instead of being replaced by an empty one
+- **Fix** Mac builds are no longer ad-hoc signed, which other Macs reported as "damaged"
+
+---
+
+## [2.6.35] — 2026-11-03
+
+Changes since 2.6.34:
+
+- **New** The eyedropper picks a custom color for lyric colors and share lyrics swatches
+- **New** `Ctrl+F` focuses a playlist's track search
+- **Improve** Debug recording works from pop-out windows
+
+---
+
+## [2.6.34] — 2026-11-03
+
+Changes since 2.6.33:
+
+- **New** Mouse back and forward buttons navigate
+- **New** A `sort:` token in Tracker search, and Download tagged / untagged in the song menu
+- **Improve** The chat side panel fits the room, and liked comp files show in the desktop player
+
+---
+
+## [2.6.33] — 2026-11-03
+
+Changes since 2.6.32:
+
+- **Fix** Previous at the top of the queue steps back across a repeat-all wrap
+
+---
+
+## [2.6.32] — 2026-11-03
+
+Changes since 2.6.30:
+
+- **New** **Pause when headphones disconnect** (Settings → Playback, `set pause-on-disconnect`) pauses on output removal and plays again when it returns
+- **New** The album menu has Add to Playlist, and files without a catalogue song have Copy link
+- **Improve** The Files queue follows the sorted order
+
+---
+
+## [2.6.30] — 2026-11-02
+
+Changes since 2.6.29:
+
+- **New** **Albums** is a page styled after Apple Music: type pills, an album page with Play, Shuffle and a menu, a numbered tracklist, and Other Versions and More by shelves. The Home Albums tile opens it, and the terminal's `open albums` goes there (`open albums-admin` is the staff editor)
+
+---
+
+## [2.6.29] — 2026-11-02
+
+Changes since 2.6.27:
+
+- **Improve** Mac updates download the DMG for your chip and open it so you can drag it over the old copy
+
+---
+
+## [2.6.27] — 2026-11-01
+
+Changes since 2.6.26:
+
+- **New** **Edit tags** on comp files, from the selection bar and row menu. Changes go in as one batch of retag proposals, covers included, and show in comp proposal lists and the review queue. The terminal's editing commands cover them
+
+---
+
+## [2.6.26] — 2026-11-01
+
+Changes since 2.6.25:
+
+- **New** **Files** is a Tracker tab, and Show in Files from the Tracker opens it there without touching the address bar
+- **Improve** The song menu fills in Play next, Add to queue, Like, Show in Files and Edit metadata itself, and Liked Songs unlikes through Like
+- **Improve** Albums admin plays its tracklist or from any row, unsaved edits included. Files has Play next
+- **Improve** The desktop player widget has Show in Files, shows a length for files without one, and plays comp, donor and local files from playlists
+
+---
+
+## [2.6.25] — 2026-10-31
+
+Changes since 2.6.22:
+
+- **New** The admin console has a **News channels** tab with channel descriptions
+- **Improve** Deleted playlists drop out of the list when the server says they're gone, Tracker search is remembered per session, and admin stat boxes that only carry a label are tidier
+- **Fix** The notification panel opens below the window controls
+
+---
+
+## [2.6.22] — 2026-10-31
+
+Changes since 2.6.21:
+
+- **New** A loading sweep runs along the progress line while the active song fetches, buffers or seeks, in the player bar, the mini player and WRLD
+- **Improve** Playlists is a mobile navigation tab again
+
+---
+
+## [2.6.21] — 2026-10-30
+
+Changes since 2.6.20:
+
+- **Fix** WRLD's Artwork colors toggle uses the theme for the background, text and queue when it's off, instead of leaving the blurred cover
+
+---
+
+## [2.6.20] — 2026-10-30
+
+Changes since 2.6.19:
+
+- **Fix** The player bar's cover no longer stays blank for a whole song, and cover fades no longer risk a React update loop
+- **Fix** Saving a cover from the desktop app uses the native save
+
+---
+
+## [2.6.19] — 2026-10-30
+
+Changes since 2.6.18:
+
+- **Fix** Song metadata fields that hold several lines (album, credited artists, producers, engineers, locations, file names, instrumentals, session details) keep their line breaks when edited
+
+---
+
+## [2.6.18] — 2026-10-30
+
+Changes since 2.6.16:
+
+- **Improve** Song and comp approvals and denials go in one backend request, merge the returned songs into the rows, report partial failures, and disable competing review actions. Comp queues gain Deny all, and the terminal has `review-batch`
+
+---
+
+## [2.6.16] — 2026-10-30
+
+Changes since 2.6.14:
+
+- **Improve** My proposals load a page at a time with load-more, with status and search handled by the server and tab totals for the whole list. `proposal ls` takes `--status`, `--search` and `--page`
+- **Improve** Comp proposal cards show the time beside the status and can be reviewed several at a time
+- **Improve** Submit cover art from Home tools opens on a song search when no song is chosen, and the Files background menu groups folder and upload actions under New
+
+---
+
+## [2.6.14] — 2026-10-30
+
+Changes since 2.6.10:
+
+- **New** Files has a **local path box** on desktop for typing a folder on this computer; `album show` joins the terminal and album tracks carry a song summary
+- **Improve** Skipping off a repeat-one song moves on (`repeat` in the terminal), and WRLD's previous button follows the hotkey action
+- **Improve** Admin proposals and applications update in place after a review and show the real error message; user changes in admin are optimistic
+- **Improve** Playback problems write a clear verdict to the run log, held keys no longer repeat hotkeys, and touch-cancelled seeks release the seek bar
+- **Improve** Escape closes Heardle, Wordle, the lightbox and notifications through the same stack as other dialogs, and the song editor asks before discarding changes
+- **Improve** WRLD has an Old WRLD style toggle in Settings → Appearance in place of the layout pill
+- **Fix** WRLD visualizer settings change straight away instead of after a restart, because pop-out windows now follow each other
+- **Fix** The mini player and the desktop player widget show a length and can seek for songs with no listed duration
+- **Fix** Resubmitting a proposal creates the new one before withdrawing the old, and keeps its comp channel
+- **Fix** Public profiles reset when the profile changes, and chat unread counts, key sharing and typing indicators are steadier
+
+---
+
+## [2.6.10] — 2026-10-29
+
+Changes since 2.6.9:
+
+- **Improve** Interrupted ZIP downloads resume
+
+---
+
+## [2.6.9] — 2026-10-29
+
+Changes since 2.6.7:
+
+- **Fix** Desktop ZIP downloads work again; the app allows file writes to a picked file for its own origin
+- **Fix** A null or out-of-range synced playback speed no longer sets the rate to 0
+- **Fix** Offline copies the player can't open are marked and downloaded again on the next playlist sync
+- **Improve** Files lazy-loads covers in long folders and keeps the deep link; the Tracker switches to Songs when you click a badge, remembers its scroll position, retries the calendar, and shows a toast when a download or title save fails
+- **Improve** The desktop app parses navigation origins and redirects properly, and hide-other-windows, window sync and the mini player only touch the app's own windows
+- **Improve** WRLD drops the old widgets layout toggle
+
+---
+
+## [2.6.7] — 2026-10-28
+
+Changes since 2.6.5:
+
+- **Improve** Adding several songs to a playlist sends one request and returns only the new items, and the playlist stays downloaded offline when it's kept offline
+
+---
+
+## [2.6.5] — 2026-10-28
+
+Changes since 2.6.4:
+
+- **New** **Cover art submission and review**: submit from the song menu or song info, see yours in Settings → My cover art, and review the queue in a new Admin tab with a badge, a profile tile, a `coverart` terminal command and pending counts
+- **Fix** The pop-out Edit metadata window no longer crashes when it opens before its song loads
+
+---
+
+## [2.6.4] — 2026-10-28
+
+Changes since 2.6.2:
+
+- **Fix** Desktop displays that share a monitor model keep separate names, so hiding or placing one no longer moves the other
+
+---
+
+## [2.6.2] — 2026-10-27
+
+Changes since 2.6.1:
+
+- **Improve** Playing a song in the Tracker queues the visible list from that row, with lyrics, calendar and producer detail and version groups, and Shuffle shuffles that list instead of starting radio
+- **Improve** Play next is in the Tracker and WRLD menus, and queue history search shows every match
+- **Fix** Crossfade is steadier: the skip marker is tied to its URL, a changed pair cancels it, it waits for the next song to be ready, and a spare request is aborted when crossfade is off
+- **Fix** Repeat-one replay no longer consumes a pending Play next marker
+
+---
+
+## [2.6.1] — 2026-10-27
+
+Changes since 2.6.0:
+
+- **Fix** Identify song only grants the microphone and capture permissions to the page the app loaded
+
+---
+
 ## [2.6.0] — 2026-10-27
 
 Changes since 2.5.46:

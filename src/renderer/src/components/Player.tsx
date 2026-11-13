@@ -28,7 +28,7 @@ import { registerPlayerCommandHandler, runPlayerCommand } from '../lib/windowSyn
 import { eventToCombo, resolveAction, getAction, effectiveGlobalBinding, comboToAccelerator, registerHotkeyDispatch, HOTKEY_ACTIONS } from '../lib/hotkeys'
 import { formatDuration } from '../lib/format'
 import { takeEqAnchor } from '../lib/eqAnchor'
-import { apiFetch, smallCoverUrl, fullCoverUrl, JWApiSong, fileStem } from '../lib/juicewrldApi'
+import { apiFetch, fullCoverUrl, JWApiSong, fileStem } from '../lib/juicewrldApi'
 import { trackIdToSongId, showStaffProfile, staffProfileView } from '../lib/userApi'
 import { rememberRecentTrack } from '../lib/recentTracks'
 import { useCanEdit } from '../hooks/useChannelRoles'
@@ -398,6 +398,9 @@ export default function Player(): JSX.Element {
   const contextMenuBtnRef = useRef<HTMLButtonElement>(null)
   const currentSongId = currentTrack ? trackIdToSongId(currentTrack.id) : null
   const { radioMode, radioNext } = useStorePick('radioMode', 'radioNext')
+  // The queue is still checking which version of this song to play (see
+  // versionSwapPending) - nothing loads until it answers.
+  const versionHeld = useStore(s => s.versionSwapPending != null && s.versionSwapPending === s.currentTrack?.id)
   const { radioFmActive, radioFmNowPlaying, radioFmMatchedSong } = useStorePick('radioFmActive', 'radioFmNowPlaying', 'radioFmMatchedSong')
   const { globalHotkeysEnabled, globalHotkeyBindings } = useStorePick('globalHotkeysEnabled', 'globalHotkeyBindings')
   const { mediaOverlayEnabled } = useStorePick('mediaOverlayEnabled')
@@ -481,6 +484,8 @@ export default function Player(): JSX.Element {
   // URL-scoped handoff marker. A boolean can go stale when a crossfade target
   // has the same track id and therefore does not trigger the load effect.
   const skipNextLoadUrl = useRef<string | null>(null)
+  // Track id the active slot was last loaded for (null while held).
+  const loadedTrackId = useRef<string | null>(null)
 
   // Pause-fade ramp ("smooth fade when pausing" setting)
   const pauseFadeRaf = useRef<number | null>(null)
@@ -933,12 +938,16 @@ export default function Player(): JSX.Element {
     const audio = getActive()
     if (resumeTrackId.current !== currentTrack?.id) resumeTrackId.current = null
     if (!audio || !currentTrack) return
+    // Already loaded (a crossfade started it, or the hold began after it
+    // loaded): a version hold starting or ending must not reload or stop it.
+    if (loadedTrackId.current === currentTrack.id) return
     const fileUrl = resolvePlaybackUrl(currentTrack)
     fillSessionArtist(currentTrack.id, currentTrack.streamUrl)
 
     if (skipNextLoadUrl.current === fileUrl) {
       // Crossfade just swapped — audio already playing on active slot
       skipNextLoadUrl.current = null
+      loadedTrackId.current = currentTrack.id
       audio.volume = volumeRef.current
       // This slot was loaded by the crossfade preload, which never ran the
       // rate setup below — apply it now or the faded-in track plays at 1x.
@@ -949,6 +958,19 @@ export default function Player(): JSX.Element {
     // A same-id crossfade can leave the marker unconsumed. It must never skip
     // a later, genuinely different source change.
     skipNextLoadUrl.current = null
+
+    if (versionHeld) {
+      // Stop the previous song and wait: the store either swaps in the
+      // preferred version (a new id, loaded below) or clears the hold.
+      loadedTrackId.current = null
+      setCurrentTrackReady(false)
+      cancelCF()
+      cancelPauseFade()
+      audio.removeAttribute('src')
+      audio.load()
+      return
+    }
+    loadedTrackId.current = currentTrack.id
 
     // Donor cloud files can't be streamed by URL (the route needs the auth
     // header) - fetch the blob first, then load it once it's ready.
@@ -1006,7 +1028,7 @@ export default function Player(): JSX.Element {
     // Local ALAC is transcoded inside the local-media handler. A remote file
     // starts as itself (so AAC is not delayed) and is swapped if it is ALAC.
     if (!fileUrl.startsWith('local-media:') && isAlacCandidate(fileUrl)) requestAlac(audio, currentTrack.id, fileUrl)
-  }, [currentTrack?.id])
+  }, [currentTrack?.id, versionHeld])
 
   // Rotate suggested covers (when the setting is on and the song has no cover
   // the user set). Keyed on the track id rather than the play-credit threshold
@@ -1490,6 +1512,9 @@ export default function Player(): JSX.Element {
 
     const check = (): void => {
       if (!isPlaying) return
+      // Held for a version check: the slot is empty on purpose.
+      const st = useStore.getState()
+      if (st.versionSwapPending != null && st.versionSwapPending === st.currentTrack?.id) return
       // ALAC is being transcoded to something this player can decode. There is
       // no progress yet, and treating that as a stall skips the song.
       if (alacPreparing.current) return
@@ -2464,9 +2489,11 @@ export default function Player(): JSX.Element {
   // (Play/pause on Space is handled by the unified hotkey system above — the
   // 'play-pause' action defaults to Space and is rebindable in Settings.)
 
-  // Cover art error state — reset when track changes
+  // Cover art error state — reset when the track or its cover changes (an
+  // offline copy can give way to the API's, or the other way round)
+  const coverArt = currentTrackFull?.albumArt ?? currentTrack?.imageUrl
   const [coverArtError, setCoverArtError] = useState(false)
-  useEffect(() => { setCoverArtError(false) }, [currentTrack?.id])
+  useEffect(() => { setCoverArtError(false) }, [currentTrack?.id, coverArt])
   // What the title/artist blocks animate on: the song (or the 999FM now-
   // playing line), with its queue position telling next from previous.
   const swapKey = radioFmActive ? `fm:${radioFmNowPlaying?.title ?? ''}:${radioFmNowPlaying?.artist ?? ''}` : (currentTrack?.id ?? '')
@@ -2667,11 +2694,11 @@ export default function Player(): JSX.Element {
               radioFmMatchedSong?.imageUrl
                 ? <CoverFade src={radioFmMatchedSong.imageUrl} />
                 : <div className="w-full h-full bg-gradient-to-br from-red-900/70 to-black flex items-center justify-center"><Radio size={16} className="text-red-400 opacity-80" /></div>
-            ) : (!coverArtError && (currentTrackFull?.albumArt ?? currentTrack?.imageUrl)) ? (
+            ) : (!coverArtError && coverArt) ? (
               // Crossfades per cover - the old art fades straight out, so it
               // never stays painted next to the new title while the new one
               // loads.
-              <CoverFade src={smallCoverUrl(currentTrackFull?.albumArt ?? currentTrack?.imageUrl) ?? ''} onError={() => setCoverArtError(true)} />
+              <CoverFade src={coverArt ?? ''} onError={() => setCoverArtError(true)} />
             ) : (
               <div className="w-full h-full flex items-center justify-center text-text-muted">
                 <svg viewBox="0 0 24 24" fill="currentColor" className="w-5 h-5">
@@ -2747,8 +2774,8 @@ export default function Player(): JSX.Element {
               radioFmMatchedSong?.imageUrl
                 ? <CoverFade src={radioFmMatchedSong.imageUrl} />
                 : <div className="w-full h-full bg-gradient-to-br from-red-900/70 to-black flex items-center justify-center"><Radio size={22} className="text-red-400 opacity-80" /></div>
-            ) : (!coverArtError && (currentTrackFull?.albumArt ?? currentTrack?.imageUrl)) ? (
-              <CoverFade src={smallCoverUrl(currentTrackFull?.albumArt ?? currentTrack?.imageUrl) ?? ''} alt="Album art" onError={() => setCoverArtError(true)} />
+            ) : (!coverArtError && coverArt) ? (
+              <CoverFade src={coverArt ?? ''} alt="Album art" onError={() => setCoverArtError(true)} />
             ) : (
               <div className="w-full h-full flex items-center justify-center text-text-muted">
                 <svg viewBox="0 0 24 24" fill="currentColor" className="w-6 h-6">

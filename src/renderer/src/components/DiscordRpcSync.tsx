@@ -131,7 +131,7 @@ export default function DiscordRpcSync(): JSX.Element | null {
       // The matched song (cover + era) resolves asynchronously after the
       // now-playing update, so it — and the resolved era — are part of the
       // key; otherwise the resend carrying that data would be deduped away.
-      const key = `radio:${radioFmNowPlaying.title}:${radioFmNowPlaying.artist}:${radioFmMatchedSong?.songId ?? ''}:${era ?? ''}:${radioFmNowPlaying.duration_ms ?? 0}`
+      const key = `radio:${radioFmNowPlaying.title}:${radioFmNowPlaying.artist}:${radioFmMatchedSong?.songId ?? ''}:${era ?? ''}:${radioFmNowPlaying.duration_ms ?? 0}:${radioFmNowPlaying.elapsed_ms ? 'on' : 'dj'}`
       if (key === lastSentKeyRef.current) return
       lastSentKeyRef.current = key
       const currentTime = (radioFmNowPlaying.elapsed_ms ?? 0) / 1000

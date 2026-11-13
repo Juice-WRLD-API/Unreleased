@@ -46,7 +46,7 @@ import type { SongUnit } from '../lib/compactGroups'
 import { versionsEnabled } from '../lib/versionsApi'
 import { baseTitle } from '../lib/onThisDay'
 import { shareOrigin } from '../lib/platform'
-import { useVirtualWindowEl } from '../hooks/useVirtualWindow'
+import { useVirtualWindowEl, useVariableVirtualWindow } from '../hooks/useVirtualWindow'
 import PlaylistCard from './PlaylistCard'
 import { allFolderedKeys, folderOfPlaylist, parsePlaylistKey } from '../lib/playlistFolders'
 import { useMultiSelect } from '../hooks/useMultiSelect'
@@ -453,6 +453,29 @@ function useGridColumnCount(el: HTMLDivElement | null): number {
   return cols
 }
 
+// Columns and row stride (card height + row gap) of a windowed card grid,
+// read from the grid itself: both follow its width. Until it mounts, one
+// column at a rough stride, so the first render stays a few cards.
+function useGridMetrics(el: HTMLDivElement | null): { cols: number; stride: number } {
+  const [metrics, setMetrics] = useState({ cols: 1, stride: 200 })
+  useLayoutEffect(() => {
+    if (!el) return
+    const measure = (): void => {
+      const style = getComputedStyle(el)
+      const cols = style.gridTemplateColumns.split(' ').filter(Boolean).length || 1
+      const card = (el.firstElementChild as HTMLElement | null)?.offsetHeight ?? 0
+      if (card <= 0) return
+      const stride = card + (parseFloat(style.rowGap) || 0)
+      setMetrics(prev => (prev.cols === cols && prev.stride === stride ? prev : { cols, stride }))
+    }
+    measure()
+    const ro = new ResizeObserver(measure)
+    ro.observe(el)
+    return () => ro.disconnect()
+  }, [el])
+  return metrics
+}
+
 // Each row's panel goes in a GridPanelSlot keyed by the row, not the card. A
 // row can briefly hold two - the one closing and the one just opened from
 // another card in the same row - and then the open one takes the slot over,
@@ -524,6 +547,24 @@ function GridPanelSlot({ contentKey, closing, col, columns, caretClass = 'is-gla
       </div>
     </div>
   )
+}
+
+// Reports its content's height, so the windowed compact list can place the
+// rows below an open version group (whose row count is only known once the
+// missing versions load).
+function MeasuredBlock({ onHeight, children }: { onHeight: (h: number) => void; children: React.ReactNode }): JSX.Element {
+  const ref = useRef<HTMLDivElement>(null)
+  const onHeightRef = useRef(onHeight)
+  onHeightRef.current = onHeight
+  useLayoutEffect(() => {
+    const el = ref.current
+    if (!el) return
+    onHeightRef.current(el.offsetHeight)
+    const ro = new ResizeObserver(() => onHeightRef.current(el.offsetHeight))
+    ro.observe(el)
+    return () => ro.disconnect()
+  }, [])
+  return <div ref={ref}>{children}</div>
 }
 
 // Entries worth copying into another playlist: songs that can play (not
@@ -1044,6 +1085,42 @@ export default function PlaylistsView(): JSX.Element {
     return rows
   }, [songUnits, displayTracks])
   const compactLeads = useMemo(() => compactRows.map(r => r.lead), [compactRows])
+  // Compact rows are windowed like the list: mounting every song row at once
+  // froze the switch to Playlists for a second or more on big playlists. A
+  // row is one track high plus, while its group is open, the measured height
+  // of its version rows (one row's worth until measured).
+  const [compactContentEl, setCompactContentEl] = useState<HTMLDivElement | null>(null)
+  const [versionBlockHeights, setVersionBlockHeights] = useState<ReadonlyMap<number, number>>(() => new Map())
+  const setVersionBlockHeight = useCallback((groupId: number, h: number) => {
+    setVersionBlockHeights(prev => {
+      if (prev.get(groupId) === h) return prev
+      const next = new Map(prev)
+      next.set(groupId, h)
+      return next
+    })
+  }, [])
+  const compactOffsets = useMemo(() => {
+    const out = [0]
+    let y = 0
+    for (const { unit } of compactRows) {
+      y += TRACK_ROW_H
+      if (unit.versions.length > 1 && unit.groupId != null && expandedGroups.has(unit.groupId)) {
+        y += versionBlockHeights.get(unit.groupId) ?? TRACK_ROW_H
+      }
+      out.push(y)
+    }
+    return out
+  }, [compactRows, expandedGroups, versionBlockHeights, TRACK_ROW_H])
+  // Grid layout, windowed by grid row for the same reason.
+  const [trackGridWrapEl, setTrackGridWrapEl] = useState<HTMLDivElement | null>(null)
+  const [trackGridEl, setTrackGridEl] = useState<HTMLDivElement | null>(null)
+  const { cols: trackGridCols, stride: trackGridStride } = useGridMetrics(trackGridEl)
+  const trackGridRows = Math.ceil(displayTracks.length / trackGridCols)
+  const { start: gridRowStart, end: gridRowEnd, totalHeight: trackGridHeight } =
+    useVirtualWindowEl(gridView ? listScrollEl : null, trackGridWrapEl, trackGridRows, trackGridStride, 2, 2)
+  const compactTotalHeight = compactOffsets[compactOffsets.length - 1]
+  const { start: compactStart, end: compactEnd } =
+    useVariableVirtualWindow(compactView ? listScrollEl : null, compactContentEl, compactOffsets, compactTotalHeight)
   // songId → this playlist's Track, for the expanded version rows.
   const playlistTrackBySong = useMemo(
     () => new Map(tracks.map(t => [userApi.trackIdToSongId(t.id) ?? -1, t])),
@@ -1879,8 +1956,10 @@ export default function PlaylistsView(): JSX.Element {
           onMenuButton={e => setCardMenu({ kind: 'api', playlist: p, x: e.clientX, y: e.clientY })}
           onPlay={async () => {
             const d = await userApi.getPlaylist(p.id).catch(() => null)
-            const trks = d ? playlistItemsToTracks(d.items).filter(t => t.path) : []
+            if (!d) { showAppToast(`Couldn't load "${p.name}"`); return }
+            const trks = playlistItemsToTracks(d.items).filter(t => t.path)
             if (trks.length) playCollection(trks)
+            else showAppToast(`Nothing in "${p.name}" can be played`, { tone: 'info' })
           }}
           onLongPress={() => togglePlaylistSelect(plKey)}
           {...dragSourceProps(plKey)}
@@ -1940,6 +2019,7 @@ export default function PlaylistsView(): JSX.Element {
             const byId = new Map(libraryTracks.map(t => [t.id, t]))
             const qt = lp.trackIds.map(id => byId.get(id)).filter((t): t is LibraryTrack => !!t).map(libTrackToTrack)
             if (qt.length) playCollection(qt)
+            else showAppToast(`Nothing in "${lp.name}" can be played`, { tone: 'info' })
           }}
           onLongPress={() => togglePlaylistSelect(plKey)}
           {...dragSourceProps(plKey)}
@@ -2532,7 +2612,7 @@ export default function PlaylistsView(): JSX.Element {
             is fixed to a light palette regardless of app theme, since the
             backdrop is always a dark blurred image — theme-aware text colors
             (which flip to dark-on-light in light mode) were unreadable here. ── */}
-        <div className="relative overflow-hidden px-6 pb-6 shrink-0">
+        <div className="relative overflow-hidden px-6 pb-3 shrink-0">
           {playlistHeroEnabled && <HeroBackdrop src={playlistCoverUrl(coverData ?? {}) ?? tracks[0]?.imageUrl ?? null} isDarkSkin={isDarkSkin} />}
 
           <div className="relative z-10 px-0 pt-5">
@@ -2805,8 +2885,8 @@ export default function PlaylistsView(): JSX.Element {
                 steals width from the columns and knocks the duration header
                 out of line with the rows. px-6 lines the grid up with the
                 rows (scroller px-2 + row px-4). */}
-            <div className="shrink-0 px-6 pt-3 pb-2">
-              <div className="flex items-center gap-3 mb-4">
+            <div className="shrink-0 px-6 pt-0 pb-2">
+              <div className="flex items-center gap-3 mb-2">
                 {searchOpen ? (
                   <>
                     <div className={`${GLASS_SEARCH_WRAP} w-64`}>
@@ -2904,12 +2984,13 @@ export default function PlaylistsView(): JSX.Element {
               ) : compactRows.length === 0 ? (
                 <p className="text-text-muted text-sm text-center py-8">No tracks match "{search}"</p>
               ) : (
-                <div className={rowsCascade ? 'rows-cascade' : undefined}>
-                  {compactRows.map(({ lead, unit }, idx) => {
+                <div ref={setCompactContentEl} className={rowsCascade ? 'rows-cascade' : undefined} style={{ height: compactTotalHeight, position: 'relative' }}>
+                  {compactRows.slice(compactStart, compactEnd).map(({ lead, unit }, sliceIdx) => {
+                    const idx = compactStart + sliceIdx
                     const hasVersions = unit.versions.length > 1
                     const open = hasVersions && expandedGroups.has(unit.groupId!)
                     return (
-                      <div key={unit.groupId ?? lead.id}>
+                      <div key={unit.groupId ?? lead.id} style={{ position: 'absolute', top: compactOffsets[idx], left: 0, right: 0 }}>
                         {renderTrackRow(lead, idx, {
                           canDrag: false,
                           queue: compactLeads,
@@ -2920,16 +3001,18 @@ export default function PlaylistsView(): JSX.Element {
                             : undefined,
                         })}
                         {open && (
-                          <CompactVersionRows
-                            versions={unit.versions}
-                            playlistTracks={playlistTrackBySong}
-                            layout="desktop"
-                            gridCols={gridCols}
-                            selectMode={selectMode}
-                            rowHeight={TRACK_ROW_H}
-                            onPlay={track => playCompactVersion(track, lead)}
-                            onMenu={(track, songId, e) => setTrackMenu({ track, songId, x: e.clientX, y: e.clientY })}
-                          />
+                          <MeasuredBlock onHeight={h => setVersionBlockHeight(unit.groupId!, h)}>
+                            <CompactVersionRows
+                              versions={unit.versions}
+                              playlistTracks={playlistTrackBySong}
+                              layout="desktop"
+                              gridCols={gridCols}
+                              selectMode={selectMode}
+                              rowHeight={TRACK_ROW_H}
+                              onPlay={track => playCompactVersion(track, lead)}
+                              onMenu={(track, songId, e) => setTrackMenu({ track, songId, x: e.clientX, y: e.clientY })}
+                            />
+                          </MeasuredBlock>
                         )}
                       </div>
                     )
@@ -2940,12 +3023,17 @@ export default function PlaylistsView(): JSX.Element {
               displayTracks.length === 0 ? (
                 <p className="text-text-muted text-sm text-center py-8">No tracks match "{search}"</p>
               ) : (
-                <div className={`grid gap-4 pt-1 ${rowsCascade ? 'rows-cascade' : ''}`} style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(9.5rem, 1fr))' }}>
+                // 4px top inset, the old pt-1 (absolute children ignore padding).
+                <div ref={setTrackGridWrapEl} style={{ height: trackGridHeight + 4, position: 'relative' }}>
+                <div ref={setTrackGridEl} className={`grid gap-4 ${rowsCascade ? 'rows-cascade' : ''}`}
+                  style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(9.5rem, 1fr))', position: 'absolute', left: 0, right: 0, top: 4 + gridRowStart * trackGridStride }}>
                   {/* Drag-to-reorder mirrors the list view: idx doubles as both
                       the original playlist index and the displayTracks index
                       because dragEnabled only allows dragging when there's no
-                      search/sort applied, so the two orders are identical. */}
-                  {displayTracks.map((track, idx) => {
+                      search/sort applied, so the two orders are identical.
+                      Only the visible grid rows are mounted. */}
+                  {displayTracks.slice(gridRowStart * trackGridCols, gridRowEnd * trackGridCols).map((track, sliceIdx) => {
+                    const idx = gridRowStart * trackGridCols + sliceIdx
                     const songId = track.id ? (userApi.trackIdToSongId(track.id) ?? -1) : -1
                     const isSelected = selectedTracks.has(track.id)
                     const isDragging = dragEnabled && dragIdx === idx
@@ -2975,6 +3063,7 @@ export default function PlaylistsView(): JSX.Element {
                       </div>
                     )
                   })}
+                </div>
                 </div>
               )
             ) : (

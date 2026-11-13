@@ -23,6 +23,13 @@ function pick<T extends string>(value: unknown, allowed: readonly T[], fallback:
   return allowed.includes(value as T) ? (value as T) : fallback
 }
 
+const fmPlace = (v: unknown): { x: number; y: number } | null => {
+  const p = v as { x?: unknown; y?: unknown } | null
+  return p && typeof p.x === 'number' && typeof p.y === 'number' && Number.isFinite(p.x) && Number.isFinite(p.y)
+    ? { x: Math.min(Math.max(p.x, 0), 1), y: Math.min(Math.max(p.y, 0), 1) }
+    : null
+}
+
 const edgeLook = (id: unknown): string | null => (LOOKS.some((l) => l.id === id) ? (id as string) : null)
 
 // An Edge light saved as the visualizer itself, from before it was a setting of its own: Off, with that light round it.
@@ -46,6 +53,14 @@ interface VizState {
   vizCycle: VizCycle
   /** Widgets layout: the desktop's player, playlist and clock stand in the tab instead of WRLD's own player and lyrics. */
   wrldWidgets: boolean
+  /** The 999 FM card (voting, suggestions, chat) in the Widgets layout, while 999 FM is on. */
+  wrldFm: boolean
+  /** Where it was left: its center as a share of the tab's width and height; null for the default spot. */
+  wrldFmPlace: { x: number; y: number } | null
+  /** Folded down to its header. */
+  wrldFmCollapsed: boolean
+  /** Which side of it shows. */
+  wrldFmTab: 'radio' | 'chat'
   /** The Edge light (its look's id) drawn round the edges: over the visualizer, or on its own with it Off; null for none. */
   vizEdgeOverlay: string | null
   /** How many pickers are open over the page (not saved). WRLD's visualizer and Edge light keep moving under them
@@ -58,6 +73,10 @@ interface VizState {
   setVizBoost: (b: Boost) => void
   setVizCycle: (c: VizCycle) => void
   setWrldWidgets: (on: boolean) => void
+  setWrldFm: (on: boolean) => void
+  setWrldFmPlace: (place: { x: number; y: number } | null) => void
+  setWrldFmCollapsed: (on: boolean) => void
+  setWrldFmTab: (tab: 'radio' | 'chat') => void
   setVizEdgeOverlay: (look: string | null) => void
   /** A picker opened (true) or closed (false). */
   coverViz: (on: boolean) => void
@@ -73,6 +92,10 @@ export const useVizStore = create<VizState>((set) => ({
   // The default. Someone who had the retired visualizer-only layout gets the widgets, where hiding all three is the same.
   wrldWidgets: ls.get<boolean>('immMinimal') ? true : (ls.get<boolean>('wrldWidgets') ?? true),
   vizEdgeOverlay: edgeLook(ls.get('vizEdgeOverlay')),
+  wrldFm: ls.get<boolean>('wrldFm') ?? true,
+  wrldFmPlace: fmPlace(ls.get('wrldFmPlace')),
+  wrldFmCollapsed: ls.get<boolean>('wrldFmCollapsed') ?? false,
+  wrldFmTab: ls.get('wrldFmTab') === 'chat' ? 'chat' : 'radio',
   vizCovered: 0,
 
   selectMode: (id, persist) => {
@@ -93,6 +116,10 @@ export const useVizStore = create<VizState>((set) => ({
     ls.set('wrldWidgets', wrldWidgets)
     ls.set('immMinimal', false)
   },
+  setWrldFm: (wrldFm) => { set({ wrldFm }); ls.set('wrldFm', wrldFm) },
+  setWrldFmPlace: (place) => { const wrldFmPlace = fmPlace(place); set({ wrldFmPlace }); ls.set('wrldFmPlace', wrldFmPlace) },
+  setWrldFmCollapsed: (wrldFmCollapsed) => { set({ wrldFmCollapsed }); ls.set('wrldFmCollapsed', wrldFmCollapsed) },
+  setWrldFmTab: (wrldFmTab) => { set({ wrldFmTab }); ls.set('wrldFmTab', wrldFmTab) },
   // A light picked for WRLD is the screen light's look too: there's one look, the screen light's (Settings > Desktop).
   setVizEdgeOverlay: (look) => {
     const vizEdgeOverlay = edgeLook(look)
@@ -122,6 +149,10 @@ if (typeof window !== 'undefined') {
       case 'vizCycle': useVizStore.setState({ vizCycle: pick(value, CYCLES, 'off') }); break
       case 'wrldWidgets': useVizStore.setState({ wrldWidgets: value !== false }); break
       case 'vizEdgeOverlay': useVizStore.setState({ vizEdgeOverlay: edgeLook(value) }); break
+      case 'wrldFm': useVizStore.setState({ wrldFm: value !== false }); break
+      case 'wrldFmPlace': useVizStore.setState({ wrldFmPlace: fmPlace(value) }); break
+      case 'wrldFmCollapsed': useVizStore.setState({ wrldFmCollapsed: value === true }); break
+      case 'wrldFmTab': useVizStore.setState({ wrldFmTab: value === 'chat' ? 'chat' : 'radio' }); break
     }
   })
 }

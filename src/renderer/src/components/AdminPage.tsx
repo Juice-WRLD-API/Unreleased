@@ -36,7 +36,7 @@ import { useOtpGate } from '../hooks/useOtpGate'
 import { useVisitedTabs } from '../hooks/useVisitedTabs'
 import { useReviseProposalForm } from '../hooks/useReviseProposalForm'
 import { useProposalsTabData } from '../hooks/useProposalsTabData'
-import { useAdminUsersList } from '../hooks/useAdminUsersList'
+import { autoApproveApplies, useAdminUsersList } from '../hooks/useAdminUsersList'
 import { useAdminStats } from '../hooks/useAdminStats'
 import { TEXTAREA_FIELDS, ALL_SONG_FIELDS, PROPOSAL_FILTERS, PROPOSAL_SORTS, PROPOSAL_PAGE } from '../lib/proposalRevise'
 import RoleBadges from './RoleBadges'
@@ -1177,28 +1177,28 @@ function UsersTab({ users, setUsers, currentUserId }: { users: AdminUser[]; setU
               </div>
             )}
 
+            {(autoApproveApplies(selected).edits || autoApproveApplies(selected).comp) && (
+              <div className="space-y-1.5">
+                <p className="text-[10px] font-bold uppercase tracking-widest text-text-muted">Auto-approve</p>
+                {autoApproveApplies(selected).edits && (
+                  <label className="flex items-center justify-between gap-2 text-sm text-text-secondary cursor-pointer">
+                    Song edit proposals
+                    <ThemedCheckbox variant="switch" checked={selected.auto_approve_proposals}
+                      onChange={v => doUpdate(selected.user_id, { auto_approve_proposals: v })} />
+                  </label>
+                )}
+                {autoApproveApplies(selected).comp && (
+                  <label className="flex items-center justify-between gap-2 text-sm text-text-secondary cursor-pointer">
+                    Comp file proposals
+                    <ThemedCheckbox variant="switch" checked={selected.auto_approve_comp_proposals}
+                      onChange={v => doUpdate(selected.user_id, { auto_approve_comp_proposals: v })} />
+                  </label>
+                )}
+              </div>
+            )}
+
             {canAct(selected) ? (
               <div className="space-y-4">
-                {(selected.role === 'editor' || selected.contributor_enabled) && (
-                  <div className="space-y-1.5">
-                    <p className="text-[10px] font-bold uppercase tracking-widest text-text-muted">Auto-approve</p>
-                    {selected.role === 'editor' && (
-                      <label className="flex items-center justify-between gap-2 text-sm text-text-secondary cursor-pointer">
-                        Song edit proposals
-                        <ThemedCheckbox variant="switch" checked={selected.auto_approve_proposals}
-                          onChange={v => doUpdate(selected.user_id, { auto_approve_proposals: v })} />
-                      </label>
-                    )}
-                    {selected.contributor_enabled && (
-                      <label className="flex items-center justify-between gap-2 text-sm text-text-secondary cursor-pointer">
-                        Comp file proposals
-                        <ThemedCheckbox variant="switch" checked={selected.auto_approve_comp_proposals}
-                          onChange={v => doUpdate(selected.user_id, { auto_approve_comp_proposals: v })} />
-                      </label>
-                    )}
-                  </div>
-                )}
-
                 <div>
                   <p className="text-[10px] font-bold uppercase tracking-widest text-text-muted mb-2">Role & status</p>
                   <div className="space-y-1.5 mb-3">
@@ -1226,7 +1226,7 @@ function UsersTab({ users, setUsers, currentUserId }: { users: AdminUser[]; setU
               </div>
             ) : (
               <p className="text-text-muted text-xs italic">
-                {selected.user_id === currentUserId ? "You can't modify your own account here." : 'Administrators can only be modified elsewhere.'}
+                {selected.user_id === currentUserId ? "You can't change your own roles or account here." : "Administrators' roles and accounts can only be changed elsewhere."}
               </p>
             )}
           </div>

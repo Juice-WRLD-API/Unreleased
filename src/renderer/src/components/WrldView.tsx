@@ -1,7 +1,7 @@
 import { SwapIcon } from './PlayerMotion'
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, memo, useCallback } from 'react'
 import { createPortal } from 'react-dom'
-import { Music, Radio, Search, SkipForward, ThumbsUp, ThumbsDown, X, ChevronDown, ChevronLeft, Play, Pause, SkipBack, SkipForward as SkipFwd, Shuffle, Repeat, Repeat1, Volume2, VolumeX, MoreHorizontal, Info, Heart, ListMusic, GripVertical, Trash2, Download, History, SlidersHorizontal, RefreshCw, TextQuote, Loader2, Settings2, Star, Ban } from 'lucide-react'
+import { Music, Radio, Search, X, ChevronDown, ChevronLeft, Play, Pause, SkipBack, SkipForward as SkipFwd, Shuffle, Repeat, Repeat1, Volume2, VolumeX, MoreHorizontal, Info, Heart, ListMusic, GripVertical, Trash2, Download, History, SlidersHorizontal, RefreshCw, TextQuote, Loader2, Settings2, Star, Ban } from 'lucide-react'
 import { useWrldExpandIn } from '../lib/wrldExpand'
 import { lazyOverlay } from '../lib/lazyView'
 import { ModalOverlay, LockToggle } from './Modal'
@@ -11,12 +11,11 @@ import { useShallow } from 'zustand/react/shallow'
 import { getCurrentLineIndex, downloadSyncedLyrics, splitAdLibs, splitColorWords, ADLIB_OPACITY, useLyricsVisible, lyricsLoading } from '../lib/lyrics'
 import { formatDuration } from '../lib/format'
 import { setEqAnchor } from '../lib/eqAnchor'
-import { seekAudio, getAudioDuration, getAudioCurrentTime, usePlayerLoading } from './Player'
+import { seekAudio, getAudioDuration, usePlayerLoading } from './Player'
 import { getSongById, songToTrack, playlistCoverUrl, smallCoverUrl, fullCoverUrl, loadAllSongs } from '../lib/juicewrldApi'
 import type { JWApiSong } from '../lib/juicewrldApi'
 import * as albumsApi from '../lib/albumsApi'
 import type { Album as WrldAlbum } from '../lib/albumsApi'
-import { getActiveRadioClient } from '../lib/radioSocketService'
 import { EFFECTS_SUPPORTED, fxInUse } from '../lib/audioEffects'
 import { useVersionPrefToggles } from '../hooks/useVersionPrefToggles'
 import { useSongVersions } from '../hooks/useSongVersions'
@@ -33,16 +32,21 @@ import { FallbackImg, ProgressiveCover } from './ProgressiveCover'
 import SongContextMenu from './SongContextMenu'
 import { SearchHelpButton } from './SearchHelpPopover'
 import ContextMenu from './ContextMenu'
+import RadioChatPanel from './RadioChatPanel'
+import RadioFmControls from './RadioFmControls'
+import WrldFmWidget from './WrldFmWidget'
 import { getSkin } from '../lib/skins'
 import WrldVisualizer from './WrldVisualizer'
 import WrldWidgets from './WrldWidgets'
 import LyricStageView from './LyricStageView'
+import { playingSeconds } from '../desktop/playClock'
+import WordLyricLine from './WordLyricLine'
 import LyricsControls from './LyricsControls'
 import { useVizStore } from '../store/vizStore'
 import { setTermFullscreen } from '../lib/terminal/fullscreenStore'
 import {
   useWrldArt, useArtTextContrast, useWrldLyricsSource, useWrldNowPlaying,
-  usePlayVersion, useRadioSuggest, useRadioVoteCountdown,
+  usePlayVersion,
 } from '../hooks/useWrldCore'
 
 // Pulls in html-to-image for the export - only worth downloading once opened.
@@ -88,8 +92,6 @@ export default function WrldView(): JSX.Element {
   const {
     currentTrack, currentTrackFull, account, theme,
     radioFmActive, setRadioFmActive, radioFmIsLive, radioFmNowPlaying,
-    radioFmVote, radioFmUpNext, radioFmQueuePreview,
-    radioFmVoteDismissed, setRadioFmVoteDismissed,
     radioFmMatchedSong,
     playlists,
     playTrack,
@@ -110,11 +112,6 @@ export default function WrldView(): JSX.Element {
     setRadioFmActive: s.setRadioFmActive,
     radioFmIsLive: s.radioFmIsLive,
     radioFmNowPlaying: s.radioFmNowPlaying,
-    radioFmVote: s.radioFmVote,
-    radioFmUpNext: s.radioFmUpNext,
-    radioFmQueuePreview: s.radioFmQueuePreview,
-    radioFmVoteDismissed: s.radioFmVoteDismissed,
-    setRadioFmVoteDismissed: s.setRadioFmVoteDismissed,
     radioFmMatchedSong: s.radioFmMatchedSong,
     playlists: s.playlists,
     playTrack: s.playTrack,
@@ -215,7 +212,7 @@ export default function WrldView(): JSX.Element {
   const [queueEverOpened, setQueueEverOpened] = useState(showQueue)
   useEffect(() => { if (showQueue) setQueueEverOpened(true) }, [showQueue])
 
-  const [fmTab, setFmTab] = useState<'radio' | 'lyrics'>('radio')
+  const [fmTab, setFmTab] = useState<'radio' | 'chat' | 'lyrics'>('radio')
   // Fullscreen renders the page through a portal (covers the sidebar/other
   // chrome) AND requests real OS/browser-level fullscreen - the portal alone
   // only fills the app window, not the actual screen.
@@ -313,14 +310,6 @@ export default function WrldView(): JSX.Element {
   const wrldWidgets = useVizStore(s => s.wrldWidgets)
   const hideForViz = wrldWidgets ? { display: 'none' } : undefined
 
-  const {
-    suggestQuery, setSuggestQuery, suggestResults, suggestLoading,
-    proposed, proposeError, handlePropose, dismissProposed,
-  } = useRadioSuggest('Tune in to 999 FM first - proposals only count from listeners')
-  const [voteError, setVoteError] = useState(false)
-  const { myVote, setMyVote, localSecondsLeft } = useRadioVoteCountdown(
-    radioFmVote?.active, radioFmVote?.seconds_left, () => setVoteError(false),
-  )
   const textIsDark = useArtTextContrast(artSrc, artError, isDarkSkin, radioFmActive, useThemeBackground ? !isDarkSkin : null)
 
   // ── Albums state ─────────────────────────────────────────────────────────────
@@ -441,7 +430,7 @@ export default function WrldView(): JSX.Element {
   // column is fully closed no view counts as shown, so reopening straight to
   // the queue doesn't play the lyrics' exit on the way in.
   const panelView: PanelView | null = !showLyricsColumn ? null
-    : radioFmActive ? (fmTab === 'radio' ? 'radio' : 'lyrics')
+    : radioFmActive ? (fmTab === 'lyrics' ? 'lyrics' : 'radio')
     : showQueue ? 'queue' : 'lyrics'
   const panelPresence = usePresence(showLyricsColumn, PANEL_EXIT_MS)
   const lastPanelView = useRef<PanelView>('lyrics')
@@ -517,25 +506,6 @@ export default function WrldView(): JSX.Element {
     { value: 'playlists', label: 'Playlists' },
   ]
 
-  // Time the warning out like the propose error below it. The rising-edge reset
-  // above only fires when a brand new ballot arrives, which can be a long way
-  // off - long enough for "tune in to 999 FM" to still be sitting there after
-  // the listener has done exactly that.
-  useEffect(() => {
-    if (!voteError) return
-    const t = setTimeout(() => setVoteError(false), 4000)
-    return () => clearTimeout(t)
-  }, [voteError])
-
-  // Highlight a choice only once the socket accepted it - the server discards
-  // votes from a connection it hasn't seen listening:true on, which otherwise
-  // looks identical to a counted vote.
-  const castFmVote = useCallback((value: 'yes' | 'no'): void => {
-    const sent = getActiveRadioClient()?.castVote(value) ?? false
-    setMyVote(sent ? value : null)
-    setVoteError(!sent)
-  }, [setMyVote])
-
   const fmLabel    = radioFmActive
     ? (radioFmIsLive ? '999 FM · LIVE' : '999 FM · OFF')
     : radioFmIsLive === false ? '999 FM · OFF' : '999 FM'
@@ -586,148 +556,7 @@ export default function WrldView(): JSX.Element {
     </div>
   )
 
-  const FmRadioPanel = () => (
-    <div className="flex-1 overflow-y-auto pb-8 px-4 md:px-6 flex flex-col gap-4 md:gap-5" style={{ scrollbarWidth: 'none' }}>
-      {/* Vote */}
-      {radioFmVote?.active && !radioFmVoteDismissed ? (
-        <div className="bg-white/5 border border-white/10 rounded-2xl p-4 flex flex-col gap-3">
-          <div className="flex items-center justify-between">
-            <p className="text-white/50 text-[11px] font-semibold uppercase tracking-widest">
-              {radioFmVote.kind === 'skip' ? 'Vote to Skip' : 'Vote to Queue'}
-            </p>
-            <div className="flex items-center gap-2">
-              {localSecondsLeft != null && (
-                <span className={`text-xs tabular-nums font-mono transition-colors ${localSecondsLeft <= 5 ? 'text-red-400/70' : 'text-white/30'}`}>
-                  {localSecondsLeft}s
-                </span>
-              )}
-              <button onClick={() => setRadioFmVoteDismissed(true)} className="text-white/20 hover:text-white/60 transition-colors">
-                <X size={13} />
-              </button>
-            </div>
-          </div>
-          {radioFmVote.track && <p className="text-white/80 text-sm font-medium">{radioFmVote.track}</p>}
-          <p className="text-white/30 text-xs">
-            {radioFmVote.yes ?? 0} yes · {radioFmVote.no ?? 0} no
-            {radioFmVote.votes_needed != null && <span> · need {radioFmVote.votes_needed}</span>}
-          </p>
-          {voteError && (
-            <p className="text-red-400/80 text-xs">Vote didn't send - tune in to 999 FM and try again.</p>
-          )}
-          <div className="flex gap-2">
-            <button
-              onClick={() => castFmVote('yes')}
-              className={`flex-1 flex items-center justify-center gap-1.5 py-2 rounded-xl text-sm font-medium transition-all ${
-                myVote === 'yes'
-                  ? 'bg-green-600/40 text-green-300 ring-1 ring-green-500/50'
-                  : 'bg-green-600/15 hover:bg-green-600/30 text-green-400'
-              }`}>
-              <ThumbsUp size={13} /> Yes
-            </button>
-            <button
-              onClick={() => castFmVote('no')}
-              className={`flex-1 flex items-center justify-center gap-1.5 py-2 rounded-xl text-sm font-medium transition-all ${
-                myVote === 'no'
-                  ? 'bg-red-600/40 text-red-300 ring-1 ring-red-500/50'
-                  : 'bg-red-900/15 hover:bg-red-900/30 text-red-400'
-              }`}>
-              <ThumbsDown size={13} /> No
-            </button>
-          </div>
-        </div>
-      ) : (
-        <button onClick={() => {
-          setRadioFmVoteDismissed(false)
-          setVoteError(!(getActiveRadioClient()?.proposeSkip() ?? false))
-        }}
-          className="flex items-center gap-2 text-sm text-white/30 hover:text-white/65 transition-colors self-start">
-          <SkipForward size={14} /> Vote to skip
-        </button>
-      )}
-      {voteError && !radioFmVote?.active && (
-        <p className="text-red-400/80 text-xs">Tune in to 999 FM to start a vote.</p>
-      )}
-
-      {/* Suggest */}
-      <div className="flex flex-col gap-2">
-        <p className="text-white/40 text-[11px] font-semibold uppercase tracking-widest">Suggest next song</p>
-        {proposed ? (
-          <div className="flex items-center justify-between bg-green-900/20 border border-green-500/20 rounded-xl px-3 py-2">
-            <div className="flex items-center gap-2 text-green-400 text-sm">
-              <span className="w-1.5 h-1.5 rounded-full bg-green-400 shrink-0 animate-pulse" />
-              Proposed: <span className="text-green-300 font-medium">{proposed}</span>
-            </div>
-            <button onClick={dismissProposed} title="Dismiss"
-              className="text-green-500/50 hover:text-green-400 transition-colors ml-2 shrink-0">
-              <X size={13} />
-            </button>
-          </div>
-        ) : (
-          <>
-            {proposeError && (
-              <p className="text-red-400/80 text-xs pl-1">{proposeError}</p>
-            )}
-            {/* Same field:"value" syntax as the Tracker - see searchRadioLibrary. */}
-            <div className="flex items-center gap-1.5">
-              <div className="relative flex-1 min-w-0">
-                <Search size={12} className="absolute left-3 top-1/2 -translate-y-1/2 text-white/25 pointer-events-none" />
-                <input
-                  type="text" value={suggestQuery}
-                  onChange={(e) => setSuggestQuery(e.target.value)}
-                  placeholder='Search, or producers:"Nick Mira"…'
-                  className="w-full bg-white/5 text-white/80 text-sm rounded-xl py-2 pl-8 pr-3 border border-white/10 focus:outline-none focus:border-white/25 transition-colors"
-                  style={{ colorScheme: 'dark' }}
-                />
-              </div>
-              <SearchHelpButton
-                className={(open) => `p-2 rounded-xl border transition-colors ${open ? 'bg-white/15 border-white/25 text-white/80' : 'bg-white/5 border-white/10 text-white/35 hover:text-white/70'}`}
-              />
-            </div>
-            {suggestLoading && <p className="text-white/25 text-xs pl-1">Searching…</p>}
-            {suggestResults.length > 0 && (
-              <div className="flex flex-col -mx-1">
-                {suggestResults.map(track => (
-                  <button key={track.id} onClick={() => handlePropose(track)}
-                    className="text-left px-3 py-2 rounded-xl hover:bg-white/10 transition-colors group">
-                    <p className="text-white/70 text-sm truncate group-hover:text-white/90 transition-colors" title={track.title}>
-                      {track.title}
-                    </p>
-                    <p className="text-white/35 text-xs truncate">{track.artist || track.era}</p>
-                  </button>
-                ))}
-              </div>
-            )}
-          </>
-        )}
-      </div>
-
-      {/* Up next */}
-      {radioFmUpNext && (
-        <div className="flex flex-col gap-2">
-          <p className="text-white/40 text-[11px] font-semibold uppercase tracking-widest">Up next</p>
-          <div className="bg-white/5 border border-white/10 rounded-xl px-4 py-3">
-            <p className="text-white/80 text-sm font-medium truncate" title={radioFmUpNext.title}>{radioFmUpNext.title}</p>
-            {radioFmUpNext.artist && <p className="text-white/40 text-xs mt-0.5">{radioFmUpNext.artist}</p>}
-          </div>
-        </div>
-      )}
-
-      {/* Queue preview */}
-      {radioFmQueuePreview.length > 0 && (
-        <div className="flex flex-col gap-2">
-          <p className="text-white/40 text-[11px] font-semibold uppercase tracking-widest">Coming up</p>
-          <div className="flex flex-col">
-            {radioFmQueuePreview.map((title, i) => (
-              <div key={i} className="flex items-center gap-3 px-1 py-1.5 rounded-lg">
-                <span className="text-white/20 text-xs w-4 text-right shrink-0">{i + 1}</span>
-                <p className="text-white/50 text-sm truncate" title={title}>{title}</p>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
-    </div>
-  )
+  const FmRadioPanel = () => <RadioFmControls />
 
   // LyricsPanel is now a module-level component (see below WrldView) - call via JSX.
 
@@ -928,6 +757,7 @@ export default function WrldView(): JSX.Element {
             />
 
           {wrldWidgets && <WrldWidgets />}
+          {wrldWidgets && <WrldFmWidget />}
 
           {/* Mobile layout */}
           <div className="md:hidden relative z-10 flex flex-col h-full min-h-0" style={hideForViz}>
@@ -981,12 +811,12 @@ export default function WrldView(): JSX.Element {
             {/* Tab bar (FM mode) or divider line */}
             {showLyricsColumn && (radioFmActive ? (
               <div className="flex items-center gap-1 px-4 pb-2 shrink-0 border-b border-white/5">
-                {(['radio', 'lyrics'] as const).map(tab => (
+                {(['radio', 'chat', 'lyrics'] as const).map(tab => (
                   <button key={tab} onClick={() => setFmTab(tab)}
                     className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-colors capitalize ${
                       fmTab === tab ? 'bg-white/10 text-white/90' : 'text-white/35 hover:text-white/65 hover:bg-white/5'
                     }`}>
-                    {tab === 'radio' ? 'Radio' : 'Lyrics'}
+                    {tab === 'radio' ? 'Radio' : tab === 'chat' ? 'Chat' : 'Lyrics'}
                   </button>
                 ))}
               </div>
@@ -999,6 +829,8 @@ export default function WrldView(): JSX.Element {
               <div key={radioFmActive ? fmTab : 'lyrics'} className="flex-1 min-h-0 flex flex-col animate-wrld-view-in">
                 {radioFmActive && fmTab === 'radio'
                   ? FmRadioPanel()
+                  : radioFmActive && fmTab === 'chat'
+                  ? <RadioChatPanel />
                   : <LyricsPanel rawLyrics={rawLyrics} isSynced={isSynced} syncedLines={syncedLines} radioFmActive={radioFmActive} currentTrack={currentTrack} isEditor={isEditor} txtPri={txtPri} txtSec={txtSec} txtTer={txtTer} txtFaint={txtFaint} artUrl={artSrc} />}
               </div>
             )}
@@ -1480,7 +1312,20 @@ export default function WrldView(): JSX.Element {
                 // help button off the window edge.
                 <WrldPanelLayer exiting={radioPresence.exiting} animateIn={viewCrossfade} className="absolute inset-0 flex justify-center px-6 xl:px-10 pt-24 pb-7">
                   <div className="w-full max-w-[360px] h-full flex flex-col">
-                    {FmRadioPanel()}
+                    {/* Radio and Chat share this layer; Lyrics is its own. */}
+                    <div className="flex items-center gap-1 pb-4 shrink-0">
+                      {(['radio', 'chat'] as const).map(tab => (
+                        <button key={tab} onClick={() => setFmTab(tab)}
+                          className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-colors ${
+                            fmTab === tab ? 'bg-white/10 text-white/90' : 'text-white/35 hover:text-white/65 hover:bg-white/5'
+                          }`}>
+                          {tab === 'radio' ? 'Radio' : 'Chat'}
+                        </button>
+                      ))}
+                    </div>
+                    <div key={fmTab} className="flex-1 min-h-0 flex flex-col animate-wrld-view-in">
+                      {fmTab === 'chat' ? <RadioChatPanel /> : FmRadioPanel()}
+                    </div>
                   </div>
                 </WrldPanelLayer>
               )}
@@ -2308,7 +2153,7 @@ const LyricsPanel = memo(function LyricsPanel({
   // the top, then glide back down" flash on every fullscreen toggle.
   const [currentLineIdx, setCurrentLineIdx] = useState(() =>
     isSynced && syncedLines.length > 0
-      ? getCurrentLineIndex(syncedLines, getAudioCurrentTime() - lyricsOffset)
+      ? getCurrentLineIndex(syncedLines, playingSeconds() - lyricsOffset)
       : -1
   )
   const lineIdxRef = useRef(currentLineIdx)
@@ -2328,7 +2173,7 @@ const LyricsPanel = memo(function LyricsPanel({
     if (!inSight) return
     let raf = 0
     const tick = (): void => {
-      const idx = getCurrentLineIndex(syncedLines, getAudioCurrentTime() - lyricsOffset)
+      const idx = getCurrentLineIndex(syncedLines, playingSeconds() - lyricsOffset)
       if (idx !== lineIdxRef.current) {
         lineIdxRef.current = idx
         setCurrentLineIdx(idx)
@@ -2563,7 +2408,9 @@ const LyricsPanel = memo(function LyricsPanel({
                   textShadow: isActive ? '0 0 30px rgba(255,255,255,0.12)' : 'none',
                 }}
               >
-                {splitAdLibs(line.text).map((seg, si) => (
+                {line.words ? (
+                  <WordLyricLine words={line.words} active={isActive} getTime={playingSeconds} offset={lyricsOffset} />
+                ) : splitAdLibs(line.text).map((seg, si) => (
                   <span key={si} style={seg.adLib ? { opacity: ADLIB_OPACITY } : undefined}>
                     {splitColorWords(seg.text).map((cseg, ci) => (
                       cseg.color

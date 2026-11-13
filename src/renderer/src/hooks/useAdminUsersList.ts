@@ -21,6 +21,14 @@ function patchedFields(payload: UserPatch): Partial<AdminUser> {
   return out
 }
 
+// Which auto-approve switches mean something for a user: edits for editors,
+// comp for contributors, both for administrators (who are both). Unlike the
+// role switches these are open for your own row and other admins too.
+export function autoApproveApplies(u: Pick<AdminUser, 'role' | 'contributor_enabled'>): { edits: boolean; comp: boolean } {
+  const admin = u.role === 'administrator'
+  return { edits: admin || u.role === 'editor', comp: admin || !!u.contributor_enabled }
+}
+
 export function useAdminUsersList(users: AdminUser[], setUsers: React.Dispatch<React.SetStateAction<AdminUser[]>>, currentUserId: number | undefined): {
   filter: UsersFilter
   setFilter: (f: UsersFilter) => void

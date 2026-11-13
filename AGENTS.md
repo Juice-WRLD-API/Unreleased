@@ -1,6 +1,6 @@
 # Agent guide: Juice WRLD API and Unreleased
 
-**Version 1.73** · updated 2026-11-13. Bump the version and date whenever you
+**Version 1.80** · updated 2026-11-14. Bump the version and date whenever you
 change this file (minor for fixes and additions, major for rewrites).
 
 **Keep this file current.** If you find something in the docs or this file that
@@ -50,6 +50,11 @@ version number (desktop 2.5.x, web 2.3.x, Android/iOS 3.2.x, beta 3.0.x-beta as 
 - **Never commit unless the user asks.** Leave changes in the working tree and
   say what is ready.
 - "Commit" means **commit and push** the branch to `origin`.
+- **Every push to `app` is a release.** `.github/workflows/auto-release.yml` bumps
+  the patch version, tags it, creates the GitHub release and starts the three
+  platform builds (only a commit titled `vX.Y.Z` is skipped). So a pushed
+  change is never "unreleased": the next version number is its release, and
+  the changelog entry for it takes that number.
 - Author every commit as the user. **No
   `Co-Authored-By` lines, no "Generated with" footers**, in commits or PRs.
 - **Never commit in `backend/`.**
@@ -203,8 +208,11 @@ public track links. Mixing them up fails silently.
 ### Realtime
 
 Websockets live under `wss://juicewrldapi.com/juicewrld/ws/…`: notifications,
-staff chat, 999 FM radio and Heardle versus. Auth and events are in
-`docs/19-websockets.md`; radio in `docs/06-999-fm.md`.
+staff chat, 999 FM radio, the 999 FM chat and Heardle versus. Auth and events are in
+`docs/19-websockets.md`; radio in `docs/06-999-fm.md`. The 999 FM chat has
+its own socket (`/ws/radio/chat/`, client `lib/radioChatSocket.ts`): never add
+frame types to `/ws/radio/`, whose text frames older players read as station
+state.
 
 ### Staff chat encryption
 
@@ -401,8 +409,14 @@ don't embed the tool in the editor again. A Whisper job's result shows it
 Sync tab; don't add timing controls back to the preview. Whisper stays
 donor-only, under Generate. Word timing
 is written as enhanced LRC (`[0:06.88] <0:06.88>No, <0:07.20>no<0:08.10>`)
-into the song's `synced_lyrics`; a player that doesn't read word tags shows
-them as text.
+into the song's `synced_lyrics`. `parseLrc` (`lib/lyrics.ts`) reads the word
+tags into the line's `words` and leaves them out of `text`, so every view
+built on it is clean; Now Playing and WRLD's list light words up through
+`WordLyricLine`, and the Desktop lyric styles use the real times instead of
+the syllable spread. Karaoke lights a line whole unless it is `wordTimed`;
+then its `sing` lights each word, so a style that ignores `sing` (Karaoke
+did) never shows word timing. Outside players that don't read word tags show them as
+text.
 
 **Web (`web`)**: same renderer plus mobile layouts (`IS_MOBILE`), PWA install,
 and `server/social-preview.mjs` for link previews (nginx setup in
@@ -564,6 +578,43 @@ Node 22.
 
 Newest first. One entry each: date, what went wrong, what to do instead. Delete
 entries that stop being true.
+
+- 2026-11-14: Git Bash's `sed -i` on Windows rewrote CRLF files as LF
+  (`WrldView.tsx`, `radioSocketService.ts`), so a follow-up edit matching
+  `\r$` silently did nothing. `git diff` hides it (the index is LF). For
+  scripted edits use Python with `newline=''`, and check `file <path>` still
+  says CRLF afterwards.
+
+- 2026-11-14: 999 FM lyrics ran ahead, worst after the DJ talked. `elapsed_ms` is the
+  song's position at the live edge, posted every 5 s, while listeners hear the stream up
+  to ~6 s behind it (more right after tuning in: the server sends a 128 KB prebuffer), and
+  during `state: "dj_talking"` `now_playing` already names the next song but `elapsed_ms`
+  keeps counting the previous one, then resets to ~0 when the song starts. `RadioFmPlayer`
+  now stores the heard position (plus `stale_seconds`, minus `listenLagMs()`), stores no
+  `elapsed_ms` during talk, and applies song/talk changes after the buffer lag. Read FM's
+  position through `radioFmSeconds` / `playingSeconds` (`desktop/playClock.ts`), never
+  `getAudioCurrentTime` (the paused main player) or raw `elapsed_ms` plus wall time.
+
+- 2026-11-14: Switching to Playlists froze for up to 2 s with a big playlist
+  open. Only the list layout was windowed; compact and grid mounted every row
+  (7,900 DOM nodes for 303 tracks), and the view remounts on every visit.
+  All three layouts are windowed now: compact through
+  `useVariableVirtualWindow` (an open version group's height is measured by
+  `MeasuredBlock`), grid by row through `useGridMetrics`. A new layout or
+  long list in that view needs a window too. To profile: port 3018 is often
+  the user's own `vite` dev server already (leave it running and point the
+  scratch Electron at it), and `window.__store` exists only in dev builds.
+  `TaskStop` on the launch command leaves Electron running; stop the
+  processes whose command line holds the scratch `--user-data-dir` before
+  deleting it.
+
+- 2026-11-14: The player bar's cover (and the ambient backdrop) stayed blank
+  for a whole song while Now Playing showed the art. Both loaded only the
+  `small=1` copy, and a request the API never answers fires neither `load`
+  nor `error`. Now Playing survived because ProgressiveCover also preloads
+  the sized copy. A cover must have a fallback copy and a stall timeout:
+  `FallbackImg` with `stallMs` (CoverFade passes the raw cover and builds
+  `[small, sized]` itself; don't hand it `smallCoverUrl(...)`).
 
 - 2026-11-13: Fuzzy patching (`patch -F3`, `git apply --3way`) put the grouped
   Settings hunks on the wrong rows of `web`, whose `Settings.desktop.tsx` is a

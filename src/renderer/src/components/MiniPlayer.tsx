@@ -345,6 +345,7 @@ export default function MiniPlayer(): JSX.Element {
   useEffect(() => {
     if (!radioFmActive || !fmElapsed) {
       if (fmTickRef.current) { clearInterval(fmTickRef.current); fmTickRef.current = null }
+      fmBaseRef.current = { elapsed: 0, at: 0 }
       setFmElapsedMs(0)
       return
     }

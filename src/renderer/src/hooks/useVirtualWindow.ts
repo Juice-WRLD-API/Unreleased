@@ -123,10 +123,11 @@ export function useVirtualWindowEl(
   return useFixedWindow(scrollEl, contentEl, rowCount, rowStride, overscan, chunk)
 }
 
-/** Variable-height rows described by a prefix sum, including the final edge. */
+/** Variable-height rows described by a prefix sum, including the final edge.
+ *  Takes refs or element state (for lists that mount later). */
 export function useVariableVirtualWindow(
-  scrollRef: RefObject<HTMLElement>,
-  contentRef: RefObject<HTMLElement>,
+  scrollRef: ElementSource,
+  contentRef: ElementSource,
   offsets: readonly number[],
   totalHeight: number,
 ): VirtualWindow {

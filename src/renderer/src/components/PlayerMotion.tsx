@@ -1,5 +1,7 @@
 import { useLayoutEffect, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
+import { smallCoverUrl } from '../lib/juicewrldApi'
+import { FallbackImg } from './ProgressiveCover'
 
 // Small motion pieces for the player controls. Each one animates on a change
 // of its key, never on mount, and compares against the previous key itself -
@@ -53,22 +55,32 @@ export function TrackSwap({ swapKey, order, className, children }: {
   return <div ref={ref} className={className}>{children}</div>
 }
 
+/** A cover request that hasn't answered by now moves on to the next copy. */
+const COVER_STALL_MS = 4000
+
 /** Cover art that crossfades between songs: the old cover fades out at once
  *  (so it never lingers next to the new title) and the new one fades in as
  *  soon as it has loaded. At most two layers; the outgoing one is dropped when
- *  its fade ends. Fills its parent. */
+ *  its fade ends. Fills its parent. `src` is the cover as the track holds it:
+ *  the small copy is tried first, then the sized one, so one stalled or failed
+ *  `small=1` request doesn't leave the box blank (Now Playing loads both, which
+ *  is why it showed the art while the bar didn't). onError fires only once
+ *  every copy has failed. */
 export function CoverFade({ src, alt = '', onError }: { src: string; alt?: string; onError?: () => void }): JSX.Element {
   const [layers, setLayers] = useState([{ src, ready: false }])
   const box = useRef<HTMLDivElement>(null)
   const top = layers[layers.length - 1]
   if (top.src !== src) setLayers(top.ready ? [top, { src, ready: false }] : [{ src, ready: false }])
+  const markReady = (s: string): void => setLayers((ls) => ls.some((x) => x.src === s && !x.ready)
+    ? ls.map((x) => (x.src === s ? { ...x, ready: true } : x))
+    : ls)
   // An image that has already loaded fires no load event. When the src flips A -> B -> A
   // before B loads (offline cover vs. API cover as a song starts), React keeps A's <img>
   // by key, so it never became ready and the cover stayed invisible.
   useLayoutEffect(() => {
-    const loaded = [...(box.current?.querySelectorAll('img') ?? [])]
-      .filter((img) => img.complete && img.naturalWidth > 0)
-      .map((img) => img.getAttribute('src'))
+    const loaded = [...(box.current?.querySelectorAll<HTMLElement>('[data-cover]') ?? [])]
+      .filter((el) => { const img = el.querySelector('img'); return !!img && img.complete && img.naturalWidth > 0 })
+      .map((el) => el.dataset.cover)
     setLayers((ls) => ls.some((l) => !l.ready && loaded.includes(l.src))
       ? ls.map((x) => (!x.ready && loaded.includes(x.src) ? { ...x, ready: true } : x))
       : ls)
@@ -79,21 +91,25 @@ export function CoverFade({ src, alt = '', onError }: { src: string; alt?: strin
       {layers.map((l, i) => {
         const isTop = i === layers.length - 1
         return (
-          <img
+          // Fades itself (below) - data-no-fade keeps it out of lib/imageFade's
+          // load fade. transitionend bubbles up from the <img> to here.
+          <span
             key={l.src}
-            src={l.src}
-            alt={isTop ? alt : ''}
-            className="cover-fade absolute inset-0 w-full h-full object-cover"
-            // Fades itself (below) - kept out of lib/imageFade's load fade.
+            data-cover={l.src}
             data-no-fade
-            style={{ opacity: isTop && l.ready ? 1 : 0 }}
-            onLoad={() => setLayers(ls => ls.some(x => x.src === l.src && !x.ready)
-              ? ls.map(x => (x.src === l.src ? { ...x, ready: true } : x))
-              : ls)}
             onTransitionEnd={() => setLayers(ls => (ls[ls.length - 1].src === l.src || !ls.some(x => x.src === l.src)
               ? ls : ls.filter(x => x.src !== l.src)))}
-            onError={isTop ? onError : undefined}
-          />
+          >
+            <FallbackImg
+              sources={[smallCoverUrl(l.src), l.src]}
+              alt={isTop ? alt : ''}
+              className="cover-fade absolute inset-0 w-full h-full object-cover"
+              style={{ opacity: isTop && l.ready ? 1 : 0 }}
+              stallMs={COVER_STALL_MS}
+              onLoad={() => markReady(l.src)}
+              onError={isTop ? onError : undefined}
+            />
+          </span>
         )
       })}
     </div>
