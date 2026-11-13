@@ -30,7 +30,35 @@ export interface RadioChatState {
   guests_enabled: boolean
   /** The admin's note while chat is off ('' when on). */
   reason: string
+  /** Who may post links. Older servers omit it (they act as 'signed_in'). */
+  links?: RadioChatLinks
   updated_at: string | null
+}
+
+/** Who may post links: everyone, signed-in listeners, staff (admins and mods), no one. */
+export type RadioChatLinks = 'everyone' | 'signed_in' | 'staff' | 'off'
+export const RADIO_CHAT_LINK_MODES: { mode: RadioChatLinks; label: string }[] = [
+  { mode: 'everyone', label: 'Everyone' },
+  { mode: 'signed_in', label: 'Signed-in listeners' },
+  { mode: 'staff', label: 'Staff only' },
+  { mode: 'off', label: 'No one' },
+]
+
+/** The admin view of the state: also the blocked words, which listeners never see. */
+export interface RadioChatAdminState extends RadioChatState {
+  blocked_words: string[]
+}
+
+export interface RadioChatStatePatch {
+  enabled?: boolean
+  guests?: boolean
+  reason?: string
+  clear?: boolean
+  links?: RadioChatLinks
+  /** Replaces the list. Entries match whole words; `*` matches any letters. */
+  blocked_words?: string[]
+  add_words?: string[]
+  remove_words?: string[]
 }
 
 export interface RadioChatSnapshot extends RadioChatState {
@@ -60,13 +88,19 @@ export async function fetchRadioChatTicket(): Promise<string> {
   return res.ticket
 }
 
-/** Admin: the killswitches. `enabled` is everyone, `guests` only listeners
- *  without an account; `clear` also hides every line for good. */
-export async function setRadioChatState(patch: { enabled?: boolean; guests?: boolean; reason?: string; clear?: boolean }): Promise<RadioChatState & { cleared: number }> {
-  return authedRequest<RadioChatState & { cleared: number }>(`${base()}/state/`, {
+/** Admin: the switches and filters. `enabled` is everyone, `guests` only
+ *  listeners without an account; `clear` also hides every line for good;
+ *  `links` and the word fields are the filters. */
+export async function setRadioChatState(patch: RadioChatStatePatch): Promise<RadioChatAdminState & { cleared: number }> {
+  return authedRequest<RadioChatAdminState & { cleared: number }>(`${base()}/state/`, {
     method: 'POST',
     body: JSON.stringify(patch),
   }, getToken())
+}
+
+/** Admin: the state with the blocked words. */
+export async function fetchRadioChatAdminState(signal?: AbortSignal): Promise<RadioChatAdminState> {
+  return authedRequest<RadioChatAdminState>(`${base()}/state/`, { method: 'GET', signal }, getToken())
 }
 
 /** Admin: hide one line. */

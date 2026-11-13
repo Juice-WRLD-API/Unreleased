@@ -1,5 +1,5 @@
 import { create } from 'zustand'
-import type { RadioChatMessage, RadioChatRole } from '../lib/radioChatApi'
+import type { RadioChatLinks, RadioChatMessage, RadioChatRole } from '../lib/radioChatApi'
 
 // The 999 FM chat as the open socket last described it. One copy per window,
 // written only by lib/radioChatSocket.ts; WRLD's desktop and phone panels both
@@ -32,6 +32,8 @@ interface RadioChatStore {
   /** Off: only signed-in listeners can post. */
   guestsEnabled: boolean
   reason: string
+  /** Who may post links. */
+  links: RadioChatLinks
   messages: RadioChatMessage[]
   pending: RadioChatPending[]
   /** Set once the socket accepted a ticket: lines go out as this account. */
@@ -48,6 +50,7 @@ export const useRadioChatStore = create<RadioChatStore>((set) => ({
   enabled: null,
   guestsEnabled: true,
   reason: '',
+  links: 'signed_in',
   messages: [],
   pending: [],
   me: null,

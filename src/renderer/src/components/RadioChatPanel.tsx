@@ -1,24 +1,25 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
-import { BadgeCheck, Ban, Eraser, Loader2, MoreHorizontal, Pencil, Power, Send, ShieldOff, Trash2, UserX, X } from 'lucide-react'
+import { BadgeCheck, Ban, Eraser, Link2, ListX, Loader2, MoreHorizontal, Pencil, Power, Send, ShieldOff, Trash2, UserX, X } from 'lucide-react'
 import ContextMenu from './ContextMenu'
 import type { ContextMenuEntry } from './ContextMenu'
 import { useStore } from '../store/useStore'
 import { useRadioChatStore } from '../store/radioChatStore'
 import type { RadioChatPending } from '../store/radioChatStore'
 import {
-  acquireRadioChat, applyRadioChatGuests, applyRadioChatState, dismissRadioChatPending, dropRadioChatLines, sendRadioChat,
+  acquireRadioChat, applyRadioChatGuests, applyRadioChatLinks, applyRadioChatState, dismissRadioChatPending, dropRadioChatLines, linksMode,
+  sendRadioChat,
 } from '../lib/radioChatSocket'
 import {
-  RADIO_CHAT_MAX_NAME, RADIO_CHAT_MAX_TEXT, banRadioChatAuthor, deleteRadioChatMessage, fetchRadioChat,
-  fetchRadioChatBans, liftRadioChatBan, setRadioChatState,
+  RADIO_CHAT_LINK_MODES, RADIO_CHAT_MAX_NAME, RADIO_CHAT_MAX_TEXT, banRadioChatAuthor, deleteRadioChatMessage, fetchRadioChat,
+  fetchRadioChatAdminState, fetchRadioChatBans, liftRadioChatBan, setRadioChatState,
 } from '../lib/radioChatApi'
-import type { RadioChatBan, RadioChatMessage } from '../lib/radioChatApi'
+import type { RadioChatBan, RadioChatLinks, RadioChatMessage } from '../lib/radioChatApi'
 import { showAppToast } from '../lib/appToast'
 import { relativeTime } from './adminShared'
 
 // The 999 FM live chat, a tab of WRLD's FM panel (desktop and phone). Anyone
 // can read and post; admins get the killswitches (everyone, or guests only),
-// delete and ban. Styled for WRLD's dark backdrop like the Radio tab beside it.
+// delete and ban, who may post links, and the blocked words. Styled for WRLD's dark backdrop like the Radio tab beside it.
 
 const BAN_LENGTHS: { label: string; minutes: number }[] = [
   { label: '10 minutes', minutes: 10 },
@@ -43,13 +44,15 @@ export default function RadioChatPanel(): JSX.Element {
   const isAdmin = useStore((s) => !!s.account?.is_administrator)
   const signedIn = useStore((s) => !!s.account)
   const setShowUserAuth = useStore((s) => s.setShowUserAuth)
-  const { status, enabled, guestsEnabled, reason, messages, pending, authPending, name, setName } = useRadioChatStore()
+  const { status, enabled, guestsEnabled, reason, links, messages, pending, authPending, name, setName } = useRadioChatStore()
   const [draft, setDraft] = useState('')
   const [editingName, setEditingName] = useState(false)
   const [nameDraft, setNameDraft] = useState(name)
   const [menu, setMenu] = useState<MenuState | null>(null)
   const [adminMenu, setAdminMenu] = useState<{ x: number; y: number } | null>(null)
   const [bans, setBans] = useState<RadioChatBan[] | null>(null)
+  // The blocked-words editor: null while closed, '' text while it loads.
+  const [words, setWords] = useState<{ text: string; loading: boolean; saving: boolean } | null>(null)
   const listRef = useRef<HTMLDivElement>(null)
   const stickRef = useRef(true)
 
@@ -62,7 +65,7 @@ export default function RadioChatPanel(): JSX.Element {
     fetchRadioChat(ctrl.signal)
       .then((snap) => {
         if (useRadioChatStore.getState().enabled !== null) return
-        useRadioChatStore.setState({ enabled: snap.enabled, guestsEnabled: snap.guests_enabled !== false, reason: snap.reason, messages: snap.messages })
+        useRadioChatStore.setState({ enabled: snap.enabled, guestsEnabled: snap.guests_enabled !== false, reason: snap.reason, links: linksMode(snap.links), messages: snap.messages })
       })
       .catch(() => {})
     return () => ctrl.abort()
@@ -111,6 +114,42 @@ export default function RadioChatPanel(): JSX.Element {
     })
   }
 
+  const setLinks = (mode: RadioChatLinks): void => {
+    const before = useRadioChatStore.getState().links
+    if (mode === before) return
+    applyRadioChatLinks(mode)
+    setRadioChatState({ links: mode }).catch((e) => {
+      applyRadioChatLinks(before)
+      showAppToast(`Couldn’t change who can post links: ${errorText(e)}`)
+    })
+  }
+
+  const openWords = (): void => {
+    setWords({ text: '', loading: true, saving: false })
+    fetchRadioChatAdminState()
+      .then((s) => setWords((cur) => (cur ? { ...cur, text: (s.blocked_words ?? []).join('\n'), loading: false } : cur)))
+      .catch((e) => {
+        setWords(null)
+        showAppToast(`Couldn’t load the blocked words: ${errorText(e)}`)
+      })
+  }
+
+  const saveWords = (): void => {
+    if (!words) return
+    const list = words.text.split(/[\n,]/).map((w) => w.trim()).filter(Boolean)
+    setWords({ ...words, saving: true })
+    setRadioChatState({ blocked_words: list })
+      .then((s) => {
+        setWords(null)
+        const n = s.blocked_words?.length ?? list.length
+        showAppToast(n ? `${n} blocked word${n === 1 ? '' : 's'} saved` : 'Blocked words cleared', { tone: 'info' })
+      })
+      .catch((e) => {
+        setWords((cur) => (cur ? { ...cur, saving: false } : cur))
+        showAppToast(`Couldn’t save the blocked words: ${errorText(e)}`)
+      })
+  }
+
   const clearAll = (): void => {
     const before = useRadioChatStore.getState().messages
     useRadioChatStore.setState({ messages: [] })
@@ -147,6 +186,12 @@ export default function RadioChatPanel(): JSX.Element {
       ? { label: 'Turn off and clear', icon: Power, danger: true, onSelect: () => toggleChat(false, true) }
       : { label: 'Turn on', icon: Power, onSelect: () => toggleChat(true) },
     { label: 'Clear all lines', icon: Eraser, danger: true, onSelect: clearAll },
+    {
+      label: 'Who can post links', icon: Link2, separatorBefore: true,
+      hint: RADIO_CHAT_LINK_MODES.find((m) => m.mode === links)?.label,
+      children: RADIO_CHAT_LINK_MODES.map((m) => ({ label: m.label, checked: links === m.mode, onSelect: () => setLinks(m.mode) })),
+    },
+    { label: 'Blocked words…', icon: ListX, onSelect: openWords },
     {
       label: 'Bans', icon: ShieldOff,
       onOpen: () => { setBans(null); fetchRadioChatBans().then(setBans).catch(() => setBans([])) },
@@ -203,6 +248,33 @@ export default function RadioChatPanel(): JSX.Element {
         </div>
       )}
 
+      {isAdmin && words && (
+        <form className="shrink-0 pb-3 flex flex-col gap-2" onSubmit={(e) => { e.preventDefault(); saveWords() }}>
+          <div className="flex items-baseline gap-2">
+            <span className="text-[11px] font-semibold uppercase tracking-widest text-white/50">Blocked words</span>
+            <span className="text-[11px] text-white/30">One per line. Whole words; * matches any letters.</span>
+          </div>
+          <textarea
+            autoFocus value={words.text} rows={6} disabled={words.loading || words.saving}
+            onChange={(e) => setWords({ ...words, text: e.target.value })}
+            onKeyDown={(e) => { if (e.key === 'Escape') setWords(null) }}
+            placeholder={words.loading ? 'Loading…' : 'No blocked words yet'}
+            aria-label="Blocked words"
+            className="w-full resize-none bg-white/5 text-white/85 text-sm rounded-xl py-2 px-3 border border-white/10 focus:outline-none focus:border-white/25 disabled:opacity-50"
+            style={{ colorScheme: 'dark', scrollbarWidth: 'thin' }}
+          />
+          <div className="flex items-center justify-end gap-2">
+            <button type="button" onClick={() => setWords(null)} className="px-3 py-1 rounded-lg text-xs font-medium text-white/60 hover:text-white hover:bg-white/10 transition-colors">Cancel</button>
+            <button
+              type="submit" disabled={words.loading || words.saving}
+              className="flex items-center gap-1.5 px-3 py-1 rounded-lg text-xs font-medium bg-white/15 text-white/90 hover:bg-white/25 disabled:opacity-40 transition-colors"
+            >
+              {words.saving && <Loader2 size={12} className="animate-spin" />} Save
+            </button>
+          </div>
+        </form>
+      )}
+
       {off ? (
         <div className="flex-1 flex flex-col items-center justify-center text-center gap-1.5 px-6">
           <p className="text-white/70 text-sm font-medium">Chat is off right now</p>
@@ -234,7 +306,7 @@ export default function RadioChatPanel(): JSX.Element {
                 <button
                   onClick={(e) => { const r = e.currentTarget.getBoundingClientRect(); setMenu({ x: r.right, y: r.bottom, line: m }) }}
                   aria-label="Moderate this line"
-                  className="absolute right-1 top-1 p-0.5 rounded text-white/40 hover:text-white/80 bg-black/40 opacity-0 group-hover:opacity-100 focus:opacity-100 transition-opacity"
+                  className="absolute right-1 top-1 p-0.5 rounded text-white/40 hover:text-white/80 bg-black/40 opacity-0 group-hover:opacity-100 focus:opacity-100 [@media(hover:none)]:opacity-100 transition-opacity"
                 >
                   <MoreHorizontal size={13} />
                 </button>
@@ -269,7 +341,7 @@ export default function RadioChatPanel(): JSX.Element {
                   onChange={(e) => setNameDraft(e.target.value)}
                   onKeyDown={(e) => { if (e.key === 'Escape') { setNameDraft(name); setEditingName(false) } }}
                   placeholder="Your name"
-                  className="w-36 bg-white/5 text-white/80 text-xs rounded-md px-2 py-0.5 border border-white/15 focus:outline-none focus:border-white/30"
+                  className="w-36 bg-white/5 text-white/80 text-xs max-md:text-[16px] rounded-md px-2 py-0.5 border border-white/15 focus:outline-none focus:border-white/30"
                   style={{ colorScheme: 'dark' }}
                 />
                 <button type="submit" className="text-white/60 hover:text-white">Save</button>
@@ -288,7 +360,7 @@ export default function RadioChatPanel(): JSX.Element {
               onChange={(e) => setDraft(e.target.value)}
               placeholder={ready ? 'Say something…' : 'Connecting…'}
               aria-label="Chat message"
-              className="flex-1 min-w-0 bg-white/5 text-white/85 text-sm rounded-xl py-2 px-3 border border-white/10 focus:outline-none focus:border-white/25 transition-colors"
+              className="flex-1 min-w-0 bg-white/5 text-white/85 text-sm max-md:text-[16px] rounded-xl py-2 px-3 border border-white/10 focus:outline-none focus:border-white/25 transition-colors"
               style={{ colorScheme: 'dark' }}
             />
             <button

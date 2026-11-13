@@ -4,7 +4,7 @@ import {
   Music, Radio, Search, SkipForward, ThumbsUp, ThumbsDown, X, ChevronDown, Play, Pause,
   SkipBack, SkipForward as SkipFwd, Shuffle, Repeat, Repeat1, Volume, Volume2, VolumeX,
   MoreHorizontal, Heart, ListMusic, Trash2, History, SlidersHorizontal,
-  Layers, Loader2, RefreshCw, Settings2, AlignLeft, AlignCenter, MicVocal,
+  Layers, Loader2, RefreshCw, Settings2, AlignLeft, AlignCenter, MicVocal, MessageCircle,
 } from 'lucide-react'
 import { lazyOverlay } from '../lib/lazyView'
 import { useStore, useStorePick } from '../store/useStore'
@@ -26,6 +26,7 @@ import { AlbumArtThumbnail } from './AlbumArtThumbnail'
 import { FallbackImg, ProgressiveCover } from './ProgressiveCover'
 import { LikePop, SwapIcon, TrackSwap } from './PlayerMotion'
 import SongContextMenu from './SongContextMenu'
+import RadioChatPanel from './RadioChatPanel'
 import { getSkin } from '../lib/skins'
 import { IS_IOS } from '../lib/platform'
 import { Sheet, SheetItem, SheetDivider } from './mobile/Sheet'
@@ -112,6 +113,9 @@ export default function WrldView(): JSX.Element {
   const isDarkSkin = getSkin(theme).dark
 
   const [sheet, setSheet] = useState<'radio' | 'versions' | null>(null)
+  // Which tab of the 999 FM sheet is showing. The Chat chip opens it straight on chat.
+  const [fmSheetTab, setFmSheetTab] = useState<'radio' | 'chat'>('radio')
+  const openFmSheet = (tab: 'radio' | 'chat'): void => { setFmSheetTab(tab); setSheet('radio') }
   const [lyricsOpen, setLyricsOpen] = useState(false)
   // Keep the queue sheet mounted after its first open instead of unmounting
   // it on close - same reasoning as the app-wide QueuePanel in App.tsx:
@@ -448,7 +452,7 @@ export default function WrldView(): JSX.Element {
                   style={{ background: glass, color: txtPri }}
                 ><SkipForward size={16} /> Vote to skip</button>
                 <button
-                  onClick={() => setSheet('radio')}
+                  onClick={() => openFmSheet('radio')}
                   className="flex-1 h-11 rounded-full text-sm font-semibold flex items-center justify-center gap-2 active:scale-[0.97] transition-transform"
                   style={{ background: glass, color: txtPri }}
                 ><Search size={16} /> Suggest</button>
@@ -516,8 +520,11 @@ export default function WrldView(): JSX.Element {
               light={textIsDark}
             />
             <ActionChip icon={SlidersHorizontal} label="EQ" onClick={toggleEqPanel} active={eqFxActive} light={textIsDark} />
+            {radioFmActive && (
+              <ActionChip icon={MessageCircle} label="999 FM chat" onClick={() => openFmSheet('chat')} light={textIsDark} />
+            )}
             {radioFmActive
-              ? <ActionChip icon={ListMusic} label="Radio" onClick={() => setSheet('radio')} light={textIsDark} />
+              ? <ActionChip icon={ListMusic} label="Radio" onClick={() => openFmSheet('radio')} light={textIsDark} />
               : <ActionChip icon={ListMusic} label="Queue" onClick={() => setShowQueue(true)} light={textIsDark} />}
           </div>
         </div>
@@ -546,7 +553,36 @@ export default function WrldView(): JSX.Element {
 
       {/* ── 999 FM panel ─────────────────────────────────────────────────── */}
       {sheet === 'radio' && (
-        <Sheet onClose={() => setSheet(null)} title="999 FM">
+        <Sheet
+          onClose={() => setSheet(null)}
+          title="999 FM"
+          header={
+            <div role="tablist" className="mx-5 mt-2 mb-1 flex p-0.5 rounded-full bg-[var(--fill)]">
+              {(['radio', 'chat'] as const).map(tab => (
+                <button
+                  key={tab}
+                  role="tab"
+                  aria-selected={fmSheetTab === tab}
+                  onClick={() => setFmSheetTab(tab)}
+                  className={`flex-1 h-8 rounded-full text-[13px] font-semibold transition-colors ${fmSheetTab === tab ? 'bg-[var(--fill-strong)] text-text-primary' : 'text-text-muted'}`}
+                >
+                  {tab === 'radio' ? 'Radio' : 'Chat'}
+                </button>
+              ))}
+            </div>
+          }
+        >
+          {/* Both tabs share one height so the sheet doesn't jump between them. */}
+          {fmSheetTab === 'chat' ? (
+            // RadioChatPanel is styled for a dark backdrop (white text), so it sits on a dark card
+            // here rather than the skin-coloured glass, which can be light.
+            <div className="h-[58svh] flex flex-col px-5 pb-1">
+              <div className="flex-1 min-h-0 flex flex-col rounded-2xl bg-black/60 pt-3">
+                <RadioChatPanel />
+              </div>
+            </div>
+          ) : (
+          <div className="h-[58svh] overflow-y-auto overscroll-contain">
           <div className="px-5 pb-2 flex flex-col gap-4">
             {/* Suggest */}
             <div className="flex flex-col gap-2">
@@ -624,6 +660,8 @@ export default function WrldView(): JSX.Element {
             label="Vote to skip this song"
             onClick={() => { setVoteDismissed(false); getActiveRadioClient()?.proposeSkip(); setSheet(null) }}
           />
+          </div>
+          )}
         </Sheet>
       )}
 
