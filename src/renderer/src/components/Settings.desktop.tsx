@@ -119,7 +119,7 @@ const SETTINGS_SEARCH_INDEX: { tab: Tab; label: string; sub?: string; electronOn
   { tab: 'appearance', label: 'Control gradients', sub: 'Accent-tinted gradients on the player bar, toggle groups, search bars, badges, and menus' },
   { tab: 'lyrics', label: 'Theme background in WRLD', sub: "Use the app's theme behind the WRLD tab instead of the playing song's cover" },
   { tab: 'lyrics', label: 'Old WRLD style', sub: "WRLD's own player and lyrics instead of the widgets" },
-  { tab: 'lyrics', label: '999 FM in WRLD', sub: "A 999 FM card in WRLD's widgets while it's on: votes, suggestions and chat" },
+  { tab: 'lyrics', label: '999 FM in WRLD', sub: "A 999 FM card in WRLD's widgets while it's on, or opened from WRLD's toolbar without tuning in: votes, suggestions and chat" },
   { tab: 'appearance', label: 'Playlist header art', sub: "Blurred cover art behind a playlist's header" },
   { tab: 'appearance', label: 'App font' },
   { tab: 'lyrics', label: 'Lyrics font' },
@@ -1861,7 +1861,7 @@ export default function Settings({ floating = false }: { floating?: boolean }): 
                       icon={Disc}
                       iconColor="#8b5cf6"
                       label="999 FM in WRLD"
-                      sub="A 999 FM card in WRLD's widgets while it's on: votes, suggestions and chat"
+                      sub="A 999 FM card in WRLD's widgets while it's on, or opened from WRLD's toolbar without tuning in: votes, suggestions and chat"
                     >
                       <Toggle on={wrldFm} onClick={() => setWrldFm(!wrldFm)} />
                     </Row>

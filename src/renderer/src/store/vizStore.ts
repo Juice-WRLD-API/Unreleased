@@ -57,6 +57,8 @@ interface VizState {
   wrldFm: boolean
   /** Where it was left: its center as a share of the tab's width and height; null for the default spot. */
   wrldFmPlace: { x: number; y: number } | null
+  /** Kept up without 999 FM on (it is always up while 999 FM is on): chat, up next and the station's votes without tuning in. */
+  wrldFmOpen: boolean
   /** Folded down to its header. */
   wrldFmCollapsed: boolean
   /** Which side of it shows. */
@@ -75,6 +77,7 @@ interface VizState {
   setWrldWidgets: (on: boolean) => void
   setWrldFm: (on: boolean) => void
   setWrldFmPlace: (place: { x: number; y: number } | null) => void
+  setWrldFmOpen: (on: boolean) => void
   setWrldFmCollapsed: (on: boolean) => void
   setWrldFmTab: (tab: 'radio' | 'chat') => void
   setVizEdgeOverlay: (look: string | null) => void
@@ -94,6 +97,7 @@ export const useVizStore = create<VizState>((set) => ({
   vizEdgeOverlay: edgeLook(ls.get('vizEdgeOverlay')),
   wrldFm: ls.get<boolean>('wrldFm') ?? true,
   wrldFmPlace: fmPlace(ls.get('wrldFmPlace')),
+  wrldFmOpen: ls.get<boolean>('wrldFmOpen') ?? false,
   wrldFmCollapsed: ls.get<boolean>('wrldFmCollapsed') ?? false,
   wrldFmTab: ls.get('wrldFmTab') === 'chat' ? 'chat' : 'radio',
   vizCovered: 0,
@@ -118,6 +122,7 @@ export const useVizStore = create<VizState>((set) => ({
   },
   setWrldFm: (wrldFm) => { set({ wrldFm }); ls.set('wrldFm', wrldFm) },
   setWrldFmPlace: (place) => { const wrldFmPlace = fmPlace(place); set({ wrldFmPlace }); ls.set('wrldFmPlace', wrldFmPlace) },
+  setWrldFmOpen: (wrldFmOpen) => { set({ wrldFmOpen }); ls.set('wrldFmOpen', wrldFmOpen) },
   setWrldFmCollapsed: (wrldFmCollapsed) => { set({ wrldFmCollapsed }); ls.set('wrldFmCollapsed', wrldFmCollapsed) },
   setWrldFmTab: (wrldFmTab) => { set({ wrldFmTab }); ls.set('wrldFmTab', wrldFmTab) },
   // A light picked for WRLD is the screen light's look too: there's one look, the screen light's (Settings > Desktop).

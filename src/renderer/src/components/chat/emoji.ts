@@ -450,6 +450,23 @@ export const NAME_BY_GLYPH: Record<string, string> = Object.fromEntries(
 )
 export const GLYPHS_BY_LENGTH_DESC = Object.values(EMOJI).sort((a, b) => b.length - a.length)
 
+const EMOJI_RE = new RegExp(`${GLYPHS_BY_LENGTH_DESC.map((glyph) => glyph.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|')}|${PLAIN_SHORTCODE_RE.source}`, 'g')
+
+export function splitChatEmoji(text: string): { text: string; name?: string }[] {
+  const parts: { text: string; name?: string }[] = []
+  let end = 0
+  for (const match of text.matchAll(EMOJI_RE)) {
+    const name = match[1] ?? NAME_BY_GLYPH[match[0]]
+    if (!name || !Object.prototype.hasOwnProperty.call(EMOJI_IMG, name)) continue
+    const start = match.index
+    if (start > end) parts.push({ text: text.slice(end, start) })
+    parts.push({ text: match[0], name })
+    end = start + match[0].length
+  }
+  if (end < text.length) parts.push({ text: text.slice(end) })
+  return parts
+}
+
 const RECENT_KEY = 'unreleased:chat:recentEmoji'
 
 export function recentEmoji(): string[] {

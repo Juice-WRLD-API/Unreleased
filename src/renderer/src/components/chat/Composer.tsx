@@ -1355,7 +1355,7 @@ const Composer = forwardRef<ComposerHandle, {
       </div>
 
       {emojiAt && (
-        <ReactionPicker x={emojiAt.x} y={emojiAt.y} onPick={(name) => insertAtCaret(emojiGlyph(name))} onClose={() => setEmojiAt(null)} />
+        <ReactionPicker x={emojiAt.x} y={emojiAt.y} forMessage onPick={(name) => insertAtCaret(emojiGlyph(name))} onClose={() => setEmojiAt(null)} />
       )}
       {gifAt && (
         <GifPicker x={gifAt.x} y={gifAt.y} onPick={sendGif} onClose={() => setGifAt(null)} />
