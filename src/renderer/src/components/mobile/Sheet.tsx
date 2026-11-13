@@ -85,7 +85,7 @@ export function Sheet({ onClose, title, header, children }: SheetProps): JSX.Ele
       />
       {/* Docked to the bottom edge with a flat bottom, frosted over the page. */}
       <div
-        className={`fixed z-[81] inset-x-0 bottom-0 flex flex-col max-h-[82svh] glass-thick rounded-t-[28px] overflow-hidden ${
+        className={`fixed z-[81] inset-x-0 bottom-0 flex flex-col max-h-[82svh] glass-thick glass-specular rounded-t-[28px] overflow-hidden ${
           closing ? 'animate-sheet-out' : entered ? '' : 'animate-sheet-in'
         }`}
         style={dragStyle}

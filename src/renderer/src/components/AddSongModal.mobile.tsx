@@ -1,5 +1,8 @@
-import { useRef } from 'react'
-import { Loader2, Plus, X, Check, AlertCircle, ChevronDown, ChevronUp } from 'lucide-react'
+import { useRef, useState } from 'react'
+import { Loader2, Plus, X, Check, AlertCircle, ChevronDown, ChevronUp, Wand2 } from 'lucide-react'
+import { hasEraCoverFile, findEraCoverFile } from '../lib/eraCoverFiles'
+import { errorMessage } from '../lib/format'
+import { toSiteRelativeImageUrl } from '../lib/juicewrldApi'
 import FilePickerModal from './FilePickerModal'
 import { BasicRow, BasicSelect, SyncedLyricsTable } from './EditorPage.desktop'
 import CopyFromSong from './CopyFromSong'
@@ -27,9 +30,28 @@ export default function AddSongModal({ onClose, onSubmitted, channel }: {
   channel?: string
 }): JSX.Element {
   const {
-    f, updateField, showMore, setShowMore, copiedFrom, setCopiedFrom, syncedTable, setSyncedTable,
-    pickingFile, setPickingFile, eras, submitState, submitError, edNotes, setEdNotes, copyFrom, handleSubmit,
+    f, updateField, copiedFrom, setCopiedFrom, syncedTable, setSyncedTable,
+    pickingFile, setPickingFile, eras, submitState, submitError, edNotes, setEdNotes, copyFrom: copyFromSong, handleSubmit,
   } = useAddSongModal(onSubmitted, onClose, channel)
+  const [showMore, setShowMore] = useState(false)
+  const copyFrom = (s: Parameters<typeof copyFromSong>[0]): void => { copyFromSong(s); setShowMore(true) }
+  const [coverBusy, setCoverBusy] = useState(false)
+  const [coverError, setCoverError] = useState<string | null>(null)
+  const [pickingImage, setPickingImage] = useState(false)
+  const era = eras.find(e => String(e.id) === f.eraId)
+  const eraHasCover = hasEraCoverFile(era?.name)
+  const fillEraCover = async (): Promise<void> => {
+    setCoverBusy(true); setCoverError(null)
+    try {
+      const path = await findEraCoverFile(era?.name)
+      if (path) updateField('imageUrl', path)
+      else setCoverError(`No cover found for ${era?.name}`)
+    } catch (err) {
+      setCoverError(errorMessage(err, 'Could not look up the era cover'))
+    } finally {
+      setCoverBusy(false)
+    }
+  }
   const overlayRef = useRef<HTMLDivElement>(null)
 
   useEscapeToClose(onClose)
@@ -86,7 +108,11 @@ export default function AddSongModal({ onClose, onSubmitted, channel }: {
               <BasicRow label="Record dates" value={f.recDate} onChange={v => updateField('recDate', v)} rows={2} placeholder="YYYY-MM-DD" mono />
               <div className="grid grid-cols-2 gap-1.5">
                 <BasicRow label="Length" value={f.songLength} onChange={v => updateField('songLength', v)} placeholder="3:59" mono />
-                <BasicRow label="Bitrate" value={f.bitrate} onChange={v => updateField('bitrate', v)} placeholder="320 kbps" mono />
+                <BasicRow label="BPM" value={f.bpm} onChange={v => updateField('bpm', v)} placeholder="140" mono />
+              </div>
+              <div className="grid grid-cols-2 gap-1.5">
+                <BasicRow label="Key" value={f.musicalKey} onChange={v => updateField('musicalKey', v)} placeholder="C# Minor" />
+                <BasicRow label="Bitrate" value={f.bitrate} onChange={v => updateField('bitrate', v)} rows={2} placeholder="Original File&#10;320kbps (.mp3)" mono />
               </div>
 
               <SectionLabel>Notes & files</SectionLabel>
@@ -133,7 +159,20 @@ export default function AddSongModal({ onClose, onSubmitted, channel }: {
                 <BasicRow label="Leak type" value={f.leakType} onChange={v => updateField('leakType', v)} placeholder="e.g. Stem, Master, Video…" suggest="leak_type" />
               </div>
               <div className="grid grid-cols-2 gap-1.5">
-                <BasicRow label="Image URL" value={f.imageUrl} onChange={v => updateField('imageUrl', v)} placeholder="https://…" mono />
+                <BasicRow label="Image URL" value={f.imageUrl} onChange={v => updateField('imageUrl', v)} placeholder="https://…" mono
+                  onBrowse={() => setPickingImage(true)}
+                  trailing={
+                    <button
+                      type="button"
+                      onClick={e => { e.preventDefault(); void fillEraCover() }}
+                      disabled={!eraHasCover || coverBusy}
+                      title={!era ? 'Pick an era first' : eraHasCover ? `Use the ${era.name} cover from Cover Art / Unreleased Discography` : `No cover for ${era.name} in Unreleased Discography`}
+                      className="shrink-0 -my-0.5 flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-semibold text-text-muted active:text-text-primary disabled:opacity-30 transition-colors"
+                    >
+                      {coverBusy ? <Loader2 size={11} className="animate-spin" /> : <Wand2 size={11} />}
+                      From era
+                    </button>
+                  } />
                 <BasicRow label="File path" value={f.filePath} onChange={v => updateField('filePath', v)} placeholder="Path to the audio file" mono onBrowse={() => setPickingFile(true)} />
               </div>
             </>
@@ -144,9 +183,9 @@ export default function AddSongModal({ onClose, onSubmitted, channel }: {
         <div className="shrink-0 border-t border-[var(--separator)] px-5 pt-3 space-y-3" style={{ paddingBottom: 'calc(env(safe-area-inset-bottom, 0px) + 0.75rem)' }}>
           <input value={edNotes} onChange={e => setEdNotes(e.target.value)} placeholder="Editor notes (optional)…"
             className="w-full bg-[var(--fill)] border border-transparent rounded-xl px-3.5 py-2.5 text-subhead text-text-primary placeholder:text-text-muted placeholder:opacity-30 focus:outline-none focus:border-accent/40 transition-colors" />
-          {submitError && (
+          {(submitError || coverError) && (
             <div className="flex items-center gap-2 text-red-500 text-footnote">
-              <AlertCircle size={12} className="shrink-0" /> {submitError}
+              <AlertCircle size={12} className="shrink-0" /> {submitError || coverError}
             </div>
           )}
           <button onClick={handleSubmit} disabled={!f.name.trim() || submitState === 'submitting' || submitState === 'submitted'}
@@ -174,6 +213,16 @@ export default function AddSongModal({ onClose, onSubmitted, channel }: {
           altTitles={f.altNames.split('\n').map(s => s.trim()).filter(Boolean)}
           onSelect={p => { updateField('filePath', p); setPickingFile(false) }}
           onClose={() => setPickingFile(false)}
+        />
+      )}
+
+      {pickingImage && (
+        <FilePickerModal
+          kind="image"
+          songTitle={f.name}
+          altTitles={f.altNames.split('\n').map(s => s.trim()).filter(Boolean)}
+          onSelect={p => { updateField('imageUrl', toSiteRelativeImageUrl(p)); setPickingImage(false) }}
+          onClose={() => setPickingImage(false)}
         />
       )}
     </div>

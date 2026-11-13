@@ -42,11 +42,13 @@ export default function ChatNotificationBanner(): JSX.Element | null {
   return createPortal(
     // Always-mounted live region, so an incoming message is announced rather
     // than appearing silently. Polite: a new chat message shouldn't interrupt.
+    // Match the mobile chrome inset so banners clear the status bar and notch.
     <div
       ref={stackRef}
       role="status"
       aria-live="polite"
-      className="fixed top-4 right-4 z-[250] flex flex-col gap-2 w-[320px] max-w-[calc(100vw-2rem)] pointer-events-none"
+      className="fixed right-4 z-[250] flex flex-col gap-2 w-[320px] max-w-[calc(100vw-2rem)] pointer-events-none"
+      style={{ top: 'calc(var(--top-inset, 0px) + 1rem)' }}
     >
       {toasts.map((t) => (
         <div

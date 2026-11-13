@@ -20,6 +20,16 @@ import type { Track, ViewType } from '../types'
 
 /** Set to false to hide the Albums tile on Home and skip its /albums/ fetch. */
 export const HOME_ALBUMS_SHOWN: boolean = true
+// Home's playlist strip scrolls sideways; past this many, "All" is closer.
+const HOME_PLAYLIST_LIMIT = 30
+
+// Home unmounts whenever another view opens. Keeping the last album list and
+// its song index here means coming back paints Albums at once instead of
+// waiting on the network again; the fetch on mount still refreshes both.
+let albumsMemo: Album[] | null = null
+let albumIndexMemo: Map<string, JWApiSong> | null = null
+const newestFirst = (list: Album[]): Album[] =>
+  [...list].sort((a, b) => (b.release_date ?? '').localeCompare(a.release_date ?? ''))
 
 export interface HomeAlbumCard {
   key: string
@@ -68,7 +78,7 @@ export interface HomePlaylistCard {
 // requests on a cold cache (lib/statsCatalog). The counts below come straight
 // off the raw play events instead. Listening *time* is the one number that
 // genuinely needs song durations, so it isn't shown here - /stats owns that.
-export function useHomeData() {
+export function useHomeData({ mobile = false } = {}) {
   const {
     account, playlists, guestPlaylists, followedPlaylists, likedTrackIds,
     listeningPlays, songPrefs, setActiveView, setPendingPlaylistId, playTrack, openProfile, openOwnPublicProfile,
@@ -110,35 +120,50 @@ export function useHomeData() {
   // listening numbers in the hero. Same stale-while-revalidate shape as News:
   // ApiTrackerView already warms this exact cache key, so most visits paint
   // it instantly from there.
-  const [siteStats, setSiteStats] = useState<JWApiStats | null>(() => apiPeek<JWApiStats>('/stats/') ?? null)
+  const [siteStats, setSiteStats] = useState<JWApiStats | null>(() => mobile ? apiPeek<JWApiStats>('/stats/') ?? null : null)
   useEffect(() => {
+    if (!mobile) return
     apiFetch<JWApiStats>('/stats/').then(setSiteStats).catch(() => undefined)
-  }, [])
+  }, [mobile])
 
   // Album objects carry track paths, not full song metadata - resolved
   // against the whole catalog (?all=true, same fetch/cache the versions
   // table and WrldView's own album browser use) for cover art and to build
   // a playable queue. Newest release first, same "what's fresh" ordering as
   // Recently played.
-  const [albums, setAlbums] = useState<Album[]>([])
-  const [albumSongIndex, setAlbumSongIndex] = useState<Map<string, JWApiSong>>(new Map())
+  // First paint comes from this session's last list, else the cached pages.
+  const [albums, setAlbums] = useState<Album[]>(() => {
+    if (!HOME_ALBUMS_SHOWN) return []
+    if (albumsMemo) return albumsMemo
+    const cached = albumsApi.peekAlbums()
+    return cached ? newestFirst(cached) : []
+  })
+  const [albumSongIndex, setAlbumSongIndex] = useState<Map<string, JWApiSong>>(() => albumIndexMemo ?? new Map())
+  // True until the first fetch settles when there was nothing to paint, so
+  // Home can hold the Albums slot instead of reshuffling the bento later.
+  const [albumsPending, setAlbumsPending] = useState(() => HOME_ALBUMS_SHOWN && albums.length === 0)
   useEffect(() => {
     if (!HOME_ALBUMS_SHOWN) return
     albumsApi.fetchAlbums()
       .then((list) => {
-        setAlbums([...list].sort((a, b) => (b.release_date ?? '').localeCompare(a.release_date ?? '')))
+        albumsMemo = newestFirst(list)
+        setAlbums(albumsMemo)
         // The catalogue is ~10 MB of JSON, and Home is the desktop landing
         // page - only pull it in when some album actually lists tracks to
         // resolve. The public list can come back with none at all, and then
         // the whole download bought nothing.
         if (!list.some((a) => a.songs?.length)) return
         return loadAllSongs()
-          .then((all) => setAlbumSongIndex(albumsApi.indexSongsByPath(all)))
+          .then((all) => {
+            albumIndexMemo = albumsApi.indexSongsByPath(all)
+            setAlbumSongIndex(albumIndexMemo)
+          })
       })
       .catch(() => undefined)
+      .finally(() => setAlbumsPending(false))
   }, [])
 
-  const albumRow: HomeAlbumCard[] = useMemo(() => albums.slice(0, 10).map((album) => {
+  const albumRow: HomeAlbumCard[] = useMemo(() => (mobile ? albums.slice(0, 10) : albums).map((album) => {
     const tracks = albumsApi.albumTracks(album)
     return {
       key: `a${album.id}`,
@@ -154,7 +179,7 @@ export function useHomeData() {
         if (queue.length > 0) playTrack(queue[0], queue)
       },
     }
-  }), [albums, albumSongIndex, songPrefs, playTrack, setActiveView])
+  }), [mobile, albums, albumSongIndex, songPrefs, playTrack, setActiveView])
 
   const games = useMemo((): GameCard[] => {
     const heardle = loadHeardleStats('daily')
@@ -173,12 +198,12 @@ export function useHomeData() {
 
   // All-time totals come off songPrefs' aggregate counts - the log is capped,
   // so its length alone stalls at SERVER_LISTENING_PLAYS_LIMIT.
-  const allTime = useMemo(() => allTimePrefs(listeningPlays, songPrefs), [listeningPlays, songPrefs])
+  const allTime = useMemo(() => mobile ? allTimePrefs(listeningPlays, songPrefs) : [], [mobile, listeningPlays, songPrefs])
   const totalPlays = useMemo(() => allTime.reduce((n, p) => n + p.playcount, 0), [allTime])
   const distinctSongs = allTime.length
   const weekPlays = useMemo(
-    () => filterListeningPlaysByDays(listeningPlays, 7).length,
-    [listeningPlays],
+    () => mobile ? filterListeningPlaysByDays(listeningPlays, 7).length : 0,
+    [mobile, listeningPlays],
   )
 
   // Server playlists need an account; the local kinds don't. Signed out we just
@@ -237,7 +262,7 @@ export function useHomeData() {
     return i < 0 ? recentIds.length : i
   }
   playlistRow.sort((a, b) => recencyRank(a) - recencyRank(b))
-  playlistRow.splice(10)
+  playlistRow.splice(mobile ? 10 : HOME_PLAYLIST_LIMIT)
 
   const openTrack = (track: Track): void => { playTrack(track) }
 
@@ -267,8 +292,8 @@ export function useHomeData() {
     account, likedTrackIds, radioFmIsLive, radioFmNowPlaying,
     setActiveView, openProfile, openOwnPublicProfile,
     showSection,
-    recent, newsItems, games, playlistRow, albumRow,
     totalPlays, distinctSongs, weekPlays, siteStats,
+    recent, newsItems, games, playlistRow, albumRow, albumsPending,
     openTrack, openNewsItem, openRadioFm,
   }
 }

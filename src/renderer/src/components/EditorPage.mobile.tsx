@@ -49,7 +49,7 @@ export function Card({ title, icon, action, children, className = '', overflowVi
           {action}
         </div>
       )}
-      <div className={`rounded-[20px] bg-[var(--grouped)] p-3.5 space-y-2.5 ${overflowVisible ? '' : 'overflow-hidden'}`}>
+      <div className={`glass-card relative rounded-[20px] p-3.5 space-y-2.5 ${overflowVisible ? '' : 'overflow-hidden'}`}>
         {children}
       </div>
     </section>

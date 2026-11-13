@@ -44,7 +44,7 @@ const detail = (s: CoverArtSubmission): string => [
   ...(s.notes ? [`notes: ${oneLine(s.notes, 300)}`] : []),
   ...(s.review_notes ? [`review: ${oneLine(s.review_notes, 300)}`] : []),
   `song cover now: ${s.song_image_url ?? 'song deleted'}`,
-  ...(s.previous_image_url ? [`replaced: ${s.previous_image_url}`] : []),
+  ...(s.comp_path ? [`in Files: ${s.comp_channel ?? '?'}:${s.comp_path}`] : []),
   `image ${s.status === 'approved' ? 'public' : 'private (coverart image <id> saves it)'}: ${s.image_url}`,
 ].join('\n')
 
@@ -126,10 +126,10 @@ const coverArtCommand: TermCommand = {
     } else if (sub === 'approve' || sub === 'reject') {
       const id = idArg(rest.shift(), `coverart ${sub} <id> [note]`)
       const s = await adminReviewCoverArt(id, sub, rest.join(' '))
-      ctx.print(`cover art #${id} ${s.status}: ${s.song_name ?? 'deleted song'}`, 'ok')
+      ctx.print(`cover art #${id} ${s.status}: ${s.song_name ?? 'deleted song'}${s.comp_path ? ` · filed at ${s.comp_channel ?? '?'}:${s.comp_path}` : ''}`, 'ok')
     } else if (sub === 'reverse') {
       const id = idArg(rest[0], 'coverart reverse <id>')
-      if (!confirmAction(ctx, `Take back cover art #${id}? The song goes back to its previous cover if it still shows this one.`, bool.has('y'))) return
+      if (!confirmAction(ctx, `Take back cover art #${id}? It is taken out of Files (Cover Arts/Community-Made).`, bool.has('y'))) return
       const s = await adminReverseCoverArt(id)
       ctx.print(`cover art #${id} reversed: ${s.song_name ?? 'deleted song'}`, 'ok')
     } else fail(`usage: ${USAGE}`)

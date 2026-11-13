@@ -26,7 +26,7 @@ import {
 import type { SongPreference, SongPrefMap, SongPrefPatch, WireSongPreference } from '../lib/songPrefs'
 import { getVersionGroup } from '../lib/versionsApi'
 import { advanceRotatedCover, resetCoverRotation } from '../lib/coverSuggestions'
-import { setEraCoverRaw } from '../lib/eraCovers'
+import { setEraCoverRaw, replaceEraCovers, sanitizeEraCovers } from '../lib/eraCovers'
 import { setActiveChannelCache } from '../lib/activeChannelState'
 import {
   appendListeningPlay,
@@ -49,7 +49,7 @@ import { foldersMatchServer, newFolderId, normalizeFolderName, pruneFolders } fr
 import type { PlaylistFolder, ServerPlaylistFolder } from '../lib/playlistFolders'
 import { createQueueSlice, QueueSlice, withoutPlayHistory } from './queueSlice'
 import { createDesktopSlice, type DesktopSlice } from './desktopSlice'
-import { getSkin, setCustomSkinsCache, type Skin, type SkinId } from '../lib/skins'
+import { DEFAULT_SKIN_ID, getSkin, setCustomSkinsCache, type Skin, type SkinId } from '../lib/skins'
 import { getFont, syncedFontId } from '../lib/fonts'
 import {
   sanitizeFieldKeys, DEFAULT_DETAIL_FIELDS, DEFAULT_MOBILE_DETAIL_FIELDS, DEFAULT_LIST_COLUMNS,
@@ -234,8 +234,6 @@ interface AppState {
   // back into the main window - the per-view list modals keep their own local
   // state. null = nothing shown.
   infoSongId: number | null
-  // Desktop bottom player collapsed to a slim strip to reclaim vertical space.
-  playerCollapsed: boolean
   // True while the WRLD tab's own in-page fullscreen (album-art focus mode)
   // is active - lets App.tsx hide the frameless-window title bar controls,
   // which would otherwise float over the immersive view.
@@ -459,6 +457,9 @@ interface AppState {
   // The song the "Submit cover art" dialog is open for (null = closed). See
   // components/CoverArtSubmitModal.
   coverArtModal: CoverArtTarget | null
+
+  // Whether the "Submit a remix or edit" dialog is open.
+  communityEditModal: boolean
   // Whether ErrorBoundary auto-submits a crash report the moment it catches
   // an error, through the same feedback pipeline (submitFeedback) the manual
   // "Report this error" button uses. On by default; Settings can turn it off
@@ -679,7 +680,6 @@ interface AppActions {
   setShowEqPanel: (show: boolean) => void
   toggleEqPanel: () => void
   setInfoSongId: (id: number | null) => void
-  setPlayerCollapsed: (collapsed: boolean) => void
   setWrldFullscreen: (fullscreen: boolean) => void
   setHeroBleedTop: (heroBleedTop: boolean) => void
   setTheme: (theme: SkinId) => void
@@ -731,6 +731,8 @@ interface AppActions {
    *  redraws any visible tracks it affects. */
   setEraCoverOverride: (era: string, raw: string | null) => void
   setDownloadFolder: (folder: { uri: string; name: string } | null) => void
+  /** Re-derives the visible tracks of these eras after their covers change. */
+  _redrawEras: (eras: Set<string>) => void
   /** Rotates a song onto its next suggested cover, if the setting is on and
    *  the user hasn't set a cover of their own. Called when a track starts. */
   _maybeRotateCover: (songId: number) => void
@@ -905,6 +907,8 @@ interface AppActions {
   /** Opens / closes the "Submit cover art" dialog for a song. */
   openCoverArtSubmit: (target?: CoverArtTarget) => void
   closeCoverArtSubmit: () => void
+  openCommunityEditSubmit: () => void
+  closeCommunityEditSubmit: () => void
 
 
   setLibraryTracks: (tracks: LibraryTrack[]) => void
@@ -1175,6 +1179,7 @@ function buildUserSettings(s: AppStore): UserSettings {
     pause_fade_enabled: s.pauseFadeEnabled,
     prefer_og_version: s.preferOgVersion,
     rotate_suggested_covers: s.rotateSuggestedCovers,
+    era_covers: s.eraCovers,
     media_overlay_enabled: s.mediaOverlayEnabled,
     lastfm_enabled: s.lastfmEnabled,
     auto_report_errors: s.autoReportErrors,
@@ -1435,7 +1440,6 @@ export const useStore = create<AppStore>((set, get, store) => ({
   showMoreNav: false,
   showEqPanel: false,
   infoSongId: null,
-  playerCollapsed: ls.get<boolean>('playerCollapsed') ?? false,
   wrldFullscreen: false,
   heroBleedTop: false,
   radioFmActive: false,
@@ -1447,10 +1451,9 @@ export const useStore = create<AppStore>((set, get, store) => ({
   radioFmQueuePreview: [],
   radioFmMatchedSong: null,
   // Seeds lib/skins' cache as a side effect - MUST stay above `theme` so a
-  // persisted custom skin id resolves (getSkin) instead of falling back to dark.
+  // persisted custom skin id resolves (getSkin) instead of falling back to the default skin.
   customSkins: hydrateCustomSkins(),
-  // getSkin() maps unknown persisted ids (renamed/removed skins) back to dark.
-  theme: getSkin(ls.get<string>('theme') ?? 'dark').id,
+  theme: getSkin(ls.get<string>('theme') ?? DEFAULT_SKIN_ID).id,
   sidebarPosition: ls.get<SidebarPosition>('sidebarPosition') ?? 'left',
   navStyle: ls.get<NavStyle>('navStyle') ?? 'classic',
   autoHideNav: ls.get<boolean>('autoHideNav') ?? false,
@@ -1648,7 +1651,6 @@ export const useStore = create<AppStore>((set, get, store) => ({
     if (infoSongId != null) useSandboxStore.getState().expand()
     set({ infoSongId })
   },
-  setPlayerCollapsed: (playerCollapsed) => { set({ playerCollapsed }); ls.set('playerCollapsed', playerCollapsed) },
   setWrldFullscreen: (wrldFullscreen) => set({ wrldFullscreen }),
   setHeroBleedTop: (heroBleedTop) => set({ heroBleedTop }),
   setTheme: (theme) => { set({ theme }); ls.set('theme', theme); get()._scheduleProfilePush(['userSettings']) },
@@ -1669,7 +1671,7 @@ export const useStore = create<AppStore>((set, get, store) => ({
     set({ customSkins: next })
     ls.set('customSkins', next)
     setCustomSkinsCache(next)
-    if (get().theme === id) get().setTheme('dark')
+    if (get().theme === id) get().setTheme(DEFAULT_SKIN_ID)
     get()._scheduleProfilePush(['userSettings'])
   },
   setSidebarPosition: (sidebarPosition) => { set({ sidebarPosition }); ls.set('sidebarPosition', sidebarPosition); get()._scheduleProfilePush(['userSettings']) },
@@ -1792,16 +1794,22 @@ export const useStore = create<AppStore>((set, get, store) => ({
   },
 
   setEraCoverOverride: (era, raw) => {
-    setEraCoverRaw(era, raw)
+    const value = raw?.trim() || null
+    setEraCoverRaw(era, value)
     const nextCovers = { ...get().eraCovers }
-    if (raw) nextCovers[era] = raw
+    if (value) nextCovers[era] = value
     else delete nextCovers[era]
     set({ eraCovers: nextCovers })
-    // Redraw every visible API track this era touches so the change shows up
+    get()._redrawEras(new Set([era]))
+    get()._scheduleProfilePush(['userSettings'])
+  },
+  _redrawEras: (eras) => {
+    if (eras.size === 0) return
+    // Redraw every visible API track these eras touch so the change shows up
     // immediately instead of at the next track change.
     const { queue, currentTrack, currentTrackFull, songPrefs } = get()
     const redraw = (t: Track): Track => {
-      if (t.era !== era) return t
+      if (!t.era || !eras.has(t.era)) return t
       const id = userApi.trackIdToSongId(t.id)
       return id == null ? t : applyPrefToTrack(t, songPrefs[id])
     }
@@ -2063,6 +2071,19 @@ export const useStore = create<AppStore>((set, get, store) => ({
     if (serverSettings.pause_fade_enabled !== undefined && serverSettings.pause_fade_enabled !== s.pauseFadeEnabled) s.setPauseFade(serverSettings.pause_fade_enabled)
     if (serverSettings.prefer_og_version !== undefined && serverSettings.prefer_og_version !== s.preferOgVersion) s.setPreferOgVersion(serverSettings.prefer_og_version)
     if (serverSettings.rotate_suggested_covers !== undefined && serverSettings.rotate_suggested_covers !== s.rotateSuggestedCovers) s.setRotateSuggestedCovers(serverSettings.rotate_suggested_covers)
+    // Era covers follow the account. An account that has never saved any
+    // (no key) keeps this device's picks, and the in-sync check below pushes
+    // them up.
+    if (serverSettings.era_covers !== undefined) {
+      const eraCovers = sanitizeEraCovers(serverSettings.era_covers)
+      if (stableJson(eraCovers) !== stableJson(s.eraCovers)) {
+        const changed = new Set([...Object.keys(eraCovers), ...Object.keys(s.eraCovers)]
+          .filter((era) => eraCovers[era] !== s.eraCovers[era]))
+        replaceEraCovers(eraCovers)
+        set({ eraCovers })
+        get()._redrawEras(changed)
+      }
+    }
     if (serverSettings.media_overlay_enabled !== undefined && serverSettings.media_overlay_enabled !== s.mediaOverlayEnabled) s.setMediaOverlayEnabled(serverSettings.media_overlay_enabled)
     if (serverSettings.lastfm_enabled !== undefined && serverSettings.lastfm_enabled !== s.lastfmEnabled) s.setLastfmEnabled(serverSettings.lastfm_enabled)
     if (serverSettings.auto_report_errors !== undefined && serverSettings.auto_report_errors !== s.autoReportErrors) s.setAutoReportErrors(serverSettings.auto_report_errors)
@@ -2820,6 +2841,9 @@ export const useStore = create<AppStore>((set, get, store) => ({
   coverArtModal: null,
   openCoverArtSubmit: (target) => set({ coverArtModal: target ?? { songId: null, songName: '' } }),
   closeCoverArtSubmit: () => set({ coverArtModal: null }),
+  communityEditModal: false,
+  openCommunityEditSubmit: () => set({ communityEditModal: true }),
+  closeCommunityEditSubmit: () => set({ communityEditModal: false }),
   setPendingCompProposal: (pendingCompProposal) => set({ pendingCompProposal }),
   setPendingEditorSongId: (pendingEditorSongId) => set({ pendingEditorSongId }),
   openSongEditor: (songId) => {

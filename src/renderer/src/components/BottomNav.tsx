@@ -112,7 +112,7 @@ export default function BottomNav(): JSX.Element {
       className="md:hidden fixed inset-x-0 bottom-0 z-20 px-4 pointer-events-none"
       style={{ paddingBottom: 'max(env(safe-area-inset-bottom, 0px), 12px)' }}
     >
-      <div className="glass pointer-events-auto relative flex items-stretch h-[62px] p-1 rounded-full">
+      <div className="glass glass-specular pointer-events-auto relative flex items-stretch h-[62px] p-1 rounded-full">
         <span
           aria-hidden
           className="absolute top-1 bottom-1 left-1 rounded-full bg-[var(--fill)] control-motion"

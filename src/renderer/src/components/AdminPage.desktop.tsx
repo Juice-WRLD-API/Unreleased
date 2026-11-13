@@ -19,6 +19,7 @@ import FeedbackTab from './FeedbackTab'
 import CompProposalsTab from './CompProposalsTab'
 import CompReplaceTab from './CompReplaceTab'
 import CoverArtTab from './CoverArtTab'
+import CommunityEditsTab from './CommunityEditsTab'
 import ChannelsTab from './ChannelsTab'
 import NewsChannelsTab from './NewsChannelsTab'
 import EraTab from './EraTab'
@@ -26,6 +27,7 @@ import CdnNodesTab from './CdnNodesTab'
 import BetaTab from './BetaTab'
 import LogsTab from './LogsTab'
 import LyricsGenAdminTab from './LyricsGenAdminTab'
+import ThanksAdminTab from './ThanksAdminTab'
 import { useStaffRoles } from '../hooks/useStaffRoles'
 import { useCanManage } from '../hooks/useChannelRoles'
 import { useAdminQueue, type AdminTab } from '../hooks/useAdminQueue'
@@ -89,6 +91,7 @@ export default function AdminPage({ embedded = false, initialTab, onExit }: {
     feedback,
     refresh,
     refreshCoverArtCount,
+    refreshCommunityEditCount,
     nav,
   } = useAdminQueue({
     canLoad: canAccessStaff,
@@ -96,7 +99,7 @@ export default function AdminPage({ embedded = false, initialTab, onExit }: {
     gateNonProposalTabs: true,
     activeChannel,
     initialTab: effectiveInitialTab ?? 'proposals',
-    managerNavIds: ['proposals', 'cover-art', 'comp-proposals', 'comp-replace'],
+    managerNavIds: ['proposals', 'cover-art', 'community-edits', 'comp-proposals', 'comp-replace'],
     canReviewCoverArt,
   })
 
@@ -170,7 +173,7 @@ export default function AdminPage({ embedded = false, initialTab, onExit }: {
         {/* A tab's data loads once per visit (see the sig comment in
             useAdminQueue) rather than refetching every time it's reselected -
             this is the explicit way back to fresh data instead. */}
-        {tab !== 'cover-art' && tab !== 'comp-proposals' && tab !== 'comp-replace' && tab !== 'channels' && tab !== 'news-channels' && tab !== 'eras' && tab !== 'cdn-nodes' && tab !== 'beta' && tab !== 'lyrics' && tab !== 'logs' && (
+        {tab !== 'cover-art' && tab !== 'community-edits' && tab !== 'comp-proposals' && tab !== 'comp-replace' && tab !== 'channels' && tab !== 'news-channels' && tab !== 'eras' && tab !== 'cdn-nodes' && tab !== 'beta' && tab !== 'lyrics' && tab !== 'thanks' && tab !== 'logs' && (
           <button onClick={() => refresh()} disabled={loading} title="Refresh"
             className="shrink-0 p-1.5 rounded-lg text-accent hover:bg-surface-overlay transition-colors disabled:opacity-40">
             <RefreshCw size={12} className={loading ? 'animate-spin' : ''} />
@@ -225,6 +228,11 @@ export default function AdminPage({ embedded = false, initialTab, onExit }: {
               })}
               channel={activeChannel}
             />
+          </div>
+        )}
+        {visited.has('community-edits') && canReviewCoverArt && (
+          <div className={tab === 'community-edits' ? 'h-full' : 'hidden'}>
+            <CommunityEditsTab onCountsChanged={refreshCommunityEditCount} />
           </div>
         )}
         {visited.has('cover-art') && canReviewCoverArt && (
@@ -298,6 +306,11 @@ export default function AdminPage({ embedded = false, initialTab, onExit }: {
         {visited.has('lyrics') && (
           <div className={tab === 'lyrics' ? 'h-full' : 'hidden'}>
             <LyricsGenAdminTab />
+          </div>
+        )}
+        {visited.has('thanks') && (
+          <div className={tab === 'thanks' ? 'h-full' : 'hidden'}>
+            <ThanksAdminTab />
           </div>
         )}
         {visited.has('logs') && (

@@ -17,6 +17,8 @@ import com.getcapacitor.annotation.CapacitorPlugin;
 import com.getcapacitor.annotation.Permission;
 import com.getcapacitor.annotation.PermissionCallback;
 
+import java.util.concurrent.atomic.AtomicInteger;
+
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
@@ -94,7 +96,8 @@ public class MediaSessionPlugin extends Plugin implements PlaybackService.Listen
     // if it's still the most recent request when it finishes — otherwise a
     // slow fetch for a track the user already skipped past would land its
     // artwork on whatever's playing by then.
-    private static int artworkRequestSeq = 0;
+    private static final AtomicInteger artworkRequestSeq = new AtomicInteger();
+    private static final Object artworkLock = new Object();
 
     @PluginMethod
     public void updateMetadata(PluginCall call) {
@@ -114,21 +117,23 @@ public class MediaSessionPlugin extends Plugin implements PlaybackService.Listen
         // re-fetching).
         String artworkUrl = call.getString("artworkUrl");
         Bitmap localArtwork = decodeArtwork(call.getString("artworkBase64"));
-        int seq = ++artworkRequestSeq;
+        int seq;
+        synchronized (artworkLock) {
+            seq = artworkRequestSeq.incrementAndGet();
+            PlaybackService.pendingTitle = title;
+            PlaybackService.pendingArtist = artist;
+            PlaybackService.pendingAlbum = album;
+            PlaybackService.pendingArtwork = localArtwork;
+            PlaybackService.pendingDurationMs = durationMs;
 
-        PlaybackService.pendingTitle = title;
-        PlaybackService.pendingArtist = artist;
-        PlaybackService.pendingAlbum = album;
-        PlaybackService.pendingArtwork = localArtwork;
-        PlaybackService.pendingDurationMs = durationMs;
-
-        ensureStarted();
-        PlaybackService instance = PlaybackService.getInstance();
-        if (instance != null) instance.update(title, artist, album, localArtwork, durationMs);
+            ensureStarted();
+            PlaybackService instance = PlaybackService.getInstance();
+            if (instance != null) instance.update(title, artist, album, localArtwork, durationMs);
+        }
         call.resolve();
 
         if (localArtwork == null && artworkUrl != null && !artworkUrl.isEmpty()) {
-            fetchArtwork(artworkUrl, seq, title, artist, album, durationMs);
+            fetchArtwork(artworkUrl, seq);
         }
     }
 
@@ -142,7 +147,7 @@ public class MediaSessionPlugin extends Plugin implements PlaybackService.Listen
         }
     }
 
-    private void fetchArtwork(String url, int seq, String title, String artist, String album, long durationMs) {
+    private void fetchArtwork(String url, int seq) {
         new Thread(() -> {
             Bitmap bitmap = null;
             HttpURLConnection conn = null;
@@ -175,10 +180,16 @@ public class MediaSessionPlugin extends Plugin implements PlaybackService.Listen
             } finally {
                 if (conn != null) conn.disconnect();
             }
-            if (bitmap == null || seq != artworkRequestSeq) return;
-            PlaybackService.pendingArtwork = bitmap;
-            PlaybackService instance = PlaybackService.getInstance();
-            if (instance != null) instance.update(title, artist, album, bitmap, durationMs);
+            if (bitmap == null) return;
+            synchronized (artworkLock) {
+                // A skip that landed while this cover was downloading owns the
+                // session now. Touch only the artwork, and only if this fetch
+                // is still the latest one.
+                if (seq != artworkRequestSeq.get()) return;
+                PlaybackService.pendingArtwork = bitmap;
+                PlaybackService instance = PlaybackService.getInstance();
+                if (instance != null) instance.updateArtwork(bitmap);
+            }
         }).start();
     }
 

@@ -84,7 +84,7 @@ export default function TrackView(): JSX.Element {
   const btnSecondary = 'flex-1 flex items-center justify-center gap-2 px-4 h-11 md:h-auto md:py-2.5 rounded-full bg-[var(--fill)] md:bg-surface-overlay text-text-primary text-subhead md:text-sm md:tracking-normal font-semibold hover:bg-surface-highest max-md:active:bg-[var(--fill-strong)] transition-colors'
 
   return (
-    <div className="flex-1 flex flex-col items-center justify-center min-h-0 overflow-y-auto px-4 py-8">
+    <div className="flex-1 flex flex-col items-center justify-center min-h-0 overflow-y-auto px-4 py-8 pb-player">
       <div className="w-full max-w-sm">
         <button
           onClick={() => setActiveView('api-tracker')}

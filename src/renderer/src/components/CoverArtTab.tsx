@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
-  AlertCircle, Calendar, Check, CheckCircle, ChevronLeft, Hash, Loader2, MessageSquare, RefreshCw, RotateCcw, XCircle,
+  AlertCircle, Calendar, Check, CheckCircle, ChevronLeft, FolderOpen, Hash, Loader2, MessageSquare, RefreshCw, RotateCcw, XCircle,
 } from 'lucide-react'
+import { openInFiles } from './SongContextMenu'
 import {
   adminListCoverArt, adminReverseCoverArt, adminReviewCoverArt, type CoverArtStatus, type CoverArtSubmission,
 } from '../lib/coverArtApi'
@@ -120,7 +121,7 @@ export default function CoverArtTab({ onCountsChanged, stacked = false }: {
   }
 
   const reverse = async (sub: CoverArtSubmission): Promise<void> => {
-    if (!confirm('Take back this approval? If the song still shows this cover, it goes back to the one before.')) return
+    if (!confirm('Take back this approval? The cover is taken out of Files (Cover Arts/Community-Made).')) return
     setActionId(sub.id)
     try {
       applyUpdate(await adminReverseCoverArt(sub.id))
@@ -242,8 +243,8 @@ export default function CoverArtTab({ onCountsChanged, stacked = false }: {
                           className="px-3 py-1.5 rounded-lg bg-red-500/10 hover:bg-red-500/20 text-red-400 text-xs font-semibold transition-colors flex items-center gap-1.5">
                           <XCircle size={13} /> Reject
                         </button>
-                        <button onClick={() => void review(s, 'approve')} disabled={s.song == null}
-                          title={s.song == null ? 'The song was deleted' : undefined}
+                        <button onClick={() => void review(s, 'approve')}
+                          title="Adds it to the Community channel in Files, under Cover Arts/Community-Made. The song's cover stays as it is."
                           className="px-3 py-1.5 rounded-lg bg-emerald-500/15 hover:bg-emerald-500/25 text-emerald-400 text-xs font-semibold transition-colors flex items-center gap-1.5 disabled:opacity-40">
                           <CheckCircle size={13} /> Approve
                         </button>
@@ -258,6 +259,15 @@ export default function CoverArtTab({ onCountsChanged, stacked = false }: {
                   </button>
                 )}
               </div>
+
+              {s.status === 'approved' && s.comp_path && (
+                <button onClick={() => openInFiles({ folder: s.comp_path!.split('/').slice(0, -1).join('/'), channel: s.comp_channel })}
+                  title={`Show in Files${s.comp_channel ? ` (${s.comp_channel})` : ''}`}
+                  className="mt-3 flex items-center gap-1.5 max-w-full px-3 py-1.5 rounded-lg bg-surface-overlay border border-[var(--border)] text-[11px] text-text-muted hover:text-text-primary transition-colors">
+                  <FolderOpen size={12} className="shrink-0" />
+                  <span className="truncate">{s.comp_path}</span>
+                </button>
+              )}
 
               {(s.notes || s.review_notes) && (
                 <div className="flex flex-wrap gap-2 mt-3">
@@ -294,11 +304,9 @@ export default function CoverArtTab({ onCountsChanged, stacked = false }: {
             <div className="flex-1 overflow-y-auto px-6 py-5">
               <div className={`grid gap-5 max-w-3xl ${stacked ? 'grid-cols-1' : 'grid-cols-2'}`}>
                 <div className="min-w-0">
-                  <p className="text-[10px] font-bold uppercase tracking-widest text-text-muted mb-2">
-                    {s.status === 'approved' ? 'Before' : 'Now on the song'}
-                  </p>
+                  <p className="text-[10px] font-bold uppercase tracking-widest text-text-muted mb-2">On the song</p>
                   <SongImage
-                    imageUrl={s.status === 'approved' ? s.previous_image_url : s.song_image_url}
+                    imageUrl={s.song_image_url}
                     className="w-full aspect-square rounded-xl border border-[var(--border)]"
                     iconSize={22}
                   />

@@ -125,8 +125,8 @@ export default function HomeChatCard({ variant }: { variant: 'desktop' | 'mobile
   }
 
   return (
-    <div className="w-full shrink-0 rounded-xl border border-[var(--border)] bg-[var(--surface-overlay)] overflow-hidden" style={{ ['--chat-ring' as string]: 'var(--surface-overlay)' }}>
-      <button onClick={() => open()} className="group w-full flex items-center gap-3 px-3.5 py-3 text-left hover:bg-surface-highest transition-colors">
+    <div data-swap className="w-full shrink-0 rounded-xl glass-pane overflow-hidden" style={{ ['--chat-ring' as string]: 'var(--surface)' }}>
+      <button onClick={() => open()} className="group w-full flex items-center gap-3 px-3.5 py-3 text-left hover:bg-[var(--fill)] transition-colors">
         <span className="relative w-10 h-10 rounded-lg bg-accent/15 flex items-center justify-center shrink-0">
           <MessagesSquare size={18} className="text-accent" />
           {totalUnread > 0 && <span className="absolute -top-1.5 -right-1.5"><CountBadge count={totalUnread} /></span>}
@@ -142,7 +142,7 @@ export default function HomeChatCard({ variant }: { variant: 'desktop' | 'mobile
       {rows.length > 0 && (
         <div className="border-t border-[var(--border)] p-1">
           {rows.map((row) => (
-            <button key={row.key} onClick={() => open(row.key)} className="w-full flex items-center gap-2.5 rounded-lg px-2 py-1.5 text-left hover:bg-surface-highest transition-colors">
+            <button key={row.key} onClick={() => open(row.key)} className="w-full flex items-center gap-2.5 rounded-lg px-2 py-1.5 text-left hover:bg-[var(--fill)] transition-colors">
               <RowIcon row={row} size={28} />
               <span className="flex-1 min-w-0">
                 <span className={`block truncate text-xs ${row.unread ? 'font-bold text-text-primary' : 'text-text-primary'}`}>

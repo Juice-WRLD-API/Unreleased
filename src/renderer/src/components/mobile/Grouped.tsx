@@ -17,7 +17,7 @@ export function GroupedSection({ header, footer, children, className = '' }: {
   return (
     <section className={className}>
       {header && <h3 className="px-4 pb-1.5 text-footnote font-medium text-text-secondary">{header}</h3>}
-      <div className="rounded-[20px] bg-[var(--grouped)] px-4 overflow-hidden">{children}</div>
+      <div className="glass-card relative rounded-[20px] px-4 overflow-hidden">{children}</div>
       {footer && <p className="px-4 pt-1.5 text-footnote text-text-muted">{footer}</p>}
     </section>
   )

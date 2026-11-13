@@ -516,7 +516,7 @@ export default function ApiFilesView({ embedded = false }: { embedded?: boolean 
       <div
         key={entry.path}
         className={`relative flex flex-col rounded-[14px] overflow-hidden transition-colors ${
-          isSelected ? 'bg-accent/15 ring-2 ring-accent' : 'bg-[var(--grouped)] active:bg-[var(--fill-strong)]'
+          isSelected ? 'bg-accent/15 ring-2 ring-accent' : 'glass-card glass-press'
         }`}
         {...clickable(() => openEntry(entry))}
         {...pressHandlers(entry)}

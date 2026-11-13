@@ -10,13 +10,14 @@ export default function NativeMediaSession(): null {
     'currentTrack', 'currentTrackFull', 'radioFmActive', 'radioFmNowPlaying', 'radioFmMatchedSong', 'resumeOnBluetooth')
   useEffect(() => { setNativeResumeOnBluetooth(resumeOnBluetooth) }, [resumeOnBluetooth])
   useEffect(() => {
-    if (!IS_NATIVE_APP || !currentTrack) return
+    if (!IS_NATIVE_APP || (!currentTrack && !radioFmActive)) return
     startMediaSession()
-    const title = radioFmActive ? radioFmNowPlaying?.title ?? '' : currentTrack.title
-    const artist = radioFmActive ? radioFmNowPlaying?.artist ?? '' : currentTrack.artist
-    const art = radioFmActive ? radioFmMatchedSong?.imageUrl : currentTrackFull?.albumArt ?? currentTrack.imageUrl
-    const duration = currentTrackFull?.duration ?? currentTrack.duration ?? 0
-    const metadata = { title, artist, album: currentTrack.album ?? '', duration }
+    const title = radioFmActive ? radioFmNowPlaying?.title || '999 FM' : currentTrack?.title ?? ''
+    const artist = radioFmActive ? radioFmNowPlaying?.artist ?? '' : currentTrack?.artist ?? ''
+    const art = radioFmActive ? radioFmMatchedSong?.imageUrl : currentTrackFull?.albumArt ?? currentTrack?.imageUrl
+    const duration = radioFmActive ? 0 : currentTrackFull?.duration ?? currentTrack?.duration ?? 0
+    const album = radioFmActive ? '999 FM' : currentTrack?.album ?? ''
+    const metadata = { title, artist, album, duration }
     let cancelled = false
     updateMediaMetadata({ ...metadata, artworkUrl: art?.startsWith('http') ? art : null, artworkBase64: null })
     if (art && !art.startsWith('http')) {
@@ -30,13 +31,22 @@ export default function NativeMediaSession(): null {
   useEffect(() => {
     if (!IS_NATIVE_APP) return
     let lastPush = 0
+    let resumeFm = false
     const push = (state: ReturnType<typeof useStore.getState>, previous?: ReturnType<typeof useStore.getState>): void => {
+      if (state.radioFmActive || state.isPlaying || state.currentTrack?.id !== previous?.currentTrack?.id) resumeFm = false
+      if (state.radioFmActive) {
+        if (!previous?.radioFmActive) {
+          startMediaSession()
+          updateMediaPlaybackState({ playing: true, position: 0, speed: 0 })
+        }
+        return
+      }
       if (!state.currentTrack) {
-        if (previous?.currentTrack) updateMediaPlaybackState({ playing: false, position: 0, speed: 1 })
+        if (previous?.currentTrack || previous?.radioFmActive) updateMediaPlaybackState({ playing: false, position: 0, speed: 1 })
         return
       }
       const now = performance.now()
-      const changed = !previous || state.currentTrack.id !== previous.currentTrack?.id || state.isPlaying !== previous.isPlaying || state.playbackSpeed !== previous.playbackSpeed
+      const changed = !previous || previous.radioFmActive || state.currentTrack.id !== previous.currentTrack?.id || state.isPlaying !== previous.isPlaying || state.playbackSpeed !== previous.playbackSpeed
       const seeked = previous && Math.abs(state.currentTime - previous.currentTime) > 2
       if (!changed && !seeked && now - lastPush < 3000) return
       lastPush = now
@@ -46,11 +56,30 @@ export default function NativeMediaSession(): null {
     push(useStore.getState())
     const unsubscribe = useStore.subscribe(push)
     const listeners = [
-      onMediaControlEvent('play', () => useStore.getState().setIsPlaying(true)),
-      onMediaControlEvent('pause', () => useStore.getState().setIsPlaying(false)),
-      onMediaControlEvent('next', () => runPlayerCommand('next')),
-      onMediaControlEvent('previous', () => runPlayerCommand('previous')),
-      onMediaControlEvent<{ position: number }>('seek', ({ position }) => { if (Number.isFinite(position)) seekAudio(position) }),
+      onMediaControlEvent('play', () => {
+        const state = useStore.getState()
+        if (state.radioFmActive) return
+        if (resumeFm) {
+          resumeFm = false
+          state.setRadioFmActive(true)
+        } else {
+          state.setIsPlaying(true)
+        }
+      }),
+      onMediaControlEvent('pause', () => {
+        const state = useStore.getState()
+        if (state.radioFmActive) {
+          resumeFm = true
+          state.setRadioFmActive(false)
+        } else {
+          state.setIsPlaying(false)
+        }
+      }),
+      onMediaControlEvent('next', () => { if (!useStore.getState().radioFmActive) runPlayerCommand('next') }),
+      onMediaControlEvent('previous', () => { if (!useStore.getState().radioFmActive) runPlayerCommand('previous') }),
+      onMediaControlEvent<{ position: number }>('seek', ({ position }) => {
+        if (!useStore.getState().radioFmActive && Number.isFinite(position)) seekAudio(position)
+      }),
     ]
     return () => { unsubscribe(); listeners.forEach((remove) => remove()) }
   }, [])

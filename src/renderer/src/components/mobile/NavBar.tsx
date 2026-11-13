@@ -117,7 +117,7 @@ export function BarButton({ label, onClick, active, children, className = '' }: 
       onClick={onClick}
       aria-label={label}
       title={label}
-      className={`glass-button relative w-11 h-11 shrink-0 rounded-full flex items-center justify-center transition-opacity active:opacity-60 ${
+      className={`glass-button glass-specular relative w-11 h-11 shrink-0 rounded-full flex items-center justify-center transition-opacity active:opacity-60 ${
         active ? 'text-accent' : 'text-text-primary'
       } ${className}`}
     >{children}</button>

@@ -93,13 +93,18 @@ public class DownloadsPlugin extends Plugin {
 
         Uri uri = ctx.getContentResolver().insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values);
         if (uri == null) throw new Exception("Could not create the download entry");
-        try (OutputStream out = ctx.getContentResolver().openOutputStream(uri)) {
-            if (out == null) throw new Exception("Could not open the download for writing");
-            out.write(bytes);
+        try {
+            try (OutputStream out = ctx.getContentResolver().openOutputStream(uri)) {
+                if (out == null) throw new Exception("Could not open the download for writing");
+                out.write(bytes);
+            }
+            values.clear();
+            values.put(MediaStore.Downloads.IS_PENDING, 0);
+            ctx.getContentResolver().update(uri, values, null, null);
+        } catch (Exception e) {
+            try { ctx.getContentResolver().delete(uri, null, null); } catch (Exception ignored) { }
+            throw e;
         }
-        values.clear();
-        values.put(MediaStore.Downloads.IS_PENDING, 0);
-        ctx.getContentResolver().update(uri, values, null, null);
     }
 
     private void saveLegacy(String filename, byte[] bytes) throws Exception {
@@ -194,7 +199,7 @@ public class DownloadsPlugin extends Plugin {
             // still works this session; it just won't survive a restart.
         }
         ret.put("uri", tree.toString());
-        ret.put("name", treeLabel(tree));
+        ret.put("name", SafUris.treeLabel(tree));
         call.resolve(ret);
     }
 
@@ -211,20 +216,4 @@ public class DownloadsPlugin extends Plugin {
         call.resolve();
     }
 
-    /**
-     * Best-effort display name for a folder, for Settings. Tree document ids
-     * look like "primary:Music/Unreleased", so the last path component is the
-     * folder name the user actually recognises.
-     */
-    private String treeLabel(Uri uri) {
-        try {
-            String docId = DocumentsContract.getTreeDocumentId(uri);
-            String tail = docId.contains(":") ? docId.substring(docId.lastIndexOf(':') + 1) : docId;
-            if (tail.isEmpty()) return "Internal storage";
-            int slash = tail.lastIndexOf('/');
-            return slash >= 0 ? tail.substring(slash + 1) : tail;
-        } catch (Exception e) {
-            return uri.getLastPathSegment() == null ? uri.toString() : uri.getLastPathSegment();
-        }
-    }
 }

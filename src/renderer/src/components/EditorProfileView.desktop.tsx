@@ -1,16 +1,19 @@
 import { useOpenUserCard } from './chat/UserCard'
 import { useRef, useState } from 'react'
 import {
-  Loader2, Trophy, FileEdit, ChevronLeft, RefreshCw, Plus, X, Search, Flag, ShieldCheck, FolderOpen,
-  Pencil, Check,
+  Loader2, Trophy, FileEdit, RefreshCw, Plus, X, Search, Flag, ShieldCheck, FolderOpen,
+  Pencil, Check, Disc3,
 } from 'lucide-react'
 import { useStore } from '../store/useStore'
 import { accountDisplayName, initial } from '../lib/format'
 import { CONTRIBUTOR_ENABLED } from '../lib/userApi'
 import ReportsTab from './ReportsTab'
 import CompProposalList, { CompFilterBar } from './CompProposalList'
+import { GlassSegmented, SegCount } from './GlassSegmented'
+import { GLASS_SEARCH, GLASS_SEARCH_WRAP, glassToolButton } from './glassControls'
 import RoleBadges from './RoleBadges'
 import { Tile } from './Tile'
+import HomeHero from './HomeHero'
 import ProposalListItem from './ProposalListItem'
 import { LoadMoreSentinel } from './LoadMoreSentinel'
 import BroadcastModal from './BroadcastModal'
@@ -53,10 +56,10 @@ function AdminStatBox({ label, value, highlight, onClick, labelOnly }: {
         <p className="text-[10px] font-bold uppercase tracking-wider text-text-primary truncate">{label}</p>
       ) : (
         <>
-        <p className={`text-base font-bold tabular-nums truncate ${highlight ? 'text-accent' : 'text-text-primary'}`}>
-          {value === null || value === undefined ? '—' : value}
-        </p>
-        <p className="text-[9px] font-bold uppercase tracking-wider text-text-muted mt-0.5 truncate">{label}</p>
+          <p className={`text-base font-bold tabular-nums truncate ${highlight ? 'text-accent' : 'text-text-primary'}`}>
+            {value === null || value === undefined ? '—' : value}
+          </p>
+          <p className="text-[9px] font-bold uppercase tracking-wider text-text-muted mt-0.5 truncate">{label}</p>
         </>
       )}
     </Comp>
@@ -135,40 +138,38 @@ export default function EditorProfileView(): JSX.Element {
 
   const avatarInputRef = useRef<HTMLInputElement>(null)
 
+  const channelName = channels.find(ch => ch.slug === activeChannel)?.name || activeChannel
+  const channelControl = channels.length > 0 && (
+    <div className="flex flex-wrap items-center gap-x-3 gap-y-2 min-w-0">
+      <span className="text-xs font-medium text-text-secondary shrink-0">Channel</span>
+      <GlassSegmented
+        ariaLabel="Staff channel"
+        value={activeChannel}
+        onChange={setActiveChannel}
+        options={channels.map((ch) => ({ value: ch.slug, label: ch.name, title: ch.description || ch.name }))}
+      />
+    </div>
+  )
+
+  const toolbarControls = (
+    <div className="flex items-center gap-1.5">
+      <button
+        onClick={() => setRefreshKey(k => k + 1)}
+        disabled={refreshing}
+        className="p-2 rounded-lg text-text-secondary hover:text-text-primary hover:bg-[var(--surface-raised)] transition-colors disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
+        title="Refresh"
+        aria-label="Refresh staff dashboard"
+      >
+        <RefreshCw size={15} className={refreshing ? 'animate-spin' : ''} />
+      </button>
+    </div>
+  )
+
   return (
     <div className="flex-1 flex flex-col min-h-0 overflow-hidden">
 
-      {/* ── Toolbar: back, channel switcher, refresh ── */}
-      <div className="flex items-center justify-between px-4 md:px-5 pt-4 pb-3 shrink-0">
-        <button
-          onClick={() => go('api-tracker')}
-          className="flex items-center gap-1.5 text-text-muted hover:text-text-primary text-xs transition-colors"
-        >
-          <ChevronLeft size={14} /> Back
-        </button>
-        <div className="flex items-center gap-1.5">
-          {channels.length > 0 && (
-            <div className="flex items-center bg-surface-overlay rounded-lg p-1 gap-0.5 mr-1">
-              {channels.map((ch) => (
-                <button
-                  key={ch.slug}
-                  onClick={() => setActiveChannel(ch.slug)}
-                  disabled={channels.length === 1}
-                  className={`px-2.5 py-1.5 rounded-md text-xs font-medium transition-colors ${activeChannel === ch.slug ? 'bg-surface-raised text-text-primary shadow-sm' : 'text-text-muted hover:text-text-primary'} disabled:opacity-70`}
-                  title={ch.description || ch.name}
-                >{ch.name}</button>
-              ))}
-            </div>
-          )}
-          <button
-            onClick={() => setRefreshKey(k => k + 1)}
-            disabled={refreshing}
-            className="p-1.5 rounded-lg text-text-muted hover:text-text-primary hover:bg-[var(--surface-raised)] transition-colors disabled:opacity-40"
-            title="Refresh"
-          >
-            <RefreshCw size={13} className={refreshing ? 'animate-spin' : ''} />
-          </button>
-        </div>
+      <div className="shrink-0 px-6 pt-5 pb-4">
+        <HomeHero on="staff" />
       </div>
 
       {/* ── Bento grid ──
@@ -181,19 +182,17 @@ export default function EditorProfileView(): JSX.Element {
           non-spanning (safe auto-placement) or a single flex-1 cell, with
           min-h-0 threaded down each flex/grid ancestor so a tile's own
           content scrolls internally instead of overflowing it. */}
-      <div className="flex-1 overflow-y-auto md:overflow-hidden px-4 md:px-5 pb-4 md:pb-5">
+      <div className="flex-1 overflow-y-auto md:overflow-hidden px-4 md:px-6 pb-4 md:pb-5 pb-player">
         <div className="flex flex-col gap-3 md:gap-4 md:h-full">
 
-          {/* Top row: identity+stats and Quick actions side by side, sharing
-              a flex row (default items-stretch) so they render at the same
-              height - as two independent columns they used to size to their
-              own content and rarely lined up. */}
-          <div className="flex flex-col md:flex-row gap-3 md:gap-4 shrink-0">
+          {/* Keep these tiles content-sized: wrapping actions must not
+              stretch the identity card into a large empty panel. */}
+          <div className="flex flex-col md:flex-row md:items-start gap-3 md:gap-4 shrink-0">
             {/* Identity + Stats - one tile: the two were separate cards
                 showing barely more than a name and three lines of text each,
                 which read as empty space more than information. */}
             <div className="md:w-[42%]">
-              <Tile span="h-full">
+              <Tile>
                 <div className="flex-1 flex items-center">
                   <div className="flex items-center gap-4">
                     <div className="flex items-center gap-3 min-w-0">
@@ -280,23 +279,30 @@ export default function EditorProfileView(): JSX.Element {
               </Tile>
             </div>
 
-            <div className="md:flex-1">
-              <Tile title="Quick actions" span="h-full">
-                <div className="flex items-center gap-2">
+            <div className="md:flex-1 min-w-0">
+              <Tile>
+                <div className="flex items-center justify-between gap-2 mb-2">
+                  {channelControl}
+                  {toolbarControls}
+                </div>
+                <div className="flex items-center flex-wrap gap-2">
+                  <h2 className="text-xs font-semibold text-text-secondary mr-1">Quick actions</h2>
                   {(account?.is_editor || account?.is_administrator) && (
                     <button
                       onClick={() => setShowAddSong(true)}
-                      className="flex-1 flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg bg-accent/15 hover:bg-accent/25 text-accent text-xs font-semibold transition-colors"
+                      title={`Add a song to ${channelName}`}
+                      className="flex items-center gap-1.5 h-8 px-3 rounded-lg bg-accent/10 hover:bg-accent/20 text-accent text-xs font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
                     >
-                      <Plus size={12} /> New song
+                      <Plus size={14} /> New song
                     </button>
                   )}
                   {account?.is_administrator && (
                     <button
                       onClick={() => go('albums-admin')}
-                      className="flex-1 flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg bg-surface-raised hover:bg-surface-highest text-text-secondary hover:text-text-primary text-xs font-semibold transition-colors"
+                      title="Manage album covers and tracklists"
+                      className="flex items-center gap-1.5 h-8 px-3 rounded-lg hover:bg-surface-raised text-text-secondary hover:text-text-primary text-xs font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
                     >
-                      Edit albums
+                      <Disc3 size={14} /> Edit albums
                     </button>
                   )}
                 </div>
@@ -342,49 +348,35 @@ export default function EditorProfileView(): JSX.Element {
               {proposalsView === 'songs' || !isContributor ? (
                 <>
                   <div className="mb-3 shrink-0">
-                    <div className="relative mb-2">
-                      <Search size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-text-muted pointer-events-none" />
+                    <div className={`${GLASS_SEARCH_WRAP} mb-2.5`}>
+                      <Search size={15} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-text-muted pointer-events-none" />
                       <input
                         type="text"
                         value={search}
                         onChange={(e) => setSearch(e.target.value)}
                         placeholder="Search proposals…"
-                        className="w-full bg-surface-overlay text-text-primary text-sm pl-7 pr-7 py-2 rounded-lg outline-none border border-transparent focus:ring-1 ring-accent focus:border-accent/40 placeholder:text-text-muted"
+                        className={`${GLASS_SEARCH} pl-9 pr-9`}
                       />
                       {search && (
-                        <button onClick={() => setSearch('')} className="absolute right-2 top-1/2 -translate-y-1/2 text-text-muted hover:text-text-primary">
+                        <button onClick={() => setSearch('')} aria-label="Clear search" className="absolute right-3 top-1/2 -translate-y-1/2 text-text-muted hover:text-text-primary">
                           <X size={13} />
                         </button>
                       )}
                     </div>
                     <div className="flex items-center gap-1">
-                      {PROPOSAL_FILTER_TABS.map(({ key, label }) => {
-                        const count = tabCount(key)
-                        const active = filter === key
-                        return (
-                          <button
-                            key={key}
-                            onClick={() => setFilter(key)}
-                            className={`flex items-center gap-1 px-2.5 py-1 rounded-lg text-sm font-medium transition-colors ${
-                              active ? 'bg-accent/15 text-accent' : 'text-text-muted hover:text-text-primary hover:bg-surface-overlay'
-                            }`}
-                          >
-                            {label}
-                            {count > 0 && (
-                              <span className={`text-[10px] tabular-nums ${active ? 'text-accent/70' : 'text-text-muted'}`}>
-                                {count}
-                              </span>
-                            )}
-                          </button>
-                        )
-                      })}
+                      <GlassSegmented
+                        ariaLabel="Status"
+                        value={filter}
+                        onChange={setFilter}
+                        options={PROPOSAL_FILTER_TABS.map(({ key, label }) => ({ value: key, label: <SegCount label={label} count={tabCount(key)} /> }))}
+                      />
                       <button
                         onClick={() => setRefreshKey(k => k + 1)}
                         disabled={refreshing}
-                        className="ml-auto p-1.5 rounded-lg text-text-muted hover:text-text-primary hover:bg-surface-overlay transition-colors disabled:opacity-40 shrink-0"
+                        className={`${glassToolButton(false)} ml-auto`}
                         title="Refresh"
                       >
-                        <RefreshCw size={13} className={refreshing ? 'animate-spin' : ''} />
+                        <RefreshCw size={15} className={refreshing ? 'animate-spin' : ''} />
                       </button>
                       {(account?.is_editor || account?.is_administrator) && (
                         <button
@@ -438,17 +430,17 @@ export default function EditorProfileView(): JSX.Element {
               ) : (
                 <>
                   <div className="mb-3 shrink-0">
-                    <div className="relative mb-2">
-                      <Search size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-text-muted pointer-events-none" />
+                    <div className={`${GLASS_SEARCH_WRAP} mb-2.5`}>
+                      <Search size={15} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-text-muted pointer-events-none" />
                       <input
                         type="text"
                         value={compSearch}
                         onChange={(e) => setCompSearch(e.target.value)}
                         placeholder="Search comp files…"
-                        className="w-full bg-surface-overlay text-text-primary text-sm pl-7 pr-7 py-2 rounded-lg outline-none border border-transparent focus:ring-1 ring-accent focus:border-accent/40 placeholder:text-text-muted"
+                        className={`${GLASS_SEARCH} pl-9 pr-9`}
                       />
                       {compSearch && (
-                        <button onClick={() => setCompSearch('')} className="absolute right-2 top-1/2 -translate-y-1/2 text-text-muted hover:text-text-primary">
+                        <button onClick={() => setCompSearch('')} aria-label="Clear search" className="absolute right-3 top-1/2 -translate-y-1/2 text-text-muted hover:text-text-primary">
                           <X size={13} />
                         </button>
                       )}
@@ -458,15 +450,15 @@ export default function EditorProfileView(): JSX.Element {
                         filter={compFilter}
                         setFilter={setCompFilter}
                         counts={{ all: compTabCount('all'), pending: compTabCount('pending'), approved: compTabCount('approved'), rejected: compTabCount('rejected') }}
-                        size="md"
+                        glass
                       />
                       <button
                         onClick={() => setRefreshKey(k => k + 1)}
                         disabled={refreshing}
-                        className="ml-auto p-1.5 rounded-lg text-text-muted hover:text-text-primary hover:bg-surface-overlay transition-colors disabled:opacity-40 shrink-0"
+                        className={`${glassToolButton(false)} ml-auto`}
                         title="Refresh"
                       >
-                        <RefreshCw size={13} className={refreshing ? 'animate-spin' : ''} />
+                        <RefreshCw size={15} className={refreshing ? 'animate-spin' : ''} />
                       </button>
                       <button
                         onClick={() => go('contributor')}
@@ -558,6 +550,7 @@ export default function EditorProfileView(): JSX.Element {
                           <>
                             <AdminStatBox label="Song edits" value={adminPreview?.pendingProposals} highlight={!!adminPreview?.pendingProposals} onClick={() => openAdmin('proposals')} />
                             {canReviewCoverArt && <AdminStatBox label="Cover art" value={adminPreview?.pendingCoverArt} highlight={!!adminPreview?.pendingCoverArt} onClick={() => openAdmin('cover-art')} />}
+                            {canReviewCoverArt && <AdminStatBox label="Remixes & edits" value={adminPreview?.pendingCommunityEdits} highlight={!!adminPreview?.pendingCommunityEdits} onClick={() => openAdmin('community-edits')} />}
                             <AdminStatBox label="Comp files" value={adminPreview?.pendingComp} highlight={!!adminPreview?.pendingComp} onClick={() => openAdmin('comp-proposals')} />
                             {CONTRIBUTOR_ENABLED && <AdminStatBox label="Replace comp" labelOnly onClick={() => openAdmin('comp-replace')} />}
                           </>

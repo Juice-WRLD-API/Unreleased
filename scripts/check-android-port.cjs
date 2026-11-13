@@ -142,3 +142,52 @@ test('native ZIP exports wait for the device save and reject failed writes', asy
   rejectSave = true
   await assert.rejects(api.writeZip(target, items), /Disk full/)
 })
+
+test('native media controls follow 999 FM even when the queue is empty', () => {
+  const reports = [], handlers = {}
+  let push
+  const update = (patch) => {
+    const previous = { ...state }
+    Object.assign(state, patch)
+    push(state, previous)
+  }
+  const state = {
+    currentTrack: null, radioFmActive: true,
+    setRadioFmActive: (radioFmActive) => update({ radioFmActive }),
+    setIsPlaying: () => assert.fail('FM transport must not start the queue'),
+  }
+  const { default: NativeMediaSession } = load('components/NativeMediaSession.tsx', {
+    react: { useEffect: (effect) => effect() },
+    '../store/useStore': {
+      useStorePick: () => state,
+      useStore: { getState: () => state, subscribe(fn) { push = fn; return () => {} } },
+    },
+    '../lib/platform': { IS_NATIVE_APP: true },
+    '../lib/mediaControl': {
+      setNativeResumeOnBluetooth() {},
+      startMediaSession() {},
+      updateMediaMetadata: ({ title, duration }) => reports.push(['metadata', title, duration]),
+      updateMediaPlaybackState: ({ playing, position, speed }) => reports.push(['state', playing, position, speed]),
+      onMediaControlEvent: (event, handler) => { handlers[event] = handler; return () => {} },
+    },
+    './Player': {
+      runPlayerCommand: () => assert.fail('FM transport must not skip tracks'),
+      seekAudio: () => assert.fail('FM transport must not seek'),
+    },
+  })
+  NativeMediaSession()
+  handlers.play()
+  handlers.next()
+  handlers.previous()
+  handlers.seek({ position: 5 })
+  handlers.pause()
+  assert.equal(state.radioFmActive, false)
+  handlers.play()
+  assert.equal(state.radioFmActive, true)
+  assert.deepEqual(reports, [
+    ['metadata', '999 FM', 0],
+    ['state', true, 0, 0],
+    ['state', false, 0, 1],
+    ['state', true, 0, 0],
+  ])
+})

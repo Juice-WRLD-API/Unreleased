@@ -17,6 +17,7 @@ import { GameSwitcher, GameBackdrop } from './gameShell'
 import { useTierlistData, MAX_TIERS } from '../hooks/useTierlistData'
 import { ListsPanelBody, FiltersPanelBody, TierlistViewer } from './TierlistPanels'
 import { SearchHelpButton } from './SearchHelpPopover'
+import { GLASS_SEARCH_WRAP } from './glassControls'
 
 // ─── Pieces ───────────────────────────────────────────────────────────────────
 
@@ -400,19 +401,19 @@ export default function TierlistView(): JSX.Element {
                 </button>
               )}
               <div className="ml-auto flex items-center gap-1.5">
-                <div className="relative w-40 sm:w-56">
-                  <Search size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-text-muted" />
+                <div className={`${GLASS_SEARCH_WRAP} w-40 sm:w-56`}>
+                  <Search size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-text-muted pointer-events-none" />
                   <input
                     value={search}
                     onChange={(e) => setSearch(e.target.value)}
                     placeholder="Search songs or eras"
-                    className="w-full pl-7 pr-7 py-1.5 rounded-lg bg-[var(--surface-overlay)] border border-[var(--border)] text-xs text-text-primary focus:outline-none focus:border-accent/50"
+                    className="glass-field w-full h-8 rounded-full pl-8 pr-7 text-xs text-text-primary placeholder:text-text-muted"
                   />
                   {search && (
                     <button
                       onClick={() => setSearch('')}
                       title="Clear search"
-                      className="absolute right-1.5 top-1/2 -translate-y-1/2 p-0.5 text-text-muted hover:text-text-primary"
+                      className="absolute right-2 top-1/2 -translate-y-1/2 p-0.5 text-text-muted hover:text-text-primary"
                     >
                       <X size={12} />
                     </button>

@@ -269,6 +269,15 @@ public class PlaybackService extends Service {
         refreshNotification();
     }
 
+    /** A cover that finished downloading. Does not touch title, artist, album
+     *  or duration, so a fetch for a track the user already skipped cannot
+     *  paint that track's name over the one that's playing. */
+    public void updateArtwork(Bitmap artwork) {
+        this.artwork = artwork;
+        applyMetadataToSession();
+        refreshNotification();
+    }
+
     /** Called by MediaSessionPlugin whenever JS reports a play/pause/seek. */
     public void updatePlaybackState(boolean playing, long positionMs, float speed) {
         // Only a real start clears it: JS's periodic "still playing" push can

@@ -6,6 +6,7 @@ import type { RadioVote } from '../lib/radioLive'
 import { apiFetch, buildImageUrl, getSongById } from '../lib/juicewrldApi'
 import type { JWApiSong } from '../lib/juicewrldApi'
 import { attachAudioElement, resumeEffectsContext } from '../lib/audioEffects'
+import { IS_IOS } from '../lib/platform'
 
 export default function RadioFmPlayer(): JSX.Element {
   const {
@@ -79,7 +80,10 @@ export default function RadioFmPlayer(): JSX.Element {
 
   // Sync store volume → FM audio element
   useEffect(() => {
-    if (audioRef.current) audioRef.current.volume = volume
+    if (!audioRef.current) return
+    audioRef.current.volume = volume
+    // iOS ignores element volume; `muted` is what makes mute work there.
+    if (IS_IOS) audioRef.current.muted = volume === 0
   }, [volume])
 
   // Mobile background watchdog - the socket/audio pipeline can silently
@@ -159,6 +163,16 @@ export default function RadioFmPlayer(): JSX.Element {
       // headers - both keep the Web Audio chain un-tainted.
       crossOrigin="anonymous"
       style={{ display: 'none' }}
+      // iOS pausing the stream while FM is on is the system taking audio for a
+      // call, Siri or another app (see handleAudioPause in Player). The health
+      // check would start it again over the call within seconds, and a live
+      // stream has no paused state to sit in, so FM turns off instead.
+      onPause={(e) => {
+        const el = e.currentTarget
+        if (!IS_IOS || !useStore.getState().radioFmActive) return
+        if (!el.paused || el.ended || el.error || el.readyState < HTMLMediaElement.HAVE_CURRENT_DATA) return
+        setRadioFmActive(false)
+      }}
       onError={() => {
         if (useStore.getState().radioFmActive) setRadioFmActive(false)
       }}

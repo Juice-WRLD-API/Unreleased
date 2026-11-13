@@ -82,7 +82,7 @@ export function widgetMenu(which: WidgetWhich, desktop: DesktopSettings, ctx: Wi
     )
   } else if (which === 'playlist') {
     const p = desktop.playlist
-    const sources: [PlaylistSource, string][] = [['queue', 'Queue'], ['liked', 'Liked Songs'],
+    const sources: [PlaylistSource, string][] = [['queue', 'Queue'], ['history', 'History'], ['liked', 'Liked Songs'],
       ...ctx.playlists.map(({ id, name }): [PlaylistSource, string] => [`playlist:${id}`, name])]
     own.push(
       choice('Show', 'source', p.source, sources),

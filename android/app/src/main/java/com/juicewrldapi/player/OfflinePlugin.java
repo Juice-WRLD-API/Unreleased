@@ -12,7 +12,6 @@ import org.json.JSONException;
 import org.json.JSONObject;
 
 import java.io.File;
-import java.io.FileInputStream;
 import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
@@ -59,14 +58,20 @@ public class OfflinePlugin extends Plugin {
      *  file for no visible benefit. */
     private static final long PROGRESS_MIN_INTERVAL_MS = 200;
 
+    /** Every registry read-modify-write, including the prune that follows a
+     *  playlist change. The download itself stays outside this lock. */
+    private static final Object REGISTRY_LOCK = new Object();
+
     // ── Library ──────────────────────────────────────────────────────────────
 
     @PluginMethod
     public void getLibrary(PluginCall call) {
         JSONObject lib = new JSONObject();
         try {
-            lib.put("tracks", readJson(TRACKS_FILE));
-            lib.put("playlists", readJson(PLAYLISTS_FILE));
+            synchronized (REGISTRY_LOCK) {
+                lib.put("tracks", readJson(TRACKS_FILE));
+                lib.put("playlists", readJson(PLAYLISTS_FILE));
+            }
         } catch (JSONException ignored) { }
         JSObject ret = new JSObject();
         ret.put("json", lib.toString());
@@ -122,17 +127,27 @@ public class OfflinePlugin extends Plugin {
                 }
                 emitProgress(id, received, total);
 
-                if (dest.exists()) dest.delete();
-                if (!tmp.renameTo(dest)) { call.resolve(errorResult("Could not save downloaded file")); return; }
+                // A dropped connection can end the stream without throwing.
+                // Promoting that partial file used to delete a working copy.
+                if (total > 0 && received != total) {
+                    tmp.delete();
+                    call.resolve(errorResult("Download was incomplete (" + received + " of " + total + " bytes) — check your connection and try again."));
+                    return;
+                }
 
-                JSONObject meta = new JSONObject(metaJson);
-                meta.put("path", path);
-                meta.put("localPath", dest.getAbsolutePath());
-                meta.put("ext", ext);
-                meta.put("downloadedAt", System.currentTimeMillis());
-                JSONObject tracks = readJson(TRACKS_FILE);
-                tracks.put(id, meta);
-                writeJson(TRACKS_FILE, tracks);
+                synchronized (REGISTRY_LOCK) {
+                    if (dest.exists()) dest.delete();
+                    if (!tmp.renameTo(dest)) { call.resolve(errorResult("Could not save downloaded file")); return; }
+
+                    JSONObject meta = new JSONObject(metaJson);
+                    meta.put("path", path);
+                    meta.put("localPath", dest.getAbsolutePath());
+                    meta.put("ext", ext);
+                    meta.put("downloadedAt", System.currentTimeMillis());
+                    JSONObject tracks = readJson(TRACKS_FILE);
+                    tracks.put(id, meta);
+                    writeJson(TRACKS_FILE, tracks);
+                }
 
                 JSObject ret = new JSObject();
                 ret.put("localPath", dest.getAbsolutePath());
@@ -176,15 +191,16 @@ public class OfflinePlugin extends Plugin {
                 List<String> ids = new ArrayList<>();
                 for (Object o : idsArg.toList()) if (o != null) ids.add(o.toString());
 
-                JSONObject playlists = readJson(PLAYLISTS_FILE);
-                JSONObject entry = new JSONObject();
-                entry.put("songIds", new JSONArray(ids));
-                entry.put("name", name);
-                entry.put("updatedAt", System.currentTimeMillis());
-                playlists.put(key, entry);
-                writeJson(PLAYLISTS_FILE, playlists);
-
-                pruneOrphanedTracks(playlists);
+                synchronized (REGISTRY_LOCK) {
+                    JSONObject playlists = readJson(PLAYLISTS_FILE);
+                    JSONObject entry = new JSONObject();
+                    entry.put("songIds", new JSONArray(ids));
+                    entry.put("name", name);
+                    entry.put("updatedAt", System.currentTimeMillis());
+                    playlists.put(key, entry);
+                    writeJson(PLAYLISTS_FILE, playlists);
+                    pruneOrphanedTracks(playlists);
+                }
                 call.resolve();
             } catch (Exception e) {
                 call.reject(e.getMessage() == null ? "setPlaylist failed" : e.getMessage(), e);
@@ -199,10 +215,12 @@ public class OfflinePlugin extends Plugin {
 
         new Thread(() -> {
             try {
-                JSONObject playlists = readJson(PLAYLISTS_FILE);
-                playlists.remove(key);
-                writeJson(PLAYLISTS_FILE, playlists);
-                pruneOrphanedTracks(playlists);
+                synchronized (REGISTRY_LOCK) {
+                    JSONObject playlists = readJson(PLAYLISTS_FILE);
+                    playlists.remove(key);
+                    writeJson(PLAYLISTS_FILE, playlists);
+                    pruneOrphanedTracks(playlists);
+                }
                 call.resolve();
             } catch (Exception e) {
                 call.reject(e.getMessage() == null ? "removePlaylist failed" : e.getMessage(), e);
@@ -217,10 +235,12 @@ public class OfflinePlugin extends Plugin {
 
         new Thread(() -> {
             try {
-                JSONObject tracks = readJson(TRACKS_FILE);
-                deleteTrackFile(tracks, id);
-                tracks.remove(id);
-                writeJson(TRACKS_FILE, tracks);
+                synchronized (REGISTRY_LOCK) {
+                    JSONObject tracks = readJson(TRACKS_FILE);
+                    deleteTrackFile(tracks, id);
+                    tracks.remove(id);
+                    writeJson(TRACKS_FILE, tracks);
+                }
                 call.resolve();
             } catch (Exception e) {
                 call.reject(e.getMessage() == null ? "removeTrack failed" : e.getMessage(), e);
@@ -289,26 +309,16 @@ public class OfflinePlugin extends Plugin {
     private JSONObject readJson(String fileName) {
         File f = new File(getContext().getFilesDir(), fileName);
         if (!f.exists()) return new JSONObject();
-        try (FileInputStream fis = new FileInputStream(f)) {
-            byte[] buf = new byte[(int) f.length()];
-            int read = fis.read(buf);
-            if (read <= 0) return new JSONObject();
-            return new JSONObject(new String(buf, 0, read, StandardCharsets.UTF_8));
+        try {
+            byte[] buf = AtomicJson.readBytes(f);
+            if (buf.length == 0) return new JSONObject();
+            return new JSONObject(new String(buf, StandardCharsets.UTF_8));
         } catch (Exception e) {
             return new JSONObject();
         }
     }
 
     private void writeJson(String fileName, JSONObject obj) throws IOException {
-        File out = new File(getContext().getFilesDir(), fileName);
-        File tmp = new File(getContext().getFilesDir(), fileName + ".tmp");
-        try (FileOutputStream fos = new FileOutputStream(tmp)) {
-            fos.write(obj.toString().getBytes(StandardCharsets.UTF_8));
-            fos.getFD().sync();
-        }
-        if (!tmp.renameTo(out)) {
-            tmp.delete();
-            throw new IOException("Could not replace " + fileName);
-        }
+        AtomicJson.writeBytes(new File(getContext().getFilesDir(), fileName), obj.toString().getBytes(StandardCharsets.UTF_8));
     }
 }

@@ -25,7 +25,7 @@ function recovery(verdict, elapsed = 1000) {
     showAppToast: text => calls.push(text), setIsPlaying: value => calls.push(value),
   }
   vm.createContext(env)
-  vm.runInContext(compile(block('  const recoverPlayback =', '  // A source the browser') + '\nglobalThis.recover = recoverPlayback'), env)
+  vm.runInContext(compile(block('  const recoverPlayback =', '  // iOS equalizer:') + '\nglobalThis.recover = recoverPlayback'), env)
   return { env, state, calls, timers }
 }
 test('outage recovery retries slowly within five minutes, then pauses without skipping', async () => {

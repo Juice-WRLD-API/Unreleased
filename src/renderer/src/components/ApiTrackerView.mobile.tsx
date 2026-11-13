@@ -249,8 +249,8 @@ const DetailedSongRow = memo(function DetailedSongRow({
 
   return (
     <div
-      className={`flex flex-col gap-2 mx-3 px-3 py-2.5 h-full overflow-hidden rounded-[20px] transition-colors ${
-        selected ? 'bg-accent/15 ring-2 ring-accent' : 'bg-[var(--grouped)] active:bg-[var(--fill-strong)]'
+      className={`relative flex flex-col gap-2 mx-3 px-3 py-2.5 h-full overflow-hidden rounded-[20px] transition-colors ${
+        selected ? 'bg-accent/15 ring-2 ring-accent' : 'glass-card glass-press'
       }`}
       {...press}
     >
@@ -310,8 +310,8 @@ const SongCard = memo(function SongCard({
 
   return (
     <div
-      className={`flex flex-col h-full overflow-hidden rounded-[14px] transition-colors ${
-        selected ? 'bg-accent/15 ring-2 ring-accent' : 'bg-[var(--grouped)] active:bg-[var(--fill-strong)]'
+      className={`relative flex flex-col h-full overflow-hidden rounded-[14px] transition-colors ${
+        selected ? 'bg-accent/15 ring-2 ring-accent' : 'glass-card glass-press'
       }`}
       {...press}
     >

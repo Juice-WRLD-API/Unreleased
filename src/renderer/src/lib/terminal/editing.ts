@@ -1,5 +1,5 @@
 import { relativeTime } from '../../components/adminShared'
-import { fetchCompChanges, fetchTrackerChanges } from '../changesApi'
+import { fetchCompChangesPage, fetchTrackerChangesPage, type CompChange, type TrackerChange } from '../changesApi'
 import { COMP_CHUNK_THRESHOLD, createCompProposalChunked } from '../compChunkedUpload'
 import { existingCompPaths, proposeTagEdits } from '../compFileChanges'
 import { getMediaType } from '../fileTypes'
@@ -366,18 +366,21 @@ export const EDITING_COMMANDS: TermCommand[] = [
     },
   },
   {
-    name: 'changes', group: 'Editor', usage: 'changes [tracker|comp] [--limit N] [--json]', description: 'The recent-changes feeds: tracker edits (default) or comp file changes',
-    covers: ['changesApi.fetchTrackerChanges', 'changesApi.fetchCompChanges'],
+    name: 'changes', group: 'Editor', usage: 'changes [tracker|comp] [--limit N] [--offset N] [--json]', description: 'The recent-changes feeds: tracker edits (default) or comp file changes; --offset pages further back',
+    covers: ['changesApi.fetchTrackerChangesPage', 'changesApi.fetchCompChangesPage', 'changesApi.fetchTrackerChanges', 'changesApi.fetchCompChanges'],
     complete: (before, partial) => (before.length === 0 ? ['tracker', 'comp'].filter((v) => v.startsWith(partial.toLowerCase())) : []),
     run: async (args, ctx) => {
-      const { rest, bool, value } = parseArgs(args, ['limit'])
+      const { rest, bool, value } = parseArgs(args, ['limit', 'offset'])
       const which = (rest[0] ?? 'tracker').toLowerCase()
       const limit = Math.min(200, Math.max(1, Number(value.get('limit') ?? 30) || 30))
-      if (which !== 'tracker' && which !== 'comp') fail('usage: changes [tracker|comp] [--limit N]')
-      const rows = which === 'tracker' ? await fetchTrackerChanges(limit) : await fetchCompChanges(limit)
+      const offset = Math.max(0, Math.floor(Number(value.get('offset') ?? 0) || 0))
+      if (which !== 'tracker' && which !== 'comp') fail('usage: changes [tracker|comp] [--limit N] [--offset N]')
+      const page = which === 'tracker' ? await fetchTrackerChangesPage(offset, limit) : await fetchCompChangesPage(offset, limit)
+      const rows: (TrackerChange | CompChange)[] = page.results
       if (asJson(ctx, bool.has('json'), rows)) return
       if (rows.length === 0) { ctx.print('no changes', 'dim'); return }
       ctx.print(table(rows.map((r) => [r.timestamp ? relativeTime(r.timestamp) : '', r.action, r.name, r.user])))
+      if (page.nextOffset != null) ctx.print(`more: changes ${which} --offset ${page.nextOffset}${value.has('limit') ? ` --limit ${limit}` : ''}`, 'dim')
     },
   },
   {

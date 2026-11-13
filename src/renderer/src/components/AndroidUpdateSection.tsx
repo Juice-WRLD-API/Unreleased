@@ -69,7 +69,7 @@ export default function AndroidUpdateSection(): JSX.Element {
     setInstall({ kind: 'downloading', percent: 0 })
     try {
       unsubStatus.current?.()
-      unsubStatus.current = await downloadAndInstall(
+      const unsub = await downloadAndInstall(
         url,
         (percent) => {
           if (alive.current) setInstall({ kind: 'downloading', percent })
@@ -86,6 +86,10 @@ export default function AndroidUpdateSection(): JSX.Element {
           }
         },
       )
+      // The listener is registered before the download resolves. Closing
+      // Settings in that window used to drop the unsubscribe on the floor.
+      if (!alive.current) { unsub(); return }
+      unsubStatus.current = unsub
       // Resolves when the install session is committed, not when it finishes —
       // the system installer takes over from here and reports back through the
       // status listener above.

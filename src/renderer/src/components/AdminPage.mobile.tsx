@@ -21,12 +21,14 @@ import ReportsTab from './ReportsTab.mobile'
 import FeedbackTab from './FeedbackTab'
 import CompProposalsTab from './CompProposalsTab.mobile'
 import CoverArtTab from './CoverArtTab'
+import CommunityEditsTab from './CommunityEditsTab'
 import ChannelsTab from './ChannelsTab.mobile'
 import NewsChannelsTab from './NewsChannelsTab'
 import EraTab from './EraTab.mobile'
 import CdnNodesTab from './CdnNodesTab.mobile'
 import LogsTab from './LogsTab'
 import LyricsGenAdminTab from './LyricsGenAdminTab'
+import ThanksAdminTab from './ThanksAdminTab'
 import { useBackToClose } from '../hooks/useBackToClose'
 import { useStaffRoles } from '../hooks/useStaffRoles'
 import { useCanManage } from '../hooks/useChannelRoles'
@@ -96,6 +98,7 @@ export default function AdminPage({ embedded = false, initialTab, onExit }: {
     feedback,
     refresh,
     refreshCoverArtCount,
+    refreshCommunityEditCount,
     nav,
   } = useAdminQueue({
     canLoad: isAdmin,
@@ -109,7 +112,7 @@ export default function AdminPage({ embedded = false, initialTab, onExit }: {
     // strand a manager on a tab their nav bar no longer offers a button for.
     // Cover art stays when it's in that nav (see useAdminQueue).
     forceTab: { when: managerOnly, tab: 'comp-proposals' },
-    managerNavIds: ['cover-art', 'comp-proposals'],
+    managerNavIds: ['cover-art', 'community-edits', 'comp-proposals'],
     canReviewCoverArt,
   })
 
@@ -170,7 +173,7 @@ export default function AdminPage({ embedded = false, initialTab, onExit }: {
           {/* A tab's data loads once per visit (see the sig comment in
               useAdminQueue) rather than refetching every time it's reselected -
               this is the explicit way back to fresh data instead. */}
-          {tab !== 'cover-art' && tab !== 'comp-proposals' && tab !== 'channels' && tab !== 'news-channels' && tab !== 'eras' && tab !== 'cdn-nodes' && tab !== 'lyrics' && tab !== 'logs' ? (
+          {tab !== 'cover-art' && tab !== 'community-edits' && tab !== 'comp-proposals' && tab !== 'channels' && tab !== 'news-channels' && tab !== 'eras' && tab !== 'cdn-nodes' && tab !== 'lyrics' && tab !== 'thanks' && tab !== 'logs' ? (
             <BarButton label="Refresh" onClick={() => { if (!loading) refresh() }}>
               <RefreshCw size={18} className={loading ? 'animate-spin opacity-60' : ''} />
             </BarButton>
@@ -225,6 +228,11 @@ export default function AdminPage({ embedded = false, initialTab, onExit }: {
               })}
               channel={activeChannel}
             />
+          </div>
+        )}
+        {visited.has('community-edits') && canReviewCoverArt && (
+          <div className={tab === 'community-edits' ? 'h-full' : 'hidden'}>
+            <CommunityEditsTab onCountsChanged={refreshCommunityEditCount} />
           </div>
         )}
         {visited.has('cover-art') && canReviewCoverArt && (
@@ -288,6 +296,11 @@ export default function AdminPage({ embedded = false, initialTab, onExit }: {
         {visited.has('lyrics') && (
           <div className={tab === 'lyrics' ? 'h-full' : 'hidden'}>
             <LyricsGenAdminTab />
+          </div>
+        )}
+        {visited.has('thanks') && (
+          <div className={tab === 'thanks' ? 'h-full' : 'hidden'}>
+            <ThanksAdminTab />
           </div>
         )}
         {visited.has('logs') && (
@@ -1112,7 +1125,7 @@ function StatsTab({ applications, proposals, users }: {
     <div className="h-full overflow-y-auto p-4">
       <div className="grid grid-cols-2 gap-2.5 mb-6">
         {metrics.map(m => (
-          <div key={m.label} className="bg-[var(--grouped)] rounded-[20px] p-3.5">
+          <div key={m.label} className="glass-card relative rounded-[20px] p-3.5">
             <div className={`mb-2 ${m.color}`}>{m.icon}</div>
             <p className={`text-title1 leading-none ${m.color}`}>{m.value}</p>
             <p className="text-text-muted text-[11px] mt-2">{m.label}</p>

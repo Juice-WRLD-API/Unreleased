@@ -10,8 +10,6 @@ import { loadEraFullNames, listEras } from '../lib/eras'
 export function useAddSongModal(onSubmitted: () => void, onClose: () => void, channel?: string): {
   f: ProposalFormState
   updateField: ReturnType<typeof useProposalForm>['updateField']
-  showMore: boolean
-  setShowMore: React.Dispatch<React.SetStateAction<boolean>>
   copiedFrom: string | null
   setCopiedFrom: (v: string | null) => void
   syncedTable: boolean
@@ -27,11 +25,10 @@ export function useAddSongModal(onSubmitted: () => void, onClose: () => void, ch
   handleSubmit: () => Promise<void>
 } {
   // Every field lives in one reducer (lib/proposalForm.ts) instead of ~26
-  // separate useState calls. Auxiliary UI-only state (showMore, copiedFrom
+  // separate useState calls. Auxiliary UI-only state (copiedFrom
   // banner, syncedTable toggle, file picker, eras, submit state) stays as
   // plain useState here - it never becomes part of the proposal payload.
   const { formState: f, updateField, copyFrom: copyFromForm } = useProposalForm()
-  const [showMore, setShowMore] = useState(false)
   const [copiedFrom, setCopiedFrom] = useState<string | null>(null)
   const [syncedTable, setSyncedTable] = useState(() => localStorage.getItem('editor:syncedFormat') !== 'raw')
   const [pickingFile, setPickingFile] = useState(false)
@@ -52,7 +49,6 @@ export function useAddSongModal(onSubmitted: () => void, onClose: () => void, ch
   const copyFrom = (s: JWApiSong): void => {
     copyFromForm(s)
     setCopiedFrom(s.name || null)
-    setShowMore(true)
   }
 
   // buildProposedData reproduces the exact pre-rewrite "only include
@@ -79,7 +75,7 @@ export function useAddSongModal(onSubmitted: () => void, onClose: () => void, ch
   }
 
   return {
-    f, updateField, showMore, setShowMore, copiedFrom, setCopiedFrom, syncedTable, setSyncedTable,
+    f, updateField, copiedFrom, setCopiedFrom, syncedTable, setSyncedTable,
     pickingFile, setPickingFile, eras, submitState, submitError, edNotes, setEdNotes, copyFrom, handleSubmit,
   }
 }

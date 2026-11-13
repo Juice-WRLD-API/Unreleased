@@ -119,7 +119,7 @@ public class LocalLibraryPlugin extends Plugin {
             // works this session; it just won't survive a restart.
         }
         ret.put("uri", tree.toString());
-        ret.put("name", treeLabel(tree));
+        ret.put("name", SafUris.treeLabel(tree));
         call.resolve(ret);
     }
 
@@ -255,7 +255,7 @@ public class LocalLibraryPlugin extends Plugin {
     public void sourceLabel(PluginCall call) {
         String uri = call.getString("uri");
         JSObject ret = new JSObject();
-        ret.put("value", uri == null ? "" : treeLabel(Uri.parse(uri)));
+        ret.put("value", uri == null ? "" : SafUris.treeLabel(Uri.parse(uri)));
         call.resolve(ret);
     }
 
@@ -290,7 +290,7 @@ public class LocalLibraryPlugin extends Plugin {
 
                 for (String source : sources) {
                     Uri uri = Uri.parse(source);
-                    if (isTreeUri(uri)) walkTree(uri, known, out, seen, counters);
+                    if (SafUris.isTreeUri(uri)) walkTree(uri, known, out, seen, counters);
                     else collectDocument(uri, null, 0, 0, known, out, seen, counters);
                 }
 
@@ -568,19 +568,10 @@ public class LocalLibraryPlugin extends Plugin {
     private void writeJson(String fileName, String json, PluginCall call) {
         if (json == null) { call.reject("json is required"); return; }
         File out = new File(getContext().getFilesDir(), fileName);
-        // Write to a sibling temp file and rename, so a crash mid-write can't
-        // leave a truncated library.json that fails to parse on next launch.
-        File tmp = new File(getContext().getFilesDir(), fileName + ".tmp");
-        try (FileOutputStream fos = new FileOutputStream(tmp)) {
-            fos.write(json.getBytes(StandardCharsets.UTF_8));
-            fos.getFD().sync();
+        try {
+            AtomicJson.writeBytes(out, json.getBytes(StandardCharsets.UTF_8));
         } catch (IOException e) {
             call.reject("Could not save " + fileName, e);
-            return;
-        }
-        if (!tmp.renameTo(out)) {
-            tmp.delete();
-            call.reject("Could not replace " + fileName);
             return;
         }
         call.resolve();
@@ -594,10 +585,9 @@ public class LocalLibraryPlugin extends Plugin {
             call.resolve(ret);
             return;
         }
-        try (FileInputStream fis = new FileInputStream(in)) {
-            byte[] buf = new byte[(int) in.length()];
-            int read = fis.read(buf);
-            ret.put("json", read <= 0 ? JSONObject.NULL : new String(buf, 0, read, StandardCharsets.UTF_8));
+        try {
+            byte[] buf = AtomicJson.readBytes(in);
+            ret.put("json", buf.length == 0 ? JSONObject.NULL : new String(buf, StandardCharsets.UTF_8));
             call.resolve(ret);
         } catch (IOException e) {
             ret.put("json", JSONObject.NULL);
@@ -637,30 +627,6 @@ public class LocalLibraryPlugin extends Plugin {
         if (mime != null && mime.startsWith("audio/")) return true;
         if ("application/ogg".equals(mime)) return true;
         return name != null && AUDIO_EXTS.contains(extOf(name));
-    }
-
-    private boolean isTreeUri(Uri uri) {
-        List<String> segments = uri.getPathSegments();
-        return segments.size() >= 2 && "tree".equals(segments.get(0));
-    }
-
-    /**
-     * Best-effort display name for a source. Tree document ids look like
-     * "primary:Music/Unreleased", so the last path component is the folder
-     * name the user actually recognises.
-     */
-    private String treeLabel(Uri uri) {
-        try {
-            String docId = isTreeUri(uri)
-                    ? DocumentsContract.getTreeDocumentId(uri)
-                    : DocumentsContract.getDocumentId(uri);
-            String tail = docId.contains(":") ? docId.substring(docId.lastIndexOf(':') + 1) : docId;
-            if (tail.isEmpty()) return "Internal storage";
-            int slash = tail.lastIndexOf('/');
-            return slash >= 0 ? tail.substring(slash + 1) : tail;
-        } catch (Exception e) {
-            return uri.getLastPathSegment() == null ? uri.toString() : uri.getLastPathSegment();
-        }
     }
 
     private Map<String, JSONObject> indexKnown(JSArray known) {

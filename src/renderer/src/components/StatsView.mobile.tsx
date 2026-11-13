@@ -34,7 +34,7 @@ import { ListRow, RowDuration, RowMenuButton } from './mobile/ListRow'
 
 function StatCard({ icon, value, label }: { icon: JSX.Element; value: string; label: string }): JSX.Element {
   return (
-    <div className="rounded-[20px] bg-[var(--grouped)] px-4 py-3.5">
+    <div className="glass-card relative rounded-[20px] px-4 py-3.5">
       <div className="flex items-center gap-1.5 text-text-secondary mb-1">
         {icon}
         <span className="text-footnote font-medium truncate">{label}</span>

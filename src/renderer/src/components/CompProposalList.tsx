@@ -1,4 +1,5 @@
 import { Check, Loader2, Sparkles, Ban, X } from 'lucide-react'
+import { GlassSegmented, SegCount } from './GlassSegmented'
 import type { CompFileProposal } from '../lib/userApi'
 import { compChangeTypeLabel } from '../lib/userApi'
 import { StatusChip, relativeTime } from './adminShared'
@@ -28,7 +29,7 @@ export function compProposalSearchText(p: CompFileProposal): string {
     .filter(Boolean).join(' ').toLowerCase()
 }
 
-export function CompFilterBar({ filter, setFilter, counts, size = 'sm' }: {
+export function CompFilterBar({ filter, setFilter, counts, size = 'sm', glass = false }: {
   filter: CompFilterTab
   setFilter: (f: CompFilterTab) => void
   /** Optional per-tab counts (e.g. from filterCompProposals(all, tab).length)
@@ -41,7 +42,19 @@ export function CompFilterBar({ filter, setFilter, counts, size = 'sm' }: {
    *  merged Proposals/Comp tile in EditorProfileView), so the two don't read
    *  as two different scales of control. */
   size?: 'sm' | 'md'
+  /** Render as the glass segmented control (view toolbars, profile tiles). */
+  glass?: boolean
 }): JSX.Element {
+  if (glass) {
+    return (
+      <GlassSegmented
+        ariaLabel="Status"
+        value={filter}
+        onChange={setFilter}
+        options={COMP_FILTERS.map((key) => ({ value: key, label: <SegCount label={key} count={counts?.[key]} /> }))}
+      />
+    )
+  }
   return (
     <div className="flex gap-2 flex-wrap">
       {COMP_FILTERS.map((key) => {
