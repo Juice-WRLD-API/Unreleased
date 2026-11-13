@@ -1125,7 +1125,7 @@ function StatsTab({ applications, proposals, users }: {
     <div className="h-full overflow-y-auto p-4">
       <div className="grid grid-cols-2 gap-2.5 mb-6">
         {metrics.map(m => (
-          <div key={m.label} className="bg-[var(--grouped)] rounded-[20px] p-3.5">
+          <div key={m.label} className="glass-card relative rounded-[20px] p-3.5">
             <div className={`mb-2 ${m.color}`}>{m.icon}</div>
             <p className={`text-title1 leading-none ${m.color}`}>{m.value}</p>
             <p className="text-text-muted text-[11px] mt-2">{m.label}</p>

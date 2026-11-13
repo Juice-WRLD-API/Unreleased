@@ -805,7 +805,7 @@ export default function HeardleView(): JSX.Element {
           ) : (
             <>
               {/* Play card */}
-              <div className="rounded-[20px] bg-[var(--grouped)] p-4 space-y-4">
+              <div className="glass-card relative rounded-[20px] p-4 space-y-4">
                 <SlotRow ladder={ladder} guesses={guesses} status={status} showEraHint={rules.eraHint} />
 
                 <Waveform
@@ -945,7 +945,7 @@ export default function HeardleView(): JSX.Element {
               )}
 
               {finished && answer && (
-                <div className="mt-4 rounded-[20px] bg-[var(--grouped)] p-4">
+                <div className="glass-card relative mt-4 rounded-[20px] p-4">
                   <div className="flex gap-4">
                     {/* Art stays hidden until the round is over - era covers are
                         shared, so showing one early would narrow the field. */}

@@ -266,7 +266,7 @@ export default function HomeViewMobile(): JSX.Element {
                   <button
                     key={g.view}
                     onClick={() => setActiveView(g.view)}
-                    className={`${TILE} shrink-0 rounded-[20px] bg-[var(--grouped)] px-4 py-3.5 text-left active:bg-[var(--fill-strong)] transition-colors`}
+                    className={`${TILE} glass-card glass-press relative shrink-0 rounded-[20px] px-4 py-3.5 text-left`}
                   >
                     <p className="text-headline text-text-primary truncate">{g.label}</p>
                     {g.kind === 'daily' ? (
@@ -311,7 +311,7 @@ export default function HomeViewMobile(): JSX.Element {
                 <EmptyNote>Play something and your stats will show up here.</EmptyNote>
               ) : (
                 <div className="px-4">
-                  <div className="grid grid-cols-3 rounded-[20px] bg-[var(--grouped)] divide-x divide-[color:var(--separator)]">
+                  <div className="glass-card relative grid grid-cols-3 rounded-[20px] divide-x divide-[color:var(--separator)]">
                     <Stat value={totalPlays.toLocaleString()} label="Plays" />
                     <Stat value={distinctSongs.toLocaleString()} label="Songs" />
                     <Stat value={weekPlays.toLocaleString()} label="This week" />

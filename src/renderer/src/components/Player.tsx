@@ -2713,7 +2713,7 @@ export default function Player(): JSX.Element {
           (MINI_PLAYER_SLOT). Play/pause and next only, as plain glyphs -
           shuffle, repeat and previous live on Now Playing. */}
       <div
-        className="app-player md:hidden fixed left-4 right-4 z-20 h-[56px] glass rounded-full overflow-hidden"
+        className="app-player md:hidden fixed left-4 right-4 z-20 h-[56px] glass glass-specular rounded-full overflow-hidden"
         style={{ bottom: 'calc(var(--nav-h, 0px) + 8px)' }}
         onContextMenu={(e) => { e.preventDefault(); if (currentTrack) setShowContextMenu(v => !v) }}
       >

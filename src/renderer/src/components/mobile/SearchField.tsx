@@ -42,7 +42,7 @@ export function SearchField({
   value, onChange, icon: Icon = Search, inputRef, trailing, className = '', ...input
 }: SearchFieldProps): JSX.Element {
   return (
-    <div className={`relative flex items-center h-9 rounded-full bg-[var(--fill)] ${className}`}>
+    <div className={`glass-track glass-specular relative flex items-center h-9 rounded-full ${className}`}>
       <Icon size={17} className="absolute left-3 text-text-muted pointer-events-none" />
       <input
         ref={inputRef}

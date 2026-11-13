@@ -17,7 +17,7 @@ export function Tile({ title, icon, action, controls, span = '', children }: {
   return (
     // Phones: an iOS inset-grouped card (no border, sentence-case headline,
     // accent "See all"-style action); desktop keeps the bento tile.
-    <section data-swap className={`${span} min-w-0 min-h-0 flex flex-col overflow-hidden rounded-[20px] md:rounded-2xl glass-pane max-md:bg-[var(--grouped)] p-4`}>
+    <section data-swap className={`${span} min-w-0 min-h-0 flex flex-col overflow-hidden rounded-[20px] md:rounded-2xl glass-pane p-4`}>
       {title && (
         <div className="flex items-center gap-2 mb-3 shrink-0">
           <span className="text-text-muted">{icon}</span>

@@ -352,8 +352,8 @@ export default function App(): JSX.Element {
   const scrollUnder = !isMobile && SCROLL_UNDER.includes(bgView)
   return (
     <UserCardHost>
-    <div className="app-shell flex flex-col overflow-hidden max-md:bg-surface">
-      {!isMobile && <ErrorBoundary fallback={null}><AmbientBackdrop /></ErrorBoundary>}
+    <div className="app-shell flex flex-col overflow-hidden">
+      <ErrorBoundary fallback={null}><AmbientBackdrop /></ErrorBoundary>
       {/* Sidebar stays first in the DOM; reverse variants place it visually
           on the right/bottom without reordering focus/tab order. */}
       <div className={`flex flex-1 overflow-hidden ${

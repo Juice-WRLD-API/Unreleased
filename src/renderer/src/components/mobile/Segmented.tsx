@@ -14,7 +14,7 @@ export function Segmented<T extends string | number>({ value, options, onChange 
 }): JSX.Element {
   const index = options.findIndex((o) => o.value === value)
   return (
-    <div className="relative flex items-stretch h-9 p-0.5 rounded-full bg-[var(--fill)]">
+    <div className="glass-track relative flex items-stretch h-9 p-0.5 rounded-full">
       <span
         aria-hidden
         className="absolute top-0.5 bottom-0.5 left-0.5 rounded-full bg-[var(--control-thumb)] shadow-[0_3px_8px_rgb(0_0_0/0.12),0_3px_1px_rgb(0_0_0/0.04)] control-motion"

@@ -898,59 +898,6 @@ input[type='range']:active::-moz-range-thumb {
   --control-thumb: color-mix(in srgb, var(--text-primary) 36%, var(--surface));
 }
 
-/* The floating glass of the mobile tab bar, mini player, sheets and collapsed
-   title bars: a see-through pane over whatever scrolls beneath it, a thin
-   light rim with a brighter top edge, and a soft shadow lifting it off the
-   page. */
-.glass {
-  background: var(--surface-raised);
-  background: color-mix(in srgb, var(--surface) 62%, transparent);
-  -webkit-backdrop-filter: blur(22px) saturate(1.8);
-  backdrop-filter: blur(22px) saturate(1.8);
-  box-shadow:
-    inset 0 0 0 0.5px color-mix(in srgb, var(--text-primary) 12%, transparent),
-    inset 0 1px 0 color-mix(in srgb, #fff 14%, transparent),
-    0 8px 28px rgb(0 0 0 / 0.22);
-}
-/* Denser variant for panels that carry body text (sheets): still frosted, but
-   busy artwork behind can't fight the rows for legibility. */
-.glass-thick {
-  background: var(--surface-raised);
-  background: color-mix(in srgb, var(--surface) 84%, transparent);
-  -webkit-backdrop-filter: blur(30px) saturate(1.8);
-  backdrop-filter: blur(30px) saturate(1.8);
-  box-shadow:
-    inset 0 0 0 0.5px color-mix(in srgb, var(--text-primary) 12%, transparent),
-    inset 0 1px 0 color-mix(in srgb, #fff 12%, transparent),
-    0 12px 40px rgb(0 0 0 / 0.3);
-}
-/* Bar backgrounds only (no lift): the collapsed large-title bar. */
-.glass-bar {
-  background: var(--surface);
-  background: color-mix(in srgb, var(--surface) 72%, transparent);
-  -webkit-backdrop-filter: blur(22px) saturate(1.8);
-  backdrop-filter: blur(22px) saturate(1.8);
-}
-/* Round toolbar buttons (back, ⋯, the large-title actions): the same glass at
-   button scale, with a lighter shadow so a row of them doesn't smudge. */
-.glass-button {
-  background: var(--surface-raised);
-  background: color-mix(in srgb, var(--surface) 55%, transparent);
-  -webkit-backdrop-filter: blur(16px) saturate(1.8);
-  backdrop-filter: blur(16px) saturate(1.8);
-  box-shadow:
-    inset 0 0 0 0.5px color-mix(in srgb, var(--text-primary) 14%, transparent),
-    inset 0 1px 0 color-mix(in srgb, #fff 14%, transparent),
-    0 2px 10px rgb(0 0 0 / 0.12);
-}
-@media (prefers-reduced-transparency: reduce) {
-  .glass, .glass-thick, .glass-bar, .glass-button {
-    background: var(--surface-raised);
-    -webkit-backdrop-filter: none;
-    backdrop-filter: none;
-  }
-}
-
 /* iOS hairlines: inset to where a row's text starts and running to its right
    edge, drawn between rows only. --row-inset is the leading content's width
    (an icon badge plus its gap); grouped rows bleed to the card's edges with
@@ -1014,13 +961,13 @@ input[type='range']:active::-moz-range-thumb {
   /* .glass-thick for a panel desktop shares (the notification center): it
      overrides that panel's own background, border and shadow on phones. */
   .m-glass-thick {
-    background: color-mix(in srgb, var(--surface) 84%, transparent);
+    background: color-mix(in srgb, var(--glass-base) 84%, transparent);
     -webkit-backdrop-filter: blur(30px) saturate(1.8);
     backdrop-filter: blur(30px) saturate(1.8);
     border-color: transparent;
     box-shadow:
-      inset 0 0 0 0.5px color-mix(in srgb, var(--text-primary) 12%, transparent),
-      inset 0 1px 0 color-mix(in srgb, #fff 12%, transparent),
+      inset 0 0 0 0.5px var(--glass-rim),
+      inset 0 1px 0 var(--glass-edge),
       0 12px 40px rgb(0 0 0 / 0.3);
   }
   @media (prefers-reduced-transparency: reduce) {
@@ -1032,21 +979,9 @@ input[type='range']:active::-moz-range-thumb {
   }
 }
 
-@media (max-width: 767px) {
-  .glass-scrim {
-    background-color: rgb(0 0 0 / 0.6);
-    backdrop-filter: blur(4px);
-  }
-  .glass-thick {
-    background-color: var(--surface);
-    border: 1px solid var(--border);
-    box-shadow: 0 12px 32px rgb(0 0 0 / 0.35);
-  }
-}
-
-@media (min-width: 768px) {
 /* ─── Glass chrome ────────────────────────────────────────────────────────────
-   The iOS 26 / Apple Music look, on every skin: chrome floats as rounded panes
+   The iOS 26 / Apple Music look, on every skin and at every width (phones
+   included, since 2026-11-13): chrome floats as rounded panes
    with a hairline rim and a brighter top edge, and the pieces with moving
    content behind them (the player bar, the pill nav, the notification and
    transfer panels, toasts, the dialog scrim) frost it with a backdrop blur.
@@ -1062,13 +997,6 @@ input[type='range']:active::-moz-range-thumb {
    loses its blur while an ancestor is fading (opacity < 1 makes the ancestor
    the backdrop root), so animated popovers use the direct classes. */
 :root {
-  --fill: color-mix(in srgb, var(--text-primary) 9%, transparent);
-  --fill-strong: color-mix(in srgb, var(--text-primary) 16%, transparent);
-  --separator: var(--border);
-  /* Inset-grouped cells and the raised thumb of a segmented control. Dark
-     skins lift both further off the page, as iOS does. */
-  --grouped: color-mix(in srgb, var(--text-primary) 5%, var(--surface));
-  --control-thumb: var(--surface);
   --glass-rim: color-mix(in srgb, var(--text-primary) 12%, transparent);
   --glass-edge: color-mix(in srgb, #fff 12%, transparent);
   /* What every glass fill is mixed from: the skin's surface with a hint of
@@ -1087,8 +1015,6 @@ input[type='range']:active::-moz-range-thumb {
   --glass-pane-shadow: 0 10px 30px rgb(0 0 0 / 0.08), 0 1px 3px rgb(0 0 0 / 0.05);
 }
 .dark {
-  --grouped: color-mix(in srgb, var(--text-primary) 11%, var(--surface));
-  --control-thumb: color-mix(in srgb, var(--text-primary) 36%, var(--surface));
   --glass-base: color-mix(in srgb, var(--glass-accent) 10%, var(--surface-raised));
   --glass-spec-hi: rgb(255 255 255 / 0.32);
   --glass-spec-lo: rgb(255 255 255 / 0.1);
@@ -1183,7 +1109,8 @@ input[type='range']:active::-moz-range-thumb {
    iOS glass edges read. A masked ::after, so it follows the radius and sits
    over children that reach the edge. The element must be positioned. */
 .glass-specular::after,
-.glass-pane::after {
+.glass-pane::after,
+.glass-card::after {
   content: '';
   position: absolute;
   inset: 0;
@@ -1224,6 +1151,38 @@ input[type='range']:active::-moz-range-thumb {
 }
 .glass-pane .glass-pane::after { display: none; }
 .glass-pane .glass-pane.glass-press:hover { background-color: var(--fill-strong); }
+
+/* Phone cards (mobile/Grouped lists, Home's game tiles and stat strip, the
+   card on a detail page): the docked-pane veil without the lift, since a column
+   of drop shadows weighs a list down, with the lit edge on top. A card that is
+   itself a button (.glass-press) darkens while pressed - touch has no hover.
+   Like .glass-specular, the element must be positioned (`relative`): a class
+   that set it would beat a card the virtualized grids place `absolute`. */
+.glass-card {
+  background-color: var(--glass-pane);
+  box-shadow: inset 0 0 0 0.5px var(--glass-rim);
+}
+.glass-card.glass-press { transition: background-color 0.3s cubic-bezier(0.4, 0, 0.2, 1); }
+.glass-card.glass-press:active { background-color: color-mix(in srgb, var(--text-primary) 10%, var(--glass-pane)); }
+.glass-pane .glass-card,
+.glass-card .glass-card {
+  background-color: var(--fill);
+  box-shadow: none;
+}
+.glass-pane .glass-card::after,
+.glass-card .glass-card::after { display: none; }
+
+/* A capsule that sits on the page or in a card: the search field and the
+   segmented track. The same veil as a card, plain fill once inside one. */
+.glass-track {
+  background-color: var(--glass-pane);
+  box-shadow: inset 0 0 0 0.5px var(--glass-rim);
+}
+.glass-pane .glass-track,
+.glass-card .glass-track {
+  background-color: var(--fill);
+  box-shadow: none;
+}
 
 /* Controls that sit straight on the ambient backdrop, like a view's toolbar
    (search field, round icon buttons): the docked-pane veil at control scale,
@@ -1347,12 +1306,29 @@ body, #root, .app-shell {
 @media (prefers-reduced-motion: reduce) {
   .app-ambient-art { transition-duration: 0.01s; }
 }
+/* Phones: a smaller layer to blur (a phone GPU paints this behind every
+   scroll frame), and a stronger tint, since rows and titles sit straight on
+   the page here rather than inside panes. */
+@media (max-width: 767px) {
+  .app-ambient { --ambient-tint: 68%; }
+  .dark .app-ambient { --ambient-tint: 66%; }
+  .app-ambient-art {
+    transform: scale(1.2);
+    filter: blur(56px) var(--ambient-art);
+  }
+}
 
 /* Behind a dialog: the page dims a little and frosts, instead of going dark. */
 .glass-scrim {
   background-color: rgb(0 0 0 / 0.3);
   -webkit-backdrop-filter: blur(16px) saturate(1.4);
   backdrop-filter: blur(16px) saturate(1.4);
+}
+@media (max-width: 767px) {
+  .glass-scrim {
+    -webkit-backdrop-filter: blur(12px) saturate(1.4);
+    backdrop-filter: blur(12px) saturate(1.4);
+  }
 }
 /* Dialog panels keep their opaque color (their headers and footers are
    painted in it) and swap the flat border for the rim. The rim is drawn on
@@ -1406,10 +1382,10 @@ body, #root, .app-shell {
   }
   .app-ambient { display: none; }
   .glass-pane { background-color: var(--pane-color, var(--surface-raised)); background-image: none; }
-  .glass-field, .glass-seg { background-color: var(--surface-raised); }
+  .glass-card { background-color: var(--grouped); }
+  .glass-field, .glass-seg, .glass-track { background-color: var(--surface-raised); }
 }
 
-}
 
 /* The copy a closing modal or menu leaves behind to animate out on
    (hooks/useExitGhost). Inert, and frozen in the state it closed in: as a
