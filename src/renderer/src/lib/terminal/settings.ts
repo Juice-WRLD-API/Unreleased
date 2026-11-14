@@ -150,6 +150,7 @@ const SETTINGS: Setting[] = [
   choice('viz-cycle', 'Switch visualizer automatically', pills('off', 'track', 'album'), () => vz().vizCycle, (v) => vz().setVizCycle(v as VizCycle)),
   bool('wrld-widgets', 'WRLD shows the desktop player, playlist and clock instead of its own player', () => vz().wrldWidgets, (v) => vz().setWrldWidgets(v)),
   bool('wrld-fm', 'The 999 FM card (votes, suggestions, chat) in WRLD’s widgets while 999 FM is on, or opened without it', () => vz().wrldFm, (v) => vz().setWrldFm(v)),
+  bool('wrld-fm-sound', 'Play the notification sound for new 999 FM chat lines and votes in WRLD’s 999 FM card', () => vz().wrldFmSound, (v) => vz().setWrldFmSound(v)),
   bool('wrld-fm-open', 'Keep the 999 FM card up in WRLD’s widgets without tuning in', () => vz().wrldFmOpen, (v) => vz().setWrldFmOpen(v)),
   bool('viz-artwork', 'WRLD background and visualizer use colours from the artwork', () => vz().vizUseArtwork, (v) => vz().setVizUseArtwork(v)),
   choice('audio-output', 'Audio output device (default = system)', () => [{ value: 'default', label: 'system default' }, ...audioDevices.map((d) => ({ value: d.deviceId, label: d.label || `Device ${d.deviceId.slice(0, 6)}` }))], () => st().audioOutput || 'default', (v) => st().setAudioOutput(v === 'default' ? '' : v)),
