@@ -135,6 +135,7 @@ const SETTINGS_SEARCH_INDEX: { tab: Tab; label: string; sub?: string; electronOn
   { tab: 'lyrics', label: 'Theme background in WRLD', sub: "Use the app's theme behind the WRLD tab instead of the playing song's cover" },
   { tab: 'lyrics', label: 'Old WRLD style', sub: "WRLD's own player and lyrics instead of the widgets" },
   { tab: 'lyrics', label: '999 FM in WRLD', sub: "A 999 FM card in WRLD's widgets while it's on: votes, suggestions and chat" },
+  { tab: 'lyrics', label: 'Sound for 999 FM chat and votes', sub: 'Play the notification sound for new chat lines and when a vote starts' },
   { tab: 'appearance', label: 'Playlist header art', sub: "Blurred cover art behind a playlist's header" },
   { tab: 'appearance', label: 'App font' },
   { tab: 'lyrics', label: 'Lyrics font' },
@@ -541,6 +542,8 @@ export default function Settings({ floating = false }: { floating?: boolean }): 
   const setWrldWidgets = useVizStore(s => s.setWrldWidgets)
   const wrldFm = useVizStore(s => s.wrldFm)
   const setWrldFm = useVizStore(s => s.setWrldFm)
+  const wrldFmSound = useVizStore(s => s.wrldFmSound)
+  const setWrldFmSound = useVizStore(s => s.setWrldFmSound)
   // Only the count is shown; the track list itself changes on every scan.
   const libraryTrackCount = useStore((s) => s.libraryTracks.length)
 
@@ -2176,6 +2179,16 @@ export default function Settings({ floating = false }: { floating?: boolean }): 
                       sub="A 999 FM card in WRLD's widgets while it's on, or opened from WRLD's toolbar without tuning in: votes, suggestions and chat"
                     >
                       <Toggle on={wrldFm} onClick={() => setWrldFm(!wrldFm)} />
+                    </Row>
+                  )}
+                  {wrldWidgets && wrldFm && (
+                    <Row
+                      icon={Bell}
+                      iconColor="#8b5cf6"
+                      label="Sound for 999 FM chat and votes"
+                      sub="Play the notification sound for new chat lines and when a vote starts, while the 999 FM card is up"
+                    >
+                      <Toggle on={wrldFmSound} onClick={() => setWrldFmSound(!wrldFmSound)} />
                     </Row>
                   )}
                   <VizSettings />
