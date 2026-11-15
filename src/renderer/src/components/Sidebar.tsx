@@ -14,6 +14,9 @@ import NavPillGrip from './NavPillGrip'
 import { accountDisplayName, initial } from '../lib/format'
 import { useSlidingIndicator } from '../hooks/useSlidingIndicator'
 import { MotionDisclosure } from './MotionDisclosure'
+import { useLiquidLens } from '../hooks/useLiquidLens'
+
+const NAV_LENS = { bezel: 16, strength: 12, coreBlur: 14 }
 import { useUnreadNotificationCount } from '../hooks/useNotificationHistory'
 
 // Right-click only - fetched on first open rather than with the app shell.
@@ -132,6 +135,8 @@ export default function Sidebar(): JSX.Element {
   // one indicator behind the items, in whichever layout below is rendered.
   const navLayout = navStyle === 'pill' ? 'pill' : sidebarPosition === 'top' || sidebarPosition === 'bottom' ? 'bar' : 'side'
   const { containerRef: navRef, indicatorRef: navIndicatorRef } = useSlidingIndicator<HTMLElement>(activeTab, navLayout)
+  // Only the floating pill frosts a page under it; the docked layouts don't.
+  useLiquidLens(navRef, 'lens-nav', NAV_LENS, navLayout === 'pill')
 
   // Start the view's chunk on hover/focus rather than on click. Pointing at a
   // menu item precedes clicking it by ~100ms, which is usually the whole

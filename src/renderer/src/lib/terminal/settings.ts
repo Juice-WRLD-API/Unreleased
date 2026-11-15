@@ -100,6 +100,7 @@ const SETTINGS: Setting[] = [
   color('lyrics-color-inactive', 'Colour of the other lines (or auto)', () => st().lyricsColorInactive, (v) => st().setLyricsColorInactive(v)),
   bool('gradients', 'Accent gradients on the shell', () => st().gradientsEnabled, (v) => st().setGradientsEnabled(v)),
   bool('surface-gradients', 'Gradients on small surfaces too', () => st().surfaceGradientsEnabled, (v) => st().setSurfaceGradientsEnabled(v)),
+  bool('glass-refraction', 'Player bar and pill nav bend what is behind their edges, like glass (Chromium only)', () => st().glassRefraction, (v) => st().setGlassRefraction(v)),
   bool('wrld-theme-bg', 'WRLD tab uses the theme instead of the cover', () => st().wrldThemeBackground, (v) => st().setWrldThemeBackground(v)),
   bool('full-era-names', 'Show full era names', () => st().fullEraNames, (v) => st().setFullEraNames(v)),
   bool('prefer-og', 'Play the OG version when one is linked', () => st().preferOgVersion, (v) => st().setPreferOgVersion(v)),

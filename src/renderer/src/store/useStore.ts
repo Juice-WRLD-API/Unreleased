@@ -301,6 +301,10 @@ interface AppState {
   // since those boxes are everywhere, and someone who likes the shell/sidebar/
   // player gradients may not want every small pill tinted too.
   surfaceGradientsEnabled: boolean
+  // Liquid glass refraction on the player bar and pill nav (lib/liquidLens).
+  // Per device: it costs GPU time, and only Chromium draws it.
+  glassRefraction: boolean
+  setGlassRefraction: (enabled: boolean) => void
   // WRLD tab only. Off (the default) it paints itself from the playing song's
   // cover - blurred art behind, text color picked from the art's brightness.
   // On, it drops both and uses the app's own skin instead: theme surface
@@ -1663,6 +1667,7 @@ export const useStore = create<AppStore>((set, get, store) => ({
   lyricsColorInactive: ls.get<string>('lyricsColorInactive'),
   gradientsEnabled: ls.get<boolean>('gradientsEnabled') ?? true,
   surfaceGradientsEnabled: ls.get<boolean>('surfaceGradientsEnabled') ?? false,
+  glassRefraction: ls.get<boolean>('glassRefraction') ?? true,
   wrldThemeBackground: ls.get<boolean>('wrldThemeBackground') ?? false,
   playlistHeroEnabledDark: ls.get<boolean>('playlistHeroEnabledDark') ?? true,
   playlistHeroEnabledLight: ls.get<boolean>('playlistHeroEnabledLight') ?? false,
@@ -1790,6 +1795,7 @@ export const useStore = create<AppStore>((set, get, store) => ({
   setLyricsColorInactive: (lyricsColorInactive) => { set({ lyricsColorInactive }); ls.set('lyricsColorInactive', lyricsColorInactive); get()._scheduleProfilePush(['userSettings']) },
   setGradientsEnabled: (gradientsEnabled) => { set({ gradientsEnabled }); ls.set('gradientsEnabled', gradientsEnabled); get()._scheduleProfilePush(['userSettings']) },
   setSurfaceGradientsEnabled: (surfaceGradientsEnabled) => { set({ surfaceGradientsEnabled }); ls.set('surfaceGradientsEnabled', surfaceGradientsEnabled); get()._scheduleProfilePush(['userSettings']) },
+  setGlassRefraction: (enabled) => { set({ glassRefraction: enabled }); ls.set('glassRefraction', enabled) },
   setWrldThemeBackground: (wrldThemeBackground) => { set({ wrldThemeBackground }); ls.set('wrldThemeBackground', wrldThemeBackground); get()._scheduleProfilePush(['userSettings']) },
   setPlaylistHeroEnabled: (enabled) => {
     if (getSkin(get().theme).dark) {

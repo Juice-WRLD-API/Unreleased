@@ -59,6 +59,9 @@ import { expandToWrld as runWrldExpand, isExpandingToWrld } from '../lib/wrldExp
 import { runLog } from '../lib/runLog'
 import { CoverFade, LikePop, SwapIcon, TrackSwap } from './PlayerMotion'
 import { PopLayer } from './PopLayer'
+import { useLiquidLens } from '../hooks/useLiquidLens'
+
+const PLAYER_LENS = { bezel: 18, strength: 14, coreBlur: 16 }
 
 // Only opened from the "more" button / right-click, so it loads on first use
 // instead of riding in the startup bundle with the player itself.
@@ -2718,6 +2721,8 @@ export default function Player(): JSX.Element {
   // reads as height 0).
   const dockRef = useRef<HTMLDivElement>(null)
   const barShown = activeView !== 'wrld'
+  // Rows scroll under the bar in most views, so its rim bends them.
+  useLiquidLens(dockRef, 'lens-player', PLAYER_LENS)
   useLayoutEffect(() => {
     const root = document.documentElement
     const el = dockRef.current
