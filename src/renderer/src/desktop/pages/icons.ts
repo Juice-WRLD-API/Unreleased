@@ -43,5 +43,6 @@ export const icons: Record<string, string> = {
   eyeSlash: line('<path d="M2.5 12s3.5-6.5 9.5-6.5S21.5 12 21.5 12s-3.5 6.5-9.5 6.5S2.5 12 2.5 12z"/><circle cx="12" cy="12" r="3"/><path d="M4 4l16 16"/>', 1.9),
   tick: line('<path d="M4.5 12.5l5 5L19.5 7"/>', 3),
   puzzle: svg('<path d="M10 4.6a2.1 2.1 0 1 1 4 0V6h3.4c.9 0 1.6.7 1.6 1.6V11h-1.4a2.1 2.1 0 1 0 0 4H19v3.4c0 .9-.7 1.6-1.6 1.6H14v-1.4a2.1 2.1 0 1 0-4 0V20H6.6c-.9 0-1.6-.7-1.6-1.6V15h1.4a2.1 2.1 0 1 0 0-4H5V7.6C5 6.7 5.7 6 6.6 6H10z"/>'),
+  film: line('<rect x="3" y="5" width="18" height="14" rx="2.5"/><path d="M7 5v14M17 5v14M3 9.5h4M3 14.5h4M17 9.5h4M17 14.5h4"/>', 1.5),
   stack: line('<rect x="4" y="8" width="16" height="12" rx="2.5"/><path d="M6.5 5h11M9 2.5h6"/>', 1.5),
 }

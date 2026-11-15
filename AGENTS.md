@@ -1,6 +1,6 @@
 # Agent guide: Juice WRLD API and Unreleased
 
-**Version 1.82** · updated 2026-11-14. Bump the version and date whenever you
+**Version 1.84** · updated 2026-11-15. Bump the version and date whenever you
 change this file (minor for fixes and additions, major for rewrites).
 
 **Keep this file current.** If you find something in the docs or this file that
@@ -220,6 +220,11 @@ Retry the same nonce after `retry_after` (rounded seconds), keeping later
 lines behind it. The burst limit can require a longer wait than the gap
 between two lines. A lost reply can still mean the line was stored.
 
+999 FM chat is English only: the server refuses a line (`not_english`) with
+any letter, digit or combining mark outside ASCII, which also catches styled
+fonts (𝓗𝓲, ｈｉ, ⓗⓘ). Emoji and punctuation pass. The composer checks the same
+rule first (`isPlainEnglish` in `lib/radioChatApi.ts`); keep the two in step.
+
 ### Staff chat encryption
 
 Every client must use this wire format: libsodium `crypto_aead_xchacha20poly1305_ietf` with no additional
@@ -329,6 +334,24 @@ it is too similar. Against other edits and every audio file in Files except
 backfill) "too similar" is 75%; against catalogue songs it is 95%, because a remix is meant
 to sound like its song. Don't lower that one. A pending match from someone
 else is never named.
+
+**Music videos in WRLD.** The official YouTube uploads live in the primary
+channel under `Footage/Youtube/<year>/<date>/`, tagged in the file name
+("(Official Music Video)", "(Official Visualizer)", "(Official Lyric Video)";
+older Vevo music videos have no tag, and "(Official Audio)" is a still picture).
+`lib/musicVideos.ts` matches them to released songs by title and
+`lib/videoSync.ts` lines each video's sound up with the song, span by span,
+since videos cut in intros and skits (Lean Wit Me jumps 33 s mid-song). The
+video's sound comes from `/files/download-compressed/` on the video path,
+which needs the backend that accepts video extensions there; reading the
+audio out of the MP4 with Range requests costs most of the file, because the
+picture sits between ~40 ms audio chunks. Results are kept per device
+(`mvSync1:` keys). UI: `WrldMusicVideo` inside `WrldVisualizer`, which stops
+the engine once the video is up (`wrldVideoShown`). Terminal: `musicvideo`,
+`set wrld-videos`. Order of choice: the listener's pick on the device, then
+an administrator's default for everyone (`/accounts/music-videos/`, set from
+Song info's star or `musicvideo default`; `''` means no video), then the
+automatic pick.
 
 **News channels.** Admin tab id `news-channels` is `NewsChannelsEditor`, not
 the Files-tab Channels tab (`channels`). `all` is a client-only tab and is

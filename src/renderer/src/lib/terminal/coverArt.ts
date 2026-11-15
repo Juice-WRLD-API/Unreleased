@@ -39,7 +39,7 @@ const listRows = (list: CoverArtSubmission[], submitter: boolean): string => tab
 
 const detail = (s: CoverArtSubmission): string => [
   `#${s.id} · ${s.status} · ${s.song_name || 'deleted song'}${s.song_public_id != null ? ` (#${s.song_public_id})` : ''}`,
-  `by ${s.submitter_username || 'deleted account'}, ${relativeTime(s.created_at)}${s.reviewer_username ? ` · reviewed by ${s.reviewer_username}${s.reviewed_at ? ` ${relativeTime(s.reviewed_at)}` : ''}` : ''}`,
+  `by ${s.submitter_username || 'deleted account'}${s.submitter_is_editor ? ' (editor)' : ''}, ${relativeTime(s.created_at)}${s.reviewer_username ? ` · reviewed by ${s.reviewer_username}${s.reviewed_at ? ` ${relativeTime(s.reviewed_at)}` : ''}` : ''}`,
   `${s.width}×${s.height} · ${formatBytes(s.size)} · ${s.mime}`,
   ...(s.notes ? [`notes: ${oneLine(s.notes, 300)}`] : []),
   ...(s.review_notes ? [`review: ${oneLine(s.review_notes, 300)}`] : []),

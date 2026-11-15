@@ -165,7 +165,7 @@ export default function CoverArtTab({ onCountsChanged }: { onCountsChanged: () =
               <div className="min-w-0 flex-1">
                 <p className="text-text-primary text-xs font-semibold truncate">{r.song_name || 'Deleted song'}</p>
                 <p className="text-text-muted text-[10px] truncate">
-                  {r.submitter_username || 'Deleted account'} · {relativeTime(r.created_at)}
+                  {r.submitter_username || 'Deleted account'} · {r.submitter_is_editor ? 'Editor' : 'User'} · {relativeTime(r.created_at)}
                 </p>
               </div>
               {status === '' && <StatusChip status={r.status} />}
@@ -191,6 +191,12 @@ export default function CoverArtTab({ onCountsChanged }: { onCountsChanged: () =
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-2 flex-wrap mb-1.5">
                     <StatusChip status={s.status} />
+                    <span title={s.submitter_is_editor ? 'Sent in by an editor' : 'Sent in by a regular user'}
+                      className={`px-2 py-0.5 rounded-full text-[10px] font-semibold ${
+                        s.submitter_is_editor ? 'bg-accent/15 text-accent' : 'bg-surface-overlay text-text-muted'
+                      }`}>
+                      {s.submitter_is_editor ? 'Editor proposed' : 'User proposed'}
+                    </span>
                     {s.song_public_id != null && (
                       <span className="flex items-center gap-0.5 text-[10px] text-text-muted">
                         <Hash size={9} />{s.song_public_id}

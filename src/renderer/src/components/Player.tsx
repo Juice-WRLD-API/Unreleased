@@ -34,7 +34,7 @@ import { rememberRecentTrack } from '../lib/recentTracks'
 import { useCanEdit } from '../hooks/useChannelRoles'
 import { toFileUrl } from '../lib/fileTypes'
 import { FullTrack, OfflineTrackMeta, Track } from '../types'
-import SongContextMenu from './SongContextMenu'
+import SongContextMenu, { openInFiles } from './SongContextMenu'
 import ContextMenu from './ContextMenu'
 import EqualizerPanel from './EqualizerPanel'
 import {
@@ -2190,6 +2190,11 @@ export default function Player(): JSX.Element {
     },
     'remove-queue': (arg) => { if (typeof arg === 'number') useStore.getState().removeFromQueue(arg) },
     'clear-queue': () => useStore.getState().clearQueue(),
+    // Song info's "Show in Files" from its pop-out window.
+    'open-in-files': (arg) => {
+      const at = arg as { folder?: unknown; channel?: unknown } | undefined
+      if (typeof at?.folder === 'string') openInFiles({ folder: at.folder, channel: typeof at.channel === 'string' ? at.channel : null })
+    },
   }
   useEffect(() => {
     const el = (window as any).electron

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useShallow } from 'zustand/react/shallow'
-import { Monitor, Minimize2, Maximize2, Radio, Settings2, PictureInPicture2, Dices, MessagesSquare } from 'lucide-react'
+import { Monitor, Minimize2, Maximize2, Radio, Settings2, PictureInPicture2, Dices, MessagesSquare, Clapperboard } from 'lucide-react'
 import { Visualizer, VISUALIZERS, needsWebGL, type VizLayout } from '../lib/viz'
 import { getAnalysisTap, resumeEffectsContext } from '../lib/audioEffects'
 import { smallCoverUrl } from '../lib/juicewrldApi'
@@ -11,6 +11,7 @@ import { useStore } from '../store/useStore'
 import { useVizStore, useWrldEdgeLook } from '../store/vizStore'
 import VizControls from './VizControls'
 import WrldEdgeLight from './WrldEdgeLight'
+import WrldMusicVideo from './WrldMusicVideo'
 import LyricsControls from './LyricsControls'
 import DesktopSettings from './DesktopSettings'
 import { ls } from '../lib/persist'
@@ -132,6 +133,14 @@ export default function WrldVisualizer({
   const off = activeMode === 'none'
   const [showSettings, setShowSettings] = useState(false)
   useEscapeToClose(() => setShowSettings(false), showSettings)
+  // The song's videos to pick from, in the old WRLD style (the Widgets layout's player card has its own button).
+  const videoNow = useVizStore((s) => s.wrldVideoNow)
+  const videoPick = useVizStore((s) => (s.wrldVideoNow ? s.wrldVideoPicks[s.wrldVideoNow.songPath] ?? null : null))
+  const oldStyle = useVizStore((s) => !s.wrldWidgets)
+  const [showVideos, setShowVideos] = useState(false)
+  useEscapeToClose(() => setShowVideos(false), showVideos)
+  const videoPicker = oldStyle && (videoNow?.videos.length ?? 0) > 1
+  useEffect(() => { if (!videoPicker) setShowVideos(false) }, [videoPicker])
   // The settings popup's tab, the same one next time.
   const [settingsTab, setSettingsTab] = useState<'viz' | 'desktop'>(() => (ls.get('wrldSettingsTab') === 'desktop' ? 'desktop' : 'viz'))
   const pickSettingsTab = (tab: 'viz' | 'desktop'): void => { setSettingsTab(tab); ls.set('wrldSettingsTab', tab) }
@@ -211,8 +220,17 @@ export default function WrldVisualizer({
       return
     }
     viz.syncAccent()
-    viz.start()
+    if (!useVizStore.getState().wrldVideoShown) viz.start()
   }, [activeMode, off])
+
+  // The song's video covers the whole page once it's faded in: nothing of the visualizer would show, so it stops.
+  const videoShown = useVizStore((s) => s.wrldVideoShown)
+  useEffect(() => {
+    const viz = vizRef.current
+    if (!viz || activeMode === 'none') return
+    if (videoShown) viz.stop()
+    else viz.start()
+  }, [videoShown, activeMode, off])
 
   // --accent is written to <html>'s inline style by several paths (accent
   // picker, skins, the chat /theme command), so follow the style itself rather
@@ -391,6 +409,7 @@ export default function WrldVisualizer({
     <>
       {/* Above WRLD's blurred-art background, beneath its content. */}
       <div ref={hostRef} className="absolute inset-0 pointer-events-none" aria-hidden />
+      <WrldMusicVideo onShow={announce} />
       {shownEdge !== null && (
         <div className="absolute inset-0 pointer-events-none" aria-hidden>
           {/* One light whatever the look: a new one per look meant a new WebGL context and its programs built again. */}
@@ -408,11 +427,43 @@ export default function WrldVisualizer({
         // pill only when they'd overlap.
         style={{ top: `max(${underPill ? 'calc(var(--nav-pill-top, 0px) + 1rem)' : '1rem'}, ${IS_ELECTRON && !fullscreen ? '2.5rem' : '1rem'})` }}
         className={`absolute right-4 z-40 flex items-center gap-0.5 p-[5px] rounded-[14px] bg-black/40 backdrop-blur-xl border border-white/10 transition-[opacity,transform] duration-300 ${
-          idle && !showSettings ? 'opacity-0 -translate-y-1.5 pointer-events-none' : ''
+          idle && !showSettings && !showVideos ? 'opacity-0 -translate-y-1.5 pointer-events-none' : ''
         }`}
         onMouseEnter={() => { overToolbar.current = true }}
         onMouseLeave={() => { overToolbar.current = false; wake() }}
       >
+        {videoPicker && videoNow && (
+          <div className="relative">
+            <button
+              className={`${tool} ${showVideos ? toolOn : toolIdle}`}
+              onClick={() => { setShowVideos((v) => !v); setShowSettings(false) }}
+              title="Videos: the song's music video, visualizer or lyric video"
+              aria-label="Videos"
+              aria-expanded={showVideos}
+            >
+              <Clapperboard size={16} />
+            </button>
+            {showVideos && (
+              <div className="absolute top-full left-0 mt-2 w-[260px] p-1.5 rounded-[14px] bg-[var(--surface)] border border-[var(--border)] shadow-2xl">
+                <p className="px-2.5 pt-1 pb-1.5 text-[11px] font-semibold text-text-muted">Video</p>
+                {[
+                  { value: null, label: 'Automatic', note: videoPick === null ? (videoNow.active ? 'On' : 'On, none lines up') : '' },
+                  ...videoNow.videos.map((v) => ({ value: v.path, label: v.label, note: videoNow.active === v.path ? 'Playing' : videoPick === v.path ? 'Doesn’t line up' : videoNow.serverDefault === v.path ? 'Default' : '' })),
+                  { value: 'none', label: 'Visualizer', note: videoPick === 'none' ? 'On' : videoNow.serverDefault === '' ? 'Default' : '' },
+                ].map((row) => (
+                  <button
+                    key={row.value ?? 'auto'}
+                    onClick={() => { useVizStore.getState().setWrldVideoPick(videoNow.songPath, row.value); setShowVideos(false) }}
+                    className="w-full flex items-baseline gap-2 px-2.5 py-1.5 rounded-lg text-left text-xs text-text-primary hover:bg-[var(--surface-overlay)] transition-colors"
+                  >
+                    <span className="min-w-0 truncate">{row.label}</span>
+                    {row.note && <span className="ml-auto shrink-0 text-[10.5px] font-semibold text-[var(--accent)]">{row.note}</span>}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
         <button
           className={`h-9 px-2.5 flex items-center gap-1.5 rounded-[10px] text-[11px] font-bold tracking-[0.1em] uppercase transition-colors disabled:opacity-30 disabled:pointer-events-none ${fm.active ? (fm.live ? 'text-red-400 bg-red-500/15' : toolOn) : toolIdle}`}
           onClick={fm.toggle}

@@ -38,9 +38,11 @@ function createDesktop(options) {
   let lastPlayingAt = 0
   /** @type {NodeJS.Timeout | undefined} */
   let lingering
-  /** @type {{ mode: string | null } | null} what the cleared desk draws behind the widgets, as the main window last
+  /** @type {{ mode: string | null, video?: unknown } | null} what the cleared desk draws behind the widgets, as the main window last
    *  told it (src/renderer/src/desktop/deskViz.ts); `mode` null for the wallpaper */
   let vizLook = null
+  /** The curtain draws WRLD's backdrop (a visualizer or the song's video) rather than the wallpaper. */
+  const backdropShown = (look) => Boolean(look?.mode || look?.video)
 
   const main = () => {
     const win = getMainWindow()
@@ -116,7 +118,7 @@ function createDesktop(options) {
 
   /** The widgets' glass shows the wallpaper behind them, blurred - but over the cleared desk's visualizer, a glass of
    *  its own, as in the WRLD tab. */
-  const frostNow = () => (clear.isOn && vizLook?.mode ? null : frost.frostUrl())
+  const frostNow = () => (clear.isOn && backdropShown(vizLook) ? null : frost.frostUrl())
 
   /** Every desktop window there is now. */
   const pages = () => [...lights.windows, ...widgetWindows()].filter((w) => w && !w.isDestroyed())
@@ -264,10 +266,10 @@ function createDesktop(options) {
     },
     'desktop:viz-look': (event, look) => {
       if (!fromMain(event) || !look || typeof look !== 'object') return
-      const wasShown = Boolean(vizLook?.mode)
+      const wasShown = backdropShown(vizLook)
       vizLook = { ...look, mode: typeof look.mode === 'string' ? look.mode : null }
       clear.send('desktop:curtain-viz', vizLook)
-      if (clear.isOn && Boolean(vizLook.mode) !== wasShown) broadcast('desktop:frost', frostNow())
+      if (clear.isOn && backdropShown(vizLook) !== wasShown) broadcast('desktop:frost', frostNow())
     },
     'desktop:viz-frame': (event, frame) => {
       if (fromMain(event) && frame instanceof Float32Array) clear.send('desktop:curtain-frame', frame)

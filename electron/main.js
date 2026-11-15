@@ -943,6 +943,9 @@ function sendTrayCommand(cmd) {
   mainWindow?.webContents.send('tray-command', cmd)
 }
 
+// Like / previous / play-pause / next under the taskbar preview (Windows).
+const thumbar = require('./thumbar').createThumbar({ getWindow: () => mainWindow, send: sendTrayCommand, log })
+
 function buildTrayMenu() {
   // `hasTrack` gates the controls (false during FM radio, matching the in-app
   // buttons), but the now-playing label follows `title` so FM still shows
@@ -1049,6 +1052,7 @@ ipcMain.on('tray-playback-state', (_, state) => {
     liked: !!state.liked,
   }
   updateTray()
+  thumbar.update(trayPlayback)
   updateMainWindowTitle()
 })
 
@@ -1190,6 +1194,7 @@ function createWindow() {
   mainWindow.on('page-title-updated', (e) => e.preventDefault())
 
   rememberSize(mainWindow, 'main')
+  thumbar.attach(mainWindow)
 
   mainWindow.once('ready-to-show', () => {
     // Maximize before showing so the window doesn't visibly snap open at its

@@ -12,7 +12,7 @@ import { LyricStage, type StageSong } from '../lyrics/stage'
 import { lyricFontFor } from '../lyrics/looks'
 import { clockTime } from '../lyrics/scene'
 import { DEFAULT_LIGHT, hsbToRgb, type HSB } from '../light/engine'
-import { Live, page, seeThrough, dragToMove, menuOnRightClick, frosted, justDragged, escapeText, clockText, type DesktopTrack } from './page'
+import { IN_WRLD, Live, page, seeThrough, dragToMove, menuOnRightClick, frosted, justDragged, escapeText, clockText, type DesktopTrack } from './page'
 import { icons } from './icons'
 
 const live = new Live()
@@ -25,6 +25,7 @@ document.body.innerHTML = `<div id="player" data-clear>
   <div id="tools" data-clear>
     <button class="circle quiet gone" data-tool="lyricsCard" aria-label="Hide the card"></button>
     <div id="notice-slot" data-clear></div>
+    <button class="circle away" data-tool="videos" data-menu-button aria-label="Videos" title="Videos: the song's music video, visualizer or lyric video"></button>
     <button class="circle" data-tool="fm" aria-label="999 FM"></button>
     <button class="circle away" data-tool="versions" data-menu-button aria-label="Other versions" title="Other versions"></button>
     <button class="circle" data-tool="more" data-menu-button aria-label="More options" title="More options"></button>
@@ -562,7 +563,7 @@ function play(song: DesktopTrack, list: DesktopTrack[]): void {
 // ---- a song's menu ----
 
 /** Which menu is open: a search result's, the song's other versions, or the song playing's own (the ⋯). */
-type MenuKind = 'result' | 'versions' | 'song'
+type MenuKind = 'result' | 'versions' | 'song' | 'videos'
 let menuKind: MenuKind | null = null
 /** Goes up as the ⋯ menu is asked for or any menu closes: an answer for a menu since closed is dropped. */
 let songMenuTurn = 0
@@ -627,6 +628,22 @@ function paintVersionPrefs(): void {
       : (prefer ? `Prefer "${version}" (several preferred = one picked at random)` : `Never auto-pick "${version}"`)
     button.setAttribute('aria-label', button.title)
   }
+}
+
+// ---- WRLD's videos for the song: which plays in place of the visualizer ----
+
+const videosOpen = (): boolean => menuOpen('videos')
+function openVideos(): void {
+  const v = live.state.videos
+  if (!v || v.list.length < 2) return
+  menuFor = null
+  const row = (value: string, label: string, note: string): string =>
+    `<button class="video-row${note ? ' chosen' : ''}" data-video="${escapeText(value)}"><span>${escapeText(label)}</span>${note ? `<em>${escapeText(note)}</em>` : ''}</button>`
+  showMenu('videos', `<div class="menu-title">Video</div>${[
+    row('auto', 'Automatic', v.pick === null ? (v.active ? 'On' : 'On, none lines up') : ''),
+    ...v.list.map((x) => row(x.path, x.label, v.active === x.path ? 'Playing' : v.pick === x.path ? 'Doesn’t line up' : v.serverDefault === x.path ? 'Default' : '')),
+    row('none', 'Visualizer', v.pick === 'none' ? 'On' : v.serverDefault === '' ? 'Default' : ''),
+  ].join('')}`, $<HTMLElement>('[data-tool="videos"]'))
 }
 
 // ---- the song playing's own menu (the ⋯ by the heart): what of the app's song menu a widget can do ----
@@ -697,6 +714,8 @@ $('#menu').addEventListener('click', (event) => {
   if (more) { songMenuPick(more); return }
   const playlist = target.closest<HTMLElement>('[data-playlist]')?.dataset.playlist
   if (playlist) { addToPlaylist(Number(playlist)); return }
+  const video = target.closest<HTMLElement>('[data-video]')?.dataset.video
+  if (video) { closeMenu(); page.command('pick-video', video === 'auto' ? null : video); return }
   const version = target.closest<HTMLElement>('[data-version]')?.dataset.version
   if (version) { closeMenu(); page.command('play-version', Number(version)); return }
   const what = target.closest<HTMLElement>('[data-menu]')?.dataset.menu
@@ -819,6 +838,10 @@ function render(): void {
   const hasVersions = !!live.state.versions?.length
   $('[data-tool="versions"]').classList.toggle('away', !hasVersions)
   if (!hasVersions && versionsOpen()) closeMenu()
+  // The videos button: in WRLD, while the song has more than one video to pick from (a window on the desktop shows none).
+  const hasVideos = IN_WRLD && (live.state.videos?.list.length ?? 0) > 1
+  $('[data-tool="videos"]').classList.toggle('away', !hasVideos)
+  if (!hasVideos && videosOpen()) closeMenu()
   // 999 FM: lit while it's on, and not to be tuned in while it's off the air.
   const fm = $<HTMLButtonElement>('[data-tool="fm"]')
   const offAir = live.state.fmLive === false && !live.state.fm
@@ -924,10 +947,12 @@ $('#tools').addEventListener('click', (event) => {
   if (tool === 'lyricsCard') page.command('set', { player: { hidesLyricsCard: !live.settings?.player.hidesLyricsCard } })
   if (tool === 'more') { if (songMenuOpen()) closeMenu(); else void openSongMenu($<HTMLElement>('[data-tool="more"]')) }
   if (tool === 'versions') { if (versionsOpen()) closeMenu(); else openVersions() }
+  if (tool === 'videos') { if (videosOpen()) closeMenu(); else openVideos() }
   if (tool === 'fm') page.command('fm')
 })
 $('[data-tool="fm"]').innerHTML = icons.radio
 $('[data-tool="versions"]').innerHTML = icons.stack
+$('[data-tool="videos"]').innerHTML = icons.film
 $('[data-tool="more"]').innerHTML = icons.ellipsis
 $('[data-tool="mini"]').innerHTML = icons.mini
 document.addEventListener('keydown', (event) => { if (event.key === 'Escape' && search.isOpen) search.close() })
@@ -953,6 +978,8 @@ live.on((what, patch) => {
   // A new song's versions: the list open was the last song's.
   if (what === 'state' && patch && ('versions' in patch || 'currentVersion' in patch) && versionsOpen()) closeMenu()
   if (what === 'state' && patch && 'versionPrefs' in patch && versionsOpen()) paintVersionPrefs()
+  // Open while the pick lands or the video lines up: show it as it is now.
+  if (what === 'state' && patch && 'videos' in patch && videosOpen()) openVideos()
   // And the ⋯ menu open was about the song before.
   if (what === 'state' && patch && 'track' in patch && songMenuOpen()) closeMenu()
   if (what === 'state' && search.isOpen && patch && 'track' in patch) search.paint()

@@ -25,6 +25,8 @@ export interface CoverArtSubmission {
   song_image_url: string | null
   submitter_id: number | null
   submitter_username: string | null
+  /** The sender is an editor or admin (globally or on any channel). Older servers omit it. */
+  submitter_is_editor?: boolean
   /** Site-relative, like a song's image_url. Public only once approved. */
   image_url: string
   mime: string

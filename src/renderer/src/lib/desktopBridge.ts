@@ -4,6 +4,7 @@
 // the audio and the queue. The widgets in the WRLD tab (components/WrldWidgets.tsx) hear and are answered by the same
 // code, without the main process in between.
 import { useStore, type AppStore } from '../store/useStore'
+import { useVizStore } from '../store/vizStore'
 import { desktopApi, desktopWindowsSupported } from '../desktop/api'
 import { watchPlayClock } from '../desktop/playClock'
 import { listenToMeter } from '../desktop/meter'
@@ -308,6 +309,13 @@ const isTrack = (v: unknown): v is Track => !!v && typeof v === 'object' && type
 export const SHARE_LYRICS_EVENT = 'wrld:share-lyrics'
 
 /** A press on a widget - on the desktop or in the WRLD tab - done as the app's own buttons do it. */
+/** The playing song's videos in WRLD: the list, the one on screen and what's picked ('none', a path, or null for
+ *  automatic). Null while WRLD isn't showing a song with videos. */
+function videoState(): { list: { path: string; label: string }[]; active: string | null; pick: string | null; serverDefault: string | null } | null {
+  const { wrldVideoNow: now, wrldVideoPicks } = useVizStore.getState()
+  return now?.videos.length ? { list: now.videos, active: now.active, pick: wrldVideoPicks[now.songPath] ?? null, serverDefault: now.serverDefault } : null
+}
+
 export async function runDesktopCommand(cmd: string, arg: unknown): Promise<void> {
   const s = useStore.getState()
   switch (cmd) {
@@ -383,6 +391,12 @@ export async function runDesktopCommand(cmd: string, arg: unknown): Promise<void
       break
     }
     case 'fm': toggleRadioFm(); break
+    // WRLD's video picker: a video's path, 'none' for the visualizer, null for the best one that lines up.
+    case 'pick-video': {
+      const now = useVizStore.getState().wrldVideoNow
+      if (now && (arg === null || arg === 'none' || now.videos.some((v) => v.path === arg))) useVizStore.getState().setWrldVideoPick(now.songPath, arg as string | null)
+      break
+    }
     // A word from the desktop itself (the desk not cleared, an app on every display).
     case 'notice': if (typeof arg === 'string') showAppToast(arg, { tone: 'info' }); break
     // The ⋯ menu's rows that open the app: song info and the editor (the main process brings the window forward).
@@ -601,6 +615,7 @@ export function watchDesktopState(send: (patch: Record<string, unknown>) => void
       lyrics: nowLyrics(s),
       lyricTune: { size: s.lyricsScale, active: s.lyricsColorActive, inactive: s.lyricsColorInactive },
       listsVersion,
+      videos: videoState(),
     })
     if (track?.cover !== colorsFor) {
       const cover = track?.cover ?? null
@@ -648,7 +663,9 @@ export function watchDesktopState(send: (patch: Record<string, unknown>) => void
     // A song with no listed length gets one when its audio loads, which no store key says.
     else if (s.currentTime !== p.currentTime && !s.radioFmActive && playingLength(s) !== sentLength) later()
   })
-  return () => { stopped = true; stopCovers(); stopClock(); unsubscribe() }
+  // WRLD's videos for the song, for the player card's video picker.
+  const unsubscribeViz = useVizStore.subscribe((s, p) => { if (s.wrldVideoNow !== p.wrldVideoNow || s.wrldVideoPicks !== p.wrldVideoPicks) later() })
+  return () => { stopped = true; stopCovers(); stopClock(); unsubscribe(); unsubscribeViz() }
 }
 
 // ---- the bridge ----

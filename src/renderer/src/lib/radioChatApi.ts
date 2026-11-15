@@ -11,6 +11,24 @@ export const RADIO_CHAT_MAX_TEXT = 300
 export const RADIO_CHAT_MAX_NAME = 24
 export const RADIO_CHAT_MIN_NAME = 2
 
+export const RADIO_CHAT_ENGLISH_ONLY = 'Chat is English only: no other alphabets, accents or fancy fonts.'
+
+// Mirrors the server's check (`_plain_english`): letters, digits and combining
+// marks outside ASCII are refused, which covers other alphabets, accents and
+// styled fonts. Emoji, punctuation and symbols pass; so do the variation
+// selectors and keycap mark emoji are built from. Circled and squared letters
+// are symbols that fold to ASCII, so those are refused too.
+const NON_ASCII_WORD = /[\p{L}\p{M}\p{N}]/u
+const KEPT_SYMBOLS = new Set(['™', 'ℹ', 'Ⓜ'])
+const EMOJI_MARKS = new Set(['︎', '️', '⃣'])
+export function isPlainEnglish(text: string): boolean {
+  for (const ch of text) {
+    if (ch.charCodeAt(0) < 128 || EMOJI_MARKS.has(ch) || KEPT_SYMBOLS.has(ch)) continue
+    if (NON_ASCII_WORD.test(ch) || /[A-Za-z0-9]/.test(ch.normalize('NFKC'))) return false
+  }
+  return true
+}
+
 export type RadioChatRole = 'admin' | 'mod' | 'member'
 
 export interface RadioChatMessage {
@@ -19,6 +37,8 @@ export interface RadioChatMessage {
   text: string
   /** Sent from a signed-in account; `name` is then the account's username. */
   verified: boolean
+  /** The account behind a verified line (null for guests and on older servers). */
+  user_id?: number | null
   role: RadioChatRole | null
   sent_at: string
 }

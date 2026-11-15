@@ -40,6 +40,11 @@ export interface DesktopState {
   /** The app's lyric size and colors, for the lyric styles that follow them. */
   lyricTune?: LyricTune
   listsVersion?: number
+  /** WRLD's videos for the song (music videos, visualizers, lyric videos): the one on screen and the pick, a path,
+   *  'none' for the visualizer or null for automatic. Null without any. */
+  videos?: { list: { path: string; label: string }[]; active: string | null; pick: string | null
+    /** The administrators' default for everyone: a path, '' for no video, null for none set. */
+    serverDefault?: string | null } | null
 }
 
 export interface Hello {
@@ -96,6 +101,8 @@ export interface Bridge {
 }
 
 export const page = (window as unknown as { desktopPage?: Bridge }).desktopPage ?? frameBridge()
+/** In a frame in the WRLD tab rather than a window on the desktop. */
+export const IN_WRLD = !(window as unknown as { desktopPage?: Bridge }).desktopPage
 
 /** Everything the page shows, kept up to date: the state merged patch by patch, the settings, the frost. */
 export class Live {

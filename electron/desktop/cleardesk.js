@@ -8,7 +8,7 @@
 // fading in, with the desktop's windows lifted over it, and fades away again. Every window waits under it exactly
 // where it was, the taskbar too, so nothing of Windows itself is ever changed, and nothing is left changed should
 // Unreleased stop.
-const { screen } = require('electron')
+const { screen, BrowserWindow } = require('electron')
 const EventEmitter = require('events')
 const { TOOL, openShared } = require('./windows')
 const { ScreenWatch, screenWatch } = require('./screenwatch')
@@ -28,6 +28,13 @@ const overlaps = (a, b) => Math.min(a.x + a.width, b.x + b.width) - Math.max(a.x
 function freeDisplays(displays, rects) {
   if (!rects) return displays
   return displays.filter((d) => !rects.some((r) => overlaps(d.bounds, r)))
+}
+
+/** Where Unreleased's own windows fill their display: shown, not minimized, and maximized or full screen. */
+function ownFilling() {
+  return BrowserWindow.getAllWindows()
+    .filter((w) => !w.isDestroyed() && w.isVisible() && !w.isMinimized() && (w.isMaximized() || w.isFullScreen()))
+    .map((w) => w.getBounds())
 }
 
 /** A window's place in real pixels, in Electron's own coordinates. */
@@ -84,9 +91,11 @@ class ClearDesk extends EventEmitter {
     const windows = await screenWatch.windowsSoon(WINDOWS_WAIT_MS)
     if (turn !== this.turn) return
     this.starting = false
-    // Unreleased's own windows go under the curtain with the rest, as when the press is in the app's settings.
-    const rects = windows && windows.filter((w) => ScreenWatch.isOtherApp(w)).map((w) => toDip(w.rect))
-    const displays = freeDisplays(screen.getAllDisplays(), rects)
+    // Unreleased's own windows go under the curtain with the rest, as when the press is in the app's settings, unless
+    // one fills its display (maximized or full screen): that display is the app's, as with any other app.
+    const own = ownFilling()
+    const rects = windows ? [...windows.filter((w) => ScreenWatch.isOtherApp(w)).map((w) => toDip(w.rect)), ...own] : (own.length ? own : null)
+    const displays = rects ? freeDisplays(screen.getAllDisplays(), rects) : screen.getAllDisplays()
     if (!displays.length) {
       screenWatch.need('cleardesk', false)
       this.emit('refused')

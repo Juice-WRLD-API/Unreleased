@@ -1,13 +1,20 @@
 // The cleared desk's visualizer: WRLD's own, drawn behind the widgets in place of the wallpaper (desktop/pages/
 // curtain.ts). The curtain hears nothing itself, so the main window, which plays the music, analyses it where WRLD's
 // visualizer taps it and sends each frame on while the desk is clear, and tells the main process the look to draw it
-// in whenever that changes, so a curtain knows it the moment it opens.
+// in whenever that changes, so a curtain knows it the moment it opens. The song's video plays there too, as in WRLD:
+// worked out here (lib/musicVideos) while the desk is clear, and sent with where the song is for the curtain to follow.
 import { AudioEngine, PACKED_LENGTH, packFrame } from '../lib/viz/audio'
 import { extractPalette } from '../lib/viz/palette'
 import type { Quality, RGB } from '../lib/viz/types'
 import { getAnalysisTap } from '../lib/audioEffects'
 import { ERA_PALETTES } from '../lib/eraPalettes'
-import { smallCoverUrl } from '../lib/juicewrldApi'
+import { buildStreamUrl, smallCoverUrl } from '../lib/juicewrldApi'
+import { isAbortError } from '../lib/apiClient'
+import { chooseMusicVideo, musicVideoTargetFor, videoTargetKey, type PlayingForVideo } from '../lib/musicVideos'
+import { onMusicVideoDefaultsChange } from '../lib/musicVideoDefaultsApi'
+import type { VideoSync } from '../lib/videoFollow'
+import { watchPlayClock } from './playClock'
+import type { StageClock } from './lyrics/scene'
 import { useStore, type AppStore } from '../store/useStore'
 import { useVizStore } from '../store/vizStore'
 import { eraAssetPath } from './artColors'
@@ -30,6 +37,10 @@ export interface DeskVizLook {
   /** The cover, blurred behind the visualizer as WRLD has it. */
   cover: string | null
   playing: boolean
+  /** The song's video over the visualizer (or over the cover, with the visualizer Off), as WRLD shows it. */
+  video: { url: string; sync: VideoSync } | null
+  /** Where the song is, for the video to follow; null without a video. */
+  clock: StageClock | null
 }
 
 const palettes = new Map<string, Promise<RGB[] | null>>()
@@ -48,6 +59,9 @@ function paletteOf(cover: string): Promise<RGB[] | null> {
 }
 
 const playingNow = (s: AppStore): boolean => s.radioFmActive || s.isPlaying
+const playingOf = (s: AppStore): PlayingForVideo => ({ track: s.currentTrack, fmActive: s.radioFmActive, fmSong: s.radioFmMatchedSong })
+/** How long to wait before looking a video up again after a look-up cut short by someone else's (WRLD's) abort. */
+const RETRY_MS = 1000
 
 /** Keeps the main process told what the cleared desk draws, and feeds the curtain frames while it's a visualizer. */
 export function followDeskViz(api: DesktopApi, coverOf: (s: AppStore) => string | null): void {
@@ -59,6 +73,61 @@ export function followDeskViz(api: DesktopApi, coverOf: (s: AppStore) => string 
   let isClear = false
   let sent = ''
 
+  // ---- the song's video ----
+
+  let video: { url: string; sync: VideoSync } | null = null
+  /** What `video` was looked up for (the song, the choice, the picks), '' for nothing yet. */
+  let videoFor = ''
+  let videoJob: AbortController | null = null
+  let defaultsTurn = 0
+  let clock: StageClock | null = null
+  let stopClock: (() => void) | null = null
+
+  /** Only while the desk is clear and draws WRLD's backdrop: the look-up can download a few MB the first time. */
+  const wantVideo = (): boolean => isClear && useStore.getState().desktop.clear.visualizer
+  const videoKey = (): string => {
+    const v = useVizStore.getState()
+    return [videoTargetKey(playingOf(useStore.getState())), v.wrldVideos, JSON.stringify(v.wrldVideoPicks), defaultsTurn].join('|')
+  }
+
+  function lookUpVideo(): void {
+    if (!wantVideo()) {
+      // A look-up cut short starts again next time; one finished is kept for the same song.
+      if (videoJob) { videoJob.abort(); videoJob = null; videoFor = '' }
+      return
+    }
+    const key = videoKey()
+    if (key === videoFor) return
+    videoFor = key
+    videoJob?.abort()
+    const ac = new AbortController()
+    videoJob = ac
+    video = null
+    void (async () => {
+      const target = await musicVideoTargetFor(playingOf(useStore.getState()), ac.signal)
+      if (!target) return null
+      const v = useVizStore.getState()
+      return (await chooseMusicVideo(target, { choice: v.wrldVideos, pick: v.wrldVideoPicks[target.path] ?? null, signal: ac.signal })).match
+    })().then((m) => {
+      if (ac.signal.aborted) return
+      videoJob = null
+      video = m ? { url: buildStreamUrl(m.video.path), sync: m.sync } : null
+      later()
+    }, (err) => {
+      if (ac.signal.aborted) return
+      videoJob = null
+      // A line-up WRLD started and then dropped (its song changed, it closed) ends this one too: ask again.
+      if (isAbortError(err)) { videoFor = ''; window.setTimeout(later, RETRY_MS); return }
+      console.warn('[deskViz] video', err)
+    })
+  }
+
+  /** The song's clock goes with the look while there's a video to follow it. */
+  function followClock(on: boolean): void {
+    if (on && !stopClock) stopClock = watchPlayClock((next) => { clock = next; later() })
+    else if (!on && stopClock) { stopClock(); stopClock = null; clock = null }
+  }
+
   const send = (): void => {
     const s = useStore.getState()
     const v = useVizStore.getState()
@@ -69,6 +138,9 @@ export function followDeskViz(api: DesktopApi, coverOf: (s: AppStore) => string 
       if (!cover) palette = null
       else void paletteOf(cover).then((p) => { if (paletteFor === cover) { palette = p; later() } })
     }
+    lookUpVideo()
+    const shownVideo = wantVideo() ? video : null
+    followClock(shownVideo !== null)
     const look: DeskVizLook = {
       mode: s.desktop.clear.visualizer && v.activeMode !== 'none' ? v.activeMode : null,
       quality: v.vizQuality,
@@ -77,6 +149,8 @@ export function followDeskViz(api: DesktopApi, coverOf: (s: AppStore) => string 
       accent,
       cover,
       playing: playingNow(s),
+      video: shownVideo,
+      clock: shownVideo ? clock : null,
     }
     mode = look.mode
     const json = JSON.stringify(look)
@@ -136,7 +210,8 @@ export function followDeskViz(api: DesktopApi, coverOf: (s: AppStore) => string 
 
   send()
   useVizStore.subscribe((v, p) => {
-    if (v.activeMode !== p.activeMode || v.vizQuality !== p.vizQuality || v.vizUseArtwork !== p.vizUseArtwork) later()
+    if (v.activeMode !== p.activeMode || v.vizQuality !== p.vizQuality || v.vizUseArtwork !== p.vizUseArtwork
+      || v.wrldVideos !== p.wrldVideos || v.wrldVideoPicks !== p.wrldVideoPicks) later()
   })
   useStore.subscribe((s, p) => {
     if (s.desktop.clear !== p.desktop.clear || s.isPlaying !== p.isPlaying || s.radioFmActive !== p.radioFmActive
@@ -148,5 +223,6 @@ export function followDeskViz(api: DesktopApi, coverOf: (s: AppStore) => string 
     const next = readAccent()
     if (next !== accent) { accent = next; later() }
   }).observe(document.documentElement, { attributes: true, attributeFilter: ['style'] })
-  api.onClearState((on) => { isClear = on; follow() })
+  onMusicVideoDefaultsChange(() => { defaultsTurn++; later() })
+  api.onClearState((on) => { isClear = on; later() })
 }
