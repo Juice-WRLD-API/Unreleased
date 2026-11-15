@@ -1,6 +1,6 @@
 # Agent guide: Juice WRLD API and Unreleased
 
-**Version 1.84** · updated 2026-11-15. Bump the version and date whenever you
+**Version 1.85** · updated 2026-11-16. Bump the version and date whenever you
 change this file (minor for fixes and additions, major for rewrites).
 
 **Keep this file current.** If you find something in the docs or this file that
@@ -563,6 +563,11 @@ Node 22.
   `glassPillButton` from `components/glassControls.ts` for search fields and
   buttons. Inside a `.glass-pane` they turn into plain fills by themselves.
   Dialogs keep their own controls: the veil is see-through.
+  The player bar and pill nav also bend the backdrop along their rim
+  (`useLiquidLens` + `lib/liquidLens.ts`, an SVG displacement filter used as
+  the `.glass-backdrop::before` backdrop-filter; `set glass-refraction`).
+  Chromium only, so it is offered only there. Give a new floating pane a lens
+  through the hook, never a DOM-wide observer.
 - **Settings pages** (`app`, and `web` desktop and phone, 2026-11-13) are iOS-style grouped glass cards:
   `SettingsTitle`, `SettingsGroup` and `SettingsLink` in
   `components/SettingsRow.tsx`. Put a new row inside the right group, not

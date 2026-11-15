@@ -988,6 +988,22 @@ input[type='range']:active::-moz-range-thumb {
 .app-sidebar.glass-backdrop {
   --glass-tint: color-mix(in srgb, var(--glass-base) 55%, transparent);
 }
+/* Liquid glass (lib/liquidLens, hooks/useLiquidLens; Settings → Appearance →
+   Glass refraction). The pane's own SVG filter bends the backdrop along the
+   rim and frosts the middle, so it replaces the blur above rather than
+   stacking on it. Only Chromium draws it; the hook adds data-lens there only. */
+.glass-backdrop[data-lens]::before {
+  -webkit-backdrop-filter: var(--lens-filter) saturate(1.8);
+  backdrop-filter: var(--lens-filter) saturate(1.8);
+}
+/* The filters' home. Not display:none, which would drop them. */
+.liquid-lens-defs {
+  position: fixed;
+  width: 0;
+  height: 0;
+  overflow: hidden;
+  pointer-events: none;
+}
 
 /* Specular edge: a 1px ring painted over the element's own edge, bright where
    light would catch the top-left and faint along the bottom-right, the way
@@ -1204,7 +1220,8 @@ body, #root, .app-shell {
     -webkit-backdrop-filter: none;
     backdrop-filter: none;
   }
-  .glass-backdrop::before {
+  .glass-backdrop::before,
+  .glass-backdrop[data-lens]::before {
     background-color: var(--surface-raised);
     -webkit-backdrop-filter: none;
     backdrop-filter: none;

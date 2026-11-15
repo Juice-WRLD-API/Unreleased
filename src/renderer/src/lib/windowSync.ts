@@ -16,7 +16,7 @@ import type { AdminTab } from '../hooks/useAdminQueue'
 const SYNC_KEYS = [
   'theme', 'customSkins', 'accentColor', 'sidebarPosition', 'navOrder', 'navVisibility', 'appMenuPosition',
   'navControlOrder', 'navControlVisibility', 'settingsTab',
-  'appTextScale', 'lyricsScale', 'lyricsAlign', 'lyricsBlur', 'appFont', 'lyricsFont', 'gradientsEnabled', 'surfaceGradientsEnabled',
+  'appTextScale', 'lyricsScale', 'lyricsAlign', 'lyricsBlur', 'appFont', 'lyricsFont', 'gradientsEnabled', 'surfaceGradientsEnabled', 'glassRefraction',
   'lyricsColorActive', 'lyricsColorInactive', 'lyricsBlurAmount', 'lyricsOverride', 'fullEraNames',
   'crossfadeEnabled', 'crossfadeDuration', 'pauseFadeEnabled', 'preferOgVersion', 'rememberQueue',
   // Last.fm connect/disconnect can happen in the pop-out Settings window; the

@@ -301,6 +301,10 @@ interface AppState {
   // Pause when the output device disconnects mid-song and play again when it
   // is back (Player.tsx, lib/outputDisconnect). Device-local, like audioOutput.
   pauseOnDisconnect: boolean
+  // Liquid glass refraction on the player bar and pill nav (lib/liquidLens).
+  // Per device: it costs GPU time, and only Chromium draws it.
+  glassRefraction: boolean
+  setGlassRefraction: (enabled: boolean) => void
   sleepTimerEnd: number | null
   audioOutput: string
   accentColor: string
@@ -1900,6 +1904,7 @@ export const useStore = create<AppStore>((set, get, store) => ({
   crossfadeDuration: ls.get<number>('crossfadeDuration') ?? 5,
   pauseFadeEnabled: ls.get<boolean>('pauseFadeEnabled') ?? false,
   pauseOnDisconnect: ls.get<boolean>('pauseOnDisconnect') ?? true,
+  glassRefraction: ls.get<boolean>('glassRefraction') ?? true,
   sleepTimerEnd: null,
   audioOutput: ls.get<string>('audioOutput') ?? '',
   accentColor: ls.get<string>('accentColor') ?? '#1db954',
@@ -1943,6 +1948,7 @@ export const useStore = create<AppStore>((set, get, store) => ({
   },
   setPauseFade: (enabled) => { set({ pauseFadeEnabled: enabled }); ls.set('pauseFadeEnabled', enabled); get()._scheduleProfilePush(['userSettings']) },
   setPauseOnDisconnect: (enabled) => { set({ pauseOnDisconnect: enabled }); ls.set('pauseOnDisconnect', enabled) },
+  setGlassRefraction: (enabled) => { set({ glassRefraction: enabled }); ls.set('glassRefraction', enabled) },
   setSleepTimer: (sleepTimerEnd) => set({ sleepTimerEnd }),
   setAudioOutput: (deviceId) => { set({ audioOutput: deviceId }); ls.set('audioOutput', deviceId) },
   setPreferOgVersion: (enabled) => { set({ preferOgVersion: enabled }); ls.set('preferOgVersion', enabled); get()._scheduleProfilePush(['userSettings']) },

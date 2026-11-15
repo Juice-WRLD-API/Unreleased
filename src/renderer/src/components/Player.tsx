@@ -56,6 +56,9 @@ import { runLog } from '../lib/runLog'
 import { isOfflineCopyUnreadable, markOfflineCopyUnreadable } from '../lib/offlineCopies'
 import { CoverFade, LikePop, SwapIcon, TrackSwap } from './PlayerMotion'
 import { PopLayer } from './PopLayer'
+import { useLiquidLens } from '../hooks/useLiquidLens'
+
+const PLAYER_LENS = { bezel: 18, strength: 14, coreBlur: 16 }
 
 // Downloaded-for-offline audio always wins over streaming — same track id,
 // just playing from local disk instead of the API. Donor cloud files can't be
@@ -2541,6 +2544,8 @@ export default function Player(): JSX.Element {
   // reads as height 0).
   const dockRef = useRef<HTMLDivElement>(null)
   const barShown = activeView !== 'wrld'
+  // Rows scroll under the bar in most views, so its rim bends them.
+  useLiquidLens(dockRef, 'lens-player', PLAYER_LENS)
   useLayoutEffect(() => {
     const root = document.documentElement
     const el = dockRef.current
