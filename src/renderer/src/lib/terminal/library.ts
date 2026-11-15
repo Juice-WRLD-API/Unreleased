@@ -1,3 +1,4 @@
+import { isReleasedPath, loadMusicVideoIndex, videosFor, VIDEO_KIND_LABEL } from '../musicVideos'
 import { useStore } from '../../store/useStore'
 import {
   addPlaylistEntry, addToPlaylist, createPlaylist, deletePlaylist, getPlaylist, removeFromPlaylist, removePlaylistEntry, trackIdToSongId,
@@ -183,7 +184,16 @@ export const LIBRARY_COMMANDS: TermCommand[] = [
     run: async (args, ctx) => {
       if (!args.trim()) fail('usage: song <title | N>')
       const picked = await songFromArg(args.trim())
-      ctx.print(describeSong(await getSongById(picked.id, ctx.signal)))
+      const song = await getSongById(picked.id, ctx.signal)
+      ctx.print(describeSong(song))
+      // Its official videos, as Song info lists them.
+      if (song.category === 'released' && isReleasedPath(song.path)) {
+        const videos = videosFor(await loadMusicVideoIndex().catch(() => new Map()), song.name, 'all')
+        if (videos.length) {
+          const lines = videos.map((v) => `  ${v.path}  (${VIDEO_KIND_LABEL[v.kind].toLowerCase()}${v.date ? `, ${v.date}` : ''})`)
+          ctx.print([`Music video${videos.length > 1 ? 's' : ''}:`, ...lines, `  musicvideo ${song.name} shows how WRLD lines one up`].join('\n'))
+        }
+      }
     },
   },
   {

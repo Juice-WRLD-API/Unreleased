@@ -19,7 +19,7 @@ const LINK_ALIASES: Record<string, RadioChatLinks> = {
 const linkLabel = (mode: RadioChatLinks | undefined): string => RADIO_CHAT_LINK_MODES.find((m) => m.mode === (mode ?? 'signed_in'))?.label.toLowerCase() ?? String(mode)
 
 const line = (m: RadioChatMessage): string =>
-  `#${m.id}  ${m.name}${m.verified ? ' ✓' : ''}${m.role === 'admin' || m.role === 'mod' ? ` [${m.role}]` : ''}: ${m.text}`
+  `#${m.id}  ${m.name}${m.verified ? ' ✓' : ''}${m.user_id != null ? ` (user ${m.user_id})` : ''}${m.role === 'admin' || m.role === 'mod' ? ` [${m.role}]` : ''}: ${m.text}`
 
 export const RADIO_CHAT_COMMANDS: TermCommand[] = [
   {

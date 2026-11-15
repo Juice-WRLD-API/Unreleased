@@ -2639,6 +2639,9 @@ export const useStore = create<AppStore>((set, get, store) => ({
     // Chat notifications quote the account's messages; the rest of the
     // notification area (news, announcements, toasts) isn't anyone's.
     clearNotifications(['chat'])
+    // Downloaded playlists came through this account. Imported lazily: the
+    // download module reads this store, so a static import would be a cycle.
+    void import('../lib/offlineDownloads').then((m) => m.removeAllOffline())
   },
 
   // Keyed on the token rather than `account`, so loadAccount can start it

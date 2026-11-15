@@ -3,8 +3,10 @@ import {
   ListMusic, Play, Loader2, Plus, Trash2, Pencil, ChevronLeft, X, Check, Heart, Shuffle,
   Music2, ListPlus, Archive, FolderInput, MoreHorizontal, Search, ChevronUp, ChevronDown, ChevronRight,
   ImageOff, Globe, Lock, Link, ListEnd, HardDrive, Layers, LayoutGrid, Rows3, Download,
-  Image as ImageIcon, ArrowUpDown, AlignLeft, GripVertical, Rss,
+  Image as ImageIcon, ArrowUpDown, AlignLeft, GripVertical, Rss, ArrowDownCircle, RotateCw,
 } from 'lucide-react'
+import { useOfflineStore, type OfflinePlaylistState } from '../store/useOfflineStore'
+import { downloadPlaylist, offlineNeedsInstall, offlineSupported, removeOfflinePlaylist } from '../lib/offlineDownloads'
 import { useStore, useStorePick } from '../store/useStore'
 import * as userApi from '../lib/userApi'
 import { addTracksInBackground, addEntriesInBackground, setPlaylistPublic } from '../lib/optimisticPlaylist'
@@ -178,10 +180,14 @@ interface TrackRowProps {
   onMenu: (e: React.MouseEvent) => void
   /** Compact view only - an arrow that opens the song's versions below it. */
   expander?: { expanded: boolean; count: number; onToggle: () => void }
+  /** Saved on this device for offline play. */
+  saved?: boolean
+  /** Offline and not saved: it can't play right now. */
+  unavailable?: boolean
 }
 
 const TrackRow = memo(function TrackRow({
-  track, libTrack, current, selectMode, selected, onTap, onLongPress, onMenu, expander,
+  track, libTrack, current, selectMode, selected, onTap, onLongPress, onMenu, expander, saved, unavailable,
 }: TrackRowProps): JSX.Element {
   const press = useLongPress({
     onTap: () => (selectMode ? onLongPress() : onTap()),
@@ -190,6 +196,7 @@ const TrackRow = memo(function TrackRow({
   return (
     <ListRow
       {...press}
+      className={unavailable && !selectMode ? 'opacity-40' : ''}
       art={libTrack
         ? <AlbumArtThumb track={libTrack} size={48} />
         : <AlbumArtThumbnail track={track} size={48} shimmer={false} eager />}
@@ -199,6 +206,7 @@ const TrackRow = memo(function TrackRow({
       current={current}
       selected={selected}
       trailing={<>
+        {saved && <ArrowDownCircle size={14} className="shrink-0 text-accent" aria-label="Downloaded" />}
         <RowDuration>{formatDuration(track.duration, '--:--')}</RowDuration>
         {expander && !selectMode && (
           <button
@@ -339,7 +347,34 @@ function copyableEntries(detail: PlaylistDetail): PlaylistEntryInput[] {
 
 const trackIsPlayable = (t: Track): boolean => !!t.path
 
+/** One line on where a playlist's offline download stands. */
+function offlineStatusText(st: OfflinePlaylistState): string {
+  const cant = st.skipped ? ` · ${st.skipped} can't be downloaded` : ''
+  switch (st.status) {
+    case 'queued': return st.done > 0 ? `Download paused · ${st.done} of ${st.total}` : 'Waiting to download'
+    case 'downloading': return `Downloading ${st.done} of ${st.total}`
+    case 'done': return `Downloaded${cant}`
+    case 'partial': return `${st.done} of ${st.total} downloaded${st.failed ? ` · ${st.failed} failed` : ''}`
+    case 'error': return st.error ?? 'Download failed'
+  }
+}
+
+const offlineActive = (st: OfflinePlaylistState | undefined): boolean =>
+  st?.status === 'queued' || st?.status === 'downloading'
+
 export default function PlaylistsView(): JSX.Element {
+  // Offline downloads (installed iOS app). Read once up here so the cards,
+  // rows and sheets below can all show it.
+  const offlineOn = offlineSupported()
+  const offlinePlaylists = useOfflineStore(s => s.playlists)
+  const offlineTrackIds = useOfflineStore(s => s.trackIds)
+  const isOnline = useOfflineStore(s => s.online)
+  // Dim what can't play: only worth it when there are downloads to play instead.
+  const dimUnsaved = offlineOn && !isOnline && offlineTrackIds.size > 0
+  const rowOffline = (t: Track): { saved: boolean; unavailable: boolean } => {
+    const saved = offlineOn && offlineTrackIds.has(t.id)
+    return { saved, unavailable: dimUnsaved && !saved && !t.id.startsWith('local-') }
+  }
   const { account, playlists, refreshPlaylists, playTrack, playCollection, addToQueue, setShowUserAuth, likedTrackIds, toggleLike, setActiveView, setPendingEditorSongId,
     localPlaylists, libraryTracks, libraryArt, loadLibrary, deleteLocalPlaylist, renameLocalPlaylist, updateLocalPlaylist, addToLocalPlaylist, removeFromLocalPlaylist, reorderLocalPlaylist, createLocalPlaylist,
     guestPlaylists, createGuestPlaylist, deleteGuestPlaylist, renameGuestPlaylist, removeFromGuestPlaylist,
@@ -1048,13 +1083,20 @@ export default function PlaylistsView(): JSX.Element {
 
   const renderApiCard = (p: PlaylistSummary): JSX.Element => {
     const key = `api:${p.id}`
+    const offline = offlinePlaylists[p.id]
     return (
       <PlaylistCard
         key={key}
         layout={layout}
         name={p.name}
-        subtitle={`${p.track_count} ${p.track_count === 1 ? 'track' : 'tracks'}`}
+        subtitle={`${p.track_count} ${p.track_count === 1 ? 'track' : 'tracks'}${
+          offline ? ` · ${offlineActive(offline) ? `Downloading ${offline.done}/${offline.total}` : 'Downloaded'}` : ''}`}
         cover={apiCoverNode(p)}
+        badge={offline ? (
+          <span className="flex items-center gap-1 bg-black/60 text-white text-caption2 px-1.5 py-0.5 rounded-md">
+            <ArrowDownCircle size={9} /> {offlineActive(offline) ? `${offline.done}/${offline.total}` : 'Downloaded'}
+          </span>
+        ) : undefined}
         selected={selectedPlaylistKeys.has(key)}
         selectMode={plSelectMode}
         onOpen={() => openApiPlaylist(p.id)}
@@ -1437,6 +1479,18 @@ export default function PlaylistsView(): JSX.Element {
                 {!loading && <> · {tracks.length} {tracks.length === 1 ? 'track' : 'tracks'}{durLabel ? ` · ${durLabel}` : ''}</>}
                 {loading && ' · loading…'}
               </p>
+              {!isLocal && !isSharedView && selectedId != null && offlinePlaylists[selectedId] && (() => {
+                const st = offlinePlaylists[selectedId]
+                const active = offlineActive(st)
+                return (
+                  <p className={`flex items-center gap-1.5 text-footnote mt-1 ${
+                    st.status === 'error' ? 'text-red-400' : heroLight ? 'text-white/80' : 'text-accent'}`}
+                  >
+                    {active ? <Loader2 size={13} className="animate-spin" /> : <ArrowDownCircle size={13} />}
+                    {offlineStatusText(st)}
+                  </p>
+                )
+              })()}
 
               {/* Description - synced playlists only; local ones have no such
                   field to store it in. Tapping it opens the editor sheet. */}
@@ -1576,6 +1630,7 @@ export default function PlaylistsView(): JSX.Element {
                       <div style={{ height: trackRowH }}>
                         <TrackRow
                           track={lead}
+                          {...rowOffline(lead)}
                           current={currentTrack?.id === lead.id}
                           selectMode={selectMode}
                           selected={selectedTracks.has(lead.id)}
@@ -1616,6 +1671,7 @@ export default function PlaylistsView(): JSX.Element {
                   >
                     <TrackRow
                       track={track}
+                      {...rowOffline(track)}
                       libTrack={isLocal ? localTrackById.get(track.id) : undefined}
                       current={currentTrack?.id === track.id}
                       selectMode={selectMode}
@@ -1689,6 +1745,7 @@ export default function PlaylistsView(): JSX.Element {
                 <div key={t.id} style={{ height: trackRowH }}>
                   <TrackRow
                     track={t}
+                    {...rowOffline(t)}
                     current={currentTrack?.id === t.id}
                     selectMode={false}
                     selected={false}
@@ -1838,6 +1895,46 @@ export default function PlaylistsView(): JSX.Element {
     )
   }
 
+  /** Download / cancel / retry / remove for a synced playlist's offline copy.
+   *  In a Safari tab on iOS, a pointer to installing the app instead. */
+  const renderOfflineSheetItems = (id: number, plName: string, empty: boolean): JSX.Element | null => {
+    if (!offlineOn) {
+      return offlineNeedsInstall()
+        ? <SheetItem icon={ArrowDownCircle} label="Download" sub="Add this app to your Home Screen to download playlists" disabled />
+        : null
+    }
+    const st = offlinePlaylists[id]
+    if (!st) {
+      return (
+        <SheetItem
+          icon={ArrowDownCircle}
+          label="Download"
+          sub="Keep it on this device to play offline"
+          disabled={empty}
+          onClick={() => { closeSheet(); void downloadPlaylist(id, plName) }}
+        />
+      )
+    }
+    const remove = (label: string, toast: string): JSX.Element => (
+      <SheetItem
+        icon={label === 'Cancel download' ? X : Trash2}
+        label={label}
+        sub={offlineStatusText(st)}
+        danger={label !== 'Cancel download'}
+        onClick={() => { closeSheet(); void removeOfflinePlaylist(id).then(() => showAppToast(toast)) }}
+      />
+    )
+    if (offlineActive(st)) return remove('Cancel download', 'Download cancelled')
+    return (
+      <>
+        {(st.status === 'partial' || st.status === 'error') && (
+          <SheetItem icon={RotateCw} label="Retry download" onClick={() => { closeSheet(); void downloadPlaylist(id, plName) }} />
+        )}
+        {remove('Remove download', 'Download removed')}
+      </>
+    )
+  }
+
   const renderCardSheet = (target: CardTarget): JSX.Element => {
     const isApi = target.kind === 'api'
     const pl = target.playlist
@@ -1929,9 +2026,10 @@ export default function PlaylistsView(): JSX.Element {
                 void setPlaylistPublic(p.id, !p.is_public)
               }}
             />
+            {renderOfflineSheetItems((target.playlist as PlaylistSummary).id, pl.name, (target.playlist as PlaylistSummary).track_count === 0)}
             <SheetItem
               icon={Archive}
-              label="Download all"
+              label="Save as ZIP"
               onClick={() => {
                 closeSheet()
                 const id = (target.playlist as PlaylistSummary).id
@@ -2039,9 +2137,10 @@ export default function PlaylistsView(): JSX.Element {
         {!isLocal && (
           <>
             <SheetDivider />
+            {!isSharedView && selectedId != null && renderOfflineSheetItems(selectedId, name, tracks.length === 0)}
             <SheetItem
               icon={zipState === 'loading' ? Loader2 : Archive}
-              label={zipState === 'error' ? 'Download failed' : zipState === 'done' ? 'Download started' : 'Download all'}
+              label={zipState === 'error' ? 'Saving failed' : zipState === 'done' ? 'Saving started' : 'Save as ZIP'}
               disabled={zipState === 'loading' || tracks.length === 0}
               onClick={() => { handleZipDownload(tracks, name || 'playlist'); closeSheet() }}
             />

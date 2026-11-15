@@ -130,7 +130,7 @@ const SETTINGS_SEARCH_INDEX: { tab: Tab; label: string; sub?: string; electronOn
   { tab: 'lyrics', label: 'Lyrics alignment' },
   { tab: 'lyrics', label: 'Blur inactive lyrics', sub: 'Soften every synced line except the one playing' },
   { tab: 'lyrics', label: 'Lyric colors', sub: 'Current line and other lines' },
-  { tab: 'lyrics', label: 'WRLD visualizer', sub: 'Visualizer, Edge light, quality, input boost, auto-switch, artwork colors' },
+  { tab: 'lyrics', label: 'WRLD visualizer', sub: 'Visualizer, Edge light, quality, input boost, auto-switch, music videos, artwork colors' },
   // General and Navigation
   { tab: 'general', label: 'Full era names', sub: 'Show eras spelled out instead of abbreviated' },
   { tab: 'general', label: 'Add song info to downloads', sub: "Write the song's name, artist, cover and lyrics into downloaded MP3s" },

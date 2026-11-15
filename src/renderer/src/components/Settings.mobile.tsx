@@ -10,6 +10,7 @@ import {
 } from 'lucide-react'
 import { DebugAnonymousToggle, DebugLogOpenButton, DebugRecordButton } from './DebugRecorder'
 import { BADGE_ROW_INSET, GroupedRow, GroupedSection, IconBadge } from './mobile/Grouped'
+import OfflineDownloadsSettings from './OfflineDownloadsSettings'
 import { BackButton, CompactBar, LARGE_TITLE_COLLAPSE, LargeTitle, useScrolledPast } from './mobile/NavBar'
 import { Segmented } from './mobile/Segmented'
 import { SearchField } from './mobile/SearchField'
@@ -172,6 +173,7 @@ const SETTINGS_SEARCH_INDEX: { tab: Tab; label: string; sub?: string; devOnly?: 
   { tab: 'playback', label: 'Sleep timer' },
   { tab: 'playback', label: 'Last.fm scrobbling' },
   { tab: 'playback', label: 'Distributed CDN downloads', sub: 'Use the peer-to-peer CDN network for faster downloads' },
+  { tab: 'playback', label: 'Offline downloads', sub: 'Playlists saved to play with no connection, and the space they use' },
   // Developer
   { tab: 'developer', label: 'API servers', sub: 'Main API and route rules', devOnly: true },
 
@@ -1741,6 +1743,7 @@ export default function Settings(): JSX.Element {
                     <></>
                   </Block>
                 </SettingsCard>
+                <OfflineDownloadsSettings />
               </div>
             )}
 

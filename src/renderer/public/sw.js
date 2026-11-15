@@ -26,10 +26,11 @@ self.addEventListener('install', (event) => {
 
 self.addEventListener('activate', (event) => {
   event.waitUntil((async () => {
-    // Drop caches from previous VERSIONs.
+    // Drop caches from previous VERSIONs. Saved covers aren't versioned: they
+    // belong to the user's downloads, not to a build.
     const keys = await caches.keys()
     await Promise.all(
-      keys.filter((k) => k !== SHELL_CACHE && k !== ASSET_CACHE).map((k) => caches.delete(k))
+      keys.filter((k) => k !== SHELL_CACHE && k !== ASSET_CACHE && k !== 'offline-covers').map((k) => caches.delete(k))
     )
     await self.clients.claim()
   })())
@@ -45,11 +46,103 @@ const zipStreams = new Map()
 
 self.addEventListener('message', (event) => {
   const data = event.data
+  if (data && data.type === 'precache') {
+    event.waitUntil(precacheAssets(data.commit))
+    return
+  }
+  if (data && data.type === 'covers-changed') {
+    coversAvailable = null
+    return
+  }
   if (!data || data.type !== 'zip-open' || !event.ports[0]) return
   zipStreams.set(data.id, { filename: data.filename, port: event.ports[0] })
   // Never answered (iframe failed to load) - don't leak the channel.
   setTimeout(() => zipStreams.delete(data.id), 30000)
 })
+
+// ── Offline downloads ────────────────────────────────────────────────────────
+// The installed iOS app can keep playlists offline (lib/offlineDownloads). Two
+// things here make that work with no network at all:
+//
+// 1. The whole build. Views load lazily, and a chunk is normally only cached
+//    once its view has been opened - offline, any other view would fail to
+//    load. So a page with downloads asks for every file in the build's
+//    precache.json. This runs on request rather than at install because this
+//    file doesn't change between deploys, so install wouldn't run again for a
+//    new build. When the page asking is that same build, files from older
+//    builds are dropped, so the cache doesn't grow with every deploy.
+//
+// 2. Covers. Downloads save each track's cover in COVER_CACHE under its own
+//    URL; cross-origin images fall back to it when the network fails.
+const COVER_CACHE = 'offline-covers'
+let precaching = null
+
+function precacheAssets(commit) {
+  if (precaching) return precaching
+  precaching = (async () => {
+    const res = await fetch('/precache.json', { cache: 'no-cache' })
+    if (!res.ok) return
+    const list = await res.json()
+    const files = Array.isArray(list.files) ? list.files : []
+    const cache = await caches.open(ASSET_CACHE)
+    const wanted = new Set(files.map((f) => new URL('/' + f, self.location.origin).href))
+    const missing = []
+    for (const href of wanted) if (!(await cache.match(href))) missing.push(href)
+    // A few at a time: a phone on cellular shouldn't open dozens at once.
+    for (let i = 0; i < missing.length; i += 4) {
+      await Promise.all(missing.slice(i, i + 4).map(async (href) => {
+        try {
+          const r = await fetch(href)
+          if (r.ok) await cache.put(href, r)
+        } catch { /* offline again - the next request picks it up */ }
+      }))
+    }
+    if (commit && list.commit === commit) {
+      for (const req of await cache.keys()) {
+        const url = new URL(req.url)
+        if (url.pathname.startsWith('/assets/') && !wanted.has(req.url)) await cache.delete(req)
+      }
+    }
+  })().catch(() => {}).finally(() => { precaching = null })
+  return precaching
+}
+
+// null = not checked yet. Checked lazily, and re-checked when a page says the
+// set of saved covers changed, so a device with no downloads never routes its
+// images through here.
+let coversAvailable = null
+
+function refreshCoversAvailable() {
+  caches.has(COVER_CACHE).then((has) => { coversAvailable = has }).catch(() => {})
+}
+
+// Covers are requested at several sizes (small/size params) for the same
+// art; any saved size beats a placeholder.
+function coverKey(href) {
+  try {
+    const u = new URL(href)
+    u.searchParams.delete('size')
+    u.searchParams.delete('small')
+    return u.href
+  } catch {
+    return href
+  }
+}
+
+async function savedCover(req) {
+  const cache = await caches.open(COVER_CACHE)
+  const exact = await cache.match(req.url, { ignoreVary: true })
+  if (exact) return exact
+  const key = coverKey(req.url)
+  let fallback = null
+  for (const k of await cache.keys()) {
+    if (coverKey(k.url) !== key) continue
+    // Prefer a larger copy over the 128px one.
+    if (!new URL(k.url).searchParams.has('small')) return cache.match(k, { ignoreVary: true })
+    fallback = fallback || k
+  }
+  return fallback ? cache.match(fallback, { ignoreVary: true }) : undefined
+}
 
 function zipDownloadResponse(id) {
   const entry = zipStreams.get(id)
@@ -86,10 +179,17 @@ self.addEventListener('fetch', (event) => {
     event.respondWith(zipDownloadResponse(url.pathname.slice('/__zip-download/'.length)))
     return
   }
-  // Only same-origin. The juicewrldapi.com API and remote cover images go
-  // straight to the network - the app has its own localStorage cache for API
-  // responses, and we never want to serve stale songs/metadata.
-  if (url.origin !== self.location.origin) return
+  // Only same-origin, except covers saved by offline downloads (see above),
+  // which images fall back to when the network fails. The juicewrldapi.com
+  // API goes straight to the network - the app has its own localStorage
+  // cache for API responses, and we never want to serve stale songs/metadata.
+  if (url.origin !== self.location.origin) {
+    if (req.destination !== 'image') return
+    if (coversAvailable === null) refreshCoversAvailable()
+    if (coversAvailable === false) return
+    event.respondWith(fetch(req).catch(async () => (await savedCover(req).catch(() => undefined)) || Response.error()))
+    return
+  }
 
   // Never touch the OAuth flow. The Discord login redirects back to
   // /auth/discord/callback?code=…&state=… and the app reads those params on

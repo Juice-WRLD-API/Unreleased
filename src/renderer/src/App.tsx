@@ -3,6 +3,7 @@ import { useStore, useStorePick } from './store/useStore'
 import { setToken, getToken } from './lib/userApi'
 import { useThemeEffects } from './lib/themeEffects'
 import { runWhenIdle, isStandalonePWA } from './lib/platform'
+import { startOfflineDownloads } from './lib/offlineDownloads'
 import { applySeo } from './lib/seo'
 import { orderedNavItems, isNavItemVisible } from './lib/navItems'
 import { hasChatAccess } from './lib/chatAccess'
@@ -313,6 +314,11 @@ export default function App(): JSX.Element {
   // making at that same moment. Overlap with those is still free - apiRequest
   // dedupes identical in-flight GETs.
   useEffect(() => runWhenIdle(() => { prefetchApiData() }), [prefetchApiData])
+
+  // Downloaded playlists (installed iOS app only): read back what's saved so
+  // the Player can play it, then bring the downloads up to date in the
+  // background. It defers its own network work behind startup.
+  useEffect(() => { startOfflineDownloads() }, [])
 
   // Warm the chunks for the nav destinations the user can actually reach, so
   // switching tabs doesn't wait on a download. Scheduled at a longer idle

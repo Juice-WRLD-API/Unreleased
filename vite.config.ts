@@ -94,6 +94,28 @@ function emitVersionFile() {
   }
 }
 
+// Emits `precache.json`: every file this build put under assets/. The service
+// worker downloads the lot when the app has offline downloads (see sw.js), so
+// the installed app can open any view with no network - lazily loaded views
+// are otherwise only cached once they've been visited.
+function emitPrecacheList() {
+  return {
+    name: 'emit-precache-list',
+    apply: 'build' as const,
+    // After Vite's own HTML plugin, which drops empty entry chunks (the WRLD
+    // host page has no script of its own) from the bundle.
+    enforce: 'post' as const,
+    generateBundle(
+      this: { emitFile: (f: { type: 'asset'; fileName: string; source: string }) => void },
+      _options: unknown,
+      bundle: Record<string, unknown>,
+    ) {
+      const files = Object.keys(bundle).filter((f) => f.startsWith('assets/')).sort()
+      this.emitFile({ type: 'asset', fileName: 'precache.json', source: JSON.stringify({ commit: commitHash(), files }) })
+    },
+  }
+}
+
 // The production CSP (style-src 'self', see index.html) blocks the inline
 // <style> tags Vite's dev server injects for HMR, so every view renders
 // unstyled under `npm run dev`. The meta tag is only meaningful in the built
@@ -122,7 +144,7 @@ function iconChunk(id: string): string | undefined {
 }
 
 export default defineConfig({
-  plugins: [react(), stripDevCsp(), emitVersionFile()],
+  plugins: [react(), stripDevCsp(), emitVersionFile(), emitPrecacheList()],
   root: resolve(__dirname, 'src/renderer'),
   envDir: resolve(__dirname, '.'),
   base: './',

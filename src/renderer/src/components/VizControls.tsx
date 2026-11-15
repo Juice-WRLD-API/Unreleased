@@ -1,6 +1,7 @@
 import { useState, type ReactNode } from 'react'
 import { VISUALIZERS, needsWebGL, type Boost, type Quality } from '../lib/viz'
 import { useVizStore, type VizCycle } from '../store/vizStore'
+import type { MusicVideoChoice } from '../lib/musicVideos'
 import { lazyOverlay } from '../lib/lazyView'
 
 // Every visualizer, Edge light or lyric style, playing at once to pick one from (the picker Settings > Desktop uses too).
@@ -144,6 +145,17 @@ export default function VizControls({ modes = true, wrldStyle = false }: { modes
             { value: 'off', label: 'Off' },
             { value: 'track', label: 'Each track' },
             { value: 'album', label: 'Each album' },
+          ]}
+        />
+      ))}
+      {line('Music videos', (
+        <Pills<MusicVideoChoice>
+          value={s.wrldVideos}
+          onChange={s.setWrldVideos}
+          options={[
+            { value: 'off', label: 'Off' },
+            { value: 'music', label: 'Music videos', title: 'A released song with a music video in Files plays it, muted and in time with the song, in place of the visualizer' },
+            { value: 'all', label: 'All videos', title: 'Official visualizers and lyric videos too, for songs without a music video' },
           ]}
         />
       ))}

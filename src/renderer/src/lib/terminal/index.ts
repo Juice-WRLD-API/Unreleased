@@ -23,12 +23,14 @@ import { COVER_ART_COMMANDS } from './coverArt'
 import { COMMUNITY_EDIT_COMMANDS } from './communityEdits'
 import { NEWS_COMMANDS } from './news'
 import { VERSION_COMMANDS } from './versions'
+import { MUSIC_VIDEO_COMMANDS } from './musicVideos'
 import { APP_COMMANDS } from './app'
 import { DESKTOP_COMMANDS } from './desktop'
 import { FUN_COMMANDS } from './fun'
 import { HTTP_COMMANDS } from './http'
 import { MORE_COMMANDS } from './more'
 import { LIBRARY_COMMANDS } from './library'
+import { OFFLINE_COMMANDS } from './offline'
 import { PLAYER_COMMANDS } from './player'
 import { RECOGNITION_COMMANDS } from './recognition'
 import { RADIO_CHAT_COMMANDS } from './radioChat'
@@ -64,7 +66,7 @@ const LOOKUP: TermCommand = {
     ]
     const playlists = useStore.getState().playlists.filter((p) => norm(p.name).includes(ql)).map((p) => `${p.name}  (${p.track_count})   → playlist play ${p.name}`)
     const settings = searchSettings(q).map((s) => `${s.key} = ${s.value}   → set ${s.key} <value>`)
-    const all = [...FUN_COMMANDS, ...PLAYER_COMMANDS, ...RECOGNITION_COMMANDS, ...LIBRARY_COMMANDS, ...SETTINGS_COMMANDS, ...BIND_COMMANDS, ...ADMIN_COMMANDS, ...CDN_COMMANDS, ...BETA_COMMANDS, ...LOG_COMMANDS, ...APP_COMMANDS, ...DESKTOP_COMMANDS, ...HTTP_COMMANDS, ...ACCOUNT_COMMANDS, ...EDITING_COMMANDS, ...COVER_ART_COMMANDS, ...COMMUNITY_EDIT_COMMANDS, ...VERSION_COMMANDS, ...NEWS_COMMANDS, ...CATALOG_COMMANDS, ...COMMUNITY_COMMANDS, ...RADIO_CHAT_COMMANDS, ...GAME_COMMANDS, ...DONOR_COMMANDS, ...LYRICS_GEN_COMMANDS, ...THANKS_COMMANDS, ...INTEGRATION_COMMANDS, ...ADMIN_EXTRA_COMMANDS, ...CHAT_MANAGE_COMMANDS, ...CHAT_KEY_COMMANDS, ...USER_COMMANDS, LOOKUP].filter((c) => canRun(c))
+    const all = [...FUN_COMMANDS, ...PLAYER_COMMANDS, ...RECOGNITION_COMMANDS, ...LIBRARY_COMMANDS, ...OFFLINE_COMMANDS, ...SETTINGS_COMMANDS, ...BIND_COMMANDS, ...ADMIN_COMMANDS, ...CDN_COMMANDS, ...BETA_COMMANDS, ...LOG_COMMANDS, ...APP_COMMANDS, ...DESKTOP_COMMANDS, ...HTTP_COMMANDS, ...ACCOUNT_COMMANDS, ...EDITING_COMMANDS, ...COVER_ART_COMMANDS, ...COMMUNITY_EDIT_COMMANDS, ...VERSION_COMMANDS, ...MUSIC_VIDEO_COMMANDS, ...NEWS_COMMANDS, ...CATALOG_COMMANDS, ...COMMUNITY_COMMANDS, ...RADIO_CHAT_COMMANDS, ...GAME_COMMANDS, ...DONOR_COMMANDS, ...LYRICS_GEN_COMMANDS, ...THANKS_COMMANDS, ...INTEGRATION_COMMANDS, ...ADMIN_EXTRA_COMMANDS, ...CHAT_MANAGE_COMMANDS, ...CHAT_KEY_COMMANDS, ...USER_COMMANDS, LOOKUP].filter((c) => canRun(c))
     const commands = [
       ...chatCommandsFor().filter((c) => c.name.includes(ql) || norm(c.description).includes(ql)).map((c) => `${c.usage}  - ${c.description}`),
       ...all.filter((c) => c.name.includes(ql) || c.aliases?.some((a) => a.includes(ql)) || norm(c.description).includes(ql)).map((c) => `${c.usage}  - ${c.description}`),
@@ -91,6 +93,7 @@ export const TERM_COMMANDS: TermCommand[] = [
   ...PLAYER_COMMANDS,
   ...RECOGNITION_COMMANDS,
   ...LIBRARY_COMMANDS,
+  ...OFFLINE_COMMANDS,
   ...SETTINGS_COMMANDS,
   ...BIND_COMMANDS,
   ...ADMIN_COMMANDS,
@@ -107,6 +110,7 @@ export const TERM_COMMANDS: TermCommand[] = [
   ...COMMUNITY_EDIT_COMMANDS,
   ...COMMUNITY_EDIT_COMMANDS,
   ...VERSION_COMMANDS,
+  ...MUSIC_VIDEO_COMMANDS,
   ...NEWS_COMMANDS,
   ...CATALOG_COMMANDS,
   ...COMMUNITY_COMMANDS,

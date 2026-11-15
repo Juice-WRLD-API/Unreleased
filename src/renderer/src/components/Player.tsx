@@ -6,6 +6,7 @@ import {
   Pause,
   SkipBack,
   SkipForward,
+  FastForward,
   Shuffle,
   Repeat,
   Repeat1,
@@ -46,6 +47,7 @@ import {
 import { LibraryTrack } from '../types'
 import { clickable } from '../lib/a11y'
 import { cachedDonorUrl, donorFileIdFromTrackId, ensureDonorUrl, isDonorStreamUrl } from '../lib/donorPlayback'
+import { cachedOfflineUrl, ensureOfflineUrl, getOfflineBlob, isOfflineTrack, markOfflineBroken } from '../lib/offlinePlayback'
 import { isSessionEditPlaceholder } from '../lib/sessionEditLinksMirror'
 import { SessionEditNotFoundError, peekSessionEditFile } from '../lib/sessionEditsApi'
 import { showPlaybackNotice } from '../lib/playbackNotice'
@@ -62,14 +64,44 @@ import { PopLayer } from './PopLayer'
 // instead of riding in the startup bundle with the player itself.
 const SongContextMenu = lazyOverlay(() => import('./SongContextMenu'))
 
-// Donor cloud files can't be streamed by URL (the route needs the auth header),
-// so their `donor://` marker resolves to a fetched blob URL - or '' while that
-// fetch is still pending. Callers that can wait use ensureDonorUrl first.
-function resolvePlaybackUrl(track: { id: string; streamUrl?: string; path: string }): string {
+type PlayableTrack = { id: string; streamUrl?: string; path: string }
+
+// The song's own file, as it plays without the iOS EQ. A downloaded track
+// (offlinePlayback) plays its saved copy, online or not. Donor cloud files
+// can't be streamed by URL (the route needs the auth header), so their
+// `donor://` marker resolves to a fetched blob URL. Both read as '' while
+// that blob is still being read - callers that can wait use
+// ensurePlaybackUrl first.
+function plainPlaybackUrl(track: PlayableTrack): string {
+  if (isOfflineTrack(track.id)) return cachedOfflineUrl(track.id) ?? ''
   if (isDonorStreamUrl(track.streamUrl)) return cachedDonorUrl(track.streamUrl) ?? ''
-  if (track.streamUrl && iosEqCurrent?.streamUrl === track.streamUrl) return iosEqCurrent.blobUrl ?? track.streamUrl
-  if (iosPrefetch?.blobUrl && iosPrefetch.streamUrl === track.streamUrl) return iosPrefetch.blobUrl
   return track.streamUrl ?? toFileUrl(track.path)
+}
+
+function resolvePlaybackUrl(track: PlayableTrack): string {
+  if (track.streamUrl && iosEqCurrent?.streamUrl === track.streamUrl) return iosEqCurrent.blobUrl ?? plainPlaybackUrl(track)
+  if (iosPrefetch?.blobUrl && iosPrefetch.streamUrl === track.streamUrl) return iosPrefetch.blobUrl
+  return plainPlaybackUrl(track)
+}
+
+/** True while the track's file still has to be read or fetched before it can
+ *  load (resolvePlaybackUrl gives '' for it). */
+function playbackPending(track: PlayableTrack): boolean {
+  return resolvePlaybackUrl(track) === ''
+    && (isOfflineTrack(track.id) || isDonorStreamUrl(track.streamUrl))
+}
+
+/** Reads or fetches what playbackPending is waiting on. A saved file that
+ *  won't read back falls through to the track's usual source. */
+function ensurePlaybackUrl(track: PlayableTrack): Promise<string> {
+  const viaSource = (): Promise<string> => isDonorStreamUrl(track.streamUrl)
+    ? ensureDonorUrl(track.streamUrl)
+    : Promise.resolve(track.streamUrl ?? toFileUrl(track.path))
+  if (!isOfflineTrack(track.id)) return viaSource()
+  return ensureOfflineUrl(track.id).catch((err) => {
+    runLog('playback', `saved copy of ${track.id} unreadable (${String(err)}) - using its usual source`)
+    return viaSource()
+  })
 }
 
 // ── iOS next-song prefetch ───────────────────────────────────────────────────
@@ -103,7 +135,9 @@ function currentIosEq(): IosEqSettings | null {
   return iosEqSettings(useStore.getState())
 }
 
-function startIosPrefetch(streamUrl: string): void {
+// `loadSource` reads the file from somewhere other than the network (a
+// downloaded track's saved copy).
+function startIosPrefetch(streamUrl: string, loadSource?: () => Promise<Blob | null>): void {
   if (iosPrefetch?.streamUrl === streamUrl) return
   // The entry being replaced is usually the song that's playing right now (it
   // was reached through this prefetch). Dropping it revokes the blob URL the
@@ -123,12 +157,19 @@ function startIosPrefetch(streamUrl: string): void {
   iosPrefetch = entry
   void (async () => {
     try {
-      const res = await fetch(streamUrl, { signal: entry.ctrl.signal })
-      if (!res.ok || Number(res.headers.get('Content-Length') ?? 0) > IOS_PREFETCH_MAX_BYTES) {
-        entry.ctrl.abort()
-        return
+      let blob: Blob
+      if (loadSource) {
+        const saved = await loadSource()
+        if (!saved || saved.size > IOS_PREFETCH_MAX_BYTES) return
+        blob = saved
+      } else {
+        const res = await fetch(streamUrl, { signal: entry.ctrl.signal })
+        if (!res.ok || Number(res.headers.get('Content-Length') ?? 0) > IOS_PREFETCH_MAX_BYTES) {
+          entry.ctrl.abort()
+          return
+        }
+        blob = await res.blob()
       }
-      const blob = await res.blob()
       if (iosPrefetch !== entry) return
       entry.source = blob
       let playable: Blob | null = null
@@ -177,7 +218,8 @@ function dropIosEqCurrent(): void {
 // Brings what `streamUrl` resolves to in line with the EQ settings. Resolves
 // true when resolvePlaybackUrl now answers differently for it, i.e. the
 // element playing it should be swapped over.
-async function syncIosEq(streamUrl: string): Promise<boolean> {
+async function syncIosEq(track: PlayableTrack & { streamUrl: string }): Promise<boolean> {
+  const { streamUrl } = track
   const job = ++iosEqJob
   const eq = currentIosEq()
   const key = iosEqKey(eq)
@@ -193,6 +235,9 @@ async function syncIosEq(streamUrl: string): Promise<boolean> {
   if (!eq) { setIosEqCurrent({ streamUrl, source, blobUrl: null, eqKey: key }); return true }
   let blobUrl: string | null = null
   try {
+    // A downloaded song renders from its saved copy - no network needed.
+    if (!source && isOfflineTrack(track.id)) source = await getOfflineBlob(track.id).catch(() => null)
+    if (source && source.size > IOS_PREFETCH_MAX_BYTES) throw new Error('file too large to render')
     if (!source) {
       const res = await fetch(streamUrl)
       if (!res.ok || Number(res.headers.get('Content-Length') ?? 0) > IOS_PREFETCH_MAX_BYTES) throw new Error(`HTTP ${res.status}`)
@@ -205,9 +250,9 @@ async function syncIosEq(streamUrl: string): Promise<boolean> {
     if (job !== iosEqJob) return false
     runLog('playback', `iOS EQ render failed: ${String(err)}`)
   }
-  const was = resolvePlaybackUrl({ id: '', path: '', streamUrl })
+  const was = resolvePlaybackUrl(track)
   setIosEqCurrent({ streamUrl, source, blobUrl, eqKey: key })
-  return resolvePlaybackUrl({ id: '', path: '', streamUrl }) !== was
+  return resolvePlaybackUrl(track) !== was
 }
 
 // A session whose file wasn't known when its Track was built shows the file's
@@ -828,10 +873,10 @@ export default function Player(): JSX.Element {
     }
     const nextTrackData = queue[nextIdx]
     if (!nextTrackData) return
-    if (isDonorStreamUrl(nextTrackData.streamUrl) && !cachedDonorUrl(nextTrackData.streamUrl)) {
-      // Not fetched yet: fetch, then load it into the spare slot if it's still
-      // the upcoming track.
-      void ensureDonorUrl(nextTrackData.streamUrl).then((u) => {
+    if (playbackPending(nextTrackData)) {
+      // Not fetched (or read from the device) yet: get it, then load it into
+      // the spare slot if it's still the upcoming track.
+      void ensurePlaybackUrl(nextTrackData).then((u) => {
         const s = useStore.getState()
         const spare = getNext()
         if (!spare || s.queue[nextIdx]?.id !== nextTrackData.id || s.currentTrack?.id === nextTrackData.id) return
@@ -898,8 +943,10 @@ export default function Player(): JSX.Element {
     const next = upcomingTrack()
     const spare = getNext()
     if (!next || !spare || next.id === useStore.getState().currentTrack?.id) return
-    // Empty for a donor file not downloaded yet - that one starts as usual.
+    // Empty for a donor file not downloaded yet, or a saved file not read
+    // yet: start reading it, and the next tick loads it.
     const url = resolvePlaybackUrl(next)
+    if (!url && playbackPending(next)) { void ensurePlaybackUrl(next).catch(() => {}); return }
     if (!url || spare.getAttribute('src') === url) return
     // preload="none" would leave it waiting for play() like the active slot
     // (see pendingPlays); this one has to load while it waits.
@@ -915,6 +962,14 @@ export default function Player(): JSX.Element {
     const current = useStore.getState().currentTrack
     const url = next?.streamUrl
     if (!next || !url || next.id === current?.id || url === current?.streamUrl) return
+    if (isOfflineTrack(next.id)) {
+      // Saved on the device: have its blob URL ready for the swap at the end
+      // of this song (onAudioEnded can't wait for a read). With the EQ on,
+      // render it from the saved copy too, as a streamed song would be.
+      void ensureOfflineUrl(next.id).catch(() => {})
+      if (currentIosEq() && /^https?:/.test(url)) startIosPrefetch(url, () => getOfflineBlob(next.id))
+      return
+    }
     if (isDonorStreamUrl(url)) { void ensureDonorUrl(url).catch(() => {}); return }
     if (/^https?:/.test(url)) startIosPrefetch(url)
   }
@@ -1099,11 +1154,24 @@ export default function Player(): JSX.Element {
       audio.load()
       return
     }
+    // Offline, with downloads in the queue: a song that needs the network
+    // can't play, so move on to the next one that's saved, the way a
+    // downloads-only player would. (With nothing downloaded, the usual
+    // offline handling stops playback instead.)
+    if (isPlaying && navigator.onLine === false && !isOfflineTrack(currentTrack.id)
+      && (isDonorStreamUrl(currentTrack.streamUrl) || /^https?:/.test(currentTrack.streamUrl ?? ''))
+      && useStore.getState().queue.some((t) => isOfflineTrack(t.id))) {
+      runLog('playback', `offline: skipping "${currentTrack.title}" (${currentTrack.id}), not downloaded`)
+      loadedTrackId.current = null
+      if (!nextTrack()) setIsPlaying(false)
+      return
+    }
     loadedTrackId.current = currentTrack.id
 
     // Donor cloud files can't be streamed by URL (the route needs the auth
-    // header) - fetch the blob first, then load it once it's ready.
-    if (isDonorStreamUrl(currentTrack.streamUrl) && !cachedDonorUrl(currentTrack.streamUrl)) {
+    // header), and a downloaded track's saved copy has to be read from the
+    // device first - get the blob, then load it once it's ready.
+    if (playbackPending(currentTrack)) {
       const trackId = currentTrack.id
       const { streamUrl, title } = currentTrack
       setCurrentTrackReady(false)
@@ -1112,7 +1180,7 @@ export default function Player(): JSX.Element {
       // Stop the previous track while the file downloads.
       audio.removeAttribute('src')
       audio.load()
-      ensureDonorUrl(currentTrack.streamUrl).then((url) => {
+      ensurePlaybackUrl(currentTrack).then((url) => {
         const s = useStore.getState()
         const a = getActive()
         if (!a || s.currentTrack?.id !== trackId) return
@@ -1520,7 +1588,7 @@ export default function Player(): JSX.Element {
     const run = (): void => {
       timer = null
       if (document.visibilityState !== 'visible') return
-      void syncIosEq(streamUrl).then((changed) => {
+      void syncIosEq({ id: trackId, path: currentTrack?.path ?? '', streamUrl }).then((changed) => {
         const track = useStore.getState().currentTrack
         if (!changed || !track || track.id !== trackId) return
         const url = resolvePlaybackUrl(track)
@@ -1595,6 +1663,23 @@ export default function Player(): JSX.Element {
       audio.volume = volumeRef.current
       applyRate(audio)
       if (playing) playSlot(audio)
+      return
+    }
+    // A downloaded track's saved copy wouldn't play: fall back to its usual
+    // source rather than judging the song by a bad file on this device.
+    if (track && src.startsWith('blob:') && isOfflineTrack(track.id) && src === cachedOfflineUrl(track.id)) {
+      runLog('playback', `saved copy of "${track.title}" (${track.id}) won't play: ${describeMediaError(err)} - using its usual source`)
+      markOfflineBroken(track.id)
+      void ensurePlaybackUrl(track).then((url) => {
+        if (getActive() !== audio || useStore.getState().currentTrack?.id !== track.id) return
+        audio.src = url
+        audio.load()
+        audio.volume = volumeRef.current
+        applyRate(audio)
+        if (useStore.getState().isPlaying) playSlot(audio)
+      }).catch(() => {
+        if (useStore.getState().isPlaying && useStore.getState().currentTrack?.id === track.id) skipUnplayableTrack("their files couldn't be loaded", `saved copy and source both failed for ${track.id}`)
+      })
       return
     }
     if (!playing) return
@@ -2125,7 +2210,8 @@ export default function Player(): JSX.Element {
 
         // A donor file that hasn't finished downloading can't be faded into;
         // skipping the crossfade falls back to a normal advance at track end.
-        const nextReady = !isDonorStreamUrl(nextTrackData?.streamUrl) || !!cachedDonorUrl(nextTrackData.streamUrl)
+        // Same for a saved file not read from the device yet.
+        const nextReady = !!nextTrackData && !playbackPending(nextTrackData)
         if (na && nextTrackData && nextReady) {
           const url = resolvePlaybackUrl(nextTrackData)
           // Never manufacture silence while a remote target is still cold.
@@ -2804,7 +2890,7 @@ export default function Player(): JSX.Element {
               aria-label="Next"
               className="w-11 h-11 rounded-full flex items-center justify-center text-text-primary active:bg-[var(--fill)] transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
             >
-              <SkipForward size={24} fill="currentColor" strokeWidth={0} />
+              <FastForward size={26} fill="currentColor" strokeWidth={0} />
             </button>
           </div>
         </div>

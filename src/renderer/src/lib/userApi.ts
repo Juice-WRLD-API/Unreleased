@@ -9,6 +9,7 @@ import type { ServerPlaylistFolder } from './playlistFolders'
 import { apiRequest, authedRequest, authHeaders, cacheDelete, defaultParseError } from './apiClient'
 import type { ApiRequestOptions } from './apiClient'
 import { cacheGet, cacheHas, cacheSet } from './apiCache'
+import { getPlaylistRecord as getOfflinePlaylistRecord, getPlaylistRecords as getOfflinePlaylistRecords } from './offlineStore'
 import type { Skin } from './skins'
 import type { GifResult } from './gifApi'
 import type { TierlistSummary } from './tierlistApi'
@@ -728,12 +729,33 @@ export async function removeFavorite(songId: number): Promise<void> {
 // the next launch paints the playlists and their tracks from it at once (see
 // peekCachedPlaylists).
 export async function getPlaylists(): Promise<PlaylistSummary[]> {
-  const rows = await request<PlaylistRow[]>(withoutLyricsParam(PLAYLISTS_URL), {
-    method: 'GET',
-    transform: (r) => r.map(detailWithoutLyrics),
-  }, true, PLAYLISTS_URL)
+  let rows: PlaylistRow[]
+  try {
+    rows = await request<PlaylistRow[]>(withoutLyricsParam(PLAYLISTS_URL), {
+      method: 'GET',
+      transform: (r) => r.map(detailWithoutLyrics),
+    }, true, PLAYLISTS_URL)
+  } catch (err) {
+    // No network and no cached list: the downloaded playlists still open.
+    const saved = await offlinePlaylistRows().catch(() => [])
+    if (!saved.length) throw err
+    rows = saved
+  }
   slimCachedDetailsOnce(rows)
   return seedPlaylistRows(rows)
+}
+
+// Playlists downloaded for offline use (lib/offlineDownloads), as the rows
+// the list endpoint returns - the last line of defence when both the network
+// and the localStorage cache come up empty.
+async function offlinePlaylistRows(): Promise<PlaylistRow[]> {
+  const records = await getOfflinePlaylistRecords()
+  return records
+    .filter((r) => r.detail != null)
+    .map((r) => {
+      const d = r.detail as PlaylistDetail
+      return { ...d, track_count: d.items?.length ?? 0 } as PlaylistRow
+    })
 }
 
 type PlaylistRow = PlaylistSummary & { items?: PlaylistItemEntry[] }
@@ -954,11 +976,15 @@ export function getPlaylist(id: number): Promise<PlaylistDetail> {
   }
   const p = request<PlaylistDetail>(withoutLyricsParam(url), { transform: detailWithoutLyrics, parseError }, true, url)
     .then((result) => storePlaylistDetail(id, result))
-    .catch((err) => {
+    .catch(async (err) => {
       if (notFound) {
         forgetPlaylist(id)
         playlistGoneListeners.forEach((fn) => fn(id))
+        throw err
       }
+      // No network and no cached copy: a downloaded playlist still opens.
+      const saved = await getOfflinePlaylistRecord(id).catch(() => null)
+      if (saved?.detail) return storePlaylistDetail(id, saved.detail as PlaylistDetail)
       throw err
     })
     .finally(() => playlistDetailInFlight.delete(id))
@@ -1049,6 +1075,9 @@ export async function setPlaylistCoverBase64(id: number, b64: string): Promise<v
 export async function deletePlaylist(id: number): Promise<void> {
   await request(`${LIBRARY_BASE}/playlists/${id}/`, { method: 'DELETE' })
   forgetPlaylist(id)
+  // Same as finding it gone on the server: the list drops it, and so does
+  // its offline download.
+  playlistGoneListeners.forEach((fn) => fn(id))
 }
 
 type PlaylistItemsAddCreated = {

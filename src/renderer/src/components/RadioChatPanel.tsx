@@ -10,8 +10,8 @@ import {
   sendRadioChat,
 } from '../lib/radioChatSocket'
 import {
-  RADIO_CHAT_LINK_MODES, RADIO_CHAT_MAX_NAME, RADIO_CHAT_MAX_TEXT, banRadioChatAuthor, deleteRadioChatMessage, fetchRadioChat,
-  fetchRadioChatAdminState, fetchRadioChatBans, liftRadioChatBan, setRadioChatState,
+  RADIO_CHAT_ENGLISH_ONLY, RADIO_CHAT_LINK_MODES, RADIO_CHAT_MAX_NAME, RADIO_CHAT_MAX_TEXT, banRadioChatAuthor, deleteRadioChatMessage, fetchRadioChat,
+  fetchRadioChatAdminState, fetchRadioChatBans, isPlainEnglish, liftRadioChatBan, setRadioChatState,
 } from '../lib/radioChatApi'
 import type { RadioChatBan, RadioChatLinks, RadioChatMessage } from '../lib/radioChatApi'
 import { showAppToast } from '../lib/appToast'
@@ -22,6 +22,8 @@ import { relativeTime } from './adminShared'
 import EmojiImg from './chat/EmojiImg'
 import { emojiGlyph, splitChatEmoji } from './chat/emoji'
 import ReactionPicker from './chat/ReactionPicker'
+import { useOpenUserCard } from './chat/UserCard'
+import type { ChatUserBrief } from '../lib/chatApi'
 
 // The 999 FM live chat, a tab of WRLD's FM panel (desktop and phone). Anyone
 // can read and post; admins get the killswitches (everyone, or guests only),
@@ -45,6 +47,14 @@ function nameColor(name: string): string {
 const errorText = (e: unknown): string => (e instanceof Error && e.message ? e.message : 'Something went wrong')
 
 interface MenuState { x: number; y: number; line: RadioChatMessage }
+
+// What the profile card needs before the profile itself loads; the card
+// fills in the avatar and display name from it.
+function lineAuthor(line: RadioChatMessage): ChatUserBrief | null {
+  if (!line.verified || line.user_id == null) return null
+  const role = line.role === 'admin' ? 'administrator' : line.role === 'mod' ? 'manager' : ''
+  return { id: line.user_id, username: line.name, display_name: line.name, avatar: '', role }
+}
 
 type MatchSongs = ReturnType<typeof matchRadioChatSongs>
 const plainText: MatchSongs = (text) => [{ text }]
@@ -70,6 +80,7 @@ export default function RadioChatPanel(): JSX.Element {
   const isAdmin = useStore((s) => !!s.account?.is_administrator)
   const signedIn = useStore((s) => !!s.account)
   const setShowUserAuth = useStore((s) => s.setShowUserAuth)
+  const openUserCard = useOpenUserCard()
   const { status, enabled, guestsEnabled, reason, links, messages, pending, authPending, name, setName } = useRadioChatStore()
   const [draft, setDraft] = useState('')
   const [matchSongs, setMatchSongs] = useState<MatchSongs>(() => plainText)
@@ -120,6 +131,10 @@ export default function RadioChatPanel(): JSX.Element {
   const send = (): void => {
     const text = draft.trim()
     if (!text) return
+    if (!isPlainEnglish(text)) {
+      showAppToast(RADIO_CHAT_ENGLISH_ONLY)
+      return
+    }
     stickRef.current = true
     if (sendRadioChat(text)) setDraft('')
     else showAppToast('Chat isn’t connected yet. Try again in a moment.')
@@ -339,7 +354,9 @@ export default function RadioChatPanel(): JSX.Element {
           {!connecting && messages.length === 0 && pending.length === 0 && (
             <p className="m-auto text-white/30 text-xs">No one’s said anything yet. Say hi.</p>
           )}
-          {messages.map((m) => (
+          {messages.map((m) => {
+            const author = lineAuthor(m)
+            return (
             <div
               key={m.id}
               className="group relative text-sm leading-snug break-words rounded-lg px-2 py-1 -mx-2 hover:bg-white/5"
@@ -347,7 +364,16 @@ export default function RadioChatPanel(): JSX.Element {
               onContextMenu={isAdmin ? (e) => { e.preventDefault(); setMenu({ x: e.clientX, y: e.clientY, line: m }) } : undefined}
             >
               <span className="font-semibold mr-1.5 inline-flex items-center gap-1 align-baseline" style={{ color: m.verified ? 'rgba(255,255,255,0.92)' : nameColor(m.name) }}>
-                {m.name}
+                {author ? (
+                  <button
+                    type="button"
+                    onClick={(e) => openUserCard(author, e)}
+                    title={`View ${m.name}’s profile`}
+                    className="font-semibold hover:underline decoration-white/40 underline-offset-2 focus:outline-none focus-visible:underline"
+                  >
+                    {m.name}
+                  </button>
+                ) : m.name}
                 {m.verified && <BadgeCheck size={12} className="text-sky-400 shrink-0" aria-label="Signed in" />}
                 {m.role === 'admin' && <span className="text-[9px] font-bold uppercase tracking-wider text-red-300 bg-red-500/20 rounded px-1 py-px">Admin</span>}
                 {m.role === 'mod' && <span className="text-[9px] font-bold uppercase tracking-wider text-amber-300 bg-amber-500/20 rounded px-1 py-px">Mod</span>}
@@ -363,7 +389,8 @@ export default function RadioChatPanel(): JSX.Element {
                 </button>
               )}
             </div>
-          ))}
+            )
+          })}
           {pending.map((p) => <PendingLine key={p.nonce} line={p} matchSongs={matchSongs} />)}
         </div>
       )}
