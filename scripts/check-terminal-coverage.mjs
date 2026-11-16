@@ -65,6 +65,7 @@ const NOT_APPLICABLE = {
   'exactSeekAudio.*': 're-reads a stream URL the Synced lyrics tool already plays, to decode it for exact seeking (get downloads the same file)',
   'compactGroups.*': 'tracker compact-view loaders over /songs and /versions (versions all, find)',
   'newsNotifications.checkForNewPosts': 'background poll; the request is fetchNews (news)',
+  'lyricsJobWatch.*': 'background poll that notifies when a started job finishes; the request is getLyricsJob (lyricsgen show, lyricsgen wait)',
   'newsNotifications.mergeSubscriptionsFromProfile': 'applies the profile’s subscriptions locally (me, news subscribe)',
   'apiFilesShared.findSongByFilename': 'Files-tab lookup over /songs (find)',
   'donorPlaylistEntries.*': 'one-off move of old donor playlists, and keeping a re-tagged file’s playlist slots; the calls are getPlaylist/createPlaylist/addPlaylistEntry/reorderPlaylistItems (playlist)',

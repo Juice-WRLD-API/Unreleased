@@ -13,6 +13,7 @@ import { buildStreamUrl, searchSongs } from '../lib/juicewrldApi'
 import { isAbortError } from '../lib/apiClient'
 import { errorMessage } from '../lib/format'
 import { showAppToast } from '../lib/appToast'
+import { showingLyricsJob } from '../lib/lyricsJobWatch'
 import { pickLocalFile } from '../lib/terminal/pick'
 import { relativeTime } from './adminShared'
 import {
@@ -81,6 +82,9 @@ export default function LyricsGenJobView({ jobId, admin, audio, backLabel, onBac
     void load()
     return () => { ac.abort(); window.clearTimeout(timer) }
   }, [jobId, admin, attempt])
+
+  // On screen, so its finish doesn't also raise a banner.
+  useEffect(() => (admin ? undefined : showingLyricsJob(jobId)), [jobId, admin])
 
   const onUpdateRef = useRef(onUpdate)
   onUpdateRef.current = onUpdate

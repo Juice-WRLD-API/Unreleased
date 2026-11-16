@@ -19,6 +19,7 @@ export type NotificationLevel = 'info' | 'success' | 'warning' | 'error'
 export type NotificationTarget =
   | { view: 'chat'; room?: RoomRef }
   | { view: 'news'; postId: number }
+  | { view: 'lyrics'; jobId: string }
 
 export interface NotificationEntry {
   /** Stable per event (`chat-<message id>`, `news-<post id>`…), so the same

@@ -6,6 +6,7 @@ import { formatDuration } from '../lib/format'
 import { showAppToast } from '../lib/appToast'
 import { ls } from '../lib/persist'
 import { exactSeekAudio } from '../lib/exactSeekAudio'
+import { useStore } from '../store/useStore'
 import {
   clearTarget, firstTarget, hasWordTiming, insertLine, isMoved, lineAt, lineStart, linesFromPlain, lrcStamp, nudgeTarget, outOfOrder, parseStamp,
   parseSyncedLyrics, removeLine, resetTarget, serializeSyncedLyrics, setLineText, shiftAll, stampTarget, stepTarget, syncProgress, targetKey,
@@ -75,6 +76,10 @@ export function useAudioClock(src: string | null): { clock: SyncClock; element: 
   const played = src && exact?.from === src ? exact.url : src
   useEffect(() => { setPlaying(false) }, [src])
   useEffect(() => { if (ref.current) ref.current.playbackRate = rate }, [rate, played])
+  // One song at a time: the app's player (or 999 FM) starting pauses this one.
+  useEffect(() => useStore.subscribe((s, prev) => {
+    if ((s.isPlaying && !prev.isPlaying) || (s.radioFmActive && !prev.radioFmActive)) ref.current?.pause()
+  }), [])
   const clock: SyncClock = {
     ready: !!src,
     playing,
@@ -95,7 +100,13 @@ export function useAudioClock(src: string | null): { clock: SyncClock; element: 
         ref={ref}
         src={played}
         preload="auto"
-        onPlay={() => setPlaying(true)}
+        onPlay={() => {
+          setPlaying(true)
+          // ...and this one starting pauses whatever the app was playing.
+          const store = useStore.getState()
+          if (store.isPlaying) store.setIsPlaying(false)
+          if (store.radioFmActive) store.setRadioFmActive(false)
+        }}
         onPause={() => setPlaying(false)}
         onLoadedMetadata={(e) => {
           const a = e.currentTarget

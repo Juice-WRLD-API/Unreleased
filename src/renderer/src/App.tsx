@@ -128,6 +128,7 @@ import {
   LikedSongsView, DiagnosticsModal, ChatView, TerminalPage, TrackView, preloadView,
 } from './lib/lazyViews'
 import { useChatBootstrap } from './hooks/useChatBootstrap'
+import { startLyricsJobWatch } from './lib/lyricsJobWatch'
 
 // Overlays that only mount while open - fetched on first open rather than
 // shipped to every visitor in the startup bundle.
@@ -268,6 +269,9 @@ export default function App(): JSX.Element {
   // Give each route its own title/description/canonical. Web only - no-op in
   // the desktop app, including electron:dev (see lib/seo.ts).
   useEffect(() => { applySeo(activeView) }, [activeView])
+
+  // Lyrics jobs the user started notify them here when they finish.
+  useEffect(() => startLyricsJobWatch(), [])
 
   // Complete Discord OAuth redirect, then load the public account
   useEffect(() => {

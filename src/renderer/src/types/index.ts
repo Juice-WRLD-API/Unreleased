@@ -81,6 +81,8 @@ export interface LyricsGenTarget {
   /** The API song behind `track`, whose lyrics can seed a sync job. */
   songId?: number | null
   tab?: 'sync' | 'create' | 'jobs' | 'admin'
+  /** Opens one of the user's generation jobs (a finished-job notification). */
+  jobId?: string
   /** Opens Sync on these lyrics (an LRC, or plain lines to time) in place of
    *  the draft. `saved` is the song's synced lyrics as saved, for the tool's
    *  "moved" marks and Reset. */

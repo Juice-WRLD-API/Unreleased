@@ -21,6 +21,7 @@ import { isAbortError } from '../lib/apiClient'
 import { errorMessage, formatBytes } from '../lib/format'
 import { isDonorStreamUrl } from '../lib/donorPlayback'
 import { showAppToast } from '../lib/appToast'
+import { watchLyricsJob } from '../lib/lyricsJobWatch'
 import { ls } from '../lib/persist'
 import { pickLocalFile } from '../lib/terminal/pick'
 import { useSlidingIndicator } from '../hooks/useSlidingIndicator'
@@ -122,7 +123,14 @@ function LyricsGenDialog({ target }: { target: LyricsGenTarget }): JSX.Element {
   const isAdmin = !!account?.is_administrator
 
   const [tab, setTab] = useState<Tab>(target.tab ?? 'sync')
-  const [openJob, setOpenJob] = useState<{ id: string; admin: boolean } | null>(null)
+  const [openJob, setOpenJob] = useState<{ id: string; admin: boolean } | null>(target.jobId ? { id: target.jobId, admin: false } : null)
+  // A finished-job notification clicked while the dialog is already open.
+  const firstTarget = useRef(target)
+  useEffect(() => {
+    if (target === firstTarget.current || !target.jobId) return
+    setTab(target.tab ?? 'jobs')
+    setOpenJob({ id: target.jobId, admin: false })
+  }, [target])
 
   // ── The form ──
   // The audio, with the song it came from (its lyrics can seed a sync), and
@@ -483,6 +491,7 @@ function LyricsGenDialog({ target }: { target: LyricsGenTarget }): JSX.Element {
         ? await createLyricsJobFromServer(audio.server, req, ac.signal)
         : await createLyricsJob(audio.file, req, setUploading, ac.signal)
       setJobs((js) => [job, ...(js ?? []).filter((j) => j.id !== job.id)])
+      watchLyricsJob(job)
       setExpected(null)
       setOpenJob({ id: job.id, admin: false })
     } catch (e) {
