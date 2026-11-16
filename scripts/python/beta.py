@@ -3,9 +3,9 @@
 Unreleased Music Player — Beta Publish
 
 Same flow and same build as release.py's "publish as beta" option, minus the
-question and without git: pick a version, build the installer, then publish
-privately to the gated beta backend. No sync, commit, push or GitHub release.
-See release.py for the details of each step.
+question and without git: the next beta version is chosen automatically, the
+Windows installer is built locally, then uploaded to the gated beta backend.
+No commit, push or GitHub release. See release.py for the details of each step.
 """
 import release
 
