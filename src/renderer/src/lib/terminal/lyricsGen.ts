@@ -15,6 +15,7 @@ import { isAbortError } from '../apiClient'
 import { ls } from '../persist'
 import { useStore } from '../../store/useStore'
 import { pickLocalFile, saveBlob } from './pick'
+import { watchLyricsJob } from '../lyricsJobWatch'
 import { asJson, confirmAction, fail, parseArgs, table, type TermCommand, type TermCtx } from './types'
 
 // Donor lyrics generation: Whisper on the server transcribes a song's audio
@@ -374,6 +375,7 @@ async function start(mode: LyricsGenMode, args: string, ctx: TermCtx): Promise<v
     }, ctx.signal)
   }
   remember([{ id: job.id, mode: job.mode, filename: jobTitle(job) || audio?.name || '', created_at: job.created_at }, ...remembered().filter((j) => j.id !== job.id)])
+  watchLyricsJob(job)
   ctx.print(`started ${MODE_NAME[mode]} job 1 (${job.id.slice(0, 8)}) for ${jobTitle(job)}`, 'ok')
   const done = await follow(ctx, job.id)
   if (done) printResult(ctx, done, 1)

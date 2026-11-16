@@ -96,6 +96,7 @@ import SandboxNotch from './components/SandboxNotch'
 import { UserCardHost } from './components/chat/UserCard'
 import { useIsMobile } from './hooks/useIsMobile'
 import { useChatBootstrap } from './hooks/useChatBootstrap'
+import { startLyricsJobWatch } from './lib/lyricsJobWatch'
 
 // Rarely-visited views load on first navigation instead of inflating the
 // startup bundle. Suspense fallback is null: these chunks are local (Electron)
@@ -311,6 +312,9 @@ export default function App(): JSX.Element {
   // Give each route its own title/description/canonical. Web only — no-op in
   // the desktop app, including electron:dev (see lib/seo.ts).
   useEffect(() => { applySeo(activeView) }, [activeView])
+
+  // Lyrics jobs the user started notify them here when they finish.
+  useEffect(() => startLyricsJobWatch(), [])
 
   // Complete Discord OAuth redirect, then load the public account
   useEffect(() => {

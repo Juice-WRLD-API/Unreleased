@@ -7,6 +7,11 @@ import { useStore } from '../store/useStore'
 import type { NotificationTarget } from './notificationHistory'
 
 export function openNotificationTarget(target: NotificationTarget): void {
+  if (target.view === 'lyrics') {
+    // A finished lyrics job: the Synced lyrics dialog, open on that job.
+    useStore.getState().openLyricsGen({ tab: 'jobs', jobId: target.jobId })
+    return
+  }
   if (target.view === 'news') {
     useStore.getState().setActiveView('news')
     // Same hand-off as NewsNotifier: NewsView reads this on mount, or the

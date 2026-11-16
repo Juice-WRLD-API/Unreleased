@@ -1,6 +1,6 @@
 # Agent guide: Juice WRLD API and Unreleased
 
-**Version 1.85** · updated 2026-11-16. Bump the version and date whenever you
+**Version 1.88** · updated 2026-11-16. Bump the version and date whenever you
 change this file (minor for fixes and additions, major for rewrites).
 
 **Keep this file current.** If you find something in the docs or this file that
@@ -34,6 +34,7 @@ checkout as a sibling.
 | `jwa-mcp/` | MCP server exposing the API as ~29 tools (stdio + HTTP) | `Juice-WRLD-API/jwa-mcp` |
 | `jwa-cdn-node/` | Desktop node for the distributed P2P CDN (Python, WebRTC). Has its own `AGENTS.md`, read it | `Juice-WRLD-API/jwa-cdn-node` |
 | `jwa-whisper/` | "WRLD Sync": generates synced lyrics with local Whisper | `Juice-WRLD-API/juicewrldapi-whisper` |
+| `support-bot/` | The Discord support bot (`run_bot.py`) plus the Django service that answers for it on a local model server, with help search and bug/suggestion tickets. Reaches the API only over HTTP, never the backend's database. Has its own `AGENTS.md` | `saint/support-bot` on git.tiddiebar.org |
 | `iJWA/` | Retired. Its features now live in the app as **Desktop** (see section 6) | `Juice-WRLD-API/iJWA` |
 
 Branches in the player repo **do not sync automatically**. Each one has its own
@@ -612,6 +613,22 @@ Node 22.
 
 Newest first. One entry each: date, what went wrong, what to do instead. Delete
 entries that stop being true.
+
+- 2026-11-16: WRLD's music video took a couple of seconds to come back after
+  every fullscreen toggle or visit to another view. Fullscreen returns WRLD
+  through `createPortal` to `<body>` instead of inline (`WrldView.tsx`), so
+  React remounts all of WRLD, and leaving WRLD unmounts it; each mount built
+  a new `<video>` that loaded and seeked from nothing. `WrldMusicVideo` now
+  keeps the target, the match and the `<video>` element itself at module
+  level and moves the element into each new mount. Anything inside WRLD that
+  is slow to start must survive a remount the same way.
+
+- 2026-11-16: A PowerShell find/replace over several files used
+  `@{ file = @(@('old', 'new')) }`. PowerShell flattens a nested array of
+  one pair, so `$pair[0]` was the first character of `'old'`, and every
+  `s` in `serve.py` became `a`. For multi-file text edits use the Edit
+  tool or Python; in PowerShell, build pairs with the unary comma
+  (`,@('old', 'new')`) and check each file's diff before moving on.
 
 - 2026-11-14: Git Bash's `sed -i` on Windows rewrote CRLF files as LF
   (`WrldView.tsx`, `radioSocketService.ts`), so a follow-up edit matching

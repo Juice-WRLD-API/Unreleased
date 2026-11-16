@@ -31,9 +31,10 @@ const SEEK_GUESS = 1.2
 const SEEK_MAX = 3
 
 /** Keeps `v` with the song by `clock`. `onShown` hears whether a frame of the right moment is up: true once one is drawn,
- *  false for a part of the song the video leaves out. Returns the way to stop (the video is paused). */
-export function followVideo(v: HTMLVideoElement, sync: VideoSync, clock: () => SongClock, onShown: (shown: boolean) => void): () => void {
-  let shown = false
+ *  false for a part of the song the video leaves out. `initiallyShown`: the video is already up (the same element picked
+ *  up again after a remount), so it stays up through the first seek. Returns the way to stop (the video is paused). */
+export function followVideo(v: HTMLVideoElement, sync: VideoSync, clock: () => SongClock, onShown: (shown: boolean) => void, initiallyShown = false): () => void {
+  let shown = initiallyShown
   // How long a seek into a part not loaded yet takes here (the server needs about a second to start sending one).
   let seekCost = SEEK_GUESS
   let seekStarted = 0
