@@ -1,6 +1,6 @@
 # Agent guide: Juice WRLD API and Unreleased
 
-**Version 1.88** · updated 2026-11-16. Bump the version and date whenever you
+**Version 1.89** · updated 2026-11-17. Bump the version and date whenever you
 change this file (minor for fixes and additions, major for rewrites).
 
 **Keep this file current.** If you find something in the docs or this file that
@@ -613,6 +613,15 @@ Node 22.
 
 Newest first. One entry each: date, what went wrong, what to do instead. Delete
 entries that stop being true.
+
+- 2026-11-17: Fullscreen (or leaving WRLD) while a song's music video was still
+  being lined up left the visualizer up for the rest of that visit. The
+  line-up is one shared job (`alignMusicVideo`); the unmount aborted it, and
+  the new mount joined that same promise and treated the abort as its own, so
+  it never tried again. A caller's abort only stops that wait
+  (`lib/sharedFlight.ts`). The job is dropped a turn later if nobody, including
+  the remount, is still waiting. Don't pass a caller's `AbortSignal` into the
+  shared job.
 
 - 2026-11-16: WRLD's music video took a couple of seconds to come back after
   every fullscreen toggle or visit to another view. Fullscreen returns WRLD
