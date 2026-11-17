@@ -8,6 +8,7 @@
 import { buildStreamUrl } from './juicewrldApi'
 import { routeUrl } from './apiServers'
 import { ls } from './persist'
+import { createSharedFlight } from './sharedFlight'
 import type { SyncSpan, VideoSync } from './videoFollow'
 
 /** Decoding rate: plenty for onsets, and small enough to keep a five-minute song in a few MB. */
@@ -226,7 +227,12 @@ export function videoAudioUrl(path: string): string {
 
 const ALIGN_VERSION = 1
 const cacheKey = (videoPath: string, songPath: string): string => `mvSync${ALIGN_VERSION}:${videoPath}|${songPath}`
-const inFlight = new Map<string, Promise<VideoSync | null>>()
+// One line-up per video and song. Callers bring their own abort signal, which
+// must not cancel the job: WRLD remounts (fullscreen, leaving the view) drop
+// the old wait and join again a moment later, and the cleared desk waits on
+// the same line-up. A signal aborts only that wait (see sharedFlight).
+const flights = createSharedFlight<VideoSync | null>()
+let forceSerial = 0
 
 /** A sync already worked out on this device: the spans, null for "doesn't hold the song", undefined when never tried. */
 export function cachedVideoSync(videoPath: string, songPath: string): VideoSync | null | undefined {
@@ -245,20 +251,17 @@ export function alignMusicVideo(videoPath: string, songPath: string, opts: { sig
   if (!opts.force) {
     const hit = cachedVideoSync(videoPath, songPath)
     if (hit !== undefined) return Promise.resolve(hit)
-    const running = inFlight.get(key)
-    if (running) return running
   }
-  const job = (async () => {
+  // A forced redo does its own pass. It still must not be the abort signal of
+  // whoever else is already waiting on the pass that's in flight.
+  const flightKey = opts.force ? `${key}\0${++forceSerial}` : key
+  return flights.join(flightKey, async (signal) => {
     const [song, video] = await Promise.all([
-      decodeMono(buildStreamUrl(songPath), opts.signal),
-      decodeMono(videoAudioUrl(videoPath), opts.signal),
+      decodeMono(buildStreamUrl(songPath), signal),
+      decodeMono(videoAudioUrl(videoPath), signal),
     ])
-    const sync = await alignAudio(song, video, opts.signal)
+    const sync = await alignAudio(song, video, signal)
     ls.set(key, { sync })
     return sync
-  })()
-  inFlight.set(key, job)
-  const clear = (): void => { if (inFlight.get(key) === job) inFlight.delete(key) }
-  job.then(clear, clear)
-  return job
+  }, opts.signal)
 }
