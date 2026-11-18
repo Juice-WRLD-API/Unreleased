@@ -1,7 +1,7 @@
 // Reducer-based replacement for AddSongModal's ~26 separate useState fields
 // (desktop and mobile AddSongModal are near-identical, confirmed by diffing
 // both files in full). Auxiliary UI-only state (showMore, copiedFrom banner
-// text, syncedTable toggle, file-picker visibility, eras list, submit
+// text, file-picker visibility, eras list, submit
 // state/error) intentionally stays as plain useState in AddSongModal itself
 // - this module only owns the fields that become the proposal payload.
 //

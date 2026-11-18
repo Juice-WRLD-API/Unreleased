@@ -1,7 +1,7 @@
 // Cover art submissions (backend docs/22-cover-art.md). Anyone signed in can
 // send in cover art for a song; managers of the primary channel and admins
 // approve or reject it. Approving never changes the song: it adds the image to
-// the community channel in Files at `Cover Arts/Community-Made/<uuid>/cover.png` (an approved comp
+// the community channel in Files at `Cover Arts/Community-Made/<uuid>/<song name>.png` (an approved comp
 // upload), and the submission's own image becomes public.
 //
 // Songs are picked by internal `id`, the same as edit proposals.

@@ -1,12 +1,9 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Check, ImageIcon, FolderSearch, Loader2 } from 'lucide-react'
 import { useStore } from '../store/useStore'
-import {
-  JWApiSong, resolvePrefCoverUrl, apiFetch, buildStreamUrl, smallCoverUrl,
-  parseBrowseEntries, coverSearchQueries, filterSearchResults, searchFiles, JWApiBrowseResponse,
-} from '../lib/juicewrldApi'
-import { getMediaType } from '../lib/fileTypes'
+import { JWApiSong, resolvePrefCoverUrl, smallCoverUrl, coverSearchQueries } from '../lib/juicewrldApi'
 import FilePickerModal from './FilePickerModal'
+import { searchCoverImages } from '../lib/coverSuggestions'
 
 export interface CoverVersionEntry { song: JWApiSong }
 
@@ -28,6 +25,8 @@ export default function CoverEditor({
 }): JSX.Element {
   const setSongCover = useStore(s => s.setSongCover)
   const pref = useStore(s => s.songPrefs[songId])
+  const coversFromAllComps = useStore(s => s.coversFromAllComps)
+  const channels = useStore(s => s.channels)
 
   const [coverDraft, setCoverDraft] = useState('')
   const [browseOpen, setBrowseOpen] = useState(false)
@@ -51,7 +50,7 @@ export default function CoverEditor({
   // inline so likely covers show up here without opening the full browser.
   // Runs again whenever the set of names changes (versions load after the
   // first render); null = nothing fetched for this song yet.
-  const [searchedCovers, setSearchedCovers] = useState<{ path: string; url: string }[] | null>(null)
+  const [searchedCovers, setSearchedCovers] = useState<{ path: string; channel?: string; url: string }[] | null>(null)
   const [searchedLoading, setSearchedLoading] = useState(false)
   useEffect(() => { setSearchedCovers(null) }, [songId])
   const queriesKey = coverSearchQueries(apiTitle, [...versions.map((v) => v.song.name), ...altTitles]).join('\u0000')
@@ -61,28 +60,13 @@ export default function CoverEditor({
     let cancelled = false
     setSearchedLoading(true)
     const seenUrls = new Set(coverChoices.map((c) => c.url))
-    Promise.all(queries.map((q) =>
-      searchFiles(q)
-        .then((entries) => filterSearchResults(entries, q))
-        .catch(() => [])
-    )).then((lists) => {
-      if (cancelled) return
-      const seenPaths = new Set<string>()
-      const out: { path: string; url: string }[] = []
-      for (const list of lists) {
-        for (const e of list) {
-          if (e.type !== 'file' || getMediaType(e.name) !== 'image' || seenPaths.has(e.path)) continue
-          seenPaths.add(e.path)
-          const url = buildStreamUrl(e.path)
-          if (seenUrls.has(url)) continue
-          out.push({ path: e.path, url })
-        }
-      }
-      setSearchedCovers(out)
-    }).finally(() => { if (!cancelled) setSearchedLoading(false) })
+    searchCoverImages(queries, coversFromAllComps).then((hits) => {
+      if (!cancelled) setSearchedCovers(hits.filter((h) => !seenUrls.has(h.url)))
+    }).catch(() => { if (!cancelled) setSearchedCovers([]) })
+      .finally(() => { if (!cancelled) setSearchedLoading(false) })
     return () => { cancelled = true }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [queriesKey, songId])
+  }, [queriesKey, songId, coversFromAllComps])
 
   const coverDraftPreview = resolvePrefCoverUrl(coverDraft.trim())
 
@@ -135,7 +119,7 @@ export default function CoverEditor({
                 <button
                   key={c.url}
                   onClick={() => applyCover(c.url)}
-                  title={c.path}
+                  title={c.channel ? `${channels.find((ch) => ch.slug === c.channel)?.name ?? c.channel}: ${c.path}` : c.path}
                   className={`relative aspect-square rounded-md overflow-hidden bg-surface-overlay border transition-colors ${active ? 'border-accent' : 'border-transparent hover:border-[var(--border)]'}`}
                 >
                   <img src={smallCoverUrl(c.url)} alt="" className="w-full h-full object-cover"

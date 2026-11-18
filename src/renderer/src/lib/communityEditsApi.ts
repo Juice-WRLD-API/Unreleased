@@ -1,7 +1,7 @@
 // Community remixes and edits (backend docs/23-community-edits.md). Anyone
 // signed in can send one in; managers of the primary channel and admins
 // approve it into the community channel in Files, at
-// Remixes & Edits/Community-Made/<uuid>/edit.<ext>.
+// Remixes & Edits/Community-Made/<uuid>/<title>.<ext>.
 //
 // The server turns away a file that is too much like one it already has (409)
 // and says which one, so the app can send the user there instead.

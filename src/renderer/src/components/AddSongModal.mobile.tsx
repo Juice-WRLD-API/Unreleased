@@ -4,7 +4,7 @@ import { hasEraCoverFile, findEraCoverFile } from '../lib/eraCoverFiles'
 import { errorMessage } from '../lib/format'
 import { toSiteRelativeImageUrl } from '../lib/juicewrldApi'
 import FilePickerModal from './FilePickerModal'
-import { BasicRow, BasicSelect, SyncedLyricsTable } from './EditorPage.desktop'
+import { BasicRow, BasicSelect } from './EditorPage.desktop'
 import CopyFromSong from './CopyFromSong'
 import { useAddSongModal } from '../hooks/useAddSongModal'
 import { useEscapeToClose } from '../hooks/useEscapeToClose'
@@ -30,7 +30,7 @@ export default function AddSongModal({ onClose, onSubmitted, channel }: {
   channel?: string
 }): JSX.Element {
   const {
-    f, updateField, copiedFrom, setCopiedFrom, syncedTable, setSyncedTable,
+    f, updateField, copiedFrom, setCopiedFrom,
     pickingFile, setPickingFile, eras, submitState, submitError, edNotes, setEdNotes, copyFrom: copyFromSong, handleSubmit,
   } = useAddSongModal(onSubmitted, onClose, channel)
   const [showMore, setShowMore] = useState(false)
@@ -133,24 +133,12 @@ export default function AddSongModal({ onClose, onSubmitted, channel }: {
               <SectionLabel>Lyrics</SectionLabel>
               <BasicRow label="Lyrics" value={f.lyrics} onChange={v => updateField('lyrics', v)} rows={8} placeholder="Plain lyrics…" />
 
-              {/* Synced lyrics get the editor's line table, with the same raw
-                  escape hatch for pasting a whole LRC at once. */}
               <div className="rounded-xl border border-transparent bg-[var(--fill)] px-2.5 py-1.5">
                 <div className="flex items-center gap-1.5">
                   <span className="text-[10px] font-semibold tracking-wide text-text-muted leading-tight">Synced lyrics</span>
-                  <span className="flex-1" />
-                  <button
-                    onClick={() => { setSyncedTable(v => !v); localStorage.setItem('editor:syncedFormat', syncedTable ? 'raw' : 'table') }}
-                    className="px-1.5 py-1 rounded text-[10px] font-semibold text-text-muted opacity-60 active:opacity-100 transition-opacity">
-                    {syncedTable ? 'Raw' : 'Lines'}
-                  </button>
                 </div>
-                {syncedTable ? (
-                  <SyncedLyricsTable value={f.syncedLyrics} onChange={v => updateField('syncedLyrics', v)} />
-                ) : (
-                  <textarea rows={6} value={f.syncedLyrics} onChange={e => updateField('syncedLyrics', e.target.value)} placeholder="[mm:ss.xx] line…"
+                <textarea rows={6} value={f.syncedLyrics} onChange={e => updateField('syncedLyrics', e.target.value)} placeholder="[mm:ss.xx] line…"
                     className="w-full bg-transparent border-0 p-0 mt-1 text-xs font-mono leading-snug text-text-primary focus:outline-none resize-y placeholder:text-text-muted placeholder:opacity-40" />
-                )}
               </div>
 
               <SectionLabel>Leak & media</SectionLabel>

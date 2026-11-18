@@ -15,7 +15,6 @@ import type { SuggestField } from '../lib/fieldSuggestions'
 import { errorMessage } from '../lib/format'
 import {
   CATEGORIES, CAT_PILL, CAT_BADGE,
-  parseSynced, serializeSynced, type SyncedLine,
 } from '../lib/editorPageShared'
 import { useValueSuggestions, DatePickerButton, AppField } from './EditorPageParts'
 import { useEditorPageState, type LyricsTab } from '../hooks/useEditorPageState'
@@ -325,63 +324,6 @@ export function BasicSelect({ label, value, original, onChange, options, placeho
   )
 }
 
-/* ── Synced lyrics table ───────────────────────────────────────────────────── */
-export function SyncedLyricsTable({ value, onChange }: {
-  value: string; onChange: (v: string) => void
-}): JSX.Element {
-  const rows = parseSynced(value)
-  const commit = (next: SyncedLine[]): void => onChange(serializeSynced(next))
-  const update = (i: number, patch: Partial<SyncedLine>): void =>
-    commit(rows.map((r, j) => (j === i ? { ...r, ...patch } : r)))
-  const insertAfter = (i: number): void =>
-    commit([...rows.slice(0, i + 1), { time: '', text: '' }, ...rows.slice(i + 1)])
-
-  return (
-    <div className="mt-1.5">
-      <div className="max-h-[340px] overflow-y-auto pr-0.5 space-y-1">
-        {rows.map((r, i) => (
-          <div key={i} className="group flex items-center gap-1.5">
-            <input
-              value={r.time}
-              onChange={e => update(i, { time: e.target.value })}
-              placeholder="0:00.00"
-              title="Timestamp for this line"
-              className={`w-[76px] shrink-0 rounded border px-1.5 py-1 font-mono text-[11px] text-center focus:outline-none focus:border-accent/50 transition-colors ${
-                r.time.trim()
-                  ? 'border-[var(--border)] bg-surface-overlay text-text-primary'
-                  : 'border-dashed border-[var(--border)] bg-transparent text-text-muted'
-              } placeholder:text-text-muted placeholder:opacity-40`}
-            />
-            <input
-              value={r.text}
-              onChange={e => update(i, { text: e.target.value })}
-              onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); insertAfter(i) } }}
-              placeholder="Lyric line…"
-              className="flex-1 min-w-0 rounded border border-transparent bg-transparent px-1.5 py-1 text-[13px] text-text-primary focus:outline-none focus:border-accent/50 focus:bg-surface-overlay transition-colors placeholder:text-text-muted placeholder:opacity-40"
-            />
-            <button
-              onClick={() => commit(rows.filter((_, j) => j !== i))}
-              title="Remove line"
-              className="shrink-0 p-1 rounded text-text-muted opacity-0 group-hover:opacity-60 hover:!opacity-100 hover:text-red-400 transition-all"
-            >
-              <X size={12} />
-            </button>
-          </div>
-        ))}
-        {rows.length === 0 && (
-          <p className="py-2 text-[11px] text-text-muted opacity-60">No synced lines yet.</p>
-        )}
-      </div>
-      <button
-        onClick={() => commit([...rows, { time: '', text: '' }])}
-        className="mt-1.5 flex items-center gap-1 text-[11px] font-semibold text-text-muted opacity-70 hover:opacity-100 hover:text-accent transition-colors"
-      >
-        <Plus size={11} /> Add line
-      </button>
-    </div>
-  )
-}
-
 /* ── Main export ──────────────────────────────────────────────────────────── */
 export default function EditorPage({ initialSongId = null }: {
   /** Song to open on mount, for callers that know their target before this
@@ -403,7 +345,6 @@ export default function EditorPage({ initialSongId = null }: {
     instrumentals, setInstrumentals, instrumentalNames, setInstrumentalNames,
     sessionTitles, setSessionTitles, sessionTracking, setSessionTracking,
     lyricsTab, setLyricsTab, lyricsLoading, lyricsError, handleLyricsPaste,
-    syncedTable, setSyncedTable,
     submitState, submitError, submit,
     deleteState, setDeleteState, deleteError, submitDeletion,
     showMore, setShowMore,
@@ -633,15 +574,6 @@ export default function EditorPage({ initialSongId = null }: {
                             Sync
                           </button>
                         )}
-                        {showSynced && (
-                          <button
-                            onClick={() => { setSyncedTable(v => !v); localStorage.setItem('editor:syncedFormat', syncedTable ? 'raw' : 'table') }}
-                            title={syncedTable ? 'Edit the raw LRC text' : 'Edit as timestamped lines'}
-                            className="px-1.5 py-0.5 rounded text-[10px] font-semibold text-text-muted opacity-60 hover:opacity-100 transition-opacity"
-                          >
-                            {syncedTable ? 'Raw' : 'Lines'}
-                          </button>
-                        )}
                         {(['lyrics', 'synced'] as LyricsTab[]).map(tab => {
                           const active = lyricsTab === tab
                           const dirty  = tab === 'lyrics'
@@ -658,17 +590,13 @@ export default function EditorPage({ initialSongId = null }: {
                           )
                         })}
                       </div>
-                      {showSynced && syncedTable ? (
-                        <SyncedLyricsTable value={synced} onChange={setSynced} />
-                      ) : (
-                        <textarea
+                                              <textarea
                           rows={12}
                           value={value}
                           onChange={e => (showSynced ? setSynced : setLyrics)(e.target.value)}
                           placeholder={showSynced ? '[00:00.00] Line one\n[00:05.20] Line two\n…' : 'Full lyrics…'}
                           className={`${basicControlClass} resize-y mt-1 ${showSynced ? 'font-mono text-xs' : ''}`}
                         />
-                      )}
                     </div>
                   )
                 })()}
@@ -1019,15 +947,6 @@ export default function EditorPage({ initialSongId = null }: {
                           Sync
                         </button>
                       )}
-                      {lyricsTab === 'synced' && (
-                        <button
-                          onClick={() => { setSyncedTable(v => !v); localStorage.setItem('editor:syncedFormat', syncedTable ? 'raw' : 'table') }}
-                          title={syncedTable ? 'Edit the raw LRC text' : 'Edit as timestamped lines'}
-                          className="px-2 py-1 rounded-lg text-[11px] font-semibold text-text-muted opacity-60 hover:opacity-100 transition-opacity"
-                        >
-                          {syncedTable ? 'Raw' : 'Lines'}
-                        </button>
-                      )}
                       {(['lyrics', 'synced'] as LyricsTab[]).map(tab => {
                         const active = lyricsTab === tab
                         const dirty = tab === 'lyrics'
@@ -1070,8 +989,6 @@ export default function EditorPage({ initialSongId = null }: {
                         </div>
                       )}
                     </div>
-                  ) : syncedTable ? (
-                    <SyncedLyricsTable value={synced} onChange={setSynced} />
                   ) : (
                     <textarea
                       rows={15} value={synced} onChange={e => setSynced(e.target.value)}

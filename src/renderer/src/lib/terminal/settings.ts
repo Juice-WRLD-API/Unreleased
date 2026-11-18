@@ -105,6 +105,7 @@ const SETTINGS: Setting[] = [
   bool('full-era-names', 'Show full era names', () => st().fullEraNames, (v) => st().setFullEraNames(v)),
   bool('prefer-og', 'Play the OG version when one is linked', () => st().preferOgVersion, (v) => st().setPreferOgVersion(v)),
   bool('rotate-covers', 'Rotate suggested covers on each play', () => st().rotateSuggestedCovers, (v) => st().setRotateSuggestedCovers(v)),
+  bool('all-comp-covers', 'Suggest and pick covers from every comp, not just the main one', () => st().coversFromAllComps, (v) => st().setCoversFromAllComps(v)),
   num('volume', 'Volume', 0, 100, () => Math.round(st().volume * 100), (v) => st().setVolume(v / 100), '%'),
   num('speed', 'Playback speed', 0.5, 2, () => st().playbackSpeed, (v) => st().setPlaybackSpeed(v), 'x'),
   bool('crossfade', 'Crossfade between tracks', () => st().crossfadeEnabled, (v) => st().setCrossfade(v, st().crossfadeDuration)),
