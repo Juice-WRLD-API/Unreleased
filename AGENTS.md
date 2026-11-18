@@ -1,6 +1,6 @@
 # Agent guide: Juice WRLD API and Unreleased
 
-**Version 1.88** · updated 2026-11-16. Bump the version and date whenever you
+**Version 1.89** · updated 2026-11-18. Bump the version and date whenever you
 change this file (minor for fixes and additions, major for rewrites).
 
 **Keep this file current.** If you find something in the docs or this file that
@@ -326,7 +326,7 @@ only tags `mp3`, `m4a`, `flac`, `opus`, `wav`, `aiff` and `aif`.
 **Community edits.** Home → Tools → Submit a remix or edit
 (`CommunityEditSubmitModal`, `lib/communityEditsApi.ts`, terminal `remix`,
 backend `docs/23-community-edits.md`). Approving files it in the `community` channel
-(never primary) at `Remixes & Edits/Community-Made/<uuid>/edit.<ext>`. The dialog sends the
+(never primary) at `Remixes & Edits/Community-Made/<uuid>/<title>.<ext>`. The dialog sends the
 file's SHA-256 to `check/` before uploading, and the server fingerprints the
 upload and answers 409 with a `match` (`target` file, song or pending) when
 it is too similar. Against other edits and every audio file in Files except

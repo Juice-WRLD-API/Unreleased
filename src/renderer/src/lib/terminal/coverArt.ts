@@ -6,6 +6,8 @@ import {
   type CoverArtStatus, type CoverArtSubmission,
 } from '../coverArtApi'
 import { dropCoverArtImage } from '../coverArtImages'
+import { searchCoverImages } from '../coverSuggestions'
+import { coverSearchQueries } from '../juicewrldApi'
 import { formatBytes } from '../format'
 import { pickLocalFile, saveBlob } from './pick'
 import { completeSongs, songFromArg } from './player'
@@ -136,4 +138,45 @@ const coverArtCommand: TermCommand = {
   },
 }
 
-export const COVER_ART_COMMANDS: TermCommand[] = [coverArtCommand]
+// The Personalize panel's "Found in API files" covers for a song, and picking
+// one as its personal cover. --all looks in every comp for this run; without it
+// the "Covers from every comp" setting (set all-comp-covers) decides.
+const COVERS_USAGE = 'covers <song> [--all] [--use n] [--clear]'
+const coversCommand: TermCommand = {
+  name: 'covers', group: 'Content',
+  usage: COVERS_USAGE,
+  description: 'Covers found in Files for a song (the Personalize panel\'s list). --use n makes one its personal cover, --clear removes it, --all searches every comp',
+  covers: ['coverSuggestions.searchCoverImages'],
+  complete: (before, partial) => completeSongs(before, partial),
+  run: async (args, ctx) => {
+    const { rest, bool, value } = parseArgs(args, ['use'])
+    if (rest.length === 0) fail(`usage: ${COVERS_USAGE}`)
+    const song = await songFromArg(rest.join(' '))
+    const st = useStore.getState()
+    if (bool.has('clear')) {
+      st.setSongCover(song.id, null)
+      ctx.print(`personal cover cleared for ${song.name}`, 'ok')
+      return
+    }
+    const allComps = bool.has('all') || st.coversFromAllComps
+    const hits = await searchCoverImages(coverSearchQueries(song.name, (song.track_titles ?? []).filter(Boolean)), allComps)
+    const use = value.get('use')
+    if (use !== undefined) {
+      const n = Number(use)
+      const hit = (Number.isInteger(n) && n >= 1 ? hits[n - 1] : undefined)
+        ?? fail(hits.length ? `pick a number from 1 to ${hits.length}` : `no covers found for ${song.name}`)
+      st.setSongCover(song.id, hit.url)
+      ctx.print(`${song.name} now uses ${hit.channel ? `${hit.channel}:` : ''}${hit.path}`, 'ok')
+      return
+    }
+    if (asJson(ctx, bool.has('json'), hits)) return
+    if (hits.length === 0) {
+      ctx.print(`no covers found for ${song.name}${allComps ? '' : ' (try --all for every comp)'}`, 'dim')
+      return
+    }
+    const compName = (slug?: string): string => slug ? (st.channels.find((c) => c.slug === slug)?.name ?? slug) : 'main'
+    ctx.print(`${table(hits.map((h, i) => [`${i + 1}`, compName(h.channel), h.path]))}\ncovers ${rest.join(' ')} --use <n> sets one`)
+  },
+}
+
+export const COVER_ART_COMMANDS: TermCommand[] = [coverArtCommand, coversCommand]

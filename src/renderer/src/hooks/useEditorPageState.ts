@@ -132,7 +132,6 @@ export function useEditorPageState(initialSongId: number | null = null) {
   // File picker for the cover image field (Cover URL / Image URL).
   const [pickingImage, setPickingImage] = useState(false)
   // Synced lyrics as a timestamp+text table (default) or the raw LRC text.
-  const [syncedTable,  setSyncedTable]  = useState(() => localStorage.getItem('editor:syncedFormat') !== 'raw')
   const [editingPropId, setEditingPropId] = useState<number | null>(null)
   // True while editing a 'create' proposal (new song) - has no backing song object yet
   const [isNewSongDraft, setIsNewSongDraft] = useState(false)
@@ -659,7 +658,6 @@ export function useEditorPageState(initialSongId: number | null = null) {
     sessionTitles, setSessionTitles, sessionTracking, setSessionTracking,
 
     lyricsTab, setLyricsTab, lyricsLoading, lyricsError, handleLyricsPaste,
-    syncedTable, setSyncedTable,
 
     submitState, submitError, submit,
     deleteState, setDeleteState, deleteError, submitDeletion,

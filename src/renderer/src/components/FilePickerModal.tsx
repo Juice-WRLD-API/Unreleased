@@ -79,7 +79,12 @@ interface Props {
 // Audio mode is the opposite: a song's `path` field in the API is the raw
 // storage path ("Compilation/1. Released Discography/…mp3") and the app builds
 // stream URLs from it, so handing back an absolute URL there would double-wrap.
-export default function FilePickerModal({ kind = 'image', songTitle, altTitles = [], onSelect, onClose, allowFolderSelect = false, title, multiple = false, onSelectMany, emptyFolderProposable = false, channel, switchableChannel = false }: Props): JSX.Element {
+export default function FilePickerModal({ kind = 'image', songTitle, altTitles = [], onSelect, onClose, allowFolderSelect = false, title, multiple = false, onSelectMany, emptyFolderProposable = false, channel, switchableChannel: switchableProp = false }: Props): JSX.Element {
+  // "Covers from every comp" opens every cover picker that isn't tied to one
+  // comp onto the switcher. Image picks come back as a download URL that
+  // carries the comp, so callers store them as they are.
+  const coversFromAllComps = useStore((s) => s.coversFromAllComps)
+  const switchableChannel = switchableProp || (kind === 'image' && !channel && coversFromAllComps)
   const storeChannel = useStore((s) => s.activeChannel)
   const channels = useStore((s) => s.channels)
   const loadChannels = useStore((s) => s.loadChannels)

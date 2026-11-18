@@ -23,7 +23,7 @@ import {
 import type { SongPreference, SongPrefMap, SongPrefPatch, WireSongPreference } from '../lib/songPrefs'
 import { getVersionGroup } from '../lib/versionsApi'
 import type { AdminTab } from '../hooks/useAdminQueue'
-import { advanceRotatedCover, resetCoverRotation } from '../lib/coverSuggestions'
+import { advanceRotatedCover, resetCoverRotation, resetCoverCandidates } from '../lib/coverSuggestions'
 import { setEraCoverRaw, replaceEraCovers, sanitizeEraCovers } from '../lib/eraCovers'
 import { setActiveChannelCache } from '../lib/activeChannelState'
 import {
@@ -372,6 +372,9 @@ interface AppState {
   // lib/coverRotation). Songs with a custom cover, and songs the storage has
   // no images for, are unaffected.
   rotateSuggestedCovers: boolean
+  // When enabled, cover suggestions, rotation and the cover pickers also look
+  // in the other comps (Files channels), not just the primary one.
+  coversFromAllComps: boolean
   // Per-era cover overrides (see lib/eraCovers): a cover the user picks for
   // an era replaces the API's shared placeholder on every unreleased song in
   // that era. Released songs, and songs with their own personal cover or a
@@ -755,6 +758,7 @@ interface AppActions {
   setWrldThemeBackground: (enabled: boolean) => void
   setPreferOgVersion: (enabled: boolean) => void
   setRotateSuggestedCovers: (enabled: boolean) => void
+  setCoversFromAllComps: (enabled: boolean) => void
   /** Sets (or, with raw = null, clears) the cover override for one era and
    *  redraws any visible tracks it affects. */
   setEraCoverOverride: (era: string, raw: string | null) => void
@@ -1928,6 +1932,7 @@ export const useStore = create<AppStore>((set, get, store) => ({
   wrldThemeBackground: ls.get<boolean>('wrldThemeBackground') ?? false,
   preferOgVersion: ls.get<boolean>('preferOgVersion') ?? false,
   rotateSuggestedCovers: ls.get<boolean>('rotateSuggestedCovers') ?? false,
+  coversFromAllComps: ls.get<boolean>('coversFromAllComps') ?? false,
   eraCovers: ls.get<Record<string, string>>('eraCovers') ?? {},
   mediaOverlayEnabled: ls.get<boolean>('mediaOverlayEnabled') ?? true,
   lastfmUser: getLastfmSession()?.name ?? null,
@@ -1952,6 +1957,11 @@ export const useStore = create<AppStore>((set, get, store) => ({
   setSleepTimer: (sleepTimerEnd) => set({ sleepTimerEnd }),
   setAudioOutput: (deviceId) => { set({ audioOutput: deviceId }); ls.set('audioOutput', deviceId) },
   setPreferOgVersion: (enabled) => { set({ preferOgVersion: enabled }); ls.set('preferOgVersion', enabled); get()._scheduleProfilePush(['userSettings']) },
+  setCoversFromAllComps: (enabled) => {
+    set({ coversFromAllComps: enabled })
+    ls.set('coversFromAllComps', enabled)
+    resetCoverCandidates()
+  },
   setRotateSuggestedCovers: (enabled) => {
     set({ rotateSuggestedCovers: enabled })
     ls.set('rotateSuggestedCovers', enabled)
@@ -2018,7 +2028,7 @@ export const useStore = create<AppStore>((set, get, store) => ({
     // A cover the user picked always wins � rotation fills gaps, it doesn't
     // override choices.
     if (get().songPrefs[songId]?.cover_url) return
-    advanceRotatedCover(songId)
+    advanceRotatedCover(songId, get().coversFromAllComps)
       // The rotated URL lives outside the store (lib/coverRotation), so the
       // re-derive is what actually moves it onto the visible tracks.
       .then((url) => { if (url) get()._reapplySongPref(songId) })

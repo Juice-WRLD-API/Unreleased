@@ -12,8 +12,6 @@ export function useAddSongModal(onSubmitted: () => void, onClose: () => void, ch
   updateField: ReturnType<typeof useProposalForm>['updateField']
   copiedFrom: string | null
   setCopiedFrom: (v: string | null) => void
-  syncedTable: boolean
-  setSyncedTable: React.Dispatch<React.SetStateAction<boolean>>
   pickingFile: boolean
   setPickingFile: (v: boolean) => void
   eras: JWApiEra[]
@@ -26,11 +24,10 @@ export function useAddSongModal(onSubmitted: () => void, onClose: () => void, ch
 } {
   // Every field lives in one reducer (lib/proposalForm.ts) instead of ~26
   // separate useState calls. Auxiliary UI-only state (copiedFrom
-  // banner, syncedTable toggle, file picker, eras, submit state) stays as
+  // banner, file picker, eras, submit state) stays as
   // plain useState here - it never becomes part of the proposal payload.
   const { formState: f, updateField, copyFrom: copyFromForm } = useProposalForm()
   const [copiedFrom, setCopiedFrom] = useState<string | null>(null)
-  const [syncedTable, setSyncedTable] = useState(() => localStorage.getItem('editor:syncedFormat') !== 'raw')
   const [pickingFile, setPickingFile] = useState(false)
   const [eras, setEras] = useState<JWApiEra[]>([])
   const [submitState, setSubmitState] = useState<'idle' | 'submitting' | 'submitted' | 'error'>('idle')
@@ -75,7 +72,7 @@ export function useAddSongModal(onSubmitted: () => void, onClose: () => void, ch
   }
 
   return {
-    f, updateField, copiedFrom, setCopiedFrom, syncedTable, setSyncedTable,
+    f, updateField, copiedFrom, setCopiedFrom,
     pickingFile, setPickingFile, eras, submitState, submitError, edNotes, setEdNotes, copyFrom, handleSubmit,
   }
 }

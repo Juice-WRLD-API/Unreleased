@@ -167,6 +167,7 @@ const SETTINGS_SEARCH_INDEX: { tab: Tab; label: string; sub?: string; electronOn
   { tab: 'playback', label: 'Pause when headphones disconnect', sub: 'And play again when they reconnect' },
   { tab: 'playback', label: 'Prefer OG version' },
   { tab: 'playback', label: 'Rotate suggested covers' },
+  { tab: 'playback', label: 'Covers from every comp', sub: 'Suggest and pick covers from every comp in Files, not just the main one' },
   { tab: 'playback', label: 'Era covers', sub: 'Custom cover art per era, used when a song has no cover of its own' },
   { tab: 'playback', label: 'Sleep timer' },
   { tab: 'general', label: 'Notification sound' },
@@ -511,6 +512,7 @@ export default function Settings({ floating = false }: { floating?: boolean }): 
     rememberQueue, setRememberQueue,
     preferOgVersion, setPreferOgVersion,
     rotateSuggestedCovers, setRotateSuggestedCovers,
+    coversFromAllComps, setCoversFromAllComps,
     mediaOverlayEnabled, setMediaOverlayEnabled,
     popoutWindows, setPopoutWindow,
     lyricsOffset, setLyricsOffset,
@@ -540,7 +542,7 @@ export default function Settings({ floating = false }: { floating?: boolean }): 
     fullEraNames, setFullEraNames,
     autoReportErrors, setAutoReportErrors,
     embedSongInfoOnDownload, setEmbedSongInfoOnDownload,
-  } = useStorePick('setShowSettings', 'setActiveView', 'account', 'theme', 'setTheme', 'customSkins', 'saveCustomSkin', 'deleteCustomSkin', 'accentColor', 'setAccentColor', 'settingsTab', 'setSettingsTab', 'sidebarPosition', 'setSidebarPosition', 'appMenuPosition', 'setAppMenuPosition', 'navStyle', 'setNavStyle', 'autoHideNav', 'setAutoHideNav', 'autoHideNavZone', 'setAutoHideNavZone', 'navOrder', 'setNavOrder', 'navVisibility', 'setNavItemVisible', 'homeSectionVisibility', 'setHomeSectionVisible', 'navControlOrder', 'setNavControlOrder', 'navControlVisibility', 'setNavControlVisible', 'audioOutput', 'setAudioOutput', 'crossfadeEnabled', 'crossfadeDuration', 'setCrossfade', 'pauseFadeEnabled', 'setPauseFade', 'pauseOnDisconnect', 'setPauseOnDisconnect', 'rememberQueue', 'setRememberQueue', 'preferOgVersion', 'setPreferOgVersion', 'rotateSuggestedCovers', 'setRotateSuggestedCovers', 'mediaOverlayEnabled', 'setMediaOverlayEnabled', 'popoutWindows', 'setPopoutWindow', 'lyricsOffset', 'setLyricsOffset', 'sleepTimerEnd', 'setSleepTimer', 'hotkeyBindings', 'setHotkeyBinding', 'resetHotkeyBindings', 'resetGlobalHotkeyBindings', 'hotkeySeekSeconds', 'setHotkeySeekSeconds', 'globalHotkeysEnabled', 'setGlobalHotkeysEnabled', 'globalHotkeyBindings', 'setGlobalHotkeyBinding', 'libraryFolders', 'addLibraryFolder', 'removeLibraryFolder', 'scanLibrary', 'libraryScanning', 'libraryLastScanned', 'libraryAutoRefresh', 'setLibraryAutoRefresh', 'developerMode', 'setDeveloperMode', 'lastfmUser', 'setLastfmUser', 'lastfmEnabled', 'setLastfmEnabled', 'appTextScale', 'setAppTextScale', 'lyricsScale', 'setLyricsScale', 'lyricsAlign', 'setLyricsAlign', 'lyricsBlur', 'setLyricsBlur', 'lyricsBlurAmount', 'setLyricsBlurAmount', 'lyricsColorActive', 'setLyricsColorActive', 'lyricsColorInactive', 'setLyricsColorInactive', 'appFont', 'setAppFont', 'lyricsFont', 'setLyricsFont', 'gradientsEnabled', 'setGradientsEnabled', 'surfaceGradientsEnabled', 'setSurfaceGradientsEnabled', 'glassRefraction', 'setGlassRefraction', 'wrldThemeBackground', 'setWrldThemeBackground', 'refreshPlaylists', 'fullEraNames', 'setFullEraNames', 'logoutAccount', 'setShowUserAuth', 'playlistHeroEnabledDark', 'playlistHeroEnabledLight', 'setPlaylistHeroEnabled', 'autoReportErrors', 'setAutoReportErrors', 'embedSongInfoOnDownload', 'setEmbedSongInfoOnDownload')
+  } = useStorePick('setShowSettings', 'setActiveView', 'account', 'theme', 'setTheme', 'customSkins', 'saveCustomSkin', 'deleteCustomSkin', 'accentColor', 'setAccentColor', 'settingsTab', 'setSettingsTab', 'sidebarPosition', 'setSidebarPosition', 'appMenuPosition', 'setAppMenuPosition', 'navStyle', 'setNavStyle', 'autoHideNav', 'setAutoHideNav', 'autoHideNavZone', 'setAutoHideNavZone', 'navOrder', 'setNavOrder', 'navVisibility', 'setNavItemVisible', 'homeSectionVisibility', 'setHomeSectionVisible', 'navControlOrder', 'setNavControlOrder', 'navControlVisibility', 'setNavControlVisible', 'audioOutput', 'setAudioOutput', 'crossfadeEnabled', 'crossfadeDuration', 'setCrossfade', 'pauseFadeEnabled', 'setPauseFade', 'pauseOnDisconnect', 'setPauseOnDisconnect', 'rememberQueue', 'setRememberQueue', 'preferOgVersion', 'setPreferOgVersion', 'rotateSuggestedCovers', 'setRotateSuggestedCovers', 'coversFromAllComps', 'setCoversFromAllComps', 'mediaOverlayEnabled', 'setMediaOverlayEnabled', 'popoutWindows', 'setPopoutWindow', 'lyricsOffset', 'setLyricsOffset', 'sleepTimerEnd', 'setSleepTimer', 'hotkeyBindings', 'setHotkeyBinding', 'resetHotkeyBindings', 'resetGlobalHotkeyBindings', 'hotkeySeekSeconds', 'setHotkeySeekSeconds', 'globalHotkeysEnabled', 'setGlobalHotkeysEnabled', 'globalHotkeyBindings', 'setGlobalHotkeyBinding', 'libraryFolders', 'addLibraryFolder', 'removeLibraryFolder', 'scanLibrary', 'libraryScanning', 'libraryLastScanned', 'libraryAutoRefresh', 'setLibraryAutoRefresh', 'developerMode', 'setDeveloperMode', 'lastfmUser', 'setLastfmUser', 'lastfmEnabled', 'setLastfmEnabled', 'appTextScale', 'setAppTextScale', 'lyricsScale', 'setLyricsScale', 'lyricsAlign', 'setLyricsAlign', 'lyricsBlur', 'setLyricsBlur', 'lyricsBlurAmount', 'setLyricsBlurAmount', 'lyricsColorActive', 'setLyricsColorActive', 'lyricsColorInactive', 'setLyricsColorInactive', 'appFont', 'setAppFont', 'lyricsFont', 'setLyricsFont', 'gradientsEnabled', 'setGradientsEnabled', 'surfaceGradientsEnabled', 'setSurfaceGradientsEnabled', 'glassRefraction', 'setGlassRefraction', 'wrldThemeBackground', 'setWrldThemeBackground', 'refreshPlaylists', 'fullEraNames', 'setFullEraNames', 'logoutAccount', 'setShowUserAuth', 'playlistHeroEnabledDark', 'playlistHeroEnabledLight', 'setPlaylistHeroEnabled', 'autoReportErrors', 'setAutoReportErrors', 'embedSongInfoOnDownload', 'setEmbedSongInfoOnDownload')
   const wrldWidgets = useVizStore(s => s.wrldWidgets)
   const setWrldWidgets = useVizStore(s => s.setWrldWidgets)
   const wrldFm = useVizStore(s => s.wrldFm)
@@ -1951,6 +1953,13 @@ export default function Settings({ floating = false }: { floating?: boolean }): 
                     label="Rotate suggested covers"
                     sub="Songs without a custom cover show a different cover from the API files each play"
                     labelExtra={<div className="ml-2 translate-y-[3px]"><Toggle on={rotateSuggestedCovers} onClick={() => setRotateSuggestedCovers(!rotateSuggestedCovers)} /></div>}
+                  />
+                  <Row
+                    icon={Images}
+                    iconColor="#0ea5e9"
+                    label="Covers from every comp"
+                    sub="Suggest and pick covers from every comp in Files, not just the main one"
+                    labelExtra={<div className="ml-2 translate-y-[3px]"><Toggle on={coversFromAllComps} onClick={() => setCoversFromAllComps(!coversFromAllComps)} /></div>}
                   />
                   <div className="py-2">
                     <EraCoversSection />

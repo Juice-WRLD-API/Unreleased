@@ -3,7 +3,7 @@ import { Loader2, Check, AlertCircle, ChevronLeft, ChevronDown, ChevronUp, Music
 import { useStorePick, IS_FLOAT_WINDOW } from '../store/useStore'
 import { attachToMainWindow, broadcastLibraryTrackUpdate } from '../lib/windowSync'
 import { LibraryTrack } from '../types'
-import { BasicRow, Card, FieldGrid, FieldRow, TextareaRow, SyncedLyricsTable } from './EditorPage'
+import { BasicRow, Card, FieldGrid, FieldRow, TextareaRow } from './EditorPage'
 import FilePickerModal from './FilePickerModal'
 import { ELECTRON_TITLEBAR_CLEARANCE_X } from '../lib/platform'
 
@@ -80,7 +80,6 @@ export default function LocalEditorPage(): JSX.Element {
   const [artLoading, setArtLoading] = useState(false)
   const [basicView, setBasicView] = useState(() => localStorage.getItem('editor:view') === 'basic')
   const [showMore, setShowMore] = useState(false)
-  const [syncedTable, setSyncedTable] = useState(() => localStorage.getItem('editor:syncedFormat') !== 'raw')
 
   // In the pop-out window there's no in-app page to return to — closing the
   // whole window is the equivalent of "back" (mirrors EditorPage's pop-out).
@@ -323,17 +322,6 @@ export default function LocalEditorPage(): JSX.Element {
 
   const lyricsActions = (
     <div className="flex items-center gap-1">
-      {lyricsTab === 'synced' && (
-        <button
-          onClick={() => {
-            setSyncedTable(v => !v)
-            localStorage.setItem('editor:syncedFormat', syncedTable ? 'raw' : 'table')
-          }}
-          title={syncedTable ? 'Edit the raw LRC text' : 'Edit as timestamped lines'}
-          className="px-2 py-1 rounded-lg text-[11px] font-semibold text-text-muted opacity-60 hover:opacity-100 transition-opacity">
-          {syncedTable ? 'Raw' : 'Lines'}
-        </button>
-      )}
       {(['lyrics', 'synced'] as LyricsTab[]).map(tab => {
         const active = lyricsTab === tab
         const dirty = tab === 'lyrics' ? changed('lyrics') : changed('syncedLyrics')
@@ -360,8 +348,6 @@ export default function LocalEditorPage(): JSX.Element {
             changed('lyrics') ? 'border-accent/40' : 'border-[var(--border)] focus:border-accent/40'
           }`}
         />
-      ) : syncedTable ? (
-        <SyncedLyricsTable value={fields.syncedLyrics} onChange={v => set('syncedLyrics', v)} />
       ) : (
         <textarea
           aria-label="Synced lyrics" rows={basicView ? 12 : 15} value={fields.syncedLyrics} onChange={e => set('syncedLyrics', e.target.value)}
