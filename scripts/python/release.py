@@ -5,18 +5,21 @@ Unreleased Music Player — Interactive Release Script
 Just run it — no arguments needed.
 
 The very first question is whether this is a beta. A beta skips ALL git and
-GitHub work (no sync, commit, push, web sync or release): pick a version, add
-notes, build the installer locally and upload it to juicewrldapi.com's gated
-beta backend. The rest of this list is the stable path.
+GitHub work (no commit, push or release): the next beta version is chosen
+automatically, the Windows installer is built locally, and it is uploaded to
+juicewrldapi.com's gated beta backend. The rest of this list is the stable path.
+
+A push to app whose subject does not start with vX.Y.Z is itself a release:
+.github/workflows/auto-release.yml bumps the patch version, tags it and
+starts the platform builds. This script's commit message is vX.Y.Z, so that
+workflow leaves the push alone and does not bump twice.
 
 Prompts are asked up front, then everything else runs unattended:
-  1. Fast-forward app onto origin/app. The previous release's web push
-     fires the sync-web-to-app workflow, which advances origin/app behind
-     our back — so without this every release after a successful one is
-     rejected at step 7 and rolled back. Runs before the version bump,
-     while the tree is still clean.
+  1. Fast-forward app onto origin/app (--ff-only). Other pushes, including
+     auto-release version bumps, move origin/app. A diverged branch stops
+     the script. Runs before the version bump, while the tree is still clean.
   2. Pick a version (bump patch / minor / major, or keep / custom)
-  3. (no prompt) the commit message is just the version
+  3. (no prompt) the commit message is vX.Y.Z, which auto-release skips
   4. Enter release notes (blank = auto-generate from commits)
   ── nothing left to answer past this point ──
   5. Commit ONLY the package.json version bump to the desktop branch (app);
@@ -25,12 +28,14 @@ Prompts are asked up front, then everything else runs unattended:
      right here, since step 9's beta publish uploads the .exe this
      produces). Stable builds are NOT done locally anymore — see step 9.
   7. Push the desktop branch to GitHub (origin)
-  8. Sync the web branch (copies src/ + package.json from app, skips
-     electron/) — skipped for beta releases, betas are desktop-only
+  8. Leave the web branch alone. It carries its own UI, and copying app's
+     src/ over it would wipe that. Platform branches are ported by hand.
   9. Stable: create the GitHub release on origin, already published, with
-     no assets attached. That publish event is what triggers
+     no assets attached, using GH_TOKEN. That publish event triggers
      .github/workflows/build-{windows,mac,linux}.yml — every platform
-     builds in CI and attaches its own installer.
+     builds in CI and attaches its own installer. (auto-release creates its
+     own releases with GITHUB_TOKEN, which does not fire that event, and
+     starts the same workflows with workflow_dispatch instead.)
      Beta: POST the local build from step 6 to
      juicewrldapi.com/beta/admin/versions/ (multipart; needs BETA_ADMIN_TOKEN
      in .env.local - an administrator's API token, with 2FA enabled).
@@ -370,13 +375,11 @@ def step_sync_remote(state):
     """Fast-forward the local app branch onto origin before anything is built,
     committed or pushed.
 
-    Without this, every release that follows a successful one fails. The tail of
-    a release pushes the web branch, which fires .github/workflows/
-    sync-web-to-app.yml; that merges web back into app and pushes, so origin/app
-    advances behind our back. The next run then commits onto a stale app, builds
-    for two minutes, and only discovers the problem at `git push` — where the
-    rejection triggers rollback()'s `git reset --hard`, throwing the just-made
-    commit away (recoverable only via reflog).
+    origin/app keeps moving: other people push, and auto-release.yml commits a
+    vX.Y.Z bump of its own after a push whose subject is not already a version.
+    This script no longer pushes the web branch, and there is no
+    sync-web-to-app workflow. Committing onto a stale app still fails at
+    `git push`, and rollback() then soft-resets the local version commit.
 
     Runs before the version bump so the tree is still clean: a fast-forward that
     has to overwrite a locally-modified package.json would abort. Deliberately
@@ -832,7 +835,7 @@ def main(force_beta=False):
         state["original_version"] = load_version()
 
         # ── Every user prompt happens first — once these are answered, the
-        #    rest of the release runs unattended (build, push, sync, commit).
+        #    rest of the release runs unattended (commit, push, publish).
         if force_beta:
             # A beta asks nothing: version and notes are picked for it.
             version = auto_beta_version(load_version())
