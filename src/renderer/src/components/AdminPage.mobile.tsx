@@ -21,6 +21,7 @@ import ReportsTab from './ReportsTab.mobile'
 import FeedbackTab from './FeedbackTab'
 import CompProposalsTab from './CompProposalsTab.mobile'
 import CoverArtTab from './CoverArtTab'
+import ArtistFolderField from './ArtistFolderField'
 import CommunityEditsTab from './CommunityEditsTab'
 import ChannelsTab from './ChannelsTab.mobile'
 import NewsChannelsTab from './NewsChannelsTab'
@@ -1072,6 +1073,7 @@ function UsersTab({ users, setUsers, currentUserId }: { users: AdminUser[]; setU
                           ['Contributor', !!u.contributor_enabled, (on: boolean) => ({ contributor_enabled: on })],
                           ['Manager', !!u.manager_enabled, (on: boolean) => ({ manager_enabled: on })],
                           ['News', !!u.news_enabled, (on: boolean) => ({ news_enabled: on })],
+                          ['Artist', !!u.artist_enabled, (on: boolean) => ({ artist_enabled: on })],
                         ] as const).map(([label, checked, payload]) => (
                           <label key={label} className="flex items-center justify-between gap-2 text-sm text-text-secondary cursor-pointer">
                             {label}
@@ -1079,6 +1081,7 @@ function UsersTab({ users, setUsers, currentUserId }: { users: AdminUser[]; setU
                               onChange={v => doUpdate(u.user_id, payload(v))} />
                           </label>
                         ))}
+                        <ArtistFolderField user={u} onSave={folder => doUpdate(u.user_id, { artist_folder: folder })} />
                       </div>
                       <div className="grid grid-cols-2 gap-2">
                         <button onClick={() => doUpdate(u.user_id, { is_active: !u.is_active })}

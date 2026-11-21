@@ -130,6 +130,7 @@ const roleBits = (u: AdminUser): string[] => [
   ...(u.contributor_enabled ? ['contributor'] : []),
   ...(u.manager_enabled ? ['manager'] : []),
   ...(u.news_enabled ? ['news'] : []),
+  ...(u.artist_enabled ? [`artist (Cover Arts/${u.artist_folder ?? ''})`] : []),
 ]
 
 async function describeUser(u: DirUser): Promise<string> {

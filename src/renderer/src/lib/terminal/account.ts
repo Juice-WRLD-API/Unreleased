@@ -3,7 +3,7 @@ import { getSongById } from '../juicewrldApi'
 import {
   changePassword, changeUsername, checkUsername, compressImageFile, decideLoginApproval, getDiscordAuthUrl, getFavorites, getMe, getOtpSetup, listLoginApprovals, pollLoginApproval,
   confirmOtpSetup, removeAvatar, requestLoginApproval, updateAvatar, updateBio, updateDisplayName,
-  updateNowPlaying, updatePrivacySettings, updateUserSettings, discordRedirectUri, type AccountUser,
+  getNowPlaying, updateNowPlaying, updatePrivacySettings, updateUserSettings, discordRedirectUri, type AccountUser,
   API_KEY_SCOPES, createApiKey, isManagerAnywhere, deleteApiKey, listApiKeys, updateApiKey, type ApiKeyScope, type UserApiKey,
 } from '../userApi'
 import { addPasskey, deletePasskey, getPasskeySupport, listPasskeys, renamePasskey, type Passkey } from '../passkeyApi'
@@ -323,8 +323,17 @@ export const ACCOUNT_COMMANDS: TermCommand[] = [
       const account = signedIn()
       const [sub = '', ...more] = args.trim().split(/\s+/).filter(Boolean)
       if (!sub) {
-        const np = account.now_playing as { song?: number; path?: string; position?: number; updated_at?: string } | undefined
-        if (!np?.song) { ctx.print('nothing shown as now playing', 'dim'); return }
+        // What anyone else (a bot, a profile page) reads from /np/. The cached
+        // account copy is only as fresh as the last account load, since the
+        // app's sharer never writes its pushes back into it.
+        const live = await getNowPlaying(account.id).catch(() => null)
+        const np = (live ? live.now_playing : account.now_playing) as { song?: number; path?: string; position?: number; updated_at?: string } | null | undefined
+        if (!np?.song) {
+          ctx.print(account.public_now_playing
+            ? 'nothing shown as now playing (it clears on pause, radio and Files tracks, and after 5 minutes without an update)'
+            : 'nothing shown as now playing: "Show what you are listening to" is off (set public-now-playing on)', 'dim')
+          return
+        }
         const song = await getSongById(np.song).catch(() => null)
         ctx.print(`${song?.name ?? `song #${np.song}`}  ${np.position ? `at ${Math.round(np.position)}s` : ''}${np.updated_at ? `  ·  ${relativeTime(np.updated_at)}` : ''}`)
       } else if (sub.toLowerCase() === 'clear') {

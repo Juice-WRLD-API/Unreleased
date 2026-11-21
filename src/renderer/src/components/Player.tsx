@@ -2548,6 +2548,12 @@ export default function Player(): JSX.Element {
     'focus-search':     () => {
       // The open view gets first claim (e.g. a playlist's collapsed track search).
       if (!window.dispatchEvent(new Event('app:focus-search', { cancelable: true }))) return
+      // Home has no song search of its own: Ctrl+F goes to the Tracker's,
+      // which focuses its search box on mount.
+      if (useStore.getState().activeView === 'home') {
+        useStore.getState().setActiveView('api-tracker')
+        return
+      }
       const input = document.querySelector<HTMLInputElement>('input[placeholder*="Search" i]')
       input?.focus()
       input?.select()

@@ -1,4 +1,4 @@
-import { SearchCode, SquareTerminal, HardDrive, ListMusic, Heart, BookOpen, Newspaper, Gamepad2, BarChart3, Shield, House, User, Download, Upload, Info, Settings, Bell } from 'lucide-react'
+import { SearchCode, SquareTerminal, HardDrive, ListMusic, Heart, BookOpen, Newspaper, Gamepad2, BarChart3, Shield, House, User, Download, Upload, Info, Settings, Bell, MessagesSquare } from 'lucide-react'
 import type { ReactNode } from 'react'
 import logo from '../assets/logo.png'
 import type { ViewType } from '../types'
@@ -172,7 +172,7 @@ export function isNavItemVisible(item: NavItemDef, visibility: Record<string, bo
 // the Sidebar owns their behavior and renders each by id. `login` and the
 // collapse toggle are deliberately NOT here: they stay pinned so the user can
 // never hide the only ways to sign in or re-expand a collapsed menu.
-export type NavControlId = 'profile' | 'uploads' | 'notifications' | 'diagnostics' | 'download' | 'settings'
+export type NavControlId = 'profile' | 'uploads' | 'fmchat' | 'notifications' | 'diagnostics' | 'download' | 'settings'
 
 export interface NavControlDef {
   id: NavControlId
@@ -184,6 +184,7 @@ export interface NavControlDef {
 export const NAV_CONTROLS: NavControlDef[] = [
   { id: 'profile', label: 'Profile', icon: <User size={18} /> },
   { id: 'uploads', label: 'Transfers', icon: <Upload size={18} /> },
+  { id: 'fmchat', label: '999 FM chat', icon: <MessagesSquare size={18} /> },
   { id: 'notifications', label: 'Notifications', icon: <Bell size={18} /> },
   { id: 'diagnostics', label: 'Diagnostics', icon: <Info size={18} /> },
   { id: 'download', label: 'Download app', icon: <Download size={18} /> },
@@ -228,6 +229,7 @@ export function isNavControlAvailable(id: NavControlId, ctx: NavControlCtx): boo
     case 'download': return !ctx.isElectron
     case 'diagnostics': return ctx.developerMode
     case 'uploads': return ctx.hasUploads
+    case 'fmchat': return true
     case 'notifications': return true
     case 'settings': return true
   }

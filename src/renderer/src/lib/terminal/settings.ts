@@ -151,7 +151,7 @@ const SETTINGS: Setting[] = [
   choice('viz-quality','Visualizer quality', pills('low', 'medium', 'high', 'ultra'), () => vz().vizQuality, (v) => vz().setVizQuality(v as Quality)),
   choice('viz-boost', 'Visualizer input boost', pills('off', 'auto', '2', '4', '8'), () => vz().vizBoost, (v) => vz().setVizBoost(v as Boost)),
   choice('viz-cycle', 'Switch visualizer automatically', pills('off', 'track', 'album'), () => vz().vizCycle, (v) => vz().setVizCycle(v as VizCycle)),
-  choice('wrld-videos', 'A released song’s video from Files in place of the WRLD visualizer: off, music videos, or visualizers and lyric videos too', pills('off', 'music', 'all'), () => vz().wrldVideos, (v) => vz().setWrldVideos(v as MusicVideoChoice)),
+  choice('wrld-videos', 'A released song’s video from Files in place of the WRLD visualizer: off, music videos (a visualizer when a song has none), or lyric videos too', pills('off', 'music', 'all'), () => vz().wrldVideos, (v) => vz().setWrldVideos(v as MusicVideoChoice)),
   bool('wrld-widgets', 'WRLD shows the desktop player, playlist and clock instead of its own player', () => vz().wrldWidgets, (v) => vz().setWrldWidgets(v)),
   bool('wrld-fm', 'The 999 FM card (votes, suggestions, chat) in WRLD’s widgets while 999 FM is on, or opened without it', () => vz().wrldFm, (v) => vz().setWrldFm(v)),
   bool('wrld-fm-sound', 'Play the notification sound for new 999 FM chat lines and votes in WRLD’s 999 FM card', () => vz().wrldFmSound, (v) => vz().setWrldFmSound(v)),

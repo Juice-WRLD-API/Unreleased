@@ -1,5 +1,6 @@
 import React, { useEffect, useLayoutEffect, useRef, useState, Suspense } from 'react'
 import { useStore, useStorePick } from './store/useStore'
+import { useRadioChatStore } from './store/radioChatStore'
 import { setToken, getToken } from './lib/userApi'
 import { useThemeEffects } from './lib/themeEffects'
 import { runWhenIdle, isStandalonePWA } from './lib/platform'
@@ -144,12 +145,14 @@ const CommunityEditSubmitModal = lazyOverlay(() => import('./components/Communit
 const BulkEditModal = lazyOverlay(() => import('./components/BulkEditModal'))
 const UploadManager = lazyOverlay(() => import('./components/UploadManager'))
 const NotificationCenter = lazyOverlay(() => import('./components/NotificationCenter'))
+const FmChatPopup = lazyOverlay(() => import('./components/FmChatPopup'))
 const GlobalSongInfoHost = lazyOverlay(async () => ({ default: (await import('./components/SongInfoModal')).GlobalSongInfoHost }))
 
 
 
 export default function App(): JSX.Element {
   const showRecognition = useStore((s) => s.showRecognition)
+  const fmChatOpen = useRadioChatStore((s) => s.popupOpen)
   const { showNowPlaying, showQueue, showSettings, setShowSettings, showDiagnostics, setShowDiagnostics, showUploadManager, setShowUploadManager, showNotifications, setShowNotifications, activeView, previousView, sidebarPosition, navStyle, autoHideNav, loadAccount, completeDiscordLogin, showUserAuth, setShowUserAuth, prefetchApiData, refreshPlaylists, heroBleedTop, navOrder, navVisibility, activeChannel, bulkEdit, infoSongId } = useStorePick(
     'showNowPlaying', 'showQueue', 'showSettings', 'setShowSettings', 'showDiagnostics', 'setShowDiagnostics', 'showUploadManager', 'setShowUploadManager', 'showNotifications', 'setShowNotifications', 'activeView', 'previousView', 'sidebarPosition', 'navStyle', 'autoHideNav', 'loadAccount', 'completeDiscordLogin', 'showUserAuth', 'setShowUserAuth', 'prefetchApiData', 'refreshPlaylists', 'heroBleedTop', 'navOrder', 'navVisibility', 'activeChannel', 'bulkEdit', 'infoSongId')
   // What renders behind WRLD - WRLD is a full-screen overlay on top of
@@ -554,6 +557,12 @@ export default function App(): JSX.Element {
       {showNotifications && (
         <ErrorBoundary variant="overlay" onDismiss={() => setShowNotifications(false)}>
           <NotificationCenter />
+        </ErrorBoundary>
+      )}
+      {/* WRLD has the same chat in its FM panel, so the pop-up waits there. */}
+      {fmChatOpen && activeView !== 'wrld' && (
+        <ErrorBoundary variant="overlay" onDismiss={() => useRadioChatStore.getState().setPopupOpen(false)}>
+          <FmChatPopup />
         </ErrorBoundary>
       )}
       {showUserAuth && (

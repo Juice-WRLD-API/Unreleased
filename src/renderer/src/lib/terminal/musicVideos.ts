@@ -45,7 +45,7 @@ export const MUSIC_VIDEO_COMMANDS: TermCommand[] = [
   {
     name: 'musicvideo', aliases: ['mvideo'], group: 'Player',
     usage: 'musicvideo [show] [<song>] [--all] · list [text] · resync [<song>] · pick <N|auto|none> · default <N|auto|none> [-- <song>] · defaults',
-    description: 'The song’s official video from Files that WRLD plays in place of the visualizer, and where each part of the song is in it. The playing song unless one is named; --all also looks at visualizers and lyric videos. resync works the timing out again. pick chooses the playing song’s video in WRLD by its number from musicvideo (auto: the best that lines up; none: the visualizer). default sets it for every player (administrators), defaults lists them',
+    description: 'The song’s official video from Files that WRLD plays in place of the visualizer, and where each part of the song is in it. The playing song unless one is named; visualizers stand in when no music video lines up, and --all also looks at lyric videos. resync works the timing out again. pick chooses the playing song’s video in WRLD by its number from musicvideo (auto: the best that lines up; none: the visualizer). default sets it for every player (administrators), defaults lists them',
     covers: ['musicVideoDefaultsApi.getMusicVideoDefaults', 'musicVideoDefaultsApi.getMusicVideoDefaultsAdmin', 'musicVideoDefaultsApi.setMusicVideoDefault', 'musicVideoDefaultsApi.clearMusicVideoDefault', 'musicVideos.loadMusicVideoIndex', 'musicVideos.findMusicVideo', 'musicVideos.chooseMusicVideo', 'musicVideos.musicVideoTargetFor', 'musicVideos.musicVideoTargetForSong', 'musicVideos.musicVideoTargetForTrack', 'videoSync.alignMusicVideo'],
     complete: (before, partial) => (before.length === 0 ? SUBS.filter((s) => s.startsWith(partial.toLowerCase()))
       : before[0] === 'pick' || before[0] === 'default' ? ['auto', 'none'].filter((w) => w.startsWith(partial.toLowerCase()))
@@ -127,7 +127,7 @@ export const MUSIC_VIDEO_COMMANDS: TermCommand[] = [
         : []
       if (!match) {
         ctx.print([every.length
-          ? `${t.name}: ${every.length} video${every.length === 1 ? '' : 's'} in Files, but ${choice === 'music' ? 'no music video holds the song (try --all for visualizers and lyric videos)' : 'none of them holds the song'}`
+          ? `${t.name}: ${every.length} video${every.length === 1 ? '' : 's'} in Files, but ${choice === 'music' ? 'no music video or visualizer holds the song (try --all for lyric videos)' : 'none of them holds the song'}`
           : `${t.name} has no video in Files`, ...listing].join('\n'), 'dim')
         return
       }

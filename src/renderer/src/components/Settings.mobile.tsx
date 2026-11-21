@@ -25,6 +25,7 @@ import { hasChatAccess, useChatStore } from '../store/chatStore'
 import ChatDevices from './chat/ChatDevices'
 import MyCdnNodes from './MyCdnNodes'
 import MyCoverArt from './MyCoverArt'
+import ArtistCovers from './ArtistCovers'
 import MyCommunityEdits from './MyCommunityEdits'
 import ApiKeys from './ApiKeys'
 import Passkeys from './Passkeys'
@@ -1050,6 +1051,7 @@ export default function Settings(): JSX.Element {
                         <ChatKeyTransfer userId={account.id} />
                       </SettingsCard>
                     )}
+                    {account?.is_artist && <SettingsCard title="Artist folder"><ArtistCovers /></SettingsCard>}
                     <SettingsCard title="My cover art">
                       <MyCoverArt />
                     </SettingsCard>

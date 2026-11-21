@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import ThemedCheckbox from './ThemedCheckbox'
 import {
   Loader2, User, ChevronLeft, ShieldCheck, Wrench, Play, Music2, History, ListMusic, Lock,
-  BarChart3, MoreHorizontal, ListEnd, Link as LinkIcon, Folder, MessageCircle, BellOff, Bell, Heart, Rows3, Check, X,
+  BarChart3, MoreHorizontal, ListEnd, Link as LinkIcon, Folder, MessageCircle, BellOff, Bell, Heart, Rows3, Check, X, Palette,
 } from 'lucide-react'
 import { useStore, useStorePick } from '../store/useStore'
 import { useChatStore } from '../store/chatStore'
@@ -30,6 +30,7 @@ import { clickable } from '../lib/a11y'
 import { initial } from '../lib/format'
 import { relativeTime } from './adminShared'
 import ContextMenu from './ContextMenu'
+import ArtistFolderField from './ArtistFolderField'
 import { showAppToast } from '../lib/appToast'
 
 // approveBlocked: comp-only gate (delete_folder) - see compApproveBlockedReason.
@@ -575,7 +576,7 @@ export default function PublicProfileView(): JSX.Element {
         <div className="flex-1 min-w-0">
           <h1 className="text-title1 md:text-2xl md:font-bold md:tracking-normal text-text-primary truncate">{profile.display_name}</h1>
           <p className="text-subhead md:text-sm md:tracking-normal text-text-secondary md:text-text-muted truncate">@{profile.username}</p>
-          {(profile.is_editor || profile.is_contributor || profile.is_donor) && (
+          {(profile.is_editor || profile.is_contributor || profile.is_artist || profile.is_donor) && (
             <div className="flex items-center gap-2 mt-1">
               {profile.is_editor && (
                 <span className="flex items-center gap-1 text-xs font-semibold text-accent bg-accent/10 px-2 py-0.5 rounded-full">
@@ -585,6 +586,11 @@ export default function PublicProfileView(): JSX.Element {
               {profile.is_contributor && (
                 <span className="flex items-center gap-1 text-xs font-semibold text-text-secondary bg-surface-overlay px-2 py-0.5 rounded-full">
                   <Wrench size={12} /> Contributor
+                </span>
+              )}
+              {profile.is_artist && (
+                <span className="flex items-center gap-1 text-xs font-semibold text-text-secondary bg-surface-overlay px-2 py-0.5 rounded-full">
+                  <Palette size={12} /> Artist
                 </span>
               )}
               {profile.is_donor && (
@@ -675,6 +681,7 @@ export default function PublicProfileView(): JSX.Element {
                 ['Contributor', !!adminUser.contributor_enabled, (on: boolean) => ({ contributor_enabled: on })],
                 ['Manager', !!adminUser.manager_enabled, (on: boolean) => ({ manager_enabled: on })],
                 ['News', !!adminUser.news_enabled, (on: boolean) => ({ news_enabled: on })],
+                ['Artist', !!adminUser.artist_enabled, (on: boolean) => ({ artist_enabled: on })],
               ] as const).map(([label, checked, payload]) => (
                 <label key={label} className="flex items-center justify-between gap-2 text-sm text-text-secondary cursor-pointer">
                   {label}
@@ -682,6 +689,7 @@ export default function PublicProfileView(): JSX.Element {
                     onChange={(on) => void doAdminUpdate(payload(on))} />
                 </label>
               ))}
+              <ArtistFolderField user={adminUser} onSave={(folder) => void doAdminUpdate({ artist_folder: folder })} />
             </div>
             <div className="grid grid-cols-2 gap-2">
               <button onClick={() => void doAdminUpdate({ is_active: !adminUser.is_active })}

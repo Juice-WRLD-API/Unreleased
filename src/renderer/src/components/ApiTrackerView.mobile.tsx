@@ -182,7 +182,9 @@ const SongRow = memo(function SongRow({
   const fullEraNames = useStore((s) => s.fullEraNames)
   const track = songToTrack(song)
   const title = pref?.name || song.name
-  const canPlay = !!song.path
+  // Sessions carry no path of their own: the Player looks up the session edit
+  // when one is played, so they stay tappable.
+  const canPlay = !!song.path || song.category === 'recording_session'
   const isCurrent = playingId === `jw-${song.id}`
 
   const press = useLongPress({
@@ -239,7 +241,9 @@ const DetailedSongRow = memo(function DetailedSongRow({
   const detailFields = useStore((s) => s.trackerMobileDetailFields)
   const track = songToTrack(song)
   const title = pref?.name || song.name
-  const canPlay = !!song.path
+  // Sessions carry no path of their own: the Player looks up the session edit
+  // when one is played, so they stay tappable.
+  const canPlay = !!song.path || song.category === 'recording_session'
   const isCurrent = playingId === `jw-${song.id}`
 
   const press = useLongPress({
@@ -300,7 +304,9 @@ const SongCard = memo(function SongCard({
   const fullEraNames = useStore((s) => s.fullEraNames)
   const track = songToTrack(song)
   const title = pref?.name || song.name
-  const canPlay = !!song.path
+  // Sessions carry no path of their own: the Player looks up the session edit
+  // when one is played, so they stay tappable.
+  const canPlay = !!song.path || song.category === 'recording_session'
   const isCurrent = playingId === `jw-${song.id}`
 
   const press = useLongPress({
@@ -408,7 +414,9 @@ const LyricResultRow = memo(function LyricResultRow({
   const fullEraNames = useStore((s) => s.fullEraNames)
   const track = songToTrack(song)
   const title = pref?.name || song.name
-  const canPlay = !!song.path
+  // Sessions carry no path of their own: the Player looks up the session edit
+  // when one is played, so they stay tappable.
+  const canPlay = !!song.path || song.category === 'recording_session'
   const snippet = useMemo(() => getLyricSnippet(song.lyrics, query), [song.lyrics, query])
 
   const press = useLongPress({
@@ -563,6 +571,8 @@ function VirtualSongGrid({ scrollRef, songs, selected, ...rest }: VirtualProps):
 type CompactListRow =
   | { key: string; kind: 'group'; group: CompactGroup<JWApiSong> }
   | { key: string; kind: 'member'; item: JWApiSong; version: string | null; isLast: boolean }
+  // A group holding one song: nothing to collapse, so it shows as the song itself.
+  | { key: string; kind: 'single'; item: JWApiSong }
 
 function CompactGroupList({
   scrollRef, groups, expanded, onToggleGroup, onGroupLongPress, selected, ...rest
@@ -579,6 +589,10 @@ function CompactGroupList({
   const rows = useMemo(() => {
     const out: CompactListRow[] = []
     for (const group of groups) {
+      if (group.members.length === 1) {
+        out.push({ key: `g${group.groupId}`, kind: 'single', item: group.members[0].item })
+        continue
+      }
       out.push({ key: `g${group.groupId}`, kind: 'group', group })
       if (expanded.has(group.groupId)) {
         group.members.forEach((m, i) => out.push({
@@ -605,6 +619,13 @@ function CompactGroupList({
                 onToggle={() => onToggleGroup(row.group)}
                 onLongPress={() => onGroupLongPress(row.group)}
               />
+            </div>
+          )
+        }
+        if (row.kind === 'single') {
+          return (
+            <div key={row.key} style={{ position: 'absolute', top, left: 0, right: 0, height: rowH }}>
+              <SongRow song={row.item} versionLabel={null} selected={selected.has(row.item.id)} {...rest} />
             </div>
           )
         }
