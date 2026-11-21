@@ -223,7 +223,7 @@ export default function SyncedLyricsTool({
   const [follow, setFollow] = useState(true)
   const [step, setStep] = useState(() => {
     const saved = ls.get<number>(STEP_KEY)
-    return saved && STEPS.includes(saved) ? saved : STEPS[1]
+    return saved && saved >= 0.001 && saved <= 10 ? saved : STEPS[1]
   })
   const [editing, setEditing] = useState<{ line: number; kind: 'time' | 'text' } | null>(null)
   const [showKeys, setShowKeys] = useState(false)
@@ -681,6 +681,22 @@ export default function SyncedLyricsTool({
               value={step}
               onChange={chooseStep}
             />
+            <label className="inline-flex items-center gap-1 h-8 px-2 rounded-lg bg-surface-overlay text-xs text-text-muted" title="Custom nudge size in milliseconds">
+              <input
+                type="number"
+                min={1}
+                max={10000}
+                step={10}
+                aria-label="Custom nudge size in milliseconds"
+                value={Math.round(step * 1000)}
+                onChange={(e) => {
+                  const ms = Number(e.target.value)
+                  if (Number.isFinite(ms) && ms >= 1 && ms <= 10000) chooseStep(ms / 1000)
+                }}
+                className="w-12 bg-transparent text-right tabular-nums text-text-primary outline-none"
+              />
+              ms
+            </label>
             <span className="flex-1" />
             <button onClick={() => stamp(false)} disabled={!clock.ready || !sel} title="Start it where the song is now (Enter)" className={SMALL_BTN}>
               <Crosshair size={13} /> To playhead

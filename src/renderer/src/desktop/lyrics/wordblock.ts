@@ -47,6 +47,14 @@ function pickStyle(word: string, index: number, count: number, position: number)
 
 interface Palette { main: RGB; second: RGB }
 
+/** A picked `#rgb` / `#rrggbb` color as 0-1 channels; null for anything else. */
+function hexRgb(hex: string | null | undefined): RGB | null {
+  const m = /^#([0-9a-f]{3}|[0-9a-f]{6})$/i.exec((hex ?? '').trim())
+  if (!m) return null
+  const h = m[1].length === 3 ? m[1].replace(/./g, '$&$&') : m[1]
+  return [0, 2, 4].map((i) => parseInt(h.slice(i, i + 2), 16) / 255) as RGB
+}
+
 /** The type's two colors from the song's artwork, each lifted until it reads over a dark picture; grey artwork gets
  *  warm white and the edit's golden yellow. */
 function paletteOf(colors: AlbumColors | null): Palette {
@@ -62,6 +70,10 @@ function paletteOf(colors: AlbumColors | null): Palette {
 }
 
 interface Art { picture: string; size: { width: number; height: number }; baseline: { x: number; y: number } }
+
+/** A word as drawn: the commas, periods and quotes around it are left off (phrases still break on them first).
+ *  A word that is only punctuation keeps it, and ! and ? stay. */
+const shown = (text: string): string => text.replace(/^[\s,.;:…—–"“”‘()[\]-]+|[\s,.;:…—–"“”()[\]-]+$/g, '') || text
 
 let penContext: CanvasRenderingContext2D | null = null
 
@@ -134,6 +146,7 @@ export class WordBlock implements LyricRenderer {
   isSeen = true
   colors: AlbumColors | null = null
   palette: Palette | null = null
+  tune: { active: string | null; inactive: string | null } | null = null
   face = STANDARD_FACE
   s = 1
   fontSize = 64
@@ -169,10 +182,18 @@ export class WordBlock implements LyricRenderer {
   get eye(): number { return 360 * this.s }
 
   /** Everything the block follows; it sets itself afresh only when the song, its look or the clock's course changed. */
-  show(song: StageSong, { clock, isSeen, colors, face, scale }: StageLook): void {
+  show(song: StageSong, { clock, isSeen, colors, face, scale, tune: tuned }: StageLook): void {
     let redo = false
+    // The app's lyric colors, when picked, stand in for the artwork's: the current line's for the main color, the
+    // other lines' for the accent words, the artist and the adlibs.
+    const tune = tuned && (hexRgb(tuned.active) || hexRgb(tuned.inactive)) ? { active: tuned.active, inactive: tuned.inactive } : null
     if (face !== this.face) { this.face = face; this.song = null; this.arts.clear() }
-    if (JSON.stringify(colors) !== JSON.stringify(this.colors)) { this.colors = colors; this.palette = paletteOf(colors); this.arts.clear(); redo = true }
+    if (JSON.stringify(colors) !== JSON.stringify(this.colors) || JSON.stringify(tune) !== JSON.stringify(this.tune)) {
+      this.colors = colors; this.tune = tune
+      const base = paletteOf(colors)
+      this.palette = { main: hexRgb(tune?.active) ?? base.main, second: hexRgb(tune?.inactive) ?? base.second }
+      this.arts.clear(); redo = true
+    }
     if (!this.palette) this.palette = paletteOf(colors)
     if (scale !== this.s || song.id !== this.song?.id || song.lyrics !== this.song?.lyrics) {
       this.s = scale
@@ -549,7 +570,7 @@ export class WordBlock implements LyricRenderer {
     for (const line of lyrics.lines) {
       if (!line.words?.length) continue
       for (const phrase of this.phrases(line.words)) {
-        const rows = this.rows(phrase.map((w) => w.text))
+        const rows = this.rows(phrase.map((w) => shown(w.text)))
         let index = 0
         rows.forEach((row, number) => {
           if (number > 0 && number % MOST === 0) page++

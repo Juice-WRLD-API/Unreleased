@@ -58,6 +58,9 @@ function lineAuthor(line: RadioChatMessage): ChatUserBrief | null {
 
 type MatchSongs = ReturnType<typeof matchRadioChatSongs>
 const plainText: MatchSongs = (text) => [{ text }]
+// The last matcher a panel built, so the next one (WRLD remounts it on every
+// visit) links song titles from its first paint instead of re-rendering.
+let lastMatchSongs: MatchSongs | null = null
 
 const MessageText = memo(function MessageText({ text, matchSongs }: { text: string; matchSongs: MatchSongs }): JSX.Element {
   return (
@@ -83,7 +86,7 @@ export default function RadioChatPanel(): JSX.Element {
   const openUserCard = useOpenUserCard()
   const { status, enabled, guestsEnabled, reason, links, messages, pending, authPending, name, setName } = useRadioChatStore()
   const [draft, setDraft] = useState('')
-  const [matchSongs, setMatchSongs] = useState<MatchSongs>(() => plainText)
+  const [matchSongs, setMatchSongs] = useState<MatchSongs>(() => lastMatchSongs ?? plainText)
   const [emojiAt, setEmojiAt] = useState<{ x: number; y: number } | null>(null)
   const [editingName, setEditingName] = useState(false)
   const [nameDraft, setNameDraft] = useState(name)
@@ -100,7 +103,10 @@ export default function RadioChatPanel(): JSX.Element {
   useEffect(() => {
     let cancelled = false
     loadAllSongs().then((songs) => {
-      if (!cancelled) setMatchSongs(() => matchRadioChatSongs(songs))
+      if (cancelled) return
+      const match = matchRadioChatSongs(songs)
+      lastMatchSongs = match
+      setMatchSongs(() => match)
     }).catch(() => {})
     return () => { cancelled = true }
   }, [])

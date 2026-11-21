@@ -27,6 +27,7 @@ const HOME_PLAYLIST_LIMIT = 30
 // its song index here means coming back paints Albums at once instead of
 // waiting on the network again; the fetch on mount still refreshes both.
 let albumsMemo: Album[] | null = null
+let albumsMemoSource: Album[] | null = null
 let albumIndexMemo: Map<string, JWApiSong> | null = null
 const newestFirst = (list: Album[]): Album[] =>
   [...list].sort((a, b) => (b.release_date ?? '').localeCompare(a.release_date ?? ''))
@@ -146,7 +147,12 @@ export function useHomeData({ mobile = false } = {}) {
     if (!HOME_ALBUMS_SHOWN) return
     albumsApi.fetchAlbums()
       .then((list) => {
-        albumsMemo = newestFirst(list)
+        // fetchAlbums hands back the same array while the list is unchanged;
+        // keeping the sorted copy then lets setAlbums skip the re-render.
+        if (albumsMemoSource !== list || !albumsMemo) {
+          albumsMemoSource = list
+          albumsMemo = newestFirst(list)
+        }
         setAlbums(albumsMemo)
         // The catalogue is ~10 MB of JSON, and Home is the desktop landing
         // page - only pull it in when some album actually lists tracks to
@@ -208,61 +214,67 @@ export function useHomeData({ mobile = false } = {}) {
 
   // Server playlists need an account; the local kinds don't. Signed out we just
   // show what exists locally rather than prompting to sign in.
-  const ownPlaylists = account ? playlists : []
-  const playlistRow: HomePlaylistCard[] = [
-    ...ownPlaylists.filter((p) => p.track_count > 0).map((p) => {
-      // `playlists` is fetched with omit_cover_image=true (PlaylistsView's own
-      // grid pays that same cost), so a summary object almost never carries
-      // its own cover_image/cover_image_url - peekPlaylistCover's cache is the
-      // real source, warmed in the background by prefetchPlaylistDetails at
-      // startup and by PlaylistsView whenever it's been opened. A miss (cache
-      // still cold) just falls back to the icon, same as before.
-      const cached = peekPlaylistCover(p.id)
-      const cover = cached?.cover_image_url ?? cached?.cover_image ?? playlistCoverUrl(p) ?? null
-      const mosaicUrls = cached?.trackImages?.slice(0, 4) ?? []
-      const useMosaic = !cover && mosaicUrls.length >= 4
-      return {
-        key: `p${p.id}`,
+  // Built once per change to the lists it reads rather than every render: Home
+  // re-renders for any store field it picks (999 FM's now playing, song prefs...),
+  // and this also reads the recents list out of localStorage.
+  const playlistRow = useMemo((): HomePlaylistCard[] => {
+    const ownPlaylists = account ? playlists : []
+    const row: HomePlaylistCard[] = [
+      ...ownPlaylists.filter((p) => p.track_count > 0).map((p) => {
+        // `playlists` is fetched with omit_cover_image=true (PlaylistsView's own
+        // grid pays that same cost), so a summary object almost never carries
+        // its own cover_image/cover_image_url - peekPlaylistCover's cache is the
+        // real source, warmed in the background by prefetchPlaylistDetails at
+        // startup and by PlaylistsView whenever it's been opened. A miss (cache
+        // still cold) just falls back to the icon, same as before.
+        const cached = peekPlaylistCover(p.id)
+        const cover = cached?.cover_image_url ?? cached?.cover_image ?? playlistCoverUrl(p) ?? null
+        const mosaicUrls = cached?.trackImages?.slice(0, 4) ?? []
+        const useMosaic = !cover && mosaicUrls.length >= 4
+        return {
+          key: `p${p.id}`,
+          name: p.name,
+          subtitle: `${p.track_count} song${p.track_count === 1 ? '' : 's'}`,
+          cover: useMosaic ? null : cover,
+          mosaic: useMosaic ? mosaicUrls : null,
+          open: () => { setPendingPlaylistId(p.id); setActiveView('playlists') },
+          playlist: p,
+        }
+      }),
+      ...followedPlaylists.filter((p) => p.trackCount > 0).map((p) => ({
+        key: `f${p.id}`,
         name: p.name,
-        subtitle: `${p.track_count} song${p.track_count === 1 ? '' : 's'}`,
-        cover: useMosaic ? null : cover,
-        mosaic: useMosaic ? mosaicUrls : null,
+        subtitle: `${p.trackCount} song${p.trackCount === 1 ? '' : 's'}`,
+        cover: p.coverUrl,
+        mosaic: null,
         open: () => { setPendingPlaylistId(p.id); setActiveView('playlists') },
-        playlist: p,
-      }
-    }),
-    ...followedPlaylists.filter((p) => p.trackCount > 0).map((p) => ({
-      key: `f${p.id}`,
-      name: p.name,
-      subtitle: `${p.trackCount} song${p.trackCount === 1 ? '' : 's'}`,
-      cover: p.coverUrl,
-      mosaic: null,
-      open: () => { setPendingPlaylistId(p.id); setActiveView('playlists') },
-    })),
-    ...guestPlaylists.filter((p) => p.tracks.length > 0).map((p) => {
-      const mosaicUrls = p.tracks.slice(0, 4).map((t) => t.imageUrl).filter((u): u is string => !!u)
-      const useMosaic = mosaicUrls.length >= 4
-      return {
-        key: `g${p.id}`,
-        name: p.name,
-        subtitle: `${p.tracks.length} song${p.tracks.length === 1 ? '' : 's'}`,
-        cover: useMosaic ? null : (p.tracks[0]?.imageUrl ?? null),
-        mosaic: useMosaic ? mosaicUrls : null,
-        open: () => setActiveView('playlists'),
-      }
-    }),
-  ]
-  // Recently opened first (Array.sort is stable, so never-opened playlists
-  // keep their existing order after them). Guest playlists have no numeric id
-  // in the recents list and stay at the end.
-  const recentIds = loadRecentPlaylistIds()
-  const recencyRank = (c: HomePlaylistCard): number => {
-    if (c.key.startsWith('g')) return recentIds.length
-    const i = recentIds.indexOf(Number(c.key.slice(1)))
-    return i < 0 ? recentIds.length : i
-  }
-  playlistRow.sort((a, b) => recencyRank(a) - recencyRank(b))
-  playlistRow.splice(mobile ? 10 : HOME_PLAYLIST_LIMIT)
+      })),
+      ...guestPlaylists.filter((p) => p.tracks.length > 0).map((p) => {
+        const mosaicUrls = p.tracks.slice(0, 4).map((t) => t.imageUrl).filter((u): u is string => !!u)
+        const useMosaic = mosaicUrls.length >= 4
+        return {
+          key: `g${p.id}`,
+          name: p.name,
+          subtitle: `${p.tracks.length} song${p.tracks.length === 1 ? '' : 's'}`,
+          cover: useMosaic ? null : (p.tracks[0]?.imageUrl ?? null),
+          mosaic: useMosaic ? mosaicUrls : null,
+          open: () => setActiveView('playlists'),
+        }
+      }),
+    ]
+    // Recently opened first (Array.sort is stable, so never-opened playlists
+    // keep their existing order after them). Guest playlists have no numeric id
+    // in the recents list and stay at the end.
+    const recentIds = loadRecentPlaylistIds()
+    const recencyRank = (c: HomePlaylistCard): number => {
+      if (c.key.startsWith('g')) return recentIds.length
+      const i = recentIds.indexOf(Number(c.key.slice(1)))
+      return i < 0 ? recentIds.length : i
+    }
+    row.sort((a, b) => recencyRank(a) - recencyRank(b))
+    row.splice(mobile ? 10 : HOME_PLAYLIST_LIMIT)
+    return row
+  }, [account, playlists, followedPlaylists, guestPlaylists, mobile, setActiveView, setPendingPlaylistId])
 
   const openTrack = (track: Track): void => { playTrack(track) }
 

@@ -150,25 +150,23 @@ export default function LyricsControls(): JSX.Element {
           </>
         )}
 
-        {!fisheye && (
-        <div className="flex flex-col gap-3">
-          <p className="text-text-secondary text-xs -mb-1">Colors</p>
-          <LyricColorRow
-            label="Current line"
-            presets={LYRIC_ACTIVE_PRESETS}
-            value={lyricsColorActive}
-            fallback="#ffffff"
-            onChange={setLyricsColorActive}
-          />
-          <LyricColorRow
-            label="Other lines"
-            presets={LYRIC_INACTIVE_PRESETS}
-            value={lyricsColorInactive}
-            fallback="#9ca3af"
-            onChange={setLyricsColorInactive}
-          />
-        </div>
-        )}
+      <div className="flex flex-col gap-3">
+        <p className="text-text-secondary text-xs -mb-1">Colors</p>
+        <LyricColorRow
+          label="Current line"
+          presets={LYRIC_ACTIVE_PRESETS}
+          value={lyricsColorActive}
+          fallback="#ffffff"
+          onChange={setLyricsColorActive}
+        />
+        <LyricColorRow
+          label="Other lines"
+          presets={LYRIC_INACTIVE_PRESETS}
+          value={lyricsColorInactive}
+          fallback="#9ca3af"
+          onChange={setLyricsColorInactive}
+        />
+      </div>
     </div>
   )
 }
