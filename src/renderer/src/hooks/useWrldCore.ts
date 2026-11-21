@@ -57,6 +57,9 @@ export function useWrldArt(
  * force a value - WrldView.desktop uses this for the "theme background"
  * option, which has no art to sample from; mobile has no such option and
  * always passes null. */
+/** Text contrast per cover (and skin darkness), as sampled. */
+const contrastCache = new Map<string, boolean>()
+
 export function useArtTextContrast(
   artSrc: string | null,
   artError: boolean,
@@ -64,13 +67,22 @@ export function useArtTextContrast(
   radioFmActive: boolean,
   override: boolean | null,
 ): boolean {
-  const [textIsDark, setTextIsDark] = useState(false)
+  const sampleKey = artSrc && !artError && override == null ? `${isDarkSkin ? 1 : 0}|${artSrc}` : null
+  const [textIsDark, setTextIsDark] = useState(() => (
+    override != null ? override
+      : !artSrc || artError ? !isDarkSkin && !radioFmActive
+      : contrastCache.get(sampleKey!) ?? false
+  ))
   useEffect(() => {
     if (override != null) { setTextIsDark(override); return }
     if (!artSrc || artError) {
       setTextIsDark(!isDarkSkin && !radioFmActive)
       return
     }
+    // Sampled before: WRLD remounts on every visit, and reading the cover back
+    // each time cost an image load and a getImageData, then a second render.
+    const known = contrastCache.get(sampleKey!)
+    if (known !== undefined) { setTextIsDark(known); return }
     // A quick skip leaves the last cover loading: its answer is dropped.
     let live = true
     const img = new Image()
@@ -89,14 +101,17 @@ export function useArtTextContrast(
           sum += 0.299 * data[i] + 0.587 * data[i + 1] + 0.114 * data[i + 2]
         const avg = sum / (data.length / 4)
         const factor = isDarkSkin ? 0.22 : 0.45
-        setTextIsDark(avg * factor > 90)
+        const dark = avg * factor > 90
+        if (contrastCache.size >= 200) contrastCache.delete(contrastCache.keys().next().value as string)
+        contrastCache.set(sampleKey!, dark)
+        setTextIsDark(dark)
       } catch { setTextIsDark(false) }
     }
     img.onerror = () => { if (live) setTextIsDark(false) }
     // Averaged over 50x50, so the degraded copy reads the same as the original.
     img.src = smallCoverUrl(artSrc) ?? artSrc
     return () => { live = false }
-  }, [artSrc, artError, isDarkSkin, radioFmActive, override])
+  }, [artSrc, artError, isDarkSkin, radioFmActive, override, sampleKey])
   return textIsDark
 }
 

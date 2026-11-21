@@ -1,6 +1,6 @@
 # Agent guide: Juice WRLD API and Unreleased
 
-**Version 1.89** · updated 2026-11-18. Bump the version and date whenever you
+**Version 1.90** · updated 2026-11-21. Bump the version and date whenever you
 change this file (minor for fixes and additions, major for rewrites).
 
 **Keep this file current.** If you find something in the docs or this file that
@@ -58,7 +58,6 @@ version number (desktop 2.5.x, web 2.3.x, Android/iOS 3.2.x, beta 3.0.x-beta as 
   the changelog entry for it takes that number.
 - Author every commit as the user. **No
   `Co-Authored-By` lines, no "Generated with" footers**, in commits or PRs.
-- **Never commit in `backend/`.**
 - Never commit `HANDOFF*.md` files. Exclude them when staging.
 - Don't create worktrees or switch branches on your own. Work in the checkout
   you were started in.
@@ -85,10 +84,7 @@ version number (desktop 2.5.x, web 2.3.x, Android/iOS 3.2.x, beta 3.0.x-beta as 
   gap: other code paths that should carry a new field, the edit flow for a new
   create flow, and above all the **terminal command** for a UI change (see
   section 5).
-- Don't launch a dev server or browser preview to check your work unless the
-  user asked for it in that turn.
-- Long builds (`electron:build`, release scripts) go in a new visible terminal
-  window. Start it, say it is running, and stop. Don't poll it.
+- Don't launch a dev server or browser preview to check your work unless you really need to (Like for profiling peformence)
 
 ---
 
@@ -614,6 +610,20 @@ Node 22.
 Newest first. One entry each: date, what went wrong, what to do instead. Delete
 entries that stop being true.
 
+- 2026-11-21: WRLD took ~230 ms to switch to (775 ms the first time) because
+  999 FM chat linked song titles with one regex alternating all ~5,000
+  titles, rebuilt and re-run over the whole backlog on every mount.
+  `lib/radioChatSongs.ts` now walks a title trie (checked identical to the
+  regex on 32,000 lines, ~70x faster) and caches the matcher and each line.
+  Never match the catalogue with a big alternation regex. Home and WRLD remount on
+  every visit, so anything they fetch on mount must come back as the same
+  object when unchanged (`fetchAlbums`, `indexSongsByPath`), or the page
+  renders twice. To profile switches: `vite build --sourcemap --outDir
+  <scratch>` served with `vite preview --port 3018`, then the scratch Electron
+  from the 2026-10-21 entry. Copy `Local Storage/leveldb` without its `LOCK`
+  file (it is held open while the app runs). Click the nav buttons through
+  `Runtime.evaluate` with `Profiler.start/stop` around each click.
+
 - 2026-11-16: WRLD's music video took a couple of seconds to come back after
   every fullscreen toggle or visit to another view. Fullscreen returns WRLD
   through `createPortal` to `<body>` instead of inline (`WrldView.tsx`), so
@@ -675,7 +685,8 @@ entries that stop being true.
   restore what only web has: Sandbox and Developer options live under General →
   Advanced there, Smooth fade is hidden on iOS. `npx tsc --noEmit` on web lists
   every reference the merge left dangling. Web files are CRLF in the working
-  tree and LF in git; strip the CRs (`sed -i 's/$//'`) before scripted edits.
+  tree and LF in git; strip the CRs (`sed -i 's/
+$//'`) before scripted edits.
 
 - 2026-11-13: Every pinned ffmpeg checksum in `FFMPEG_SHA256` (`main.js`)
   was one or two characters short since v2.0.0, so the on-demand ffmpeg

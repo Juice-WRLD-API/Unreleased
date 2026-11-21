@@ -59,6 +59,10 @@ type PanelView = 'queue' | 'lyrics' | 'radio'
 const PANEL_EXIT_MS = 360
 const VIEW_EXIT_MS = 220
 const SPLIT_GLIDE_MS = 650
+// The album index WRLD last built. WRLD remounts on every visit; starting from
+// the last one (and the last album list) means the refresh on mount finds
+// nothing new and doesn't re-render the whole page.
+let albumSongIndexMemo: Map<string, JWApiSong> | null = null
 
 // One view in the desktop side panel (lyrics, queue, FM radio). Its entrance
 // plays only when it replaces another view in an already-open panel - when the
@@ -317,15 +321,15 @@ export default function WrldView(): JSX.Element {
   // path→song lookup built from the whole catalog resolves each track's
   // name/art/id for display and playback - same ?all=true fetch the
   // versions table uses, and it shares that fetch's cache.
-  const [wrldAlbums, setWrldAlbums] = useState<WrldAlbum[]>([])
-  const [albumSongIndex, setAlbumSongIndex] = useState<Map<string, JWApiSong>>(new Map())
+  const [wrldAlbums, setWrldAlbums] = useState<WrldAlbum[]>(() => albumsApi.lastFetchedAlbums() ?? [])
+  const [albumSongIndex, setAlbumSongIndex] = useState<Map<string, JWApiSong>>(() => albumSongIndexMemo ?? new Map())
   const [selectedAlbumId, setSelectedAlbumId] = useState<number | null>(null)
   const [playingAlbumSongPath, setPlayingAlbumSongPath] = useState<string | null>(null)
 
   useEffect(() => {
     albumsApi.fetchAlbums().then(setWrldAlbums).catch(() => {})
     loadAllSongs()
-      .then(list => setAlbumSongIndex(albumsApi.indexSongsByPath(list)))
+      .then(list => setAlbumSongIndex(albumSongIndexMemo = albumsApi.indexSongsByPath(list)))
       .catch(() => {})
   }, [])
 

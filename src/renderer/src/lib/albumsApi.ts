@@ -46,8 +46,19 @@ export const albumTracks = (album: Album): AlbumSongEntry[] => [...album.songs].
 
 /** Album entries carry track paths, not full song metadata - this path→song
  *  lookup, built from the whole catalogue (loadAllSongs), resolves them. */
-export const indexSongsByPath = (songs: JWApiSong[]): Map<string, JWApiSong> =>
-  new Map(songs.filter(s => s.path).map(s => [s.path as string, s]))
+// Kept per catalogue array: loadAllSongs hands every caller the same array
+// until its TTL runs out, so Home, WRLD and Albums share one index, and a view
+// that remounts gets the very Map it already holds (its setState bails out
+// instead of re-rendering the whole page).
+const songIndexByList = new WeakMap<JWApiSong[], Map<string, JWApiSong>>()
+export const indexSongsByPath = (songs: JWApiSong[]): Map<string, JWApiSong> => {
+  let index = songIndexByList.get(songs)
+  if (!index) {
+    index = new Map(songs.filter(s => s.path).map(s => [s.path as string, s]))
+    songIndexByList.set(songs, index)
+  }
+  return index
+}
 
 /** The lead track's personalized cover wins, then the album's own cover, then
  *  the lead track's API art. The raw `image_url` alone skipped both of the
@@ -97,8 +108,21 @@ export async function fetchArtists(): Promise<Artist[]> {
   return collectPages((page) => apiFetch<Paged<Artist>>('/artists/', page === 1 ? {} : { page }))
 }
 
+// The last list fetchAlbums returned. An unchanged list comes back as this very
+// array, so a view refreshing on mount (Home, WRLD) doesn't re-render for it.
+let lastAlbums: { list: Album[]; json: string } | null = null
+
 export async function fetchAlbums(): Promise<Album[]> {
-  return collectPages((page) => apiFetch<Paged<Album>>('/albums/', page === 1 ? {} : { page }))
+  const list = await collectPages((page) => apiFetch<Paged<Album>>('/albums/', page === 1 ? {} : { page }))
+  const json = JSON.stringify(list)
+  if (lastAlbums?.json === json) return lastAlbums.list
+  lastAlbums = { list, json }
+  return list
+}
+
+/** The list fetchAlbums last returned this session, with no request. */
+export function lastFetchedAlbums(): Album[] | undefined {
+  return lastAlbums?.list
 }
 
 /** The album list as `fetchAlbums` last cached it, page by page, with no

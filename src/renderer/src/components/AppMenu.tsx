@@ -149,6 +149,23 @@ export default function AppMenu({ variant = 'bar', collapsed = false }: { varian
     })
   }, [el])
 
+  // The anchor is measured when the menu opens; if the window resizes while it
+  // is open the trigger can move (pill nav, sidebar), so re-measure it.
+  useEffect(() => {
+    if (!open) return
+    let raf = 0
+    const remeasure = (): void => {
+      cancelAnimationFrame(raf)
+      raf = requestAnimationFrame(() => {
+        const r = triggerRef.current?.getBoundingClientRect()
+        if (!r) return
+        setAnchorRect((p) => (p && p.left === r.left && p.top === r.top && p.bottom === r.bottom ? p : { left: r.left, top: r.top, bottom: r.bottom }))
+      })
+    }
+    window.addEventListener('resize', remeasure)
+    return () => { window.removeEventListener('resize', remeasure); cancelAnimationFrame(raf) }
+  }, [open])
+
   // Refresh the Discord toggle from app settings each time the menu opens, so
   // the checkmark is accurate even if it changed elsewhere (Settings, hotkey).
   useEffect(() => {

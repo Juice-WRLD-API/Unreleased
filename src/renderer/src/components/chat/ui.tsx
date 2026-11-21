@@ -94,7 +94,7 @@ export function ChatAvatar({ user, size = 36, presence, listening, className = '
       ) : (
         <span
           className="w-full h-full rounded-full flex items-center justify-center font-semibold select-none"
-          style={{ background: `hsl(${hue} 55% 45% / 0.22)`, color: `hsl(${hue} 70% 62%)`, fontSize: Math.max(10, size * 0.4) }}
+          style={{ backgroundColor: 'var(--surface)', backgroundImage: `linear-gradient(hsl(${hue} 55% 45% / 0.22), hsl(${hue} 55% 45% / 0.22))`, color: `hsl(${hue} 70% 62%)`, fontSize: Math.max(10, size * 0.4) }}
         >
           {name.charAt(0).toUpperCase()}
         </span>

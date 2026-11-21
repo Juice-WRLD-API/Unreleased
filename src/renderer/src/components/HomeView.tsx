@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { ChevronLeft, ChevronRight, Play, ListMusic, Gamepad2, Flame, Music2, Disc3, Newspaper, Radio, Heart, Album, Music, Wrench, MicVocal, RefreshCw, AudioLines, ImagePlus, FileAudio } from 'lucide-react'
 import { AlbumArtThumbnail } from './AlbumArtThumbnail'
-import { ProgressiveCover } from './ProgressiveCover'
+import { FallbackImg, ProgressiveCover } from './ProgressiveCover'
 import { Tile } from './Tile'
 import HomeHero from './HomeHero'
 import OnThisDayTile from './OnThisDayTile'
@@ -9,6 +9,7 @@ import { useHomeData, HOME_ALBUMS_SHOWN, type GameCard, type HomePlaylistCard, t
 import { useElementSize } from '../hooks/useElementSize'
 import { useStore, useStorePick } from '../store/useStore'
 import { useCanEdit } from '../hooks/useChannelRoles'
+import { sizedCoverUrl, smallCoverUrl } from '../lib/juicewrldApi'
 import * as userApi from '../lib/userApi'
 import type { SongContextMenuState } from './SongContextMenu'
 import type { PlaylistContextMenuState } from './PlaylistContextMenu'
@@ -295,7 +296,9 @@ function AlbumsTile({ albums, onAll, span }: {
             <div className="relative aspect-square rounded-lg overflow-hidden bg-surface-raised mb-1.5">
               <button onClick={a.open} aria-label={a.title} className="absolute inset-0 flex items-center justify-center">
                 {a.cover ? (
-                  <img src={a.cover} alt={a.title} className="w-full h-full object-cover" />
+                  // A tile-sized copy, then the API's small one: an edition's
+                  // cover can be a full-size PNG (690 KB, decoded on every visit).
+                  <FallbackImg sources={[sizedCoverUrl(a.cover, 512), smallCoverUrl(a.cover)]} alt={a.title} lazy className="w-full h-full object-cover" />
                 ) : (
                   <Music size={20} className="text-text-muted" />
                 )}
