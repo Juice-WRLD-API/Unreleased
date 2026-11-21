@@ -108,7 +108,7 @@ const SETTINGS_SEARCH_INDEX: { tab: Tab; label: string; sub?: string; electronOn
   { tab: 'account', label: 'Passkeys', sub: 'Sign in with your face, fingerprint, PIN, a security key or your phone', page: 'security' },
   { tab: 'account', label: 'Chat online status and read receipts', page: 'chat' },
   { tab: 'account', label: 'My cover art', sub: 'Cover art you submitted', page: 'uploads' },
-  { tab: 'account', label: 'Artist folder', sub: 'Upload covers to your own folder (artists)', page: 'uploads' },
+  { tab: 'account', label: 'Artist folder', sub: 'Upload covers to your own folder, or apply to be an artist', page: 'uploads' },
   { tab: 'account', label: 'My remixes & edits', sub: 'Remixes and edits you submitted', page: 'uploads' },
   { tab: 'account', label: 'My CDN nodes', sub: 'Nodes linked to your account', page: 'uploads' },
   { tab: 'account', label: 'API keys', sub: 'Keys for scripts and integrations', page: 'developer' },

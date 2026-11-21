@@ -110,8 +110,8 @@ function OverviewTab() {
           <Endpoint method="PATCH" path="/accounts/donor/files/{file_id}/" description="Rename a donor file or toggle its share link" />
           <Endpoint method="GET" path="/accounts/donor/shared/{share_token}/" description="Download a shared donor file (no auth)" />
           <Endpoint method="POST" path="/accounts/logout/" description="Invalidate the current token" />
-          <Endpoint method="GET" path="/accounts/application/" description="Fetch the logged-in user's editor or contributor application" />
-          <Endpoint method="POST" path="/accounts/application/" description="Apply to become an editor or contributor" />
+          <Endpoint method="GET" path="/accounts/application/" description="Fetch the logged-in user's editor, contributor or artist application" />
+          <Endpoint method="POST" path="/accounts/application/" description="Apply to become an editor, contributor or artist" />
           <Endpoint method="GET" path="/accounts/editor/proposals/" description="List your own edit proposals (paginated summaries, limit/offset)" />
           <Endpoint method="POST" path="/accounts/editor/proposals/" description="Submit an edit proposal (editor+)" />
           <Endpoint method="GET" path="/accounts/editor/proposals/{id}/" description="Fetch a single proposal by id, any status" />
@@ -1936,7 +1936,7 @@ Content-Type: application/json
         <Pre>{`POST /accounts/application/
 
 {
-  "application_type": "editor",  // "editor" | "contributor"
+  "application_type": "editor",  // "editor" | "contributor" | "artist"
   "display_name": "optional",
   "contact": "optional",
   "experience": "optional",

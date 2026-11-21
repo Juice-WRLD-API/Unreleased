@@ -26,6 +26,7 @@ import ChatDevices from './chat/ChatDevices'
 import MyCdnNodes from './MyCdnNodes'
 import MyCoverArt from './MyCoverArt'
 import ArtistCovers from './ArtistCovers'
+import ArtistApply from './ArtistApply'
 import MyCommunityEdits from './MyCommunityEdits'
 import ApiKeys from './ApiKeys'
 import Passkeys from './Passkeys'
@@ -1051,7 +1052,7 @@ export default function Settings(): JSX.Element {
                         <ChatKeyTransfer userId={account.id} />
                       </SettingsCard>
                     )}
-                    {account?.is_artist && <SettingsCard title="Artist folder"><ArtistCovers /></SettingsCard>}
+                    <SettingsCard title="Artist folder">{account?.is_artist ? <ArtistCovers /> : <ArtistApply />}</SettingsCard>
                     <SettingsCard title="My cover art">
                       <MyCoverArt />
                     </SettingsCard>

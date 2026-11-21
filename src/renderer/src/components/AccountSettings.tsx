@@ -17,6 +17,7 @@ import Passkeys from './Passkeys'
 import ApiKeys from './ApiKeys'
 import MyCoverArt from './MyCoverArt'
 import ArtistCovers from './ArtistCovers'
+import ArtistApply from './ArtistApply'
 import MyCommunityEdits from './MyCommunityEdits'
 import MyCdnNodes from './MyCdnNodes'
 import ChatDevices from './chat/ChatDevices'
@@ -118,7 +119,9 @@ export default function AccountSettings({ page, setPage, openMainView }: {
           {shown === 'chat' && <ChatPage />}
           {shown === 'uploads' && (
             <>
-              {account?.is_artist && <Group title="Artist folder"><ArtistCovers /></Group>}
+              {account?.is_artist
+                ? <Group title="Artist folder"><ArtistCovers /></Group>
+                : <Group title="Artist folder"><ArtistApply /></Group>}
               <Group title="Cover art"><MyCoverArt /></Group>
               <Group title="Remixes & edits"><MyCommunityEdits /></Group>
               <Group title="CDN nodes"><MyCdnNodes /></Group>

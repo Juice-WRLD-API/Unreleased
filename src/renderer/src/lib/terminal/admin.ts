@@ -35,22 +35,25 @@ function statusArg(arg: string, allowed: readonly string[], fallback: string): s
 
 // "approve 12", "approve comp 12 looks good" - the kind is optional (song edit
 // proposals are the common case), then the id, then a free-text note.
-function parseReviewArgs(args: string, usage: string): { kind: Kind; id: number; notes: string } {
+function parseReviewArgs(args: string, usage: string): { kind: Kind; id: number; notes: string; folder?: string } {
+  // Artist applications: approve app <id> --folder "name" gives another folder.
+  let folder: string | undefined
+  args = args.replace(/\s--folder\s+(?:"([^"]*)"|'([^']*)'|(\S+))/, (_m, dq?: string, sq?: string, bare?: string) => { folder = dq ?? sq ?? bare; return '' })
   const words = args.trim().split(/\s+/).filter(Boolean)
   let kind: Kind = 'song'
   const k = words[0]?.toLowerCase()
   if (k && (KINDS as string[]).includes(k)) { kind = k as Kind; words.shift() } else if (k === 'application' || k === 'applications') { kind = 'app'; words.shift() } else if (k === 'songs') words.shift()
   const id = Number(words.shift())
   if (!Number.isInteger(id) || id < 1) fail(`usage: ${usage}`)
-  return { kind, id, notes: words.join(' ') }
+  return { kind, id, notes: words.join(' '), folder }
 }
 
-async function review(kind: Kind, id: number, action: 'approve' | 'reject', notes: string): Promise<string> {
+async function review(kind: Kind, id: number, action: 'approve' | 'reject', notes: string, folder?: string): Promise<string> {
   const review_notes = notes || undefined
   if (kind === 'song') { const r = await adminReviewProposal(id, { action, review_notes }); return `song proposal #${id} ${r.status}: ${oneLine(r.title)}` }
   if (kind === 'comp') { const r = await adminReviewCompProposal(id, { action, review_notes }); return `comp proposal #${id} ${r.status}: ${oneLine(r.file_path)}` }
-  const r = await adminReviewApplication(id, { action, review_notes })
-  return `application #${id} ${r.status}: ${oneLine(r.display_name || r.username)}`
+  const r = await adminReviewApplication(id, { action, review_notes, artist_folder: action === 'approve' ? folder : undefined })
+  return `${r.application_type ?? 'editor'} application #${id} ${r.status}: ${oneLine(r.display_name || r.username)}${r.application_type === 'artist' && r.status === 'approved' && r.artist_folder ? ` · folder "${r.artist_folder}"` : ''}`
 }
 
 export const ADMIN_COMMANDS: TermCommand[] = [
@@ -101,7 +104,7 @@ export const ADMIN_COMMANDS: TermCommand[] = [
     },
   },
   {
-    name: 'applications', aliases: ['apps'], group: 'Admin', usage: 'applications [pending|approved|rejected]', description: 'List editor and contributor applications (default: pending)',
+    name: 'applications', aliases: ['apps'], group: 'Admin', usage: 'applications [pending|approved|rejected]', description: 'List editor, contributor and artist applications (default: pending)',
     complete: (before, partial) => (before.length === 0 ? APPLICATION_STATUSES.filter((s) => s.startsWith(partial.toLowerCase())) : []),
     run: async (args, ctx) => {
       const status = statusArg(args, APPLICATION_STATUSES, 'pending') as ApplicationStatus
@@ -141,14 +144,16 @@ export const ADMIN_COMMANDS: TermCommand[] = [
           `areas: ${oneLine(a.areas, 200)}`,
           `experience: ${oneLine(a.experience, 300)}`,
           `motivation: ${oneLine(a.motivation, 300)}`,
+          ...(a.portfolio ? [`work: ${oneLine(a.portfolio, 300)}`] : []),
+          ...(a.application_type === 'artist' ? [`folder: ${a.artist_folder || '(named after them)'}${a.status === 'pending' ? ' · approve app <id> --folder "name" to give another' : ''}`] : []),
         ].join('\n'))
       }
     },
   },
   {
-    name: 'approve', group: 'Admin', usage: 'approve [song|comp|app] <id> [note]', description: 'Approve a proposal or application',
+    name: 'approve', group: 'Admin', usage: 'approve [song|comp|app] <id> [note] [--folder "name"]', description: 'Approve a proposal or application (--folder: the folder for an artist application)',
     complete: (before, partial) => (before.length === 0 ? KINDS.filter((s) => s.startsWith(partial.toLowerCase())) : []),
-    run: async (args, ctx) => { const r = parseReviewArgs(args, 'approve [song|comp|app] <id> [note]'); ctx.print(await review(r.kind, r.id, 'approve', r.notes), 'ok') },
+    run: async (args, ctx) => { const r = parseReviewArgs(args, 'approve [song|comp|app] <id> [note] [--folder "name"]'); ctx.print(await review(r.kind, r.id, 'approve', r.notes, r.folder), 'ok') },
   },
   {
     name: 'reject', group: 'Admin', usage: 'reject [song|comp|app] <id> [note]', description: 'Reject a proposal or application, optionally saying why',

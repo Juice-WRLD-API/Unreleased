@@ -1286,7 +1286,7 @@ export interface SongEditProposal {
 }
 
 export type ApplicationStatus = 'pending' | 'approved' | 'rejected'
-export type ApplicationType = 'editor' | 'contributor'
+export type ApplicationType = 'editor' | 'contributor' | 'artist'
 
 export interface EditorApplication {
   id: number
@@ -1299,6 +1299,10 @@ export interface EditorApplication {
   experience: string
   motivation: string
   areas: string
+  // Artist applications only: links to their work, and the folder they asked
+  // for under Cover Arts/ (once approved, the folder they were given).
+  portfolio?: string
+  artist_folder?: string
   // Optional on the way in: applications created before contributor
   // applications existed have no type, and neither do cached rows. Read it
   // through applicationType() rather than directly.
@@ -1346,7 +1350,8 @@ export interface OtpSetupPayload {
 /** Editor was the only kind of application until contributor applications
  *  shipped, so an untyped row is an editor row. */
 export function applicationType(app: Pick<EditorApplication, 'application_type'> | null | undefined): ApplicationType {
-  return app?.application_type === 'contributor' ? 'contributor' : 'editor'
+  const type = app?.application_type
+  return type === 'contributor' || type === 'artist' ? type : 'editor'
 }
 
 /** The caller's application *of one kind*.
@@ -1361,7 +1366,8 @@ export function applicationType(app: Pick<EditorApplication, 'application_type'>
 export async function getMyApplication(type?: ApplicationType, channel?: string): Promise<{ application: EditorApplication | null }> {
   const url = new URL(`${ACCOUNT_BASE}/application/`)
   if (type) url.searchParams.set('type', type)
-  if (channel) url.searchParams.set('channel', channel)
+  // The artist role is account-wide, so artist applications have no channel.
+  if (channel && type !== 'artist') url.searchParams.set('channel', channel)
   const res = await request<{ application: EditorApplication | null }>(url.toString(), { method: 'GET' })
   if (type && res.application && applicationType(res.application) !== type) return { application: null }
   return res
@@ -1373,6 +1379,8 @@ export async function submitApplication(payload: {
   experience?: string
   motivation: string
   areas?: string
+  portfolio?: string
+  artist_folder?: string
   application_type?: ApplicationType
   channel?: string
 }): Promise<EditorApplication> {
@@ -1617,6 +1625,8 @@ export async function adminListApplications(statusFilter?: ApplicationStatus): P
 export async function adminReviewApplication(id: number, payload: {
   action: 'approve' | 'reject'
   review_notes?: string
+  /** Artist applications: the folder to give, instead of the one they asked for. */
+  artist_folder?: string
 }): Promise<EditorApplication> {
   return request(`${ACCOUNT_BASE}/admin/applications/${id}/review/`, {
     method: 'POST',
