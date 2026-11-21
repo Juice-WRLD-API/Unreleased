@@ -934,6 +934,8 @@ function ProposalsTab({ proposals, status, setStatus, onChanged, onReviewed, cha
 function ApplicationsTab({ applications, onReviewed }: { applications: EditorApplication[]; onReviewed: (updated: EditorApplication) => void }): JSX.Element {
   const [actionId, setActionId] = useState<number | null>(null)
   const [notes,    setNotes]    = useState<Record<number, string>>({})
+  // Artist applications: the folder to give, when not the one they asked for.
+  const [folders,  setFolders]  = useState<Record<number, string>>({})
   const [selected, setSelected] = useState<EditorApplication | null>(null)
 
   // Keep the open application (as its updated row) across a review or a
@@ -945,7 +947,8 @@ function ApplicationsTab({ applications, onReviewed }: { applications: EditorApp
   const doReview = async (id: number, action: 'approve' | 'reject') => {
     setActionId(id)
     try {
-      const updated = await userApi.adminReviewApplication(id, { action, review_notes: notes[id] || '' })
+      const artist_folder = action === 'approve' ? folders[id]?.trim() || undefined : undefined
+      const updated = await userApi.adminReviewApplication(id, { action, review_notes: notes[id] || '', artist_folder })
       // Applied in place, same as ProposalsTab's doReview - no full refetch.
       onReviewed(updated)
     }
@@ -1045,7 +1048,22 @@ function ApplicationsTab({ applications, onReviewed }: { applications: EditorApp
               {a.areas && <AppSection label="Areas of interest" value={a.areas} />}
               {a.experience && <AppSection label="Experience" value={a.experience} />}
               {a.motivation && <AppSection label="Motivation" value={a.motivation} />}
+              {a.portfolio && <AppSection label="Their work" value={a.portfolio} />}
+              {a.application_type === 'artist' && a.status !== 'pending' && a.artist_folder && <AppSection label="Folder" value={a.artist_folder} />}
             </div>
+
+            {a.application_type === 'artist' && a.status === 'pending' && (
+              <label className="space-y-2 block">
+                <span className="text-[10px] font-bold uppercase tracking-widest text-text-muted">Folder under Cover Arts</span>
+                <input
+                  value={folders[a.id] ?? a.artist_folder ?? ''}
+                  onChange={e => setFolders(f => ({ ...f, [a.id]: e.target.value }))}
+                  placeholder="Leave empty to name it after them"
+                  maxLength={120}
+                  className="w-full bg-surface-overlay border border-[var(--border)] rounded-xl px-3 py-2.5 text-text-primary text-sm focus:outline-none focus:border-accent/40"
+                />
+              </label>
+            )}
 
             {/* Review notes */}
             {a.status === 'pending' && (

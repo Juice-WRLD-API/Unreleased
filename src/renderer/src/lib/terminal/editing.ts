@@ -333,24 +333,27 @@ export const EDITING_COMMANDS: TermCommand[] = [
   compCommand,
   compReplaceCommand,
   {
-    name: 'apply', group: 'Editor', usage: 'apply [status] <editor|contributor> [--motivation "…"] [--experience "…"] [--areas "…"] [--contact "…"] [--name "…"] [--channel c]',
-    description: 'Apply to become an editor or contributor, or check the state of your application (apply status editor)',
+    name: 'apply', group: 'Editor', usage: 'apply [status] <editor|contributor|artist> [--motivation "…"] [--experience "…"] [--areas "…"] [--contact "…"] [--name "…"] [--channel c] [--portfolio "links"] [--folder "name"]',
+    description: 'Apply to become an editor, contributor or artist, or check the state of your application (apply status artist). --portfolio and --folder are for artist applications',
     covers: ['userApi.getMyApplication', 'userApi.submitApplication'],
-    complete: (before, partial) => (before.length === 0 ? ['status', 'editor', 'contributor'].filter((v) => v.startsWith(partial.toLowerCase())) : before.length === 1 && before[0] === 'status' ? ['editor', 'contributor'].filter((v) => v.startsWith(partial.toLowerCase())) : []),
+    complete: (before, partial) => (before.length === 0 ? ['status', 'editor', 'contributor', 'artist'].filter((v) => v.startsWith(partial.toLowerCase())) : before.length === 1 && before[0] === 'status' ? ['editor', 'contributor', 'artist'].filter((v) => v.startsWith(partial.toLowerCase())) : []),
     run: async (args, ctx) => {
       signedIn()
-      const { rest, value } = parseArgs(args, ['motivation', 'experience', 'areas', 'contact', 'name', 'channel'])
+      const { rest, value } = parseArgs(args, ['motivation', 'experience', 'areas', 'contact', 'name', 'channel', 'portfolio', 'folder'])
       const status = rest[0]?.toLowerCase() === 'status'
       if (status) rest.shift()
       const type = (rest[0] ?? '').toLowerCase() as ApplicationType
-      if (type !== 'editor' && type !== 'contributor') fail('usage: apply [status] <editor|contributor> --motivation "why you want in"')
+      if (type !== 'editor' && type !== 'contributor' && type !== 'artist') fail('usage: apply [status] <editor|contributor|artist> --motivation "why you want in"')
+      if (!status && type === 'artist' && useStore.getState().account?.is_artist) fail('you are already an artist (see: covers folder)')
       if (status) {
         const { application: a } = await getMyApplication(type, value.get('channel'))
-        ctx.print(a ? `${type} application #${a.id}: ${a.status}${a.review_notes ? `\nreviewer: ${oneLine(a.review_notes, 200)}` : ''}\nsent ${relativeTime(a.created_at)}` : `no ${type} application yet`, a ? 'plain' : 'dim')
+        ctx.print(a ? `${type} application #${a.id}: ${a.status}${a.artist_folder ? ` · folder "${a.artist_folder}"` : ''}${a.review_notes ? `\nreviewer: ${oneLine(a.review_notes, 200)}` : ''}\nsent ${relativeTime(a.created_at)}` : `no ${type} application yet`, a ? 'plain' : 'dim')
         return
       }
       const motivation = value.get('motivation') ?? fail('--motivation "…" is required')
-      const made = await submitApplication({ application_type: type, motivation, experience: value.get('experience'), areas: value.get('areas'), contact: value.get('contact'), display_name: value.get('name'), channel: value.get('channel') })
+      const made = type === 'artist'
+        ? await submitApplication({ application_type: type, motivation, portfolio: value.get('portfolio'), artist_folder: value.get('folder'), contact: value.get('contact'), display_name: value.get('name') })
+        : await submitApplication({ application_type: type, motivation, experience: value.get('experience'), areas: value.get('areas'), contact: value.get('contact'), display_name: value.get('name'), channel: value.get('channel') })
       ctx.print(`${type} application #${made.id} sent (${made.status})`, 'ok')
     },
   },
