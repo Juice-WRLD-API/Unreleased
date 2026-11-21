@@ -912,6 +912,9 @@ function useScaledRowH(desktopH: number, mobileH: number): number {
 type CompactListRow =
   | { key: string; kind: 'group'; group: CompactGroup<JWApiSong> }
   | { key: string; kind: 'member'; item: JWApiSong; meta: SongVersionMeta; isLast: boolean }
+  // A group holding one song: nothing to collapse, so it shows as the song
+  // itself (as Playlists' compact view does).
+  | { key: string; kind: 'single'; item: JWApiSong }
 
 function CompactGroupList({
   scrollRef, groups, expanded, onToggleGroup, onGroupContextMenu,
@@ -944,6 +947,10 @@ function CompactGroupList({
   const rows = useMemo(() => {
     const out: CompactListRow[] = []
     for (const group of groups) {
+      if (group.members.length === 1) {
+        out.push({ key: `g${group.groupId}`, kind: 'single', item: group.members[0].item })
+        continue
+      }
       out.push({ key: `g${group.groupId}`, kind: 'group', group })
       if (expanded.has(group.groupId)) {
         group.members.forEach((m, i) => out.push({
@@ -974,6 +981,24 @@ function CompactGroupList({
                 onContextMenu={(e) => onGroupContextMenu(row.group, e)}
                 categoryLabel={CATEGORY_LABELS[cat] ?? cat}
                 categoryClassName={CATEGORY_COLORS[cat]}
+              />
+            </div>
+          )
+        }
+        if (row.kind === 'single') {
+          return (
+            <div key={row.key} style={{ position: 'absolute', top, left: 0, right: 0, height: rowH }}>
+              <SongRow
+                song={row.item}
+                onPlay={onPlay}
+                onCategoryClick={onCategoryClick}
+                onEraClick={onEraClick}
+                onInfo={onInfo}
+                onContextMenu={onContextMenu}
+                selectMode={selectMode}
+                selected={selected.has(row.item.id)}
+                onToggleSelect={onToggleSelect}
+                compact
               />
             </div>
           )

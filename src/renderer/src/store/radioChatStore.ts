@@ -43,6 +43,9 @@ interface RadioChatStore {
   /** The guest name typed in the panel ('' = the server picks one). */
   name: string
   setName: (name: string) => void
+  /** The chat pop-up opened from the side menu (FmChatPopup), outside WRLD. */
+  popupOpen: boolean
+  setPopupOpen: (open: boolean) => void
 }
 
 export const useRadioChatStore = create<RadioChatStore>((set) => ({
@@ -60,6 +63,8 @@ export const useRadioChatStore = create<RadioChatStore>((set) => ({
     try { localStorage.setItem(NAME_KEY, name) } catch {}
     set({ name })
   },
+  popupOpen: false,
+  setPopupOpen: (popupOpen) => set({ popupOpen }),
 }))
 
 /** Adds lines by id, oldest first, keeping the last MAX_KEPT_LINES. */

@@ -53,6 +53,11 @@ export interface AccountUser {
   // Grants News write access (create/edit-own/delete-own posts) - separate
   // from is_editor. Admins can write News regardless of this flag.
   is_news?: boolean
+  // Artist: uploads cover art straight into `Cover Arts/<artist_folder>/` in
+  // the community channel (lib/artistCoversApi). Admin-granted; not implied by
+  // administrator. Older servers omit both.
+  is_artist?: boolean
+  artist_folder?: string
   // Donor priority (see docs/content.tsx "Donor Priority API") - admin-granted
   // only, never PATCHable. donor_since is null while is_donor is false.
   is_donor?: boolean
@@ -316,6 +321,7 @@ export interface PublicProfile {
   bio: string
   is_editor: boolean
   is_contributor: boolean
+  is_artist?: boolean
   is_donor: boolean
   donor_since: string | null
   public_play_history: boolean
@@ -1283,6 +1289,8 @@ export interface AdminUser {
   contributor_enabled: boolean
   manager_enabled?: boolean
   news_enabled?: boolean
+  artist_enabled?: boolean
+  artist_folder?: string
   discord_id: string
   discord_username: string
   discord_avatar: string
@@ -1609,6 +1617,9 @@ export async function adminUpdateUser(userId: number, payload: {
   contributor_enabled?: boolean
   manager_enabled?: boolean
   news_enabled?: boolean
+  artist_enabled?: boolean
+  /** Folder name under Cover Arts/. Renaming one that holds covers moves them. */
+  artist_folder?: string
   is_active?: boolean
   auto_approve_proposals?: boolean
   auto_approve_comp_proposals?: boolean

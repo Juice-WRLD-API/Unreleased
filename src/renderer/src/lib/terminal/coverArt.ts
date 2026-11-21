@@ -6,6 +6,7 @@ import {
   type CoverArtStatus, type CoverArtSubmission,
 } from '../coverArtApi'
 import { dropCoverArtImage } from '../coverArtImages'
+import { deleteArtistCover, getArtistFolder, uploadArtistCover } from '../artistCoversApi'
 import { searchCoverImages } from '../coverSuggestions'
 import { coverSearchQueries } from '../juicewrldApi'
 import { formatBytes } from '../format'
@@ -179,4 +180,48 @@ const coversCommand: TermCommand = {
   },
 }
 
-export const COVER_ART_COMMANDS: TermCommand[] = [coverArtCommand, coversCommand]
+// Artists' own folder, Cover Arts/<folder>/ in the community channel (Settings
+// → Account → Your uploads → Artist folder). Uploads go in at once, no review.
+const ARTIST_USAGE = 'artistfolder [ls] · upload [--name n] · rm <file name> [-y]'
+const artistFolderCommand: TermCommand = {
+  name: 'artistfolder', group: 'Content',
+  usage: ARTIST_USAGE,
+  description: 'Your artist folder in Files (artists only): list it, upload a cover straight into it (opens a file picker), or remove one',
+  covers: ['artistCoversApi.getArtistFolder', 'artistCoversApi.uploadArtistCover', 'artistCoversApi.deleteArtistCover'],
+  complete: async (before, partial) => {
+    const p = partial.toLowerCase()
+    if (before.length === 0) return ['ls', 'upload', 'rm'].filter((v) => v.startsWith(p))
+    if (before[0] === 'rm' && before.length === 1) {
+      const folder = await getArtistFolder().catch(() => null)
+      return (folder?.files ?? []).map((f) => f.name).filter((n) => n.toLowerCase().startsWith(p))
+    }
+    return []
+  },
+  run: async (args, ctx) => {
+    signedIn()
+    const { rest, bool, value } = parseArgs(args, ['name'])
+    const sub = (rest.shift() ?? 'ls').toLowerCase()
+    if (sub === 'upload') {
+      if (!useStore.getState().account?.is_artist) fail('only artists have a folder (an administrator gives the role: usermod <user> --artist on)')
+      const file = await pickLocalFile(COVER_ART_TYPES.join(','))
+      const checked = await checkCoverArtFile(file)
+      if (typeof checked === 'string') fail(checked)
+      ctx.print(`uploading ${file.name} (${formatBytes(file.size)})…`, 'dim')
+      const added = await uploadArtistCover(file, value.get('name'))
+      ctx.print(`added ${added.channel}:${added.path}`, 'ok')
+    } else if (sub === 'ls' || sub === 'list') {
+      const folder = await getArtistFolder()
+      if (asJson(ctx, bool.has('json'), folder)) return
+      if (folder.files.length === 0) { ctx.print(`${folder.path} is empty · artistfolder upload adds a cover`, 'dim'); return }
+      ctx.print(`${table(folder.files.map((f) => [f.name, formatBytes(f.size), relativeTime(f.updated_at)]))}
+${folder.channel}:${folder.path} · ${folder.files.length}/${folder.max_files}`)
+    } else if (sub === 'rm' || sub === 'remove' || sub === 'delete') {
+      const name = rest.join(' ').trim() || fail('usage: artistfolder rm <file name>')
+      if (!confirmAction(ctx, `Remove ${name} from your folder? It goes to the comp archive.`, bool.has('y'))) return
+      await deleteArtistCover(name)
+      ctx.print(`removed ${name}`, 'ok')
+    } else fail(`usage: ${ARTIST_USAGE}`)
+  },
+}
+
+export const COVER_ART_COMMANDS: TermCommand[] = [coverArtCommand, coversCommand, artistFolderCommand]

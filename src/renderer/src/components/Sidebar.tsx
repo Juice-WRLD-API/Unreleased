@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react'
-import { Settings, LogIn, ChevronLeft, ChevronRight, ChevronDown, Download, Upload, Info, Check, EyeOff, Bell } from 'lucide-react'
+import { Settings, LogIn, ChevronLeft, ChevronRight, ChevronDown, Download, Upload, Info, Check, EyeOff, Bell, MessagesSquare } from 'lucide-react'
 import logo from '../assets/logo.png'
 import { useStore, useStorePick } from '../store/useStore'
 import { ViewType } from '../types'
@@ -18,6 +18,7 @@ import { useSlidingIndicator } from '../hooks/useSlidingIndicator'
 import { MotionDisclosure } from './MotionDisclosure'
 import { useUnreadNotificationCount } from '../hooks/useNotificationHistory'
 import { useLiquidLens } from '../hooks/useLiquidLens'
+import { useRadioChatStore } from '../store/radioChatStore'
 
 const NAV_LENS = { bezel: 16, strength: 12, coreBlur: 14 }
 
@@ -35,6 +36,13 @@ export default function Sidebar(): JSX.Element {
   const activeUploadCount = useStore((s) => s.downloads.reduce((n, d) => (d.state === 'downloading' ? n + 1 : n), 0))
   const { showNotifications, setShowNotifications } = useStorePick('showNotifications', 'setShowNotifications')
   const unreadNotifications = useUnreadNotificationCount()
+  // The 999 FM chat pop-up (FmChatPopup) shares the top-right corner with
+  // Notifications and Transfers, so opening it closes them.
+  const fmChatOpen = useRadioChatStore((s) => s.popupOpen)
+  const toggleFmChat = (): void => {
+    if (!fmChatOpen) { setShowNotifications(false); setShowDownloadManager(false) }
+    useRadioChatStore.getState().setPopupOpen(!fmChatOpen)
+  }
   const isElectron = navigator.userAgent.includes('Electron')
 
   const [collapsed, setCollapsed] = useState<boolean>(
@@ -213,6 +221,13 @@ export default function Sidebar(): JSX.Element {
             <span aria-hidden={collapsed} className={labelCls}>Transfers</span>
           </button>
         )
+      case 'fmchat':
+        return (
+          <button key="fmchat" data-fmchat-toggle onClick={toggleFmChat} onContextMenu={openControlMenu('fmchat', '999 FM chat')} title={collapsed ? '999 FM chat' : undefined} aria-pressed={fmChatOpen} className={rowCls}>
+            <span className={iconWrap}><MessagesSquare size={18} className={fmChatOpen ? 'text-accent' : ''} /></span>
+            <span aria-hidden={collapsed} className={labelCls}>999 FM chat</span>
+          </button>
+        )
       case 'notifications':
         return (
           <button key="notifications" data-notifications-toggle onClick={() => setShowNotifications(!showNotifications)} onContextMenu={openControlMenu('notifications', 'Notifications')} title={collapsed ? 'Notifications' : undefined} aria-label={unreadNotifications > 0 ? `Notifications, ${unreadNotifications} new` : undefined} className={rowCls}>
@@ -274,6 +289,12 @@ export default function Sidebar(): JSX.Element {
                 {activeUploadCount}
               </span>
             )}
+          </button>
+        )
+      case 'fmchat':
+        return (
+          <button key="fmchat" data-fmchat-toggle onClick={toggleFmChat} onContextMenu={openControlMenu('fmchat', '999 FM chat')} title="999 FM chat" aria-pressed={fmChatOpen} className={barIconBtn}>
+            <MessagesSquare size={18} className={fmChatOpen ? 'text-accent' : ''} />
           </button>
         )
       case 'notifications':

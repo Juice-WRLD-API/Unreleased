@@ -8,7 +8,7 @@ import { buildHaystack, matchesHaystack } from '../components/adminShared'
 import { showAppToast } from '../lib/appToast'
 import { errorMessage } from '../lib/format'
 
-export type UsersFilter = 'all' | 'admins' | 'editors' | 'contributors' | 'managers' | 'applicants'
+export type UsersFilter = 'all' | 'admins' | 'editors' | 'contributors' | 'managers' | 'artists' | 'applicants'
 
 type UserPatch = Parameters<typeof userApi.adminUpdateUser>[1]
 
@@ -76,6 +76,7 @@ export function useAdminUsersList(users: AdminUser[], setUsers: React.Dispatch<R
     // still counted under whichever of Admins/Editors/Applicants they are.
     { id: 'contributors', label: 'Contributors', count: users.filter(u => u.contributor_enabled).length },
     { id: 'managers', label: 'Managers', count: users.filter(u => !!u.manager_enabled).length },
+    { id: 'artists', label: 'Artists', count: users.filter(u => !!u.artist_enabled).length },
     { id: 'applicants', label: 'Applicants', count: users.filter(u => u.role === 'applicant').length },
   ]
 
@@ -86,7 +87,8 @@ export function useAdminUsersList(users: AdminUser[], setUsers: React.Dispatch<R
   const haystack = useMemo(() => new Map(users.map(u => [u.user_id,
     buildHaystack(u.discord_username, u.username, u.role,
       u.contributor_enabled ? 'contributor' : undefined,
-      u.manager_enabled ? 'manager' : undefined),
+      u.manager_enabled ? 'manager' : undefined,
+      u.artist_enabled ? 'artist' : undefined, u.artist_folder),
   ])), [users])
 
   const visible = useMemo(() => users.filter(u => {
@@ -100,7 +102,9 @@ export function useAdminUsersList(users: AdminUser[], setUsers: React.Dispatch<R
             ? u.contributor_enabled
             : filter === 'managers'
               ? !!u.manager_enabled
-              : u.role === 'applicant'
+              : filter === 'artists'
+                ? !!u.artist_enabled
+                : u.role === 'applicant'
     return ok && matchesHaystack(search, haystack.get(u.user_id))
   }), [users, filter, search, haystack])
 

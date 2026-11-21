@@ -8,19 +8,19 @@ import { resolveUser, directory } from './users'
 const ROLES = ['editor', 'contributor', 'manager', 'applicant'] as const
 type Role = (typeof ROLES)[number]
 
-const SWITCHES: Record<string, 'contributor_enabled' | 'manager_enabled' | 'news_enabled' | 'is_active' | 'auto_approve_proposals' | 'auto_approve_comp_proposals'> = {
-  contributor: 'contributor_enabled', manager: 'manager_enabled', news: 'news_enabled', active: 'is_active', 'auto-edits': 'auto_approve_proposals', 'auto-comp': 'auto_approve_comp_proposals',
+const SWITCHES: Record<string, 'contributor_enabled' | 'manager_enabled' | 'news_enabled' | 'artist_enabled' | 'is_active' | 'auto_approve_proposals' | 'auto_approve_comp_proposals'> = {
+  contributor: 'contributor_enabled', manager: 'manager_enabled', news: 'news_enabled', artist: 'artist_enabled', active: 'is_active', 'auto-edits': 'auto_approve_proposals', 'auto-comp': 'auto_approve_comp_proposals',
 }
 
 export const ADMIN_EXTRA_COMMANDS: TermCommand[] = [
   {
     name: 'usermod', group: 'Admin',
-    usage: `usermod <user> [--role ${ROLES.join('|')}] [--contributor on|off] [--manager on|off] [--news on|off] [--active on|off] [--auto-edits on|off] [--auto-comp on|off]`,
+    usage: `usermod <user> [--role ${ROLES.join('|')}] [--contributor on|off] [--manager on|off] [--news on|off] [--artist on|off] [--artist-folder name] [--active on|off] [--auto-edits on|off] [--auto-comp on|off]`,
     description: 'Change a user’s role and switches (the Admin page’s Users tab). <user> is a name or id as for `user`',
     covers: ['userApi.adminUpdateUser'],
     complete: async (before, partial) => (before.length === 0 ? (await directory()).map((u) => u.username).filter((n) => n.toLowerCase().startsWith(partial.toLowerCase())) : []),
     run: async (args, ctx) => {
-      const { rest, value } = parseArgs(args, ['role', ...Object.keys(SWITCHES)])
+      const { rest, value } = parseArgs(args, ['role', 'artist-folder', ...Object.keys(SWITCHES)])
       if (rest.length === 0) fail('usage: usermod <user> --role … / --active off …')
       const user = await resolveUser(rest.join(' '))
       const patch: Parameters<typeof adminUpdateUser>[1] = {}
@@ -34,9 +34,11 @@ export const ADMIN_EXTRA_COMMANDS: TermCommand[] = [
         if (v === undefined) continue
         patch[field] = parseBool(v) ?? fail(`--${flag} takes on or off`)
       }
+      const folder = value.get('artist-folder')
+      if (folder !== undefined) patch.artist_folder = folder.trim() || fail('--artist-folder needs a name')
       if (Object.keys(patch).length === 0) fail('nothing to change - give --role or a switch')
       const u = await adminUpdateUser(user.id, patch)
-      ctx.print(`${u.username}: ${u.role}${u.is_active ? '' : ' (inactive)'} · contributor ${u.contributor_enabled ? 'on' : 'off'} · auto-approve edits ${u.auto_approve_proposals ? 'on' : 'off'}, comp ${u.auto_approve_comp_proposals ? 'on' : 'off'}`, 'ok')
+      ctx.print(`${u.username}: ${u.role}${u.is_active ? '' : ' (inactive)'} · contributor ${u.contributor_enabled ? 'on' : 'off'} · auto-approve edits ${u.auto_approve_proposals ? 'on' : 'off'}, comp ${u.auto_approve_comp_proposals ? 'on' : 'off'}${u.artist_enabled ? ` · artist (Cover Arts/${u.artist_folder ?? ''})` : ''}`, 'ok')
     },
   },
   {

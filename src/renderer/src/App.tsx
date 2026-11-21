@@ -1,6 +1,7 @@
 import React, { useEffect, useLayoutEffect, useRef, useState, Suspense } from 'react'
 import { useStore, useStorePick } from './store/useStore'
 import { useCatalogSync } from './store/catalogSyncStore'
+import { useRadioChatStore } from './store/radioChatStore'
 import { initCatalogSync } from './lib/catalogSync'
 import { setToken, getToken } from './lib/userApi'
 import { useThemeEffects } from './lib/themeEffects'
@@ -122,6 +123,7 @@ const LyricsGenModal = lazyOverlay(() => import('./components/LyricsGenModal'))
 // Desktop only - fetched the first time Sync is opened.
 const SyncModal = lazyOverlay(() => import('./components/SyncModal'))
 const NotificationCenter = lazyOverlay(() => import('./components/NotificationCenter'))
+const FmChatPopup = lazyOverlay(() => import('./components/FmChatPopup'))
 const StatisticsView = lazyView(() => import('./components/StatisticsView'))
 const PublicProfileView = lazyView(() => import('./components/PublicProfileView'))
 const ChatView = lazyView(() => import('./components/ChatView'))
@@ -213,6 +215,7 @@ function renderView(v: ViewType): JSX.Element {
 
 export default function App(): JSX.Element {
   const showRecognition = useStore((s) => s.showRecognition)
+  const fmChatOpen = useRadioChatStore((s) => s.popupOpen)
   const { showNowPlaying, showQueue, showSettings, setShowSettings, showDiagnostics, setShowDiagnostics, activeView, sidebarPosition, navStyle, appMenuPosition, loadAccount, completeDiscordLogin, showUserAuth, setShowUserAuth, loadLibrary, wrldFullscreen, loadOfflineLibrary, syncOfflinePlaylists, libraryAutoRefresh, libraryFolders, scanLibrary, prefetchApiData, refreshPlaylists, previousView, autoHideNav, showNotifications, setShowNotifications } = useStorePick(
     'showNowPlaying', 'showQueue', 'showSettings', 'setShowSettings', 'showDiagnostics', 'setShowDiagnostics', 'activeView', 'sidebarPosition', 'navStyle', 'appMenuPosition', 'loadAccount', 'completeDiscordLogin', 'showUserAuth', 'setShowUserAuth', 'loadLibrary', 'wrldFullscreen', 'loadOfflineLibrary', 'syncOfflinePlaylists', 'libraryAutoRefresh', 'libraryFolders', 'scanLibrary', 'prefetchApiData', 'refreshPlaylists', 'previousView', 'autoHideNav', 'showNotifications', 'setShowNotifications')
   // Opening the terminal from a view that holds unsaved local state (the song
@@ -582,6 +585,12 @@ export default function App(): JSX.Element {
       {showNotifications && (
         <ErrorBoundary variant="overlay" onDismiss={() => setShowNotifications(false)}>
           <NotificationCenter />
+        </ErrorBoundary>
+      )}
+      {/* WRLD has the same chat in its FM panel, so the pop-up waits there. */}
+      {fmChatOpen && activeView !== 'wrld' && (
+        <ErrorBoundary variant="overlay" onDismiss={() => useRadioChatStore.getState().setPopupOpen(false)}>
+          <FmChatPopup />
         </ErrorBoundary>
       )}
       {/* Rendered last on purpose: Chromium builds the frameless window's

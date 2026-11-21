@@ -95,8 +95,8 @@ interface VizState {
   /** How many pickers are open over the page (not saved). WRLD's visualizer and Edge light keep moving under them
    *  at a lower frame rate, so they don't fight the picker's own screens for the GPU. */
   vizCovered: number
-  /** The song's official video in place of the visualizer, when the archive has one: off, music videos, or
-   *  visualizers and lyric videos too. */
+  /** The song's official video in place of the visualizer, when the archive has one: off, music videos (a
+   *  visualizer for a song with none), or lyric videos too. */
   wrldVideos: MusicVideoChoice
   /** A video is up and the visualizer stopped under it (not saved). */
   wrldVideoShown: boolean

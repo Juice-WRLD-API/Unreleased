@@ -152,8 +152,8 @@ export default function VizControls({ modes = true, wrldStyle = false }: { modes
           onChange={s.setWrldVideos}
           options={[
             { value: 'off', label: 'Off' },
-            { value: 'music', label: 'Music videos', title: 'A released song with a music video in Files plays it, muted and in time with the song, in place of the visualizer' },
-            { value: 'all', label: 'All videos', title: 'Official visualizers and lyric videos too, for songs without a music video' },
+            { value: 'music', label: 'Music videos', title: 'A released song with a music video in Files plays it, muted and in time with the song, in place of the visualizer. A song with no music video plays its official visualizer' },
+            { value: 'all', label: 'All videos', title: 'Lyric videos too, for songs with neither a music video nor a visualizer' },
           ]}
         />
       ))}

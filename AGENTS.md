@@ -1,6 +1,6 @@
 # Agent guide: Juice WRLD API and Unreleased
 
-**Version 1.90** · updated 2026-11-21. Bump the version and date whenever you
+**Version 1.91** · updated 2026-11-22. Bump the version and date whenever you
 change this file (minor for fixes and additions, major for rewrites).
 
 **Keep this file current.** If you find something in the docs or this file that
@@ -609,6 +609,14 @@ Node 22.
 
 Newest first. One entry each: date, what went wrong, what to do instead. Delete
 entries that stop being true.
+
+- 2026-11-22: The main machine's `Chicken-Dinner/` checkout has no
+  `juicewrldapi/settings.py` (per server, not in git) and no venv, so
+  `manage.py test` and `makemigrations` can't run there. Write migrations by
+  hand from the last one in `accounts/migrations/`, `py_compile` the files,
+  and say the tests weren't run. `UserProfile.role` choices already differ
+  from the migrations (`news` was never migrated), so a new flag-style role
+  belongs in a boolean field, not in `ROLE_CHOICES`.
 
 - 2026-11-21: WRLD took ~230 ms to switch to (775 ms the first time) because
   999 FM chat linked song titles with one regex alternating all ~5,000

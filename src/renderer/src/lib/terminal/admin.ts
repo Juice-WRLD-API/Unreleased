@@ -15,7 +15,7 @@ import { pageRows } from './more'
 // standing, so a non-admin account just gets the API's own refusal.
 const PROPOSAL_STATUSES: ProposalStatus[] = ['pending', 'approved', 'rejected', 'reversed']
 const APPLICATION_STATUSES: ApplicationStatus[] = ['pending', 'approved', 'rejected']
-const USER_ROLES = ['administrator', 'editor', 'contributor', 'manager', 'applicant']
+const USER_ROLES = ['administrator', 'editor', 'contributor', 'manager', 'news', 'artist', 'applicant']
 const LIMIT = 50
 
 type Kind = 'song' | 'comp' | 'app'
@@ -192,7 +192,7 @@ export const ADMIN_COMMANDS: TermCommand[] = [
     },
   },
   {
-    name: 'users', group: 'Admin', usage: 'users [role] [filter]', description: 'List accounts, optionally by role (administrator, editor, contributor, manager, applicant) and a name filter. See one with: role @user',
+    name: 'users', group: 'Admin', usage: 'users [role] [filter]', description: 'List accounts, optionally by role (administrator, editor, contributor, manager, news, artist, applicant) and a name filter. See one with: role @user',
     complete: (before, partial) => (before.length === 0 ? USER_ROLES.filter((s) => s.startsWith(partial.toLowerCase())) : []),
     run: async (args, ctx) => {
       const words = args.trim().split(/\s+/).filter(Boolean)
@@ -203,7 +203,7 @@ export const ADMIN_COMMANDS: TermCommand[] = [
       if (list.length === 0) { ctx.print('no matching users', 'dim'); return }
       list = [...list].sort((a, b) => a.username.localeCompare(b.username))
       const flags = (u: (typeof list)[number]): string => [
-        u.contributor_enabled ? 'contrib' : '', u.manager_enabled ? 'mgr' : '', u.news_enabled ? 'news' : '',
+        u.contributor_enabled ? 'contrib' : '', u.manager_enabled ? 'mgr' : '', u.news_enabled ? 'news' : '', u.artist_enabled ? 'artist' : '',
         u.auto_approve_proposals ? 'auto-edits' : '', u.auto_approve_comp_proposals ? 'auto-comp' : '', u.is_active ? '' : 'DISABLED',
       ].filter(Boolean).join(',')
       ctx.print(`${pageRows(list.length, (i) => { const u = list[i]; return `${String(u.user_id).padEnd(7)}${u.username.padEnd(22)}${u.role.padEnd(15)}${relativeTime(u.last_login).padEnd(12)}${flags(u)}` }, LIMIT)}\n${list.length} user${list.length === 1 ? '' : 's'}`)

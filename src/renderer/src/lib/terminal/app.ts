@@ -27,7 +27,7 @@ const VIEWS: Record<string, ViewType> = {
 }
 const SETTINGS_TABS: SettingsTab[] = ['account', 'general', 'appearance', 'navigation', 'playback', 'lyrics', 'connections', 'desktop', 'shortcuts', 'library', 'app', 'developer', 'about']
 const ADMIN_TABS: AdminTab[] = ['proposals', 'comp-proposals', 'comp-replace', 'cover-art', 'community-edits', 'applications', 'reports', 'feedback', 'users', 'stats', 'channels', 'news-channels', 'eras', 'cdn-nodes', 'beta', 'lyrics', 'thanks', 'logs']
-const OPEN_TARGETS = [...Object.keys(VIEWS), 'settings', 'profile', 'admin', 'queue', 'eq', 'diagnostics', 'notifications', 'identify', 'user', 'song']
+const OPEN_TARGETS = [...Object.keys(VIEWS), 'settings', 'profile', 'admin', 'queue', 'eq', 'diagnostics', 'notifications', 'fm-chat', 'identify', 'user', 'song']
 // `notifications` filters, by the names the notification area shows.
 const NOTIFY_KINDS: Record<string, NotificationKind> = { chat: 'chat', news: 'news', announcements: 'broadcast', app: 'app' }
 const NOTIFY_SUBS = ['ls', 'show', 'open', 'rm', 'read', 'clear']
@@ -42,7 +42,7 @@ const offered = (target: string): boolean => {
 export const APP_COMMANDS: TermCommand[] = [
   {
     name: 'open', aliases: ['go', 'goto'], group: 'Navigation',
-    get usage() { return `open <page> · open settings [tab] · ${offered('admin') ? 'open admin [tab] · ' : ''}open user <id> · open song <title> · open queue|eq|diagnostics|notifications|identify` },
+    get usage() { return `open <page> · open settings [tab] · ${offered('admin') ? 'open admin [tab] · ' : ''}open user <id> · open song <title> · open queue|eq|diagnostics|notifications|fm-chat|identify` },
     description: 'Go to any page, as if you had clicked it. The terminal keeps its place for when you return (Ctrl+` or the Terminal button)',
     complete: (before, partial) => {
       const p = partial.toLowerCase()
@@ -75,6 +75,14 @@ export const APP_COMMANDS: TermCommand[] = [
       if (key === 'eq') { s.setShowEqPanel(true); ctx.print('equalizer opened', 'ok'); return }
       if (key === 'diagnostics' || key === 'diag') { s.setShowDiagnostics(true); ctx.print('diagnostics opened', 'ok'); return }
       if (key === 'notifications') { s.setShowNotifications(true); ctx.print('notification area opened', 'ok'); return }
+      if (key === 'fm-chat') {
+        s.setShowNotifications(false)
+        s.setShowDownloadManager(false)
+        const { useRadioChatStore } = await import('../../store/radioChatStore')
+        useRadioChatStore.getState().setPopupOpen(true)
+        ctx.print('999 FM chat opened', 'ok')
+        return
+      }
       if (key === 'identify') { s.setShowRecognition(true); ctx.print('identify song opened', 'ok'); return }
       if (key === 'user') {
         if (!/^\d+$/.test(rest)) fail('usage: open user <numeric id>')

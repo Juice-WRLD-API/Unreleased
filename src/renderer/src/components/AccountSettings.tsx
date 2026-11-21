@@ -16,6 +16,7 @@ import AccountSignIn from './AccountSignIn'
 import Passkeys from './Passkeys'
 import ApiKeys from './ApiKeys'
 import MyCoverArt from './MyCoverArt'
+import ArtistCovers from './ArtistCovers'
 import MyCommunityEdits from './MyCommunityEdits'
 import MyCdnNodes from './MyCdnNodes'
 import ChatDevices from './chat/ChatDevices'
@@ -86,7 +87,7 @@ export default function AccountSettings({ page, setPage, openMainView }: {
             {hasChatAccess(account) && (
               <SettingsLink icon={MessageSquare} color="#7c3aed" label="Chat" sub="Online status, read receipts and devices" onClick={() => setPage('chat')} />
             )}
-            <SettingsLink icon={Upload} color="#db2777" label="Your uploads" sub="Cover art, remixes & edits and CDN nodes" onClick={() => setPage('uploads')} />
+            <SettingsLink icon={Upload} color="#db2777" label="Your uploads" sub={account.is_artist ? 'Your artist folder, cover art, remixes & edits and CDN nodes' : 'Cover art, remixes & edits and CDN nodes'} onClick={() => setPage('uploads')} />
             <SettingsLink icon={Code2} color="#4b5563" label="Developer" sub="API keys and your auth token" onClick={() => setPage('developer')} />
           </Group>
           <div className="glass-pane rounded-2xl">
@@ -117,6 +118,7 @@ export default function AccountSettings({ page, setPage, openMainView }: {
           {shown === 'chat' && <ChatPage />}
           {shown === 'uploads' && (
             <>
+              {account?.is_artist && <Group title="Artist folder"><ArtistCovers /></Group>}
               <Group title="Cover art"><MyCoverArt /></Group>
               <Group title="Remixes & edits"><MyCommunityEdits /></Group>
               <Group title="CDN nodes"><MyCdnNodes /></Group>

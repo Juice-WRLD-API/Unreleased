@@ -20,6 +20,7 @@ import FeedbackTab from './FeedbackTab'
 import CompProposalsTab from './CompProposalsTab'
 import CompReplaceTab from './CompReplaceTab'
 import CoverArtTab from './CoverArtTab'
+import ArtistFolderField from './ArtistFolderField'
 import CommunityEditsTab from './CommunityEditsTab'
 import ChannelsTab from './ChannelsTab'
 import NewsChannelsTab from './NewsChannelsTab'
@@ -1208,6 +1209,7 @@ function UsersTab({ users, setUsers, currentUserId }: { users: AdminUser[]; setU
                       ['Contributor', !!selected.contributor_enabled, (on: boolean) => ({ contributor_enabled: on })],
                       ['Manager', !!selected.manager_enabled, (on: boolean) => ({ manager_enabled: on })],
                       ['News', !!selected.news_enabled, (on: boolean) => ({ news_enabled: on })],
+                      ['Artist', !!selected.artist_enabled, (on: boolean) => ({ artist_enabled: on })],
                     ] as const).map(([label, checked, payload]) => (
                       <label key={label} className="flex items-center justify-between gap-2 text-sm text-text-secondary cursor-pointer">
                         {label}
@@ -1215,6 +1217,7 @@ function UsersTab({ users, setUsers, currentUserId }: { users: AdminUser[]; setU
                           onChange={v => doUpdate(selected.user_id, payload(v))} />
                       </label>
                     ))}
+                    <ArtistFolderField user={selected} onSave={folder => doUpdate(selected.user_id, { artist_folder: folder })} />
                   </div>
                   <div className="grid grid-cols-2 gap-2">
                     <button onClick={() => doUpdate(selected.user_id, { is_active: !selected.is_active })}

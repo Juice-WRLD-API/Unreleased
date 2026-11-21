@@ -12,7 +12,7 @@ import type { Track } from '../types'
 
 export const MUSIC_VIDEO_ROOT = 'Footage/Youtube'
 
-/** music: music videos and "Official Video"s. The others are only used when asked for. */
+/** music: music videos and "Official Video"s. Visualizers stand in when a song has none; lyric videos only when asked for. */
 export type MusicVideoKind = 'music' | 'visualizer' | 'lyric'
 
 export interface MusicVideo {
@@ -33,7 +33,7 @@ export function videoLabel(v: MusicVideo): string {
   return day ? `${VIDEO_KIND_LABEL[v.kind]} · ${day}` : VIDEO_KIND_LABEL[v.kind]
 }
 
-/** What a setting lets WRLD show: none, music videos, or visualizers and lyric videos too. */
+/** What a setting lets WRLD show: none, music videos (or a visualizer when there's none), or lyric videos too. */
 export type MusicVideoChoice = 'off' | 'music' | 'all'
 
 const VIDEO_EXT = /\.(mp4|webm|mov|m4v)$/i
@@ -119,12 +119,13 @@ export function loadMusicVideoIndex(force = false): Promise<Map<string, MusicVid
 
 const RANK: Record<MusicVideoKind, number> = { music: 0, visualizer: 1, lyric: 2 }
 
-/** The videos for a song name, best first: music videos, then (with `all`) visualizers and lyric videos, newest first
- *  within each. A re-upload or "Go Hard 2.0" gets its own name, so this never mixes songs. */
+/** The videos for a song name, best first: music videos, then official visualizers, then (with `all`) lyric videos,
+ *  newest first within each. Visualizers come after every music video, so they only play for a song whose music
+ *  videos are missing or don't line up. A re-upload or "Go Hard 2.0" gets its own name, so this never mixes songs. */
 export function videosFor(map: Map<string, MusicVideo[]>, songName: string, choice: MusicVideoChoice): MusicVideo[] {
   if (choice === 'off') return []
   return (map.get(songTitleKey(songName)) ?? [])
-    .filter((v) => choice === 'all' || v.kind === 'music')
+    .filter((v) => choice === 'all' || v.kind !== 'lyric')
     .sort((a, b) => RANK[a.kind] - RANK[b.kind] || b.date.localeCompare(a.date))
 }
 
