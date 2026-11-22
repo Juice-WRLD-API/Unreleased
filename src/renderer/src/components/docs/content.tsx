@@ -89,6 +89,7 @@ function OverviewTab() {
           <Endpoint method="GET" path="/playlists/shared/{share_id}/" description="Fetch a shared playlist by ID" />
           <Endpoint method="POST" path="/plays/" description="Record a play event (no auth required)" />
           <Endpoint method="GET" path="/plays/stats/" description="Site-wide play stats: top songs, albums, eras, recent plays" />
+          <Endpoint method="GET" path="/plays/top-songs/" description="Song chart: range=7d|30d|all, sort=plays|likes, era; plays, minutes, listeners, rank movement" />
           <Endpoint method="GET" path="/heardle/leaderboard/" description="Heardle leaderboards: streak, today, versus" />
           <Endpoint method="GET" path="/heardle/clip/" description="Signed Heardle audio clip (HMAC round token, not a user token)" />
           <Endpoint method="GET" path="/feeds/tracker.rss" description="RSS feed of approved song edits" />
@@ -520,6 +521,25 @@ function FilesTab() {
         />
       </Section>
 
+      <Section title="Audio Tags (POST /files/tags/)" defaultOpen={false}>
+        <p className="text-sm text-text-secondary">Current tags of up to 500 comp audio files (MP3, M4A, FLAC, Opus, WAV, AIFF) per request. No auth. There is no GET.</p>
+        <Pre>{`POST /files/tags/
+{ "paths": ["Era/A.mp3", "Era/notes.txt"], "channel": "comp" }
+
+-> {
+  "tags": {
+    "Era/A.mp3": { "title": "", "artist": "Juice WRLD", "album": "", "album_artist": "", "genre": "",
+                   "year": "2018", "track": "3/12", "composer": "", "comment": "", "has_cover": true }
+  },
+  "errors": { "Era/notes.txt": "Tags can't be read from this file type" }
+}`}</Pre>
+        <p className="text-xs text-text-muted">
+          Every value is a string (<Code>""</Code> when missing) except <Code>has_cover</Code>. Missing, non-audio and
+          unreadable paths go to <Code>errors</Code>. To change tags, submit <Code>retag</Code> comp proposals (Editor
+          Workflow tab).
+        </p>
+      </Section>
+
       <Section title="Cover Art Image (GET /files/cover-art/)">
         <Table
           headers={['Param', 'Required', 'Description']}
@@ -593,7 +613,7 @@ GET /files/cover-art/?path=Compilation/…/Lucid Dreams.mp3&size=400`}</Pre>
       </Section>
 
       <Section title="Compressed Audio (GET /files/download-compressed/)" defaultOpen={false}>
-        <p className="text-sm text-text-secondary">On-the-fly transcode to a lower bitrate MP3, for bandwidth-constrained playback.</p>
+        <p className="text-sm text-text-secondary">On-the-fly transcode to a lower bitrate MP3, for bandwidth-constrained playback. A video file (<Code>.mp4</Code>, <Code>.mov</Code>, <Code>.webm</Code>, <Code>.mkv</Code>, <Code>.m4v</Code>) gives its sound track alone, which is how the player lines a music video up with its song. Anything else is a 400.</p>
         <Table
           headers={['Param', 'Required', 'Description']}
           rows={[
@@ -1026,7 +1046,58 @@ function AccountsTab() {
       <Section title="Logout">
         <Pre>{`POST /accounts/logout/
 Authorization: Token <token>`}</Pre>
-        <p className="text-xs text-text-muted">Invalidates the token server-side. Clear the locally stored token regardless of whether this call succeeds.</p>
+        <p className="text-xs text-text-muted">
+          Signs out this device only: its token stops working and other devices stay signed in. Clear the locally
+          stored token whether or not the call succeeds. <Code>POST /accounts/logout/all/</Code> signs out every
+          device on the account, the caller included.
+        </p>
+      </Section>
+
+      <Section title="Signed-in Devices" defaultOpen={false}>
+        <p className="text-sm text-text-secondary">
+          Every sign-in (password, Discord, passkey, login approval, sign-up) gets its own token. A token unused for
+          90 days stops working (401), so treat a 401 as signed out. Using a token keeps it alive.
+        </p>
+        <Table
+          headers={['Method', 'Path', 'Notes']}
+          rows={[
+            ['GET', <Code>{'/accounts/account/sessions/'}</Code>, <><Code>{'{ "sessions": [{ id, user_agent, ip, created_at, last_used_at, current }] }'}</Code>, most recently used first. <Code>current</Code> is the calling device; <Code>last_used_at</Code> updates at most hourly</>],
+            ['DELETE', <Code>{'/accounts/account/sessions/{id}/'}</Code>, 'Sign that device out. 404 if it is not yours'],
+            ['POST', <Code>{'/accounts/logout/all/'}</Code>, 'Sign every device out'],
+          ]}
+        />
+        <p className="text-xs text-text-muted">Signing a device out also closes the chat, notification and log sockets it opened.</p>
+      </Section>
+
+      <Section title="Username and Password on Any Account" defaultOpen={false}>
+        <p className="text-sm text-text-secondary">
+          Discord sign-ups start with a placeholder username (<Code>{'discord_<id>'}</Code>) and no password. They
+          can pick a username and add a password, then sign in either way. Both endpoints take a session token only
+          (API keys get 401) and share a limit of 20 requests an hour.
+        </p>
+        <Table
+          headers={['Field on /account/me/', 'Meaning']}
+          rows={[
+            [<Code>username</Code>, <>The sign-in name. <Code>{'discord_<id>'}</Code> until one is picked; never show it as a handle then</>],
+            [<Code>username_chosen</Code>, <><Code>false</Code> while it is still the placeholder</>],
+            [<Code>has_password</Code>, 'Whether the account can sign in with a password'],
+            [<Code>username_changed_at</Code>, <>Last rename, or <Code>null</Code></>],
+            [<Code>username_next_change_at</Code>, <>When the next rename is allowed, or <Code>null</Code> if now</>],
+          ]}
+        />
+        <Pre>{`POST /accounts/account/username/
+{ "username": "new_name" }
+
+POST /accounts/account/password/
+{ "current_password": "old-password", "new_password": "new-password" }`}</Pre>
+        <p className="text-xs text-text-muted">
+          A username can change once every 14 days (the first pick counts). The username call returns the user; errors
+          are 400 with a <Code>username</Code> list, plus <Code>next_change_at</Code> during the wait. The old name stops
+          working at once. <Code>current_password</Code> is needed only when <Code>has_password</Code> is true, and an
+          account must pick a username before adding a password. The password call returns{' '}
+          <Code>{'{ user, signed_out }'}</Code>: changing an existing password signs every other device out, adding a
+          first one signs nobody out.
+        </p>
       </Section>
 
 
@@ -1673,6 +1744,50 @@ Authorization: Token <token>`}</Pre>
         </p>
       </Section>
 
+      <Section title="Passkeys" defaultOpen={false}>
+        <p className="text-sm text-text-secondary">
+          Sign in with a passkey (WebAuthn). A passkey is added from a signed-in account, then works on its own and
+          returns the same <Code>{'{ token, user }'}</Code> as the other logins. It counts as two-factor, so an account
+          with <Code>otp_enabled</Code> is not asked for a code.
+        </p>
+        <Table
+          headers={['Method', 'Path', 'Auth', 'Description']}
+          rows={[
+            ['POST', <Code>{'/accounts/auth/passkey/options/'}</Code>, 'none', 'Start a sign-in: get a challenge'],
+            ['POST', <Code>{'/accounts/auth/passkey/login/'}</Code>, 'none', 'Finish a sign-in, get a token'],
+            ['GET', <Code>{'/accounts/account/passkeys/'}</Code>, 'token', <><Code>{'{ "passkeys": [...] }'}</Code>, newest first</>],
+            ['POST', <Code>{'/accounts/account/passkeys/register/options/'}</Code>, 'token', 'Start adding a passkey'],
+            ['POST', <Code>{'/accounts/account/passkeys/register/'}</Code>, 'token', 'Finish adding a passkey'],
+            ['PATCH', <Code>{'/accounts/account/passkeys/{id}/'}</Code>, 'token', <>Rename: <Code>{'{ "name": "Work laptop" }'}</Code></>],
+            ['DELETE', <Code>{'/accounts/account/passkeys/{id}/'}</Code>, 'token', 'Remove'],
+          ]}
+        />
+        <Pre>{`// Adding (signed in)
+const { challenge_id, options } = await post('/accounts/account/passkeys/register/options/')
+const cred = await navigator.credentials.create({
+  publicKey: PublicKeyCredential.parseCreationOptionsFromJSON(options),
+})
+await post('/accounts/account/passkeys/register/', { challenge_id, credential: cred.toJSON(), name: 'Laptop' })
+
+// Signing in (no username needed)
+const start = await post('/accounts/auth/passkey/options/')
+const got = await navigator.credentials.get({
+  publicKey: PublicKeyCredential.parseRequestOptionsFromJSON(start.options),
+})
+const { token, user } = await post('/accounts/auth/passkey/login/', { challenge_id: start.challenge_id, credential: got.toJSON() })`}</Pre>
+        <p className="text-xs text-text-muted">
+          A passkey is <Code>{'{ id, name, transports, backed_up, last_used_at, created_at }'}</Code>. Challenges work
+          once and expire after 5 minutes. Up to 20 passkeys per account. The <Code>/account/passkeys/</Code> routes
+          take a session token only, so an API key can&apos;t add a way to sign in. Closing the browser prompt never
+          reaches the server: treat <Code>NotAllowedError</Code> as a cancel.
+        </p>
+        <p className="text-xs text-text-muted">
+          Passkeys belong to <Code>juicewrldapi.com</Code>, so browsers only offer them there and on subdomains such as
+          player.juicewrldapi.com. The Windows desktop app runs the prompt in a helper window; macOS and Linux desktop,
+          Android, iOS and the CLI can list, rename and remove passkeys but not create or use them.
+        </p>
+      </Section>
+
       <Section title="API Keys" defaultOpen={false}>
         <p className="text-xs text-text-muted">
           Named keys for scripts and integrations. A key acts as its owner, limited by its scopes, and never raises the account's
@@ -1921,15 +2036,15 @@ Content-Type: application/json
       </Section>
 
 
-      <Section title="Applications (Editor or Contributor)">
+      <Section title="Applications (Editor, Contributor or Artist)">
         <p className="text-sm text-text-secondary">
-          How a standard user applies for either the editor or the contributor track: same endpoint, distinguished
+          How a standard user applies for the editor, contributor or artist role: same endpoint, distinguished
           by <Code>application_type</Code>.
         </p>
         <Table
           headers={['Method', 'Path', 'Description']}
           rows={[
-            ['GET', '/accounts/application/', "Fetch the logged-in user's own application (null if none)"],
+            ['GET', '/accounts/application/', <>Your latest application (null if none). <Code>{'?type=editor|contributor|artist'}</Code> narrows it; without it, artist applications are left out</>],
             ['POST', '/accounts/application/', 'Submit an application'],
           ]}
         />
@@ -1942,8 +2057,16 @@ Content-Type: application/json
   "experience": "optional",
   "motivation": "required, why you want this access",
   "areas": "optional",
-  "channel": "optional, applying for a role scoped to one channel rather than globally"
+  "channel": "optional, applying for a role scoped to one channel rather than globally",
+  "portfolio": "artist only, optional: links to your work",
+  "artist_folder": "artist only, optional: the folder you'd like under Cover Arts/"
 }`}</Pre>
+        <p className="text-xs text-text-muted">
+          An artist application has no channel (the role is account-wide, see Artist folders in the Community Uploads
+          tab). A taken or reserved <Code>artist_folder</Code> is a 400, and so is applying while already an artist or
+          with the same kind still pending. Reviewers can pass <Code>artist_folder</Code> when approving to pick another
+          folder.
+        </p>
         <p className="text-xs text-text-muted"><Code>status</Code> on the returned application is <Code>pending</Code>, <Code>approved</Code>, or <Code>rejected</Code>.</p>
         <p className="text-xs text-text-muted">
           Approving a <Code>contributor</Code> application should set <Code>is_contributor</Code>, not{' '}
@@ -2308,7 +2431,7 @@ Content-Type: application/json
 }
 
 function AdminTab() {
-  const { Code, Section } = usePrimitives()
+  const { Code, Section, MethodPath } = usePrimitives()
   return (
     <div className="space-y-6">
       <Section title="Admin: User Lookup" defaultOpen={false}>
@@ -2737,6 +2860,140 @@ Content-Type: application/json
         </p>
       </Section>
 
+      <Section title="Admin: Cover Art and Community Edit Review" defaultOpen={false}>
+        <p className="text-sm text-text-secondary">
+          Cover art and remixes users send in have their own queues, <Code>/accounts/admin/cover-art/</Code> and{' '}
+          <Code>/accounts/admin/community-edits/</Code>, reviewed by primary-channel managers and administrators. See
+          the Community Uploads tab.
+        </p>
+      </Section>
+
+      <Section title="Admin: Replace a Whole Comp" defaultOpen={false}>
+        <MethodPath method="POST" path={`/accounts/admin/comp-replace/`} />
+        <p className="text-sm text-text-secondary">
+          For a manager or admin of the channel. Builds the complete new comp beside the live one while the old one
+          keeps serving, then swaps the two folders in one rename, so listeners never see a half-filled Files tab.
+        </p>
+        <ol className="list-decimal pl-5 space-y-1 text-sm text-text-secondary">
+          <li>Stage the new files with <Code>upload/stage/</Code> or <Code>upload/init/</Code> + <Code>upload/chunk/</Code>, as for a contributor batch. Managers don&apos;t need the contributor role. Don&apos;t call <Code>upload/complete/</Code>.</li>
+          <li>Send the full layout. Every file is listed once, with the <Code>upload_id</Code> of new bytes or the <Code>from_path</Code> of a file already in the comp. Anything not listed is removed.</li>
+        </ol>
+        <Pre>{`POST /accounts/admin/comp-replace/
+{
+  "channel": "redemptionz",
+  "notes": "optional, stored on the commit",
+  "dry_run": false,
+  "files": [
+    { "file_path": "Era/Song.mp3", "upload_id": "..." },
+    { "file_path": "Era/Kept.mp3", "from_path": "Era/Kept.mp3" },
+    { "file_path": "Era/Moved.mp3", "from_path": "Misc/Moved.mp3" }
+  ],
+  "folders": ["Era/Empty Folder"]
+}
+
+dry_run -> { "dry_run": true, "files": 1240, "folders": 3, "added": [...], "removed": [...], "kept": 1239 }
+real run -> { "commit_id": "a1b2c3d4e5f6", "files": 1240, "folders": 3, "added": 1, "changed": 12, "removed": 1, "unchanged": 1227 }`}</Pre>
+        <p className="text-xs text-text-muted">
+          Any invalid entry is a 400 listing <Code>errors</Code> (<Code>field</Code>, <Code>index</Code>,{' '}
+          <Code>detail</Code>) and nothing changes. Replaced and removed files are archived with revisions under the{' '}
+          <Code>commit_id</Code>; unchanged files keep their history; a reused <Code>from_path</Code> updates matching{' '}
+          <Code>Song.path</Code> values. One replacement per channel at a time (409), and comp proposals in that channel
+          can&apos;t be approved meanwhile. Follow it in the admin logs: <Code>comp.replace_started</Code>,{' '}
+          <Code>comp.replace_progress</Code> (<Code>step</Code>, <Code>percent</Code>), then <Code>comp.replaced</Code>{' '}
+          or <Code>comp.replace_failed</Code>.
+        </p>
+      </Section>
+
+      <Section title="Admin: Thank you page" defaultOpen={false}>
+        <Table
+          headers={['Method', 'Path', 'Auth', 'Purpose']}
+          rows={[
+            ['GET', <Code>{'/accounts/thanks/'}</Code>, 'none', 'The page, for the players'],
+            ['GET', <Code>{'/accounts/admin/thanks/'}</Code>, 'admin + 2FA', <>Plus <Code>updated_by</Code> and <Code>available_icons</Code></>],
+            ['PUT', <Code>{'/accounts/admin/thanks/'}</Code>, 'admin + 2FA', 'Replace the whole page'],
+            ['DELETE', <Code>{'/accounts/admin/thanks/'}</Code>, 'admin + 2FA', 'Remove it; players go back to their built-in page'],
+          ]}
+        />
+        <Pre>{`{ "configured": true, "title": "Thank you", "intro": "...", "footnote": "...",
+  "sections": [
+    { "title": "With thanks to", "icon": "heart", "names": ["Anonymous"] },
+    { "title": "Built by", "icon": "code", "names": ["saint"] }
+  ],
+  "updated_at": "2026-11-12T12:00:00Z" }`}</Pre>
+        <p className="text-xs text-text-muted">
+          <Code>configured: false</Code> means players show the page they ship with. PUT limits: <Code>title</Code> 80,{' '}
+          <Code>intro</Code> 2000, <Code>footnote</Code> 500, up to 20 <Code>sections</Code> with an <Code>icon</Code>{' '}
+          of <Code>""</Code>, <Code>heart</Code>, <Code>code</Code>, <Code>star</Code>, <Code>users</Code> or{' '}
+          <Code>skull</Code> and up to 500 <Code>names</Code> of 120 characters. Changes show on the next page load.
+        </p>
+      </Section>
+
+      <Section title="Admin: Music video defaults" defaultOpen={false}>
+        <p className="text-sm text-text-secondary">
+          WRLD shows a released song&apos;s official video in place of the visualizer, picking one itself. An
+          administrator can set the video every player uses for a song, or turn it off. A listener&apos;s own pick
+          on their device still wins.
+        </p>
+        <Table
+          headers={['Method', 'Path', 'Auth', 'Purpose']}
+          rows={[
+            ['GET', <Code>{'/accounts/music-videos/'}</Code>, 'none', <>Every default (<Code>max-age=300</Code>)</>],
+            ['GET', <Code>{'/accounts/admin/music-videos/'}</Code>, 'admin + 2FA', <>Plus <Code>song_name</Code> and <Code>updated_by</Code></>],
+            ['PUT', <Code>{'/accounts/admin/music-videos/'}</Code>, 'admin + 2FA', <><Code>{'{ "song_id": 94117, "video_path": "Footage/Youtube/...mp4" }'}</Code></>],
+            ['DELETE', <Code>{'/accounts/admin/music-videos/{song_id}/'}</Code>, 'admin + 2FA', 'Back to the players\' own pick'],
+          ]}
+        />
+        <Pre>{`{ "defaults": [
+  { "song_id": 94117, "public_id": 2190,
+    "song_path": "Compilation/1. Released Discography/12. Legends Never Die/Wishing Well.mp3",
+    "video_path": "Footage/Youtube/2020/2020-07-13/Juice WRLD - Wishing Well (Official Music Video).mp4",
+    "updated_at": "2026-11-15T12:00:00Z" }
+] }`}</Pre>
+        <p className="text-xs text-text-muted">
+          <Code>song_id</Code> is internal. <Code>video_path</Code> is a primary-channel <Code>.mp4</Code>,{' '}
+          <Code>.webm</Code>, <Code>.mov</Code> or <Code>.m4v</Code>; a missing file is a 400 and <Code>""</Code> means
+          no video for that song. Players match by <Code>song_path</Code>, so a comp file of the same song gets it too.
+        </p>
+      </Section>
+
+      <Section title="Admin: Logs" defaultOpen={false}>
+        <p className="text-sm text-text-secondary">
+          The server&apos;s logs over the API, for administrators with two-factor (API keys need <Code>admin</Code>).
+          Every process writes to the same place, so this covers the API, media, websocket and Celery workers.
+        </p>
+        <Table
+          headers={['Method', 'Path', 'Description']}
+          rows={[
+            ['GET', <Code>{'/accounts/admin/logs/'}</Code>, <>Log files with sizes and last write, plus the valid <Code>levels</Code> and <Code>categories</Code></>],
+            ['GET', <Code>{'/accounts/admin/logs/events/'}</Code>, 'Search the structured event log, newest first'],
+            ['GET', <Code>{'/accounts/admin/logs/stats/'}</Code>, <>Totals for <Code>?hours=</Code> (default 24, max 720) or <Code>?since=</Code>: levels, categories, status classes and top-10 lists</>],
+            ['POST', <Code>{'/accounts/admin/logs/ws-ticket/'}</Code>, 'Ticket for the live log socket (Realtime Sockets tab)'],
+            ['GET', <Code>{'/accounts/admin/logs/files/{name}/'}</Code>, <>Last lines of <Code>api.log</Code>, <Code>audit.log</Code>, <Code>auth.log</Code>, <Code>security.log</Code>, <Code>errors.log</Code>, <Code>performance.log</Code>, <Code>file_access.log</Code> or <Code>django.log</Code> (<Code>lines</Code>, <Code>level</Code>, <Code>q</Code>)</>],
+          ]}
+        />
+        <Table
+          headers={['events/ param', 'Meaning']}
+          rows={[
+            [<Code>level</Code>, 'Minimum level'],
+            [<Code>category</Code>, <><Code>request</Code>, <Code>audit</Code>, <Code>security</Code>, <Code>performance</Code>, <Code>tasks</Code>, <Code>comp</Code>, <Code>lyrics</Code>, <Code>files</Code>, <Code>auth</Code>, <Code>chat</Code>, <Code>cdn</Code>, <Code>app</Code></>],
+            [<Code>event</Code>, <>Exact name; end with a dot (<Code>auth.</Code>) for a family</>],
+            [<><Code>user</Code>, <Code>ip</Code>, <Code>method</Code>, <Code>logger</Code>, <Code>status</Code></>, <>Exact match; <Code>status</Code> also takes a class like <Code>5xx</Code></>],
+            [<><Code>path</Code>, <Code>q</Code></>, 'Substring of the path; text search over message and traceback'],
+            [<Code>channel</Code>, 'Entries about that comp'],
+            [<><Code>since</Code>, <Code>until</Code></>, <>ISO time or a window: <Code>15m</Code>, <Code>2h</Code>, <Code>7d</Code></>],
+            [<><Code>before</Code>, <Code>limit</Code>, <Code>scan_mb</Code></>, <>Paging with <Code>next_before</Code>; default 100 (max 1000); scan size, default 64 MB</>],
+          ]}
+        />
+        <Pre>{`GET /accounts/admin/logs/events/?event=auth.login_failed&since=24h
+-> { "count": 2, "results": [ { "ts": "...", "level": "WARNING", "category": "security",
+     "event": "auth.login_failed", "ip": "1.2.3.4", "path": "/accounts/auth/login/", ... } ],
+     "scanned_lines": 5310, "scan_truncated": false, "next_before": "2026-10-23T11:58:02.004Z" }`}</Pre>
+        <p className="text-xs text-text-muted">
+          Comma-separated values mean any of. <Code>scan_truncated: true</Code> means the scan stopped at{' '}
+          <Code>scan_mb</Code>: narrow <Code>since</Code> or raise it. Passwords, tokens and keys are never logged.
+        </p>
+      </Section>
+
     </div>
   )
 }
@@ -2968,6 +3225,58 @@ Authorization: Token <token>
           Body is rendered client-side as Markdown with raw HTML stripped; links/images are restricted to
           http/https/mailto. There is no server-side sanitization requirement beyond that (the client never
           executes raw HTML from <Code>body</Code>).
+        </p>
+      </Section>
+
+      <Section title="Live blocks in the body" defaultOpen={false}>
+        <p className="text-sm text-text-secondary">
+          A line holding only a Markdown link to a <Code>jwa:</Code> target becomes a live card when a reader opens the
+          post. Older clients show the link text, so it should read well alone.
+        </p>
+        <Pre>{`[Lucid Dreams](jwa:song/94316)
+[Poll: Best era?](jwa:poll/k3f9a)`}</Pre>
+        <Table
+          headers={['Target', 'Card', 'Data from']}
+          rows={[
+            [<Code>{'jwa:song/<id>'}</Code>, 'Song with play button and plays', <Code>{'/songs/{id}/'}</Code>],
+            [<Code>{'jwa:album/<id>'}</Code>, 'Album with cover and tracks', <Code>{'/albums/{id}/'}</Code>],
+            [<Code>{'jwa:era/<id>'}</Code>, 'Era with time frame and counts', <><Code>{'/eras/{id}/'}</Code>, <Code>/stats/</Code></>],
+            [<Code>jwa:radio</Code>, '999 FM now playing', <Code>/radio/live/</Code>],
+            [<Code>{'jwa:stat/<name>'}</Code>, <>One number: <Code>total</Code>, <Code>released</Code>, <Code>unreleased</Code>, <Code>unsurfaced</Code>, <Code>sessions</Code>, <Code>plays</Code>, <Code>surfaced-30d</Code></>, <><Code>/stats/</Code>, <Code>/plays/stats/</Code></>],
+            [<Code>{'jwa:countdown/<ISO datetime>'}</Code>, 'Countdown; the link text is the label', 'none'],
+            [<Code>{'jwa:poll/<key>'}</Code>, 'A poll from the post', <Code>{'/news/{id}/polls/'}</Code>],
+          ]}
+        />
+      </Section>
+
+      <Section title="Polls" defaultOpen={false}>
+        <p className="text-sm text-text-secondary">
+          Up to 5 polls per post, written with the post: <Code>polls</Code> on create or PATCH is the whole set (omit it
+          to leave polls alone, <Code>[]</Code> removes them). Polls no body line places show at the end.
+        </p>
+        <Pre>{`// write
+{ "key": "k3f9a", "question": "Best era?", "multiple": false,
+  "closes_at": "2026-12-01T00:00:00Z",
+  "options": [ { "id": 41, "label": "jute" }, { "label": "WRLD on Drugs" } ] }
+
+// read
+{ "key": "k3f9a", "question": "Best era?", "multiple": false,
+  "closes_at": "2026-12-01T00:00:00Z", "closed": false,
+  "options": [ { "id": 41, "label": "jute", "votes": 12 } ],
+  "total_votes": 30, "voters": 30, "my_votes": [41] }`}</Pre>
+        <Table
+          headers={['Method', 'Path', 'Access', 'Description']}
+          rows={[
+            ['GET', <Code>{'/news/{id}/polls/'}</Code>, 'none', <><Code>{'{ results }'}</Code>, current totals</>],
+            ['POST', <Code>{'/news/{id}/polls/{key}/vote/'}</Code>, 'signed in', <><Code>{'{ "options": [41] }'}</Code> replaces your vote; <Code>[]</Code> clears it</>],
+            ['DELETE', <Code>{'/news/{id}/polls/{key}/vote/'}</Code>, 'signed in', 'Clear your vote'],
+          ]}
+        />
+        <p className="text-xs text-text-muted">
+          <Code>key</Code> is 1 to 16 lowercase letters or digits, chosen by the client. Keep an option&apos;s votes by
+          passing its <Code>id</Code>; an option left out is deleted with its votes. 2 to 10 options, question up to 200
+          characters. <Code>my_votes</Code> is <Code>null</Code> without a token, so send it on feed reads. A closed poll
+          answers 400. Votes are throttled to 240 an hour.
         </p>
       </Section>
 
@@ -3510,6 +3819,60 @@ ws.onmessage = (e) => {
           <li className="flex items-start gap-2"><span className="text-accent mt-0.5">•</span> Because it&apos;s a live stream, buffered audio drifts behind. Seek forward when you fall more than a few seconds behind the buffered end, and evict old buffered ranges or the SourceBuffer eventually throws <Code>QuotaExceededError</Code>.</li>
           <li className="flex items-start gap-2"><span className="text-accent mt-0.5">•</span> Reconnect on close. Background tabs get their socket closed and audio paused silently, with no event fired, so a periodic health check is worth having.</li>
         </ul>
+      </Section>
+
+      <Section title="Live chat (/ws/radio/chat/)" defaultOpen={false}>
+        <p className="text-sm text-text-secondary">
+          A public chat beside the live station. Reading and posting need no account. It has its own socket; never send
+          chat frames on <Code>/ws/radio/</Code>, whose text frames older players read as station state.
+        </p>
+        <Table
+          headers={['Method', 'Path', 'Auth', 'Purpose']}
+          rows={[
+            ['GET', <Code>/radio/chat/</Code>, 'none', <><Code>{'{ enabled, guests_enabled, reason, links, updated_at, messages }'}</Code>, the last 50 lines</>],
+            ['POST', <Code>/radio/chat/ws-ticket/</Code>, 'token', <><Code>{'{ ticket, expires_in }'}</Code>: a 30-second ticket that marks your lines as your account&apos;s</>],
+            ['WS', <Code>/ws/radio/chat/</Code>, 'none', 'Live lines, deletions, switches; posting'],
+            ['GET, POST', <Code>/radio/chat/state/</Code>, 'admin + 2FA', 'Killswitches, link permission, blocked words'],
+            ['DELETE', <Code>{'/radio/chat/messages/{id}/'}</Code>, 'admin + 2FA', 'Hide one line'],
+            ['GET, POST', <Code>/radio/chat/bans/</Code>, 'admin + 2FA', 'List bans; ban a line\'s author'],
+            ['DELETE', <Code>{'/radio/chat/bans/{id}/'}</Code>, 'admin + 2FA', 'Lift a ban'],
+          ]}
+        />
+        <Pre>{`{ "id": 812, "name": "lucid", "text": "this one hard", "verified": false,
+  "user_id": null, "role": null, "sent_at": "2026-11-14T20:01:12.345Z" }`}</Pre>
+        <p className="text-xs text-text-muted">
+          <Code>verified</Code> lines came with a ticket: <Code>name</Code> is the username, <Code>role</Code> is{' '}
+          <Code>admin</Code>, <Code>mod</Code> or <Code>member</Code>. Show the difference; it is the only thing that stops a
+          guest naming themselves after staff.
+        </p>
+        <Table
+          headers={['Frame', 'Direction', 'Meaning']}
+          rows={[
+            [<Code>{'{ type: "hello", enabled, guests_enabled, reason, links, updated_at, messages }'}</Code>, 'in', 'On connect'],
+            [<Code>{'{ type: "message", message }'}</Code>, 'in', 'Someone posted'],
+            [<Code>{'{ type: "sent", nonce, message }'}</Code>, 'in', <>Your line was accepted (only with a <Code>nonce</Code>)</>],
+            [<Code>{'{ type: "error", code, detail, retry_after?, nonce? }'}</Code>, 'in', 'Your line was refused'],
+            [<Code>{'{ type: "state", ... }'}</Code>, 'in', 'A switch or filter changed'],
+            [<><Code>{'{ type: "deleted", ids }'}</Code>, <Code>{'{ type: "cleared" }'}</Code></>, 'in', 'Lines were hidden'],
+            [<Code>{'{ type: "send", name, text, client_id, nonce? }'}</Code>, 'out', <>Post. <Code>client_id</Code> is the durable browser id (8 to 64 of <Code>A-Za-z0-9_-</Code>)</>],
+            [<Code>{'{ type: "auth", ticket }'}</Code>, 'out', <>Answered by <Code>authenticated</Code> or <Code>auth.failed</Code></>],
+            [<Code>ping</Code>, 'out', <>Plain text; answered by <Code>pong</Code></>],
+          ]}
+        />
+        <p className="text-xs text-text-muted">
+          Error codes: <Code>disabled</Code>, <Code>guests_disabled</Code>, <Code>banned</Code>, <Code>slow_down</Code>{' '}
+          (retry the same nonce after <Code>retry_after</Code>), <Code>empty</Code>, <Code>too_long</Code> (300),{' '}
+          <Code>not_english</Code> (any letter, digit or combining mark outside ASCII, styled fonts included; emoji are
+          fine), <Code>bad_name</Code>, <Code>reserved_name</Code>, <Code>links</Code>, <Code>blocked</Code>. Limits: one
+          line every 1.5 s and 6 per 30 s. Lines are kept 7 days.
+        </p>
+        <p className="text-xs text-text-muted">
+          Moderation: <Code>POST /radio/chat/state/</Code> takes <Code>{'{ enabled?, guests?, reason?, clear? }'}</Code>,
+          plus <Code>links</Code> (<Code>everyone</Code>, <Code>signed_in</Code>, <Code>staff</Code>, <Code>off</Code>) and{' '}
+          <Code>blocked_words</Code> / <Code>add_words</Code> / <Code>remove_words</Code> (<Code>*</Code> is a wildcard).{' '}
+          <Code>POST /radio/chat/bans/</Code> takes <Code>{'{ message_id, minutes?: 60, reason?, purge?: true }'}</Code>;{' '}
+          <Code>minutes: 0</Code> bans until lifted.
+        </p>
       </Section>
 
       <Section title="Notes">
@@ -5460,6 +5823,29 @@ Node -> Browser:  { "t": "done", "size": 8432100 }`}</Pre>
         </div>
       </Section>
 
+      <Section title={"Node tunnel and change propagation"} defaultOpen={false}>
+        <div className="space-y-3">
+          <p className="text-sm text-text-secondary leading-relaxed">
+            <strong className="text-text-primary">GET / POST</strong> <Code>{'/cdn/nodes/tunnel/'}</Code> (node auth) gives an
+            approved, active node the token for its Cloudflare Tunnel, creating the tunnel and DNS record on first call.{' '}
+            <Code>{'{ "serve_port": 8787 }'}</Code> on POST changes the loopback port of the node&apos;s file server.
+          </p>
+          <Pre>{`{ "enabled": true, "tunnel_token": "...", "hostname": "cdn-node-7c9e66797425.juicewrldapi.com", "serve_port": 8787 }`}</Pre>
+          <p className="text-sm text-text-secondary leading-relaxed">
+            <Code>{'{ "enabled": false, "reason": "..." }'}</Code> when tunnels are off or the node isn&apos;t approved yet;
+            502 if Cloudflare fails. Run <Code>cloudflared</Code> with the token, serve files on <Code>serve_port</Code>,
+            then send <Code>serve_ready: true</Code> in a heartbeat. Resolve entries for the node then carry{' '}
+            <Code>{'transport: "tunnel"'}</Code> and a <Code>serve_url</Code>.
+          </p>
+          <p className="text-sm text-text-secondary leading-relaxed">
+            <strong className="text-text-primary">GET</strong> <Code>{'/cdn/admin/proposals/{proposal_id}/propagation/'}</Code>{' '}
+            shows whether each active node has picked up a reviewed comp change: <Code>server</Code>,{' '}
+            <Code>proposal</Code>, and <Code>nodes</Code> with location and a <Code>state</Code> of{' '}
+            <Code>offline</Code>, <Code>propagating</Code> or <Code>propagated</Code>.
+          </p>
+        </div>
+      </Section>
+
       <Section title={"Account: your nodes"} defaultOpen={false}>
         <div className="space-y-3">
           <p className="text-sm text-text-secondary leading-relaxed">All of these use token auth (<Code>{"Authorization: Token ..."}</Code>) and only ever touch nodes owned by the caller; a node you don&apos;t own is <Code>{"404 { \"detail\": \"Node not found.\" }"}</Code>.</p>
@@ -5606,6 +5992,605 @@ Node -> Browser:  { "t": "done", "size": 8432100 }`}</Pre>
         </div>
       </Section>
 
+    </div>
+  )
+}
+
+function CoverArtTab() {
+  const { Code, Section } = usePrimitives()
+  return (
+    <div className="space-y-6">
+      <Section title="Community Cover Art">
+        <div className="space-y-3">
+          <p className="text-sm text-text-secondary leading-relaxed">
+            Anyone with an account can send in cover art for a song. A manager or administrator reviews it, and
+            approving it adds the image to Files in the <Code>community</Code> channel at{' '}
+            <Code>{'Cover Arts/Community-Made/<uuid>/<song name>.png'}</Code>.{' '}
+            <strong className="text-text-primary">Approving never changes the song</strong>: its{' '}
+            <Code>image_url</Code> stays as it is, and only staff editing the song can change it.
+          </p>
+          <p className="text-sm text-text-secondary leading-relaxed">
+            Songs are picked by internal <Code>id</Code> (<Code>song.id</Code>, not <Code>public_id</Code>), the same
+            as edit proposals. Approved covers are ordinary Files images, so load them with{' '}
+            <Code>{'/files/download/?path=<comp_path>&channel=community'}</Code>.
+          </p>
+        </div>
+      </Section>
+
+      <Section title="Submitting (any signed-in user)" defaultOpen={false}>
+        <div className="space-y-3">
+          <Table
+            headers={['Method', 'Path', 'Description']}
+            rows={[
+              ['GET', <Code>{'/accounts/cover-art/'}</Code>, 'Your own submissions, newest first, paginated'],
+              ['POST', <Code>{'/accounts/cover-art/'}</Code>, 'Send in cover art for a song (multipart)'],
+              ['GET', <Code>{'/accounts/cover-art/{id}/'}</Code>, 'One of your submissions, any status'],
+              ['DELETE', <Code>{'/accounts/cover-art/{id}/'}</Code>, 'Withdraw a submission that is still pending; its image is deleted'],
+              ['GET', <Code>{'/accounts/cover-art/{id}/image/'}</Code>, 'The image itself (see Images)'],
+            ]}
+          />
+          <Pre>{`POST /accounts/cover-art/
+Authorization: Token <token>
+Content-Type: multipart/form-data
+
+song=94086
+image=<file>
+notes=Artwork from the official SoundCloud upload   (optional)`}</Pre>
+          <Table
+            headers={['Field', 'Type', 'Description']}
+            rows={[
+              [<Code>song</Code>, 'number', 'Internal song id'],
+              [<Code>image</Code>, 'file', 'JPEG, PNG or WebP, at most 20 MB, 300 to 6000 pixels on each side'],
+              [<Code>notes</Code>, 'string', 'Optional, at most 1000 characters: where the art comes from, anything a reviewer should know'],
+            ]}
+          />
+          <p className="text-sm text-text-secondary leading-relaxed">
+            The server decodes the image and saves it again in the same format. That removes EXIF and other
+            metadata (phone photos carry GPS), turns the image upright if EXIF said it was rotated, and shrinks
+            anything over 3000 pixels on a side to 3000. <Code>width</Code>, <Code>height</Code> and{' '}
+            <Code>size</Code> describe the stored image.
+          </p>
+          <p className="text-sm text-text-secondary leading-relaxed">
+            <Code>{'GET /accounts/cover-art/'}</Code> returns <Code>{'{ count, limit, offset, results }'}</Code>. Params:{' '}
+            <Code>status</Code> (one status), <Code>song</Code> (internal id), <Code>limit</Code> (default 50,
+            1 to 200) and <Code>offset</Code>.
+          </p>
+        </div>
+      </Section>
+
+      <Section title="Limits and errors" defaultOpen={false}>
+        <div className="space-y-3">
+          <p className="text-sm text-text-secondary leading-relaxed">Each is a 400 with a <Code>detail</Code> message unless noted.</p>
+          <Table
+            headers={['Limit', 'Rule']}
+            rows={[
+              ['Per song', 'One pending submission per song per user. Withdraw it to send a different image'],
+              ['Pending', 'At most 10 pending submissions per user'],
+              ['Daily', <>20 submissions a day per user (429). Servers can change it with <Code>COVER_ART_SUBMIT_RATE</Code></>],
+              ['Size', 'Uploads over 20 MB get a 413'],
+              ['Near-copies', <>An image 95% or more similar to cover art the server already holds is turned away: a pending or approved submission, a stored cover, or an image in Files (<Code>.png</Code>, <Code>.jpg</Code>, <Code>.jpeg</Code>, <Code>.webp</Code>, any channel). The message names what it matched. Rejected and reversed submissions don&apos;t count</>],
+            ]}
+          />
+          <Pre>{`{ "detail": "This image is 100.0% similar to Cover Arts/Official Covers/1400x 999 Freestyle.png, which is already in Files." }`}</Pre>
+        </div>
+      </Section>
+
+      <Section title="The submission object" defaultOpen={false}>
+        <div className="space-y-3">
+          <Pre>{`{
+  "id": 12,
+  "song": 94086,
+  "song_public_id": 163,
+  "song_name": "Song Title",
+  "song_image_url": "/assets/drfl.png",
+  "submitter_id": 40,
+  "submitter_username": "someone",
+  "submitter_is_editor": false,
+  "image_url": "/juicewrld/accounts/cover-art/12/image/",
+  "mime": "image/png",
+  "width": 1400,
+  "height": 1400,
+  "size": 2381940,
+  "notes": "Artwork from the official SoundCloud upload",
+  "status": "pending",
+  "reviewer_username": null,
+  "review_notes": "",
+  "comp_proposal_id": null,
+  "comp_channel": null,
+  "comp_path": null,
+  "created_at": "2026-10-27T20:12:03.512Z",
+  "reviewed_at": null
+}`}</Pre>
+          <Table
+            headers={['Field', 'Description']}
+            rows={[
+              [<Code>image_url</Code>, <>Where the submitted image is served. Site-relative like a song&apos;s <Code>image_url</Code>: prepend <Code>https://juicewrldapi.com</Code></>],
+              [<Code>song_image_url</Code>, <>What the song shows right now, to compare against. <Code>null</Code> once the song is deleted</>],
+              [<Code>status</Code>, <><Code>pending</Code>, <Code>approved</Code>, <Code>rejected</Code> or <Code>reversed</Code></>],
+              [<Code>comp_channel</Code>, <>Set on approval: the channel the cover was filed in, <Code>community</Code></>],
+              [<Code>comp_path</Code>, <>Set on approval: where the cover is in that channel, e.g. <Code>{'Cover Arts/Community-Made/3f2a.../Lucid Dreams.png'}</Code>. Its file URLs need <Code>{'&channel=community'}</Code></>],
+              [<Code>comp_proposal_id</Code>, "Set on approval: the comp upload proposal that put it there, so it shows in the file's history"],
+              [<Code>submitter_username</Code>, <>Discord name when linked, like proposals. <Code>null</Code> once the account is deleted</>],
+              [<Code>submitter_is_editor</Code>, <><Code>true</Code> when the sender is an editor or admin, globally or through an editor membership on any channel</>],
+            ]}
+          />
+        </div>
+      </Section>
+
+      <Section title="Images" defaultOpen={false}>
+        <div className="space-y-3">
+          <p className="text-sm text-text-secondary leading-relaxed">
+            <Code>{'GET /accounts/cover-art/{id}/image/'}</Code> serves the stored image with its own{' '}
+            <Code>Content-Type</Code>.
+          </p>
+          <Table
+            headers={['Status', 'Who can load it']}
+            rows={[
+              ['approved', <>Anyone, no auth, <Code>{'Cache-Control: public, max-age=86400'}</Code>, so an <Code>{'<img>'}</Code> tag can load it directly. The same picture is in Files at <Code>comp_path</Code></>],
+              ['pending, rejected, reversed', <>Only the submitter and reviewers, with <Code>Authorization: Token</Code>, and <Code>{'Cache-Control: private, no-store'}</Code>. Anyone else gets a 404. An <Code>{'<img>'}</Code> tag can&apos;t send the header, so fetch it and show a blob URL</>],
+            ]}
+          />
+        </div>
+      </Section>
+
+      <Section title="Reviewing (manager or administrator)" defaultOpen={false}>
+        <div className="space-y-3">
+          <Table
+            headers={['Method', 'Path', 'Description']}
+            rows={[
+              ['GET', <Code>{'/accounts/admin/cover-art/'}</Code>, 'All submissions, newest first, paginated. Same params as your own list'],
+              ['GET', <Code>{'/accounts/admin/cover-art/?counts=1'}</Code>, <><Code>{'{ total, pending, approved, rejected, reversed }'}</Code> only</>],
+              ['POST', <Code>{'/accounts/admin/cover-art/{id}/review/'}</Code>, 'Approve or reject a pending submission'],
+              ['POST', <Code>{'/accounts/admin/cover-art/{id}/reverse/'}</Code>, 'Take back an approval'],
+            ]}
+          />
+          <p className="text-sm text-text-secondary leading-relaxed">
+            Reviewers are managers of the primary channel and administrators, the people who review song edit
+            proposals. Songs aren&apos;t per channel, so a <Code>?channel=</Code> param is ignored here. Administrators
+            need two-factor set up; API keys need the <Code>admin</Code> scope.
+          </p>
+          <Pre>{`POST /accounts/admin/cover-art/{id}/review/
+Authorization: Token <token>
+Content-Type: application/json
+
+{
+  "action": "approve",        // "approve" | "reject"
+  "review_notes": "optional"
+}`}</Pre>
+          <p className="text-sm text-text-secondary leading-relaxed">
+            Both return the updated submission. Reviewing one that isn&apos;t pending is a 400.
+          </p>
+          <ul className="list-disc pl-5 space-y-1 text-sm text-text-secondary leading-relaxed">
+            <li>
+              <strong className="text-text-primary">approve</strong> files the image in the <Code>community</Code>{' '}
+              channel at <Code>{'Cover Arts/Community-Made/<uuid>/<song name>.png'}</Code>, always as a PNG (a JPEG or
+              WebP is converted). It is an upload comp proposal, created already approved and credited to the
+              submitter, so it gets a revision, a commit and a CDN manifest entry like any other upload. The song is
+              not touched and the image becomes public. If the upload fails, or the server has no active{' '}
+              <Code>community</Code> channel, nothing changes and the submission stays pending (400): a cover is never
+              filed in the primary channel instead.
+            </li>
+            <li>
+              <strong className="text-text-primary">reject</strong> leaves the song and Files alone. The image stays
+              private and on the server so the submitter can still see what they sent.
+            </li>
+            <li>
+              <strong className="text-text-primary">reverse</strong> works only on an approved submission. It reverses
+              the comp upload, so the file leaves Files (it goes to the comp archive) and the image stops being
+              public.
+            </li>
+          </ul>
+          <p className="text-sm text-text-secondary leading-relaxed">
+            Reviews and reversals go to the audit log (<Code>cover_art.reviewed</Code>,{' '}
+            <Code>cover_art.reversed</Code>). A new submission posts to the proposals Discord webhook.
+          </p>
+        </div>
+      </Section>
+
+      <Section title="Artist folders" defaultOpen={false}>
+        <div className="space-y-3">
+          <p className="text-sm text-text-secondary leading-relaxed">
+            An administrator can make an account an <strong className="text-text-primary">artist</strong>{' '}
+            (<Code>artist_enabled</Code> and <Code>artist_folder</Code> on{' '}
+            <Code>{'PATCH /accounts/admin/users/{id}/'}</Code>), or approve its artist application{' '}
+            (<Code>{'application_type: "artist"'}</Code> on <Code>POST /accounts/application/</Code>). An artist has a
+            folder of their own, <Code>{'Cover Arts/<artist_folder>/'}</Code> in the <Code>community</Code> channel, and
+            puts covers there with no review. <Code>/account/me/</Code> carries <Code>is_artist</Code> and{' '}
+            <Code>artist_folder</Code>.
+          </p>
+          <Table
+            headers={['Method', 'Path', 'Description']}
+            rows={[
+              ['GET', <Code>{'/accounts/artist/covers/'}</Code>, <><Code>{'{ folder, path, channel, max_files, files: [{ name, path, channel, size, hash, updated_at }] }'}</Code></>],
+              ['POST', <Code>{'/accounts/artist/covers/'}</Code>, <>Multipart: <Code>image</Code> (required), <Code>name</Code> (optional file name without extension). 201 with the new file&apos;s entry</>],
+              ['DELETE', <Code>{'/accounts/artist/covers/?name=<file name>'}</Code>, 'Takes one cover out of the folder (404 when it is not there)'],
+            ]}
+          />
+          <p className="text-sm text-text-secondary leading-relaxed">
+            Anyone who isn&apos;t an artist gets 403, administrators included. Uploads are checked and cleaned like
+            submissions but keep their format (<Code>.jpg</Code>, <Code>.png</Code>, <Code>.webp</Code>). A name
+            already in the folder is a 400; remove the old one first. A folder holds at most 500 covers, and uploads
+            are throttled (<Code>ARTIST_COVER_UPLOAD_RATE</Code>, default <Code>200/day</Code>).
+          </p>
+          <p className="text-sm text-text-secondary leading-relaxed">
+            Each upload or removal is a comp proposal by the artist, approved at once, so it has a revision, a commit
+            and a CDN manifest entry; a removed cover goes to the comp archive. Audit events:{' '}
+            <Code>artist_cover.uploaded</Code>, <Code>artist_cover.deleted</Code>.
+          </p>
+        </div>
+      </Section>
+
+      <Section title="Community Edits (remixes and stem edits)">
+        <div className="space-y-3">
+          <p className="text-sm text-text-secondary leading-relaxed">
+            Anyone with an account can send in a remix or stem edit. A manager or administrator reviews it, and
+            approving it files it in the <Code>community</Code> channel at{' '}
+            <Code>{'Remixes & Edits/Community-Made/<uuid>/<title>.<ext>'}</Code>. Before an upload is stored it is
+            compared with the audio already here, and one that is too similar gets a 409 naming what it matched.
+          </p>
+          <Table
+            headers={['Method', 'Path', 'Description']}
+            rows={[
+              ['GET', <Code>{'/accounts/community-edits/'}</Code>, 'Your own submissions, newest first, paginated'],
+              ['POST', <Code>{'/accounts/community-edits/'}</Code>, 'Send in an edit (multipart)'],
+              ['GET', <Code>{'/accounts/community-edits/check/?sha256='}</Code>, 'Is a file with exactly these bytes already here? No upload needed'],
+              ['GET', <Code>{'/accounts/community-edits/{id}/'}</Code>, 'One of your submissions, any status'],
+              ['DELETE', <Code>{'/accounts/community-edits/{id}/'}</Code>, 'Withdraw a pending submission; its file is deleted'],
+              ['GET', <Code>{'/accounts/community-edits/{id}/audio/'}</Code>, 'The audio, with Range. Public once approved; otherwise submitter and reviewers only (fetch it with the token and play a blob URL)'],
+            ]}
+          />
+          <Pre>{`POST /accounts/community-edits/
+Authorization: Token <token>
+Content-Type: multipart/form-data
+
+file=<audio file>
+title=Lucid Dreams (slowed + reverb)
+kind=remix
+song=94086          (optional)
+notes=Made from the session stems   (optional)`}</Pre>
+          <Table
+            headers={['Field', 'Description']}
+            rows={[
+              [<Code>file</Code>, 'MP3, M4A, FLAC, WAV, Ogg, Opus or AIFF, at most 95 MB, 10 seconds to 20 minutes. The container has to match the extension. Stored as sent, not re-encoded'],
+              [<Code>title</Code>, 'Required, at most 200 characters'],
+              [<Code>kind</Code>, <><Code>remix</Code> (default), <Code>stem_edit</Code> or <Code>other</Code></>],
+              [<Code>song</Code>, <>Optional internal song id it was made from (<Code>song.id</Code>, not <Code>public_id</Code>)</>],
+              [<Code>notes</Code>, 'Optional, at most 1000 characters'],
+            ]}
+          />
+          <p className="text-sm text-text-secondary leading-relaxed">
+            Limits: 5 pending per user, 10 a day (429), 413 over 95 MB (the proxy stops anything over 100 MB with its
+            own HTML 413). The submission object matches cover art&apos;s, with <Code>title</Code>, <Code>kind</Code>,{' '}
+            <Code>audio_url</Code>, <Code>extension</Code>, <Code>size</Code>, <Code>duration</Code> and{' '}
+            <Code>sha256</Code> in place of the image fields.
+          </p>
+        </div>
+      </Section>
+
+      <Section title="Community Edits: duplicates" defaultOpen={false}>
+        <div className="space-y-3">
+          <Table
+            headers={['Compared with', 'Blocks from']}
+            rows={[
+              ['Other community edits, pending or approved', '75%'],
+              [<>Audio in Files, every channel, except under <Code>Compilation/</Code></>, '75%'],
+              ['Catalogue songs', '95% (a remix is meant to sound like its song)'],
+            ]}
+          />
+          <Pre>{`409
+{
+  "detail": "This sounds 98.6% like Remixes & Edits/Someone/Lucid Dreams Remix.mp3, which is already in Files.",
+  "code": "duplicate",
+  "match": { "source": "comp_edit_audio", "score": 98.6, "verdict": "duplicate",
+             "target": "file", "path": "Remixes & Edits/Someone/Lucid Dreams Remix.mp3", "channel": "comp" }
+}`}</Pre>
+          <Table
+            headers={['match.target', 'Fields', 'Meaning']}
+            rows={[
+              [<Code>file</Code>, <><Code>path</Code>, <Code>channel</Code> (and <Code>title</Code> for an approved edit)</>, 'A file in Files'],
+              [<Code>song</Code>, <><Code>{'song: { id, public_id, name }'}</Code>, <Code>path</Code></>, 'A catalogue song'],
+              [<Code>pending</Code>, <><Code>mine</Code>; <Code>submission</Code> and <Code>title</Code> only when it is yours</>, 'An edit waiting for review. Someone else\'s is never named'],
+            ]}
+          />
+          <p className="text-sm text-text-secondary leading-relaxed">
+            <Code>{'GET check/?sha256=<64 hex>'}</Code> returns <Code>{'{ "match": ... }'}</Code> or{' '}
+            <Code>{'{ "match": null }'}</Code> for exact copies only, before uploading (120 an hour). Rejected and
+            reversed edits don&apos;t count.
+          </p>
+        </div>
+      </Section>
+
+      <Section title="Community Edits: reviewing" defaultOpen={false}>
+        <div className="space-y-3">
+          <Table
+            headers={['Method', 'Path', 'Description']}
+            rows={[
+              ['GET', <Code>{'/accounts/admin/community-edits/'}</Code>, <>All submissions (<Code>status</Code>, <Code>limit</Code>, <Code>offset</Code>)</>],
+              ['GET', <Code>{'/accounts/admin/community-edits/?counts=1'}</Code>, <><Code>{'{ total, pending, approved, rejected, reversed }'}</Code></>],
+              ['POST', <Code>{'/accounts/admin/community-edits/{id}/review/'}</Code>, <><Code>{'{ "action": "approve" | "reject", "review_notes": "optional" }'}</Code></>],
+              ['POST', <Code>{'/accounts/admin/community-edits/{id}/reverse/'}</Code>, 'Take back an approval'],
+            ]}
+          />
+          <p className="text-sm text-text-secondary leading-relaxed">
+            Same reviewers and rules as cover art: approving is an approved comp upload credited to the submitter,
+            never filed in the primary channel; reversing sends the file to the comp archive. Audit events:{' '}
+            <Code>community_edit.reviewed</Code>, <Code>community_edit.reversed</Code>.
+          </p>
+        </div>
+      </Section>
+    </div>
+  )
+}
+
+function LyricsGenTab() {
+  const { Code, Section } = usePrimitives()
+  return (
+    <div className="space-y-6">
+      <Section title="Donor lyrics generation">
+        <div className="space-y-3">
+          <p className="text-sm text-text-secondary leading-relaxed">
+            Donors can have the server transcribe a song (plain lyrics) or time lyrics they already have, by the line
+            or by the word, with a local Whisper model. Base: <Code>/accounts/donor/lyrics/</Code>. Every endpoint
+            needs a token and <Code>is_donor</Code>, superusers included. API keys need write or admin scope for POST
+            and DELETE.
+          </p>
+          <p className="text-sm text-text-secondary leading-relaxed">
+            Generation never changes a song. The result is a preview the client shows for editing; saving it back to
+            a song goes through the normal edit flow.
+          </p>
+          <ol className="list-decimal pl-5 space-y-1 text-sm text-text-secondary leading-relaxed">
+            <li>Read <Code>GET options/</Code>. When <Code>available</Code> is false, show <Code>unavailable_reason</Code>. Each mode in <Code>options</Code> has its own <Code>available</Code> too.</li>
+            <li>For a song with no lyrics, start <Code>mode=plain</Code>. A song or comp file already on the API is sent by <Code>song_id</Code> or <Code>file_path</Code>; anything else is uploaded.</li>
+            <li>With plain lyrics (edited or existing), start <Code>synced</Code> or <Code>word_synced</Code> with them as <Code>plain_lyrics</Code>, or send existing LRC as <Code>synced_lyrics</Code>.</li>
+            <li>Uploaded audio is deleted after each job, so the next step needs the file again. A <Code>song_id</Code> or <Code>file_path</Code> job just sends the same source.</li>
+          </ol>
+        </div>
+      </Section>
+
+      <Section title="Jobs" defaultOpen={false}>
+        <div className="space-y-3">
+          <Table
+            headers={['Method', 'Path', 'Description']}
+            rows={[
+              ['GET', <Code>{'options/'}</Code>, 'Availability, size limit, mode labels, and whether each mode needs lyrics'],
+              ['GET', <Code>{'jobs/'}</Code>, <>Your jobs, newest first, as <Code>{'{ results }'}</Code> without lyrics</>],
+              ['POST', <Code>{'jobs/'}</Code>, '202 with the job. Multipart for uploads; JSON or form data for song_id / file_path'],
+              ['GET', <Code>{'jobs/{id}/'}</Code>, 'Status and the editable preview (owner only)'],
+              ['GET', <Code>{'jobs/{id}/?output=txt|lrc|enhanced_lrc'}</Code>, 'Download the result'],
+              ['DELETE', <Code>{'jobs/{id}/'}</Code>, 'Delete a completed or failed job (204)'],
+            ]}
+          />
+          <Table
+            headers={['Field', 'Meaning']}
+            rows={[
+              [<Code>file</Code>, 'Audio upload, at most 100 MiB by default'],
+              [<Code>song_id</Code>, <>A song on the API, by public id or id (as <Code>{'/songs/{id}/'}</Code>). Its <Code>path</Code> must be audio in the primary comp</>],
+              [<Code>file_path</Code>, <>An audio file in a comp, as in <Code>{'/files/download/?path='}</Code></>],
+              [<Code>channel</Code>, <>Optional comp slug for <Code>file_path</Code>; defaults to the primary comp</>],
+              [<Code>mode</Code>, <>Required: <Code>plain</Code>, <Code>synced</Code> or <Code>word_synced</Code></>],
+              [<Code>plain_lyrics</Code>, 'One lyric line per line, up to 30,000 characters'],
+              [<Code>synced_lyrics</Code>, 'Instead of plain text: standard or enhanced LRC, up to 30,000 characters'],
+              [<Code>language</Code>, 'Optional two or three letter code; omit to detect'],
+            ]}
+          />
+          <p className="text-sm text-text-secondary leading-relaxed">
+            Send exactly one audio source, and exactly one lyrics field for a sync mode (none for plain). Songs and
+            comp files are read in place, so the upload size limit doesn&apos;t apply (the 30-minute length limit does).
+          </p>
+          <Pre>{`// A song already on the API: no upload
+await fetch(BASE + '/accounts/donor/lyrics/jobs/', {
+  method: 'POST',
+  headers: { Authorization: 'Token ' + token, 'Content-Type': 'application/json' },
+  body: JSON.stringify({ song_id: song.public_id, mode: 'plain' }),
+})
+// then poll jobs/{id}/ every few seconds until completed or failed`}</Pre>
+          <p className="text-sm text-text-secondary leading-relaxed">
+            A job has <Code>id</Code>, <Code>mode</Code>, <Code>status</Code> (<Code>queued</Code>, <Code>processing</Code>,{' '}
+            <Code>completed</Code>, <Code>failed</Code>, <Code>cancelled</Code>), <Code>progress</Code> (0 to 99 while
+            processing, 100 when done; it sits at 0 while the model loads), <Code>filename</Code>, <Code>source</Code>{' '}
+            (<Code>null</Code> for an upload, else <Code>{'{ channel, path, song }'}</Code>), <Code>language</Code>,{' '}
+            <Code>result</Code>, <Code>error</Code> and timestamps.
+          </p>
+          <Pre>{`"result": {
+  "plain_lyrics": "Hello world",
+  "synced_lyrics": "[00:12.50]Hello world",
+  "word_synced_lyrics": "[00:12.50]<00:12.50>Hello <00:13.10>world<00:13.80>",
+  "segments": [{ "start": 12.5, "end": 13.8, "text": "Hello world", "estimated": false,
+    "words": [{ "start": 12.5, "end": 13.0, "word": "Hello", "estimated": false }] }],
+  "unaligned_lines": 0,
+  "unaligned_words": 1
+}`}</Pre>
+          <p className="text-sm text-text-secondary leading-relaxed">
+            JSON times are seconds; LRC uses centiseconds. Limits: 10 submissions an hour (staff skip this), two
+            active jobs and 100 kept jobs per user. Errors: 400 bad input, 403 not a donor, 404 someone else&apos;s
+            job, 409 output not ready or deleting an active job, 429 limits, 503 generation off or the queue is down.
+          </p>
+        </div>
+      </Section>
+
+      <Section title="Administrator: all jobs and the model" defaultOpen={false}>
+        <div className="space-y-3">
+          <p className="text-sm text-text-secondary leading-relaxed">Administrators with two-factor; API keys need the <Code>admin</Code> scope.</p>
+          <Table
+            headers={['Method', 'Path', 'Description']}
+            rows={[
+              ['GET', <Code>{'/accounts/admin/lyrics/jobs/'}</Code>, <>Every user&apos;s jobs: <Code>{'{ count, active, results }'}</Code>. Filters: <Code>status</Code> (or <Code>active</Code>), <Code>user</Code>, <Code>limit</Code>, <Code>offset</Code></>],
+              ['GET', <Code>{'/accounts/admin/lyrics/jobs/{id}/'}</Code>, <>Any job with its lyrics and result; <Code>?output=</Code> downloads as above</>],
+              ['POST', <Code>{'/accounts/admin/lyrics/jobs/{id}/cancel/'}</Code>, 'Cancel a queued or processing job. 409 for any other status. A job already inside Whisper runs to the end and its result is discarded'],
+              ['GET / PUT', <Code>{'/accounts/admin/lyrics/settings/'}</Code>, <>The Whisper model: <Code>{'{ "whisper_model": "medium" }'}</Code>. <Code>""</Code> goes back to the server default</>],
+            ]}
+          />
+          <Pre>{`{ "whisper_model": "medium", "default_model": "small", "effective_model": "medium",
+  "available_models": ["tiny.en", "tiny", "...", "turbo"],
+  "updated_by": "admin-name", "updated_at": "2026-10-22T12:00:00Z" }`}</Pre>
+          <p className="text-sm text-text-secondary leading-relaxed">
+            The next job picks up a model change without a restart. A model that isn&apos;t cached downloads on its
+            first job, so that one is slow.
+          </p>
+        </div>
+      </Section>
+    </div>
+  )
+}
+
+function RecognitionTab() {
+  const { Code, Section } = usePrimitives()
+  return (
+    <div className="space-y-6">
+      <Section title="Song recognition">
+        <div className="space-y-3">
+          <p className="text-sm text-text-secondary leading-relaxed">
+            Identify a catalogue recording from a 3 to 20 second clip (the player&apos;s Identify song dialog). It is
+            off on a server until an index has been built; until then <Code>status</Code> says{' '}
+            <Code>available: false</Code> and uploads get 503.
+          </p>
+          <Table
+            headers={['Method', 'Path', 'Description']}
+            rows={[
+              ['GET', <Code>{'/recognition/status/'}</Code>, <><Code>{'{ "contract_version": 1, "available": true }'}</Code></>],
+              ['POST', <Code>{'/recognition/'}</Code>, <>Multipart with exactly one file in <Code>audio</Code>. Token optional</>],
+            ]}
+          />
+          <Pre>{`{
+  "contract_version": 1,
+  "status": "match",
+  "matches": [{
+    "song_id": 123, "recording_id": "recording-456", "title": "Song name",
+    "artist": "Juice WRLD", "version": "Original", "image_url": null, "offset_seconds": 42.5
+  }]
+}`}</Pre>
+          <p className="text-sm text-text-secondary leading-relaxed">
+            <Code>status</Code> is <Code>match</Code> (one result), <Code>ambiguous</Code> (2 to 5, best first) or{' '}
+            <Code>no_match</Code>. <Code>song_id</Code> opens with <Code>{'/songs/{id}/'}</Code>. Songs with no{' '}
+            <Code>path</Code> are never returned.
+          </p>
+        </div>
+      </Section>
+
+      <Section title="Errors" defaultOpen={false}>
+        <div className="space-y-3">
+          <p className="text-sm text-text-secondary leading-relaxed">Errors are <Code>{'{ "code", "detail" }'}</Code>.</p>
+          <Table
+            headers={['Status', 'Code', 'When']}
+            rows={[
+              ['400', <Code>invalid_audio</Code>, 'Not exactly one audio file, undecodable, or silent'],
+              ['401', <Code>authentication_failed</Code>, 'Invalid token'],
+              ['413', <Code>clip_too_large</Code>, 'Over 5 MiB'],
+              ['415', <Code>unsupported_audio</Code>, 'Not WebM/Matroska, Ogg, MP4/M4A, AAC, MP3, WAV or FLAC'],
+              ['415', <Code>unsupported_media_type</Code>, 'Body is not multipart'],
+              ['422', <Code>invalid_duration</Code>, 'Decoded audio outside 3 to 20 seconds'],
+              ['429', <Code>rate_limited</Code>, <>Quota hit; <Code>Retry-After</Code> is set</>],
+              ['503', <Code>recognition_unavailable</Code>, <>Not ready, or busy (<Code>Retry-After: 5</Code>)</>],
+              ['504', <Code>recognition_timeout</Code>, 'Matching ran past its deadline'],
+            ]}
+          />
+        </div>
+      </Section>
+    </div>
+  )
+}
+
+function ExpansionTab() {
+  const { Code, Section } = usePrimitives()
+  return (
+    <div className="space-y-6">
+      <Section title="Domain Expansion catalogue">
+        <div className="space-y-3">
+          <p className="text-sm text-text-secondary leading-relaxed">
+            Songs and albums from services other than JWA (Apple Music today). A player that plays one reports its
+            tags, explicit flag, lyrics and cover here so every client gets them, then uploads the audio so it plays
+            from our storage. Rows are keyed by <Code>source</Code> and <Code>key</Code>: for{' '}
+            <Code>apple</Code>, <Code>{'song:<id>'}</Code> or <Code>{'album:<id>'}</Code>.
+          </p>
+          <Table
+            headers={['Method', 'Path', 'Auth', 'Description']}
+            rows={[
+              ['GET', <Code>{'/expansion/tracks/?source=apple&keys=song:1,album:2'}</Code>, 'none', <>Up to 200 keys. <Code>lyrics=0</Code> leaves lyrics out. Unknown keys are left out</>],
+              ['POST', <Code>{'/expansion/tracks/'}</Code>, 'token', 'Report up to 100 tracks (300 requests an hour)'],
+              ['POST', <Code>{'/expansion/audio/'}</Code>, 'token', 'Upload a song\'s audio (120 an hour)'],
+              ['GET', <Code>{'/expansion/audio/{hash}/'}</Code>, 'none', 'Stream the audio, with Range'],
+              ['GET', <Code>{'/expansion/covers/{hash}/'}</Code>, 'none', 'The cover image'],
+            ]}
+          />
+          <Pre>{`{
+  "source": "apple",
+  "tracks": {
+    "song:1440833098": {
+      "source": "apple", "key": "song:1440833098", "kind": "song",
+      "title": "Alright", "artist": "Kendrick Lamar", "album": "To Pimp a Butterfly",
+      "album_key": "album:1440829580", "isrc": "USUM71500283", "duration": 219, "explicit": true,
+      "cover": "3f1c9a0d6e2b4c8a9f7e5d3b1a0c2e4f",
+      "cover_url": "/juicewrld/expansion/covers/3f1c9a0d6e2b4c8a9f7e5d3b1a0c2e4f/",
+      "audio": { "hash": "9b2e...", "url": "/juicewrld/expansion/audio/9b2e.../", "mime": "audio/mp4",
+                 "codec": "mp4a.40.2", "lossless": false, "bitrate": 256000, "duration": 219.37, "size": 7154688 },
+      "updated_at": "2026-10-26T01:00:00Z",
+      "lyrics": "...", "synced_lyrics": "[00:01.00]...", "lyrics_source": "apple"
+    }
+  }
+}`}</Pre>
+          <p className="text-sm text-text-secondary leading-relaxed">
+            Unknown values are <Code>null</Code>. <Code>audio</Code> is <Code>null</Code> until someone uploads the
+            song (albums never have it). <Code>cover_url</Code> and <Code>audio.url</Code> are relative: prepend{' '}
+            <Code>https://juicewrldapi.com</Code>.
+          </p>
+        </div>
+      </Section>
+
+      <Section title="Reporting tracks" defaultOpen={false}>
+        <div className="space-y-3">
+          <Pre>{`POST /expansion/tracks/
+{
+  "entries": [{ "source": "apple", "key": "song:1440833098", "title": "Alright",
+                "duration": 219, "explicit": true, "lyrics_source": "apple",
+                "cover": "3f1c9a0d6e2b4c8a9f7e5d3b1a0c2e4f" }],
+  "covers": { "3f1c9a0d6e2b4c8a9f7e5d3b1a0c2e4f": "<base64 JPEG or PNG>" }
+}`}</Pre>
+          <p className="text-sm text-text-secondary leading-relaxed">
+            Only <Code>source</Code> and <Code>key</Code> are required. <Code>cover</Code> is the first 32 hex
+            characters of the image&apos;s SHA-256. Send entries with just the hash first; hashes the server lacks come
+            back in <Code>missing_covers</Code>, then post again with the bytes in <Code>covers</Code> (at most 10,
+            6 MB and 6000 px each). <Code>lyrics_source</Code> is the service name for its own lyrics,{' '}
+            <Code>file</Code> for file tags, or <Code>user</Code>.
+          </p>
+          <p className="text-sm text-text-secondary leading-relaxed">
+            The response has <Code>tracks</Code> (each valid entry as stored now), <Code>created</Code>,{' '}
+            <Code>missing_covers</Code> and <Code>errors</Code>. A bad entry doesn&apos;t fail the rest.
+          </p>
+          <Table
+            headers={['Field', 'How a report merges']}
+            rows={[
+              ['title, artist, album, album_key, isrc, duration', 'Fill blanks only'],
+              [<Code>explicit</Code>, <>Fills an unknown flag; can raise <Code>false</Code> to <Code>true</Code>, never lower it</>],
+              ['Lyrics', <>Replace when they rank at least as high: the service&apos;s own, then <Code>file</Code> and the rest, then <Code>user</Code>. Synced timings are never dropped at the same rank</>],
+              [<Code>cover</Code>, 'Replaced only by one with more pixels'],
+            ]}
+          />
+        </div>
+      </Section>
+
+      <Section title="Uploading audio" defaultOpen={false}>
+        <div className="space-y-3">
+          <p className="text-sm text-text-secondary leading-relaxed">
+            Multipart <Code>source</Code>, <Code>key</Code> and <Code>file</Code> (M4A with AAC or ALAC, MP3, FLAC or
+            Opus, at most 95 MB; keep the extension). The track must be reported already, with a{' '}
+            <Code>duration</Code>, and the file must be within 4 seconds (or 3%) of it.
+          </p>
+          <Table
+            headers={['Status', 'Meaning']}
+            rows={[
+              ['201', <><Code>{'{ track, stored: true }'}</Code>: the file is now the song&apos;s audio</>],
+              ['200', <><Code>{'{ track, stored: false }'}</Code>: the song already has audio at least as good</>],
+              ['400', 'Not supported audio, wrong length, an album, or no duration on the track'],
+              ['404', 'The track has not been reported'],
+              ['413', 'Too big'],
+            ]}
+          />
+          <p className="text-sm text-text-secondary leading-relaxed">
+            A song keeps its first file until a clearly better one arrives: lossless beats lossy, otherwise more than
+            10% higher bitrate. Look the track up first and skip the upload when yours isn&apos;t better.
+          </p>
+        </div>
+      </Section>
     </div>
   )
 }
@@ -5985,6 +6970,10 @@ export const TABS = [
   { id: 'feeds',     label: 'Feeds & Media' },
   { id: 'patterns',  label: 'Code Patterns' },
   { id: 'cdn',       label: 'Distributed CDN' },
+  { id: 'community', label: 'Community Uploads' },
+  { id: 'lyrics',    label: 'Lyrics Generation' },
+  { id: 'recognition', label: 'Song Recognition' },
+  { id: 'expansion', label: 'Expansion Catalogue' },
   { id: 'tierlists', label: 'Tier Lists' },
   { id: 'sockets',   label: 'Realtime Sockets' },
 ] as const
@@ -6008,6 +6997,10 @@ const TAB_CONTENT: Record<TabId, () => JSX.Element> = {
   feeds:     FeedsMediaTab,
   patterns:  FetchPatternTab,
   cdn:       CdnTab,
+  community: CoverArtTab,
+  lyrics:    LyricsGenTab,
+  recognition: RecognitionTab,
+  expansion: ExpansionTab,
   tierlists: TierListsTab,
   sockets:   SocketsTab,
 }
