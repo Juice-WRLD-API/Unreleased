@@ -54,14 +54,23 @@ codesign --force --deep --sign - /Applications/Unreleased.app
   JSON/M3U import and export, share links, and following someone else's
   playlist live.
 - **Player**: a queue with history, search and reshuffle, radio/shuffle mode,
-  automatic recovery when a stream stalls, synced lyrics (Shift+L), an
-  equalizer with volume boost, era covers, and personal covers per song.
+  automatic recovery when a stream stalls, synced lyrics (Shift+L; word by
+  word when a line is timed that way), an equalizer with volume boost, era
+  covers, and personal covers per song. On desktop, an ALAC `.m4a` plays as
+  a FLAC transcode through the on-demand ffmpeg.
 - **WRLD**: a full-screen now-playing view with blurred cover art, scrolling
-  synced lyrics, a visualizer, and 999 FM controls.
+  synced lyrics, a visualizer, and 999 FM controls. For a released song, an
+  official video from Files can play in place of the visualizer, muted and
+  lined up with the song (Settings → Lyrics & WRLD → Music videos).
 - **999 FM**: the API's live radio, where listeners vote to skip and suggest
-  songs.
+  songs, plus a live chat. Chat is English only: emoji and punctuation pass,
+  and other alphabets, accents and styled fonts are refused. In WRLD the
+  radio is a card you can drag and resize, and open without tuning in. The
+  side menu opens the same chat over any other page.
 - **Offline**: download tracks and whole playlists for offline playback. You
-  can also embed lyrics and your cover art into downloaded MP3s.
+  can also embed lyrics and your cover art into downloaded MP3s. Sync
+  (desktop only, off by default, Home → Tools) keeps released and unreleased
+  songs that have audio offline. Either category can be left out.
 - **URL import**: pull audio in from a link (yt-dlp, downloaded on first use).
 
 **Sharing**
@@ -72,20 +81,31 @@ codesign --force --deep --sign - /Applications/Unreleased.app
 **Extras**
 - **Games**: Heardle (daily puzzle and online versus), Wordle, and tier lists.
 - **Wrapped**: your own listening stats. **Statistics**: catalogue-wide
-  numbers.
+  numbers, including a song chart.
 - **News** feed with channels and notifications.
 - **Integrations**: Discord Rich Presence and Last.fm scrobbling.
 - **Desktop niceties**: mini player, pop-out windows, tray controls, media
-  keys, and global and in-app hotkeys you can rebind separately.
-- **Customisation**: skins and themes, and a sidebar or pill nav (drag it to
-  any window edge) where you choose and reorder the tabs.
+  keys, Windows taskbar thumbnail buttons (like, previous, play/pause, next),
+  and global and in-app hotkeys you can rebind separately.
+- **Customisation**: skins and themes, and the glass look (a floating player
+  bar, translucent panels, and a backdrop made from the playing cover). On
+  Chromium, Glass refraction bends that backdrop along the player bar and
+  the pill nav. Navigation is a sidebar or a pill (drag it to any window
+  edge) where you choose and reorder the tabs.
 
-**Accounts and community** (sign in with Discord)
+**Accounts and community** (sign in with Discord, or with a username and
+password any account can set under Settings → Account → Sign-in; a username
+can change once every 14 days)
 - Public profiles, liked songs, and synced preferences.
+- Artists upload cover art straight into their own folder in Files. Apply
+  from Settings → Account → Your uploads.
+- Submit a remix or edit from Home → Tools. Staff review it before it is
+  filed into Files.
 - Song edit proposals with Genius lyrics paste, a synced-lyrics timing tool,
   and bulk editing. File ("comp") uploads, reports and feedback.
-- Roles: contributor, editor, manager and admin, each with its own profile
-  page and review queue.
+- Roles: contributor, editor, manager, artist and admin, each with its own
+  profile page and review queue. Artist is a folder in Files, not a review
+  queue.
 - An admin console for proposals, users, eras, albums, channels, broadcasts,
   CDN nodes and beta builds.
 - End-to-end encrypted staff chat with group rooms, GIFs, link previews,
@@ -111,6 +131,12 @@ npm run electron:dev
 This starts Vite on port `3018` and opens Electron against it with hot reload.
 On Windows, `scripts\run.bat` does the same thing. On Linux, use
 `electron:dev:wayland` or `electron:dev:x11` to pick a display backend.
+
+Unreleased allows one instance, and a dev run uses the same data folder as
+the installed app. If the app is already open, `npm run electron:dev` quits
+at once and that window comes forward. To run a dev copy beside it, start
+Electron with its own `--user-data-dir` after Vite is already serving port
+3018.
 
 To work on the renderer alone in a browser:
 
