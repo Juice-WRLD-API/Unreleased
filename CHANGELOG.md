@@ -6,6 +6,111 @@ All notable changes to this project are documented here.
 
 ---
 
+## [2.6.56] — 2026-11-22
+
+Changes since 2.6.55:
+
+- **Improve** The in-app API docs catch up with the backend: community cover art, artist folders, and remixes and edits; donor lyrics generation; song recognition and the Domain Expansion catalogue; signed-in devices, username and password, and passkeys; editor, contributor and artist applications; audio file tags; admin pages for cover-art and community-edit review, replacing a comp, the Thank you page, music-video defaults and logs; news polls; 999 FM's live chat; and the CDN node's tunnel
+
+---
+
+## [2.6.55] — 2026-11-22
+
+Changes since 2.6.54:
+
+- **New** **Artist applications**: from Settings → Account → Your uploads, anyone who is not an artist yet can ask for a folder under Cover Arts. The note has to be at least 20 characters. Links to work are optional, and so is the folder name (it defaults to your display name). An administrator reviews it under Admin → Applications and can set a different folder when approving. The terminal has `apply artist` (with `--folder`) and `approve app <id> --folder`
+
+---
+
+## [2.6.54] — 2026-11-22
+
+Changes since 2.6.53:
+
+- **New** **Artist** is a role of its own. An artist has a badge on their profile and a folder in Files (`Cover Arts/<name>/` in the community channel). Covers uploaded there go in at once, with no review; removing one asks first. Administrators turn the role on from the user's profile or Admin → Users, and set the folder name there. The terminal has `artistfolder` (list, upload, remove) and `usermod <user> --artist on --artist-folder <name>`
+- **New** **999 FM chat** opens from the side menu as a pop-up over any page other than WRLD (WRLD already has the chat in its card). X, Escape, or the menu button again closes it, and opening Notifications or Transfers closes it too. The terminal has `open fm-chat`
+- **Improve** With Music videos on, a released song that has no music video (or whose video does not line up) plays its official visualizer. Lyric videos still wait for All videos
+- **Improve** Compact Tracker shows a version group that holds one song as that song, with no group header
+- **Improve** Ctrl+F on Home opens Tracker, and Tracker's search box takes focus when it opens
+- **Fix** `nowplaying` with no arguments reads the live value your profile is showing, including the position, rather than the copy saved at the last account load
+
+---
+
+## [2.6.53] — 2026-11-21
+
+Changes since 2.6.52:
+
+- **Improve** Switching to Home and to WRLD is faster. Home's album tiles use the sized cover
+- **Improve** The Desktop word-by-word lyric styles take the Current line and Other lines colors from Settings, and draw a word without the commas, periods and quotes stuck to it. A word that is only punctuation keeps it, and ! and ? stay
+- **Fix** The app menu stays on its button when the window is resized while the menu is open
+
+---
+
+## [2.6.52] — 2026-11-18
+
+Changes since 2.6.51:
+
+- **New** **Covers from every comp** (Settings → Playback → Songs, `set all-comp-covers`): suggestions, the cover rotation and the pickers search every comp in Files, not only the main one. The terminal's `covers` follows the same switch
+- **Improve** The song editor, the local tag editor and the add-song dialog edit synced lyrics as text. Timing a line stays in the Synced lyrics tool
+
+---
+
+## [2.6.51] — 2026-11-16
+
+Changes since 2.6.50:
+
+- **New** A lyrics job tells you when it finishes, in the banner and the notification area, even after you leave the Synced lyrics dialog or close the app. The note says Lyrics, Synced lyrics or Word-synced lyrics, and clicking it opens that job. A job you are already watching is recorded without a banner. A job still running at quit is reported on the next launch, and one that never finishes stops being watched after a day
+- **Fix** WRLD's music video stays put across fullscreen and across leaving WRLD, so it does not load and seek from the start on every visit
+- **Improve** The Synced lyrics tool and the app's player take turns: starting one pauses the other, 999 FM included
+
+---
+
+## [2.6.50] — 2026-11-16
+
+Changes since 2.6.49:
+
+- **New** **Glass refraction** (Settings → Appearance, `set glass-refraction`): the player bar and the pill nav bend what passes under their edges. Chromium only, so the row is hidden on other engines
+
+---
+
+## [2.6.49] — 2026-11-15
+
+Changes since 2.6.48:
+
+- **New** **Music videos in WRLD**: a released song's official upload from Files (`Footage/Youtube`) plays muted and lined up with the song, in place of the visualizer. Song info lists the song's videos. A star there, for an administrator, sets the default every player uses, or turns video off for that song; your pick on this device wins, then that default, then the automatic one. Settings → Lyrics & WRLD → Music videos (`set wrld-videos`: off, music videos, or all videos). The terminal has `musicvideo`
+- **New** On Windows, the taskbar preview of the main window has Like, Previous, Play/Pause and Next
+- **Improve** Cover art review labels a proposal Editor proposed or User proposed
+- **Improve** 999 FM chat is English only. Emoji and punctuation pass; other alphabets, accents and styled fonts are refused before the line is sent. Clicking a verified name opens that person's profile card
+
+---
+
+## [2.6.48] — 2026-11-14
+
+Changes since 2.6.47:
+
+- **Improve** The 999 FM card in WRLD resizes from its corner. Double-click the corner for the default size
+- **New** **Sound for 999 FM chat and votes** (Settings → Lyrics & WRLD): the notification sound for a new chat line and for a vote starting, while the 999 FM card is up. Off until you turn it on
+
+---
+
+## [2.6.47] — 2026-11-14
+
+Changes since 2.6.46:
+
+- **Improve** 999 FM chat turns a catalogue song title into a link to that track, and the composer has an emoji picker
+- **Improve** A line sent while chat asks you to slow down waits out the pause and sends itself. Lines you type after it stay behind it
+- **Improve** With the 999 FM card up in WRLD, the vote sits on the card (on the Radio side, or directly under the card when it is folded or on Chat). The card can also be opened from WRLD's toolbar without tuning in to the radio
+
+---
+
+## [2.6.46] — 2026-11-14
+
+Changes since 2.6.45:
+
+- **New** 999 FM chat moderation for links and words. An administrator chooses who may post links (everyone, signed-in listeners, staff only, or no one) and keeps a list of blocked words. A word matches whole, and `*` matches any letters. Both are in the chat's admin menu and in the terminal: `fmmod links` and `fmmod words`
+- **Improve** On a phone, the 999 FM chat name and message fields use a size that does not zoom the page, and a line's delete control stays visible without a hover
+
+---
+
 ## [2.6.45] — 2026-11-14
 
 Changes since 2.6.44:
