@@ -1,8 +1,9 @@
 import { useEffect, useState } from 'react'
-import { KeyRound, Loader2, ShieldAlert, ShieldCheck, Smartphone } from 'lucide-react'
+import { KeyRound, Loader2, ShieldAlert, ShieldCheck, Smartphone, UserCheck } from 'lucide-react'
 import QRCode from 'qrcode'
 import type { ChatUserBrief } from '../../lib/chatApi'
 import type { UserTrust } from '../../lib/chatIdentity'
+import type { MemberState } from '../../lib/chatMembers'
 import type { LinkCandidate } from '../../lib/chatLinking'
 import { displayName, useChatStore } from '../../store/chatStore'
 import { showAppToast } from '../../lib/appToast'
@@ -37,17 +38,94 @@ export function useParticipantTrust(users: ChatUserBrief[]): Map<number, UserTru
 
 const bump = (): void => useChatStore.setState((s) => ({ trustEpoch: s.trustEpoch + 1 }))
 
+// After adding or removing people: sign the new member list, so the others
+// hand keys to whoever joined. Best effort; anyone can confirm later.
+export async function confirmMemberChange(conversationId: number): Promise<void> {
+  const meId = useChatStore.getState().meId
+  if (!meId || useChatStore.getState().identity !== 'ready') return
+  await import('../../lib/chatMembers')
+    .then((m) => m.confirmMembers(meId, conversationId))
+    .then(() => useChatStore.setState((s) => ({ trustEpoch: s.trustEpoch + 1 })))
+    .catch((err) => console.warn('[chat] member list not signed', err))
+}
+
+// Whether strict mode is on (members with no security key get no keys).
+export function useStrictMode(): boolean {
+  const epoch = useChatStore((s) => s.trustEpoch)
+  const [strict, setStrict] = useState(false)
+  useEffect(() => {
+    let cancelled = false
+    void identity().then((m) => m.getFeatures()).then((f) => { if (!cancelled) setStrict(f.strict) }).catch(() => undefined)
+    return () => { cancelled = true }
+  }, [epoch])
+  return strict
+}
+
+// The conversation's signed member list as this account verified it, once
+// this device is linked; null until then.
+export function useConversationMembers(conversationId: number | undefined): MemberState | null {
+  const meId = useChatStore((s) => s.meId)
+  const epoch = useChatStore((s) => s.trustEpoch)
+  const status = useChatStore((s) => s.identity)
+  const [state, setState] = useState<MemberState | null>(null)
+  useEffect(() => {
+    if (!meId || !conversationId || status !== 'ready') {
+      setState(null)
+      return
+    }
+    let cancelled = false
+    void import('../../lib/chatMembers')
+      .then((m) => m.loadMembers(meId, conversationId))
+      .then((s) => { if (!cancelled) setState(s) })
+      .catch(() => undefined)
+    return () => { cancelled = true }
+  }, [meId, conversationId, epoch, status])
+  return state
+}
+
+const MEMBER_REASONS: Record<string, string> = {
+  'list-rollback': 'the server showed an older list than one you already saw',
+  'list-gap': 'a version of the list is missing',
+  'list-signature': 'a signature doesn’t match',
+  'list-malformed': 'the list is malformed',
+  'signer-not-member': 'it was signed by someone who wasn’t a member',
+  'signer-key-changed': 'the person who signed it has a new security key you haven’t accepted',
+  'signer-unverified': 'the person who signed it has no verified security key',
+}
+
+const names = (users: ChatUserBrief[]): string => {
+  const list = users.map(displayName)
+  return list.length <= 2 ? list.join(' and ') : `${list.slice(0, -1).join(', ')} and ${list[list.length - 1]}`
+}
+
 // Above the message list: this device isn't linked yet, a participant's
 // security key changed, or an unanswered key request can be restored from
 // the recovery code.
-export function TrustBanners({ participants }: { participants: ChatUserBrief[] }): JSX.Element | null {
+export function TrustBanners({ participants, conversationId }: { participants: ChatUserBrief[]; conversationId?: number }): JSX.Element | null {
   const meId = useChatStore((s) => s.meId)
   const status = useChatStore((s) => s.identity)
   const offerRestore = useChatStore((s) => s.offerRestore)
   const dismissRestore = useChatStore((s) => s.dismissRestoreOffer)
   const others = participants.filter((p) => p.id !== meId)
   const trust = useParticipantTrust(others)
+  const members = useConversationMembers(conversationId)
+  const strict = useStrictMode()
   const [busy, setBusy] = useState<number | null>(null)
+  const [confirming, setConfirming] = useState(false)
+
+  const confirmJoin = async (): Promise<void> => {
+    if (!meId || !conversationId) return
+    setConfirming(true)
+    try {
+      await (await import('../../lib/chatMembers')).confirmMembers(meId, conversationId)
+      bump()
+      void useChatStore.getState().resolveKey(conversationId)
+    } catch (err) {
+      showAppToast(errorMessage(err, "Couldn't confirm the members"), { tone: 'error' })
+    } finally {
+      setConfirming(false)
+    }
+  }
 
   const accept = async (userId: number): Promise<void> => {
     if (!meId) return
@@ -78,6 +156,43 @@ export function TrustBanners({ participants }: { participants: ChatUserBrief[] }
       <Banner key="restore" tone="amber" icon={<KeyRound size={16} className="shrink-0 text-amber-400" />}>
         <span className="flex-1">None of your other devices answered with the missing key. You can restore it with your recovery code in Settings › Chat devices.</span>
         <button onClick={dismissRestore} className="shrink-0 font-semibold text-amber-800 dark:text-amber-300 hover:underline">Dismiss</button>
+      </Banner>,
+    )
+  }
+  if (members?.state === 'invalid') {
+    banners.push(
+      <Banner key="members-bad" tone="red" icon={<ShieldAlert size={16} className="shrink-0 text-red-400" />}>
+        <span className="flex-1">
+          <b>Couldn&apos;t verify who&apos;s in this conversation:</b> {MEMBER_REASONS[members.reason] ?? members.reason}. New keys aren&apos;t handed out until it checks out.
+        </span>
+      </Banner>,
+    )
+  } else if (members?.state === 'ok' && members.unconfirmed.length) {
+    const joined = participants.filter((p) => members.unconfirmed.includes(p.id))
+    const meWaiting = joined.some((p) => p.id === meId)
+    const others = joined.filter((p) => p.id !== meId)
+    banners.push(
+      <Banner key="members-new" tone="amber" icon={<UserCheck size={16} className="shrink-0 text-amber-400" />}>
+        <span className="flex-1">
+          {meWaiting
+            ? <><b>You&apos;re waiting to be confirmed.</b> Another member has to confirm adding you before you can read new messages here.</>
+            : <><b>{names(others)} joined, but no member has confirmed adding them,</b> so they don&apos;t get keys yet. Confirm only if you know they were meant to be added.</>}
+        </span>
+        {!meWaiting && (
+          <button onClick={() => void confirmJoin()} disabled={confirming} className="shrink-0 font-semibold text-amber-800 dark:text-amber-300 hover:underline">
+            {confirming ? <Loader2 size={12} className="animate-spin" /> : 'Confirm'}
+          </button>
+        )}
+      </Banner>,
+    )
+  }
+  const keyless = others.filter((u) => trust.get(u.id)?.state === 'none')
+  if (strict && keyless.length) {
+    banners.push(
+      <Banner key="keyless" tone="amber" icon={<ShieldAlert size={16} className="shrink-0 text-amber-400" />}>
+        <span className="flex-1">
+          <b>{names(keyless)} {keyless.length === 1 ? 'needs' : 'need'} to update Unreleased to chat securely.</b> They won&apos;t get new messages here until then.
+        </span>
       </Banner>,
     )
   }

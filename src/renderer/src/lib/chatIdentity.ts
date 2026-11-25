@@ -7,14 +7,29 @@ import type { E2EFeatures, ListDeviceEntry, ServerDeviceRow, UserKeysInfo } from
 import {
   b64, generateSigningKey, listBytes, safetyDigits, safetyFingerprint, sign, signingPublicFromSecret, unb64, verify,
 } from './chatV2Crypto'
-import { clearMsk, getTrust, loadMsk, putTrust, saveMsk } from './chatKeyStore'
+import { clearMsk, getFeatureLatch, getTrust, loadMsk, putFeatureLatch, putTrust, saveMsk } from './chatKeyStore'
 
 // --- rollout flags ----------------------------------------------------------------
 
-const NO_FEATURES: E2EFeatures = { send: false, identity: false, linking: false, backup: false }
+const NO_FEATURES: E2EFeatures = { send: false, identity: false, linking: false, backup: false, strict: false }
+const FLAGS = Object.keys(NO_FEATURES) as (keyof E2EFeatures)[]
 let featuresPromise: Promise<E2EFeatures> | null = null
 let featuresAt = 0
 const FEATURES_TTL_MS = 5 * 60_000
+
+// A flag this browser has seen on stays on: the flags come from the server,
+// and a server that could switch v2 off again could undo every check it adds.
+async function latched(server: E2EFeatures): Promise<E2EFeatures> {
+  const seen = await getFeatureLatch().catch(() => ({} as Record<string, boolean>))
+  const out = { ...server }
+  let grew = false
+  for (const flag of FLAGS) {
+    if (seen[flag]) out[flag] = true
+    else if (server[flag]) grew = true
+  }
+  if (grew) await putFeatureLatch(Object.fromEntries(FLAGS.filter((f) => out[f]).map((f) => [f, true]))).catch(() => undefined)
+  return out
+}
 
 export function getFeatures(): Promise<E2EFeatures> {
   if (!featuresPromise || Date.now() - featuresAt > FEATURES_TTL_MS) {
@@ -23,6 +38,7 @@ export function getFeatures(): Promise<E2EFeatures> {
       .then((f) => ({ ...NO_FEATURES, ...f }))
       // An older server has no flags endpoint: stay on v1.
       .catch(() => NO_FEATURES)
+      .then(latched)
   }
   return featuresPromise
 }

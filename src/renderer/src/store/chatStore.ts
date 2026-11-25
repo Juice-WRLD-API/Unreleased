@@ -777,6 +777,8 @@ export const useChatStore = create<ChatState>((set, get) => {
         return
       case 'conversation.updated': {
         const stillIn = ev.conversation.participants.some((p) => p.user.id === s.meId)
+        void import('../lib/chatMembers').then((m) => m.invalidateMembers(ev.conversation.id))
+          .then(() => set((st) => ({ trustEpoch: st.trustEpoch + 1 })))
         set((st) => ({
           conversations: stillIn
             ? [ev.conversation, ...st.conversations.filter((c) => c.id !== ev.conversation.id)]
@@ -806,6 +808,28 @@ export const useChatStore = create<ChatState>((set, get) => {
       }
       case 'device.registered':
         onDeviceRegistered(ev.device_id)
+        return
+      case 'members.signed':
+        // Someone signed a new member list: re-check who keys may go to, hand
+        // the current key to whoever it added (adding rotates, and the new key
+        // can be made before they're confirmed), and retry a waiting room.
+        void import('../lib/chatMembers').then(async (mm) => {
+          mm.invalidateMembers(ev.conversation)
+          set((st) => ({ trustEpoch: st.trustEpoch + 1 }))
+          const meId = get().meId
+          const conv = get().conversations.find((c) => c.id === ev.conversation)
+          if (meId && conv) {
+            const state = await mm.loadMembers(meId, ev.conversation).catch(() => null)
+            const last = state?.state === 'ok' ? state.history[state.history.length - 1] : undefined
+            if (state?.state === 'ok' && last?.version === state.version) {
+              const m = await e2e()
+              for (const uid of last.added) {
+                if (uid !== meId) await m.shareKeyWithUser(meId, conv, uid).catch(() => undefined)
+              }
+            }
+          }
+          if (get().keyState[ev.conversation] !== 'ready') void get().resolveKey(ev.conversation)
+        }).catch((err) => console.warn('[chat] member list update failed', err))
         return
       case 'key.committed':
         void e2e().then((m) => m.forgetPendingKeyFetches(ev.conversation))
@@ -1731,7 +1755,7 @@ export const useChatStore = create<ChatState>((set, get) => {
         set((s) => ({ keyState: { ...s.keyState, [conversationId]: res.state } }))
         if (res.state === 'ready') void get().decryptRoom(conversationId)
         // Rate limited inside, so every waiting room can ask.
-        else if (res.reason !== 'needs-link') void m.askForRoomKeys(meId).catch((err) => console.warn('[chat] key ask failed', err))
+        else if (!res.reason) void m.askForRoomKeys(meId).catch((err) => console.warn('[chat] key ask failed', err))
       } catch (err) {
         console.warn('[chat] key resolution failed', err)
         set((s) => ({ keyState: { ...s.keyState, [conversationId]: 'error' } }))

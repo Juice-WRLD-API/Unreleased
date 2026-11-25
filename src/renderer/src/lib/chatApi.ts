@@ -315,6 +315,30 @@ export interface E2EFeatures {
   identity: boolean
   linking: boolean
   backup: boolean
+  // Members with no v2 identity get no keys, and only signed messages count.
+  strict: boolean
+}
+
+// One signed version of a conversation's member list (see lib/chatMembers).
+export interface MemberListRow {
+  version: number
+  members: number[]
+  signer_user: number
+  signer_device: string
+  signature: string
+  created_at: string
+}
+
+export interface MemberLists {
+  version: number
+  participants: number[]
+  results: MemberListRow[]
+}
+
+export interface E2ERollout {
+  staff: number
+  with_identity: number
+  without_identity: { id: number; username: string }[]
 }
 
 export interface ToDeviceOut {
@@ -665,6 +689,13 @@ export const establishKey = (id: number, body: { key_version: number; key_commit
   requestOutcome<KeyCommitmentInfo & { commitment?: KeyCommitmentInfo; current_key_version?: number }>(`/dms/${id}/keys/establish/`, json('POST', body))
 export const rotateKey = (id: number, expectedVersion: number) =>
   requestOutcome<{ current_key_version: number }>(`/dms/${id}/keys/rotate/`, json('POST', { expected_version: expectedVersion }))
+// Through requestOutcome so a failure carries its status: 404 is an older
+// server without signed lists.
+export const getMemberLists = (id: number, after = 0) =>
+  requestOutcome<MemberLists>(`/dms/${id}/members/signed/${after ? `?after=${after}` : ''}`).then((r) => r.data)
+export const postMemberList = (id: number, body: { version: number; members: number[]; signer_device: string; signature: string }) =>
+  requestOutcome<MemberListRow & { detail?: string; version?: number; participants?: number[] }>(`/dms/${id}/members/signed/`, json('POST', body))
+export const getE2ERollout = () => request<E2ERollout>('/keys/rollout/')
 export const createLinkSession = (body: { device_id: string; enc_pub: string; sign_pub: string; label: string }) =>
   request<{ session_id: string; expires_at: string }>('/keys/link-sessions/', json('POST', body))
 export const getLinkSession = (sessionId: string) =>

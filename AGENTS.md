@@ -1,6 +1,6 @@
 # Agent guide: Juice WRLD API and Unreleased
 
-**Version 1.91** · updated 2026-11-22. Bump the version and date whenever you
+**Version 1.92** · updated 2026-11-25. Bump the version and date whenever you
 change this file (minor for fixes and additions, major for rewrites).
 
 **Keep this file current.** If you find something in the docs or this file that
@@ -232,6 +232,17 @@ up as `attachment.bin` / `application/octet-stream` with the plaintext `size`;
 reactions are shortcode names (`fire`), not emoji glyphs. Code:
 `lib/chatCrypto.ts`, `lib/chatE2E.ts`, `lib/chatV2Crypto.ts`. If you change the
 format, change every client.
+
+Who gets a room key is decided by the **signed member list**
+(`lib/chatMembers.ts`, `/dms/{id}/members/signed/`), not by the server's
+participant list: each version is signed with a member's master key, and a
+participant nobody signed in gets no keys and can't hand any out. After any
+change to a conversation's members, call `confirmMembers` (UI:
+`confirmMemberChange` in `ChatTrust.tsx`) so the change is signed. Adding a
+member rotates the key on the server. Rollout flags from `/keys/features/`
+are latched per browser (`getFeatures`): once seen on they stay on, so turning
+one off on the server doesn't reach clients that already saw it. `strict`
+(the last flag) stops keys going to members with no v2 identity.
 
 Room keys go to every active device of each participant, not just their oldest
 (that rule left newer devices waiting forever). A device missing a key asks by

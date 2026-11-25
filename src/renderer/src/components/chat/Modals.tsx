@@ -10,6 +10,7 @@ import { adminListUsers, compressImageFile } from '../../lib/userApi'
 import { displayName, useChatStore, useNowPlayingByIds } from '../../store/chatStore'
 import { useChatPermissions } from '../../hooks/useChatPermissions'
 import { ConfirmDialog } from './MessageItem'
+import { confirmMemberChange } from './ChatTrust'
 import { useStaffDirectory } from './people'
 import { ChatAvatar, errorText, ServerGlyph, useChatToast } from './ui'
 import { useEscapeToClose } from '../../hooks/useEscapeToClose'
@@ -1330,6 +1331,9 @@ export function NewDmModal({ onClose, conversationId }: { onClose: () => void; c
       if (conv) {
         const updated = await api.updateConversation(conv.id, { add_participant_ids: selected.map((p) => p.id) })
         useChatStore.setState((s) => ({ conversations: s.conversations.map((c) => c.id === updated.id ? updated : c) }))
+        // Adding people rotates the key, so there is nothing to share with
+        // them yet; signing the new member list lets the next key reach them.
+        await confirmMemberChange(conv.id)
         const meId = useChatStore.getState().meId
         if (meId) {
           const { shareKeyWithUser } = await import('../../lib/chatE2E')

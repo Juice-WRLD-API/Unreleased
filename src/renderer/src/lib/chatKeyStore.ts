@@ -258,3 +258,45 @@ export async function getTrust(me: number, them: number): Promise<TrustRecord | 
 export async function putTrust(me: number, them: number, record: TrustRecord): Promise<void> {
   await run(META, 'readwrite', (s) => s.put({ id: trustRowId(me, them), ...record }))
 }
+
+// Rollout flags this browser has seen switched on. They only ever go up, so a
+// server can't quietly turn v2 (or strict mode) back off.
+const LATCH_ROW = 'features-latch'
+
+export async function getFeatureLatch(): Promise<Record<string, boolean>> {
+  const row = await run<{ id: string; flags: Record<string, boolean> } | undefined>(META, 'readonly', (s) => s.get(LATCH_ROW))
+  return row?.flags ?? {}
+}
+
+export async function putFeatureLatch(flags: Record<string, boolean>): Promise<void> {
+  await run(META, 'readwrite', (s) => s.put({ id: LATCH_ROW, flags }))
+}
+
+// The newest member list this account verified for a conversation, plus the
+// changes it has seen, newest last.
+export interface MemberChange {
+  version: number
+  by: number
+  added: number[]
+  removed: number[]
+  at: string
+}
+
+export interface MemberPin {
+  version: number
+  members: number[]
+  history: MemberChange[]
+}
+
+const memberRowId = (me: number, conversationId: number): string => `members:${me}:${conversationId}`
+
+export async function getMemberPin(me: number, conversationId: number): Promise<MemberPin | null> {
+  const row = await run<({ id: string } & MemberPin) | undefined>(META, 'readonly', (s) => s.get(memberRowId(me, conversationId)))
+  if (!row) return null
+  const { id: _id, ...rest } = row
+  return { ...rest, history: rest.history ?? [] }
+}
+
+export async function putMemberPin(me: number, conversationId: number, pin: MemberPin): Promise<void> {
+  await run(META, 'readwrite', (s) => s.put({ id: memberRowId(me, conversationId), ...pin }))
+}
