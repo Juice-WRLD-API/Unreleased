@@ -456,7 +456,7 @@ export default function RadioChatPanel(): JSX.Element {
               }}
               aria-label="Emoji"
               title="Emoji"
-              className="p-2 rounded-xl text-white/60 hover:text-white hover:bg-white/10 transition-colors"
+              className="max-md:hidden p-2 rounded-xl text-white/60 hover:text-white hover:bg-white/10 transition-colors"
             >
               <SmilePlus size={15} />
             </button>

@@ -12,6 +12,7 @@ import { allKnownUsers, collectFacts, scopeRooms, startIndexing, type Scope } fr
 import { splitReplyRef } from '../chatReplyRef'
 import { formatBytes } from '../format'
 import { decryptAttachment, decryptAttachmentMeta } from '../chatE2E'
+import { confirmMembers } from '../chatMembers'
 import { pickLocalFile, saveBlob } from './pick'
 import { resolveUser, directory } from './users'
 import { asJson, confirmAction, fail, idArg, oneLine, parseArgs, parseBool, table, type TermCommand, type TermCtx } from './types'
@@ -295,6 +296,11 @@ const convoCommand: TermCommand = {
       const ids = await users(rest.slice(1))
       if (ids.length === 0) fail(`usage: convo ${sub} <id> <user…>`)
       await updateConversation(id, sub === 'add' ? { add_participant_ids: ids } : { remove_participant_ids: ids })
+      // Sign the new member list so the others hand keys to whoever joined.
+      const meId = useChatStore.getState().meId
+      if (meId && useChatStore.getState().identity === 'ready') {
+        await confirmMembers(meId, id).catch((err) => ctx.print(`member list not signed: ${(err as Error).message}`, 'dim'))
+      }
       await refresh()
       ctx.print(`${sub === 'add' ? 'added' : 'removed'} ${ids.length} ${ids.length === 1 ? 'person' : 'people'}`, 'ok')
     } else if (sub === 'rm' || sub === 'delete') {

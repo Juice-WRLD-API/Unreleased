@@ -4730,7 +4730,7 @@ function ChatTab() {
           headers={['Method', 'Path', 'Description']}
           rows={[
             ['GET', '/dms/{id}/', 'Conversation detail'],
-            ['PATCH', '/dms/{id}/', '{ name?, add_participant_ids?, remove_participant_ids? } (participant). Removing a participant bumps current_key_version — broadcasts conversation.updated, key.rotated on rotation'],
+            ['PATCH', '/dms/{id}/', '{ name?, add_participant_ids?, remove_participant_ids? } (participant). Adding or removing a participant bumps current_key_version — broadcasts conversation.updated, key.rotated on rotation. v2 clients then sign the new member list (/dms/{id}/members/signed/)'],
             ['DELETE', '/dms/{id}/', 'Delete (creator or platform admin)'],
             ['GET', '/dms/{id}/messages/?limit=30&before={messageId}', 'Same pagination as channels; returns encrypted message objects'],
             ['POST', '/dms/{id}/messages/', 'Create an encrypted message (below)'],

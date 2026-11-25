@@ -125,6 +125,13 @@ export async function listBytes(userId: number, listVersion: number, devices: Li
   return tbs('unrlsd/devices/v2', ...items)
 }
 
+// --- conversation member lists ----------------------------------------------------
+
+// Signed with the signer's master key, so it still checks out after the
+// device that made it is gone.
+export const memberListBytes = (conversationId: number, version: number, signerUserId: number, members: number[]): Uint8Array =>
+  tbs('unrlsd/members/v2', conversationId, version, signerUserId, mentionsCsv(members))
+
 // --- room keys ------------------------------------------------------------------
 
 export async function keyCommitment(conversationId: number, keyVersion: number, roomKey: Uint8Array): Promise<Uint8Array> {

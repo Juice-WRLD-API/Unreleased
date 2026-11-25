@@ -17,7 +17,7 @@ import { useRoomInfo } from './RoomPane'
 import { ChatAvatar, IconButton, errorText, shortStamp, useChatToast } from './ui'
 import { AnchoredContextMenu } from '../ContextMenu'
 import { useOpenUserCard } from './UserCard'
-import { SafetyNumber } from './ChatTrust'
+import { SafetyNumber, confirmMemberChange, useConversationMembers, useParticipantTrust } from './ChatTrust'
 import { anchorOf, clickable } from '../../lib/a11y'
 
 function PanelShell({ title, subtitle, onClose, children }: { title: string; subtitle?: string; onClose: () => void; children: React.ReactNode }): JSX.Element {
@@ -344,7 +344,15 @@ export function DmInfoPanel({ conversationId, onClose, onAddPeople }: { conversa
   const toast = useChatToast()
   const [confirm, setConfirm] = useState<number | null>(null)
   const nowPlaying = useNowPlayingByIds(conv?.participants.map((p) => p.user.id) ?? [])
+  const users = useMemo(() => conv?.participants.map((p) => p.user) ?? [], [conv])
+  const trust = useParticipantTrust(users)
+  const members = useConversationMembers(conversationId)
   if (!conv) return <PanelShell title="Details" onClose={onClose}><div /></PanelShell>
+  const nameOf = (id: number): string => {
+    const p = conv.participants.find((x) => x.user.id === id)
+    return p ? displayName(p.user) : id === meId ? 'You' : 'Someone who left'
+  }
+  const changes = members?.state === 'ok' ? members.history.filter((c) => c.added.length || c.removed.length).slice(-8).reverse() : []
   return (
     <PanelShell title={conv.is_group ? 'Group members' : 'Details'} subtitle={`${conv.participants.length} people · encrypted`} onClose={onClose}>
       <div className="chat-scroll flex-1 min-h-0 overflow-y-auto p-2">
@@ -353,7 +361,13 @@ export function DmInfoPanel({ conversationId, onClose, onAddPeople }: { conversa
             <ChatAvatar user={p.user} size={32} presence listening={!!nowPlaying[p.user.id]} onClick={(e) => openUserCard(p.user, e)} />
             <div className="flex-1 min-w-0 cursor-pointer" {...clickable((el) => openUserCard(p.user, anchorOf(el)))}>
               <p className="text-sm text-text-primary truncate hover:underline">{displayName(p.user)}{p.user.id === meId && <span className="text-text-muted"> (you)</span>}</p>
-              <p className="text-[11px] text-text-muted truncate">Joined {relativeTime(p.joined_at)}</p>
+              <p className="text-[11px] text-text-muted truncate">
+                {members?.state === 'ok' && members.unconfirmed.includes(p.user.id)
+                  ? <span className="text-amber-500">Not confirmed yet</span>
+                  : trust.get(p.user.id)?.state === 'none'
+                    ? <span className="text-amber-500">No security key yet</span>
+                    : <>Joined {relativeTime(p.joined_at)}</>}
+              </p>
             </div>
             {conv.is_group && p.user.id !== meId && (
               <button onClick={() => setConfirm(p.user.id)} title="Remove" className="w-7 h-7 rounded-lg hidden group-hover:flex items-center justify-center text-text-muted hover:text-red-400 hover:bg-red-500/10">
@@ -363,6 +377,16 @@ export function DmInfoPanel({ conversationId, onClose, onAddPeople }: { conversa
           </div>
         ))}
         {conv.participants.filter((p) => p.user.id !== meId).map((p) => <SafetyNumber key={`sn-${p.id}`} user={p.user} />)}
+        {changes.length > 0 && (
+          <div className="mt-3 px-2">
+            <p className="text-[11px] font-semibold uppercase tracking-wide text-text-muted">Member changes</p>
+            {changes.map((c) => (
+              <p key={c.version} className="mt-1 text-[11px] text-text-muted">
+                {nameOf(c.by)} {[c.added.length ? `added ${c.added.map(nameOf).join(', ')}` : '', c.removed.length ? `removed ${c.removed.map(nameOf).join(', ')}` : ''].filter(Boolean).join(' and ')} · {relativeTime(c.at)}
+              </p>
+            ))}
+          </div>
+        )}
         {conv.is_group && (
           <button onClick={onAddPeople} className="mt-2 w-full rounded-lg border border-dashed border-[var(--border)] py-2 text-xs font-semibold text-text-muted hover:text-text-primary hover:border-text-muted">
             Add people
@@ -379,8 +403,9 @@ export function DmInfoPanel({ conversationId, onClose, onAddPeople }: { conversa
             const id = confirm
             setConfirm(null)
             api.updateConversation(conversationId, { remove_participant_ids: [id] })
-              .then((updated) => {
+              .then(async (updated) => {
                 useChatStore.setState((s) => ({ conversations: s.conversations.map((c) => c.id === updated.id ? updated : c) }))
+                await confirmMemberChange(conversationId)
                 return useChatStore.getState().resolveKey(conversationId)
               })
               .catch((err) => toast(errorText(err)))

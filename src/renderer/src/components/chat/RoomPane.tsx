@@ -286,7 +286,7 @@ export default function RoomPane({ room, header, enterSends = true }: {
           <span className="flex-1">{restriction}. You can still read this channel.</span>
         </div>
       )}
-      {participants && <TrustBanners participants={participants.map((p) => p.user)} />}
+      {participants && <TrustBanners participants={participants.map((p) => p.user)} conversationId={room.kind === 'conversation' ? room.id : undefined} />}
       {room.kind === 'conversation' && (keyState === 'waiting' || keyState === 'error') && identity !== 'needs-link' && (
         <MissingKeyBanner conversationId={room.id} failed={keyState === 'error'} />
       )}

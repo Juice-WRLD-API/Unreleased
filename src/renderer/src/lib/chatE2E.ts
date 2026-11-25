@@ -94,6 +94,7 @@ export function resetDevice(): void {
   bodies.clear()
   manifests.clear()
   metaCache.clear()
+  void import('./chatMembers').then((m) => m.invalidateMembers()).catch(() => undefined)
 }
 
 export function ownKeys(device: ActiveDevice): OwnDeviceKeys {
@@ -194,8 +195,11 @@ async function fetchV2Key(userId: number, conversationId: number, version: numbe
   const envelopes = await api.listEnvelopes(conversationId, version)
   const mine = envelopes.find((e) => e.recipient_device === device.serverId && e.key_version === version)
   if (!mine) return null
-  const members = new Set((info.members ?? []).map((m) => m.user_id))
-  const key = await openV2Envelope(userId, conversationId, version, mine, commitment, members)
+  // Someone the server added but no member confirmed can't hand out a key
+  // either: whoever creates a key can read everything sent under it.
+  const serverIds = (info.members ?? []).map((m) => m.user_id)
+  const allowed = await sealable(userId, conversationId, serverIds) ?? ((await getFeatures()).strict ? [] : serverIds)
+  const key = await openV2Envelope(userId, conversationId, version, mine, commitment, new Set(allowed))
   if (key) await storeRoomKey(userId, conversationId, version, key)
   return key
 }
@@ -272,14 +276,17 @@ interface SealTarget { rowId: number; deviceId: string; encPub: string }
 
 // Every signed device of every member (our own other devices included). A
 // member with no v2 identity yet is on an older client, so their server rows
-// are used as in v1; one whose key changed gets nothing until it's accepted.
+// are used as in v1, except in strict mode, where they get nothing (the server
+// could be hiding their identity to slip its own devices in). One whose key
+// changed gets nothing until it's accepted.
 async function memberTargets(userId: number, memberIds: number[]): Promise<SealTarget[]> {
   const trusts = await loadUsersTrust(userId, memberIds)
+  const strict = (await getFeatures()).strict
   const out: SealTarget[] = []
   for (const trust of trusts.values()) {
     if (trust.state === 'ok') {
       for (const d of trust.devices) if (d.rowId != null) out.push({ rowId: d.rowId, deviceId: d.deviceId, encPub: d.encPub })
-    } else if (trust.state === 'none') {
+    } else if (trust.state === 'none' && !strict) {
       for (const r of trust.serverDevices) out.push({ rowId: r.id, deviceId: r.device_id, encPub: r.public_key })
     }
   }
@@ -343,12 +350,20 @@ async function rotationDue(conversationId: number, info: ConversationKeys): Prom
 
 export type KeyResolution =
   | { state: 'ready'; key: Uint8Array; version: number }
-  | { state: 'waiting'; reason?: 'needs-link' }
+  // 'members': the member list doesn't verify, so no new key can be handed out.
+  | { state: 'waiting'; reason?: 'needs-link' | 'members' }
+
+// Who new keys may be sealed to (lib/chatMembers): members on the signed list
+// who are still in the conversation. Null when nobody can be trusted yet.
+async function sealable(userId: number, conversationId: number, serverIds: number[]): Promise<number[] | null> {
+  const m = await import('./chatMembers')
+  return m.sealableMembers(userId, conversationId, serverIds)
+}
 
 async function resolveV2(userId: number, conversation: Conversation, forSend: boolean, mayRotate = true): Promise<KeyResolution> {
   const info = await api.listConversationDevices(conversation.id)
   const version = info.current_key_version
-  const memberIds = (info.members ?? []).map((m) => m.user_id)
+  const serverIds = (info.members ?? []).map((m) => m.user_id)
 
   // The first sender after a trigger rotates; a 409 just means someone else
   // already did, and either way we resolve again at the new version.
@@ -378,6 +393,8 @@ async function resolveV2(userId: number, conversation: Conversation, forSend: bo
     return key ? { state: 'ready', key, version } : { state: 'waiting' }
   }
 
+  const memberIds = await sealable(userId, conversation.id, serverIds)
+  if (!memberIds) return { state: 'waiting', reason: 'members' }
   const created = await establishV2(userId, conversation.id, version, memberIds)
   if (created) return { state: 'ready', key: created, version }
   // Lost the race: take the winner's key once its envelope lands.
@@ -417,16 +434,25 @@ export async function resolveRoomKey(
 // A participant's devices need the key everyone else already has - only at
 // the current version, so nobody receives keys from before a rotation.
 export async function shareKeyWithUser(userId: number, conversation: Conversation, targetUserId: number): Promise<void> {
+  const device = await ensureDevice(userId)
+  const status = await identityStatus(userId)
+  if (status === 'needs-link') return
+  if (status === 'ready') {
+    // The conversation in hand can be a version behind (adding someone
+    // rotates), and a key from before someone joined is history they
+    // shouldn't get.
+    const info = await api.listConversationDevices(conversation.id)
+    const current = info.current_key_version
+    const allowed = await sealable(userId, conversation.id, (info.members ?? []).map((m) => m.user_id))
+    if (!info.commitment || !allowed?.includes(targetUserId)) return
+    const currentKey = await getRoomKey(conversation.id, current)
+    if (!currentKey) return
+    await postV2Envelopes(userId, conversation.id, current, currentKey, await memberTargets(userId, [targetUserId]))
+    return
+  }
   const version = conversation.current_key_version
   const key = await getRoomKey(conversation.id, version)
   if (!key) return
-  const device = await ensureDevice(userId)
-  const status = await identityStatus(userId)
-  if (status === 'ready') {
-    await postV2Envelopes(userId, conversation.id, version, key, await memberTargets(userId, [targetUserId]))
-    return
-  }
-  if (status === 'needs-link') return
   const { results } = await api.listConversationDevices(conversation.id)
   await postV1Envelopes(conversation.id, version, key, results.filter((d) => deviceOwnerId(d) === targetUserId && d.id !== device.serverId))
 }
@@ -530,7 +556,9 @@ export async function onDevicesUpdated(userId: number, changedUser: number, drop
   }
   for (const c of shared) {
     const key = await getRoomKey(c.id, c.current_key_version)
-    if (key) await postV2Envelopes(userId, c.id, c.current_key_version, key, fresh).catch(() => undefined)
+    if (!key) continue
+    const allowed = await sealable(userId, c.id, c.participants.map((p) => p.user.id)).catch(() => null)
+    if (allowed?.includes(changedUser)) await postV2Envelopes(userId, c.id, c.current_key_version, key, fresh).catch(() => undefined)
   }
 }
 
@@ -604,8 +632,12 @@ async function senderSignPub(userId: number, authorId: number, deviceId: string)
   const trust = await loadUserTrust(userId, authorId)
   if (trust.state === 'ok') return trustedDevice(trust, deviceId)?.signPub ?? null
   // Phase 1: the author has no master key yet, so the best available is the
-  // server's record of that device's signing key.
-  if (trust.state === 'none') return trust.serverDevices.find((r) => r.device_id === deviceId)?.sign_pub || null
+  // server's record of that device's signing key. Strict mode doesn't take
+  // the server's word for it.
+  if (trust.state === 'none') {
+    if ((await getFeatures()).strict) return null
+    return trust.serverDevices.find((r) => r.device_id === deviceId)?.sign_pub || null
+  }
   return null
 }
 

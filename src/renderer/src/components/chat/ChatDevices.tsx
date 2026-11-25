@@ -22,7 +22,7 @@ export default function ChatDevices({ userId }: { userId: number }): JSX.Element
       const [status, features] = await Promise.all([m.identityStatus(userId), idm.getFeatures()])
       setV2({ status, features })
     } catch {
-      setV2({ status: 'disabled', features: { send: false, identity: false, linking: false, backup: false } })
+      setV2({ status: 'disabled', features: { send: false, identity: false, linking: false, backup: false, strict: false } })
     }
   }, [userId])
 

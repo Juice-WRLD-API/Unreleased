@@ -1,10 +1,11 @@
 import { relativeTime } from '../../components/adminShared'
-import { useChatStore } from '../../store/chatStore'
-import { listMyDevices } from '../chatApi'
+import { displayName, useChatStore } from '../../store/chatStore'
+import { getE2ERollout, listMyDevices } from '../chatApi'
 import { backupExists, changeRecoveryCode, restoreFromCode, setupBackup } from '../chatBackup'
 import { identityStatus, localDeviceId, shareKeyWithUser } from '../chatE2E'
 import { getFeatures, loadUserTrust, resetOwnIdentity, safetyNumber } from '../chatIdentity'
 import { exportKeys, importKeys, looksLikeKeyExport } from '../chatKeyTransfer'
+import { confirmMembers, loadMembers, type MemberState } from '../chatMembers'
 import { approveLink, lookupLink, pendingDevices, revokeLinkedDevice, startLink, type LinkCandidate } from '../chatLinking'
 import { processInbox, requestRoomKey } from '../chatToDevice'
 import { ensureDevice, ownKeys } from '../chatE2E'
@@ -30,12 +31,12 @@ async function confirmSas(ctx: TermCtx, c: LinkCandidate): Promise<void> {
   }
 }
 
-const SUBS = ['status', 'devices', 'revoke', 'link', 'pending', 'approve', 'backup', 'export', 'import', 'trust', 'safety', 'share', 'request', 'ask', 'rekey', 'sync', 'reset']
+const SUBS = ['status', 'devices', 'revoke', 'link', 'pending', 'approve', 'backup', 'export', 'import', 'trust', 'safety', 'share', 'request', 'ask', 'rekey', 'members', 'confirm', 'rollout', 'sync', 'reset']
 
 const keysCommand: TermCommand = {
   name: 'keys', group: 'People', chat: true,
-  usage: 'keys [status] · devices · revoke <deviceId> · link · pending · approve <code|qr | deviceId> · backup [setup|change|restore] · export · import · trust <user> · safety <user> · share <conversationId> <user> · request <conversationId> <version> · ask <conversationId> · rekey <conversationId> · sync · reset',
-  description: 'Chat encryption: this device’s identity and status, your other devices, linking a new device, the recovery-code backup, exporting and importing keys, asking for a missing conversation key or resetting it, who you trust, and safety numbers',
+  usage: 'keys [status] · devices · revoke <deviceId> · link · pending · approve <code|qr | deviceId> · backup [setup|change|restore] · export · import · trust <user> · safety <user> · share <conversationId> <user> · request <conversationId> <version> · ask <conversationId> · rekey <conversationId> · members <conversationId> · confirm <conversationId> · rollout · sync · reset',
+  description: 'Chat encryption: this device’s identity and status, your other devices, linking a new device, the recovery-code backup, exporting and importing keys, asking for a missing conversation key or resetting it, the signed member list of a conversation (and confirming someone who joined), who still has no security key (admins), who you trust, and safety numbers',
   covers: [
     'chatApi.listMyDevices', 'chatApi.getE2EFeatures', 'chatApi.revokeDevice', 'chatApi.registerDevice', 'chatApi.putIdentity', 'chatApi.putDeviceList',
     'chatApi.createLinkSession', 'chatApi.getLinkSession', 'chatApi.getUserKeys', 'chatApi.getUsersKeys', 'chatApi.getBackup', 'chatApi.putBackup',
@@ -43,6 +44,8 @@ const keysCommand: TermCommand = {
     'chatApi.establishKey', 'chatApi.rotateKey', 'chatApi.postEnvelopes', 'chatApi.listEnvelopes', 'chatApi.listConversationDevices',
     'chatE2E.ensureDevice', 'chatE2E.identityStatus', 'chatE2E.localDeviceId', 'chatE2E.shareKeyWithUser', 'chatE2E.storeRoomKey', 'chatE2E.fetchRoomKey',
     'chatE2E.establishRoomKey', 'chatE2E.resolveRoomKey', 'chatE2E.onDevicesUpdated', 'chatE2E.askForRoomKeys', 'chatE2E.resetRoomKey',
+    'chatApi.getMemberLists', 'chatApi.postMemberList', 'chatApi.getE2ERollout',
+    'chatMembers.loadMembers', 'chatMembers.confirmMembers', 'chatMembers.sealableMembers',
     'chatIdentity.getFeatures', 'chatIdentity.loadUserTrust', 'chatIdentity.loadUsersTrust', 'chatIdentity.ensureIdentity', 'chatIdentity.publishDeviceList',
     'chatIdentity.resetOwnIdentity', 'chatIdentity.safetyNumber',
     'chatLinking.startLink', 'chatLinking.ownDeviceSas', 'chatLinking.lookupLink', 'chatLinking.pendingDevices', 'chatLinking.approveLink', 'chatLinking.revokeLinkedDevice',
@@ -163,6 +166,41 @@ const keysCommand: TermCommand = {
       if (!confirmAction(ctx, `Reset the key of #${convId}? Everyone gets a new key for new messages; older ones stay unreadable on devices that never had the old key.`, bool.has('y'))) return
       await cs().resetKey(convId)
       ctx.print(cs().keyState[convId] === 'ready' ? `#${convId} is on a new key` : 'someone else reset it at the same time; their key arrives shortly', 'ok')
+    } else if (sub === 'members' || sub === 'confirm') {
+      const convId = idArg(rest[0], `keys ${sub} <conversationId>`)
+      const conv = cs().conversations.find((c) => c.id === convId) ?? fail(`#${convId} isn’t one of your conversations (convo ls)`)
+      const nameOf = (uid: number): string => {
+        const p = conv.participants.find((x) => x.user.id === uid)
+        return p ? displayName(p.user) : `user ${uid}`
+      }
+      let state: MemberState
+      if (sub === 'confirm') {
+        const before = await loadMembers(id, convId)
+        if (before.state === 'ok' && before.unconfirmed.length
+          && !confirmAction(ctx, `Confirm ${before.unconfirmed.map(nameOf).join(', ')} as member${before.unconfirmed.length === 1 ? '' : 's'} of #${convId}? Do this only if you know they were meant to be added.`, bool.has('y'))) return
+        state = await confirmMembers(id, convId)
+        await cs().resolveKey(convId)
+      } else {
+        state = await loadMembers(id, convId)
+      }
+      if (asJson(ctx, bool.has('json'), state)) return
+      if (state.state === 'unsupported') ctx.print('this server has no signed member lists yet', 'dim')
+      else if (state.state === 'unsigned') ctx.print('nobody has signed this conversation’s member list yet (this device has to be verified to sign it)', 'dim')
+      else if (state.state === 'invalid') ctx.print(`member list does NOT verify: ${state.reason}. New keys aren’t handed out.`, 'error')
+      else {
+        ctx.print(`member list v${state.version}: ${state.members.map(nameOf).join(', ')}`, 'ok')
+        if (state.unconfirmed.length) ctx.print(`not confirmed yet (no keys until someone does): ${state.unconfirmed.map(nameOf).join(', ')} · keys confirm ${convId}`, 'plain')
+        for (const c of state.history.slice(-10)) {
+          const what = [c.added.length ? `added ${c.added.map(nameOf).join(', ')}` : '', c.removed.length ? `removed ${c.removed.map(nameOf).join(', ')}` : ''].filter(Boolean).join(' and ')
+          if (what) ctx.print(`  v${c.version} · ${nameOf(c.by)} ${what} · ${relativeTime(c.at)}`, 'dim')
+        }
+      }
+    } else if (sub === 'rollout') {
+      const r = await getE2ERollout()
+      if (asJson(ctx, bool.has('json'), r)) return
+      ctx.print(`${r.with_identity} of ${r.staff} staff have a security key`, r.without_identity.length ? 'plain' : 'ok')
+      if (r.without_identity.length) ctx.print(`still without one: ${r.without_identity.map((u) => u.username).join(', ')}`, 'dim')
+      else ctx.print('everyone has one: strict mode (CHAT_E2E_V2_STRICT) is safe to switch on', 'ok')
     } else if (sub === 'sync') {
       await processInbox(id)
       await cs().refreshIdentity()
