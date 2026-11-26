@@ -3,7 +3,9 @@ import { RotateCcw, PictureInPicture2, X, Save, Trash2 } from 'lucide-react'
 import {
   EQ_BANDS, EQ_GAIN_LIMIT, EQ_BOOST_MAX, EQ_PRESETS, EFFECTS_SUPPORTED,
   DEFAULT_FX, FX_RANGES, USER_PRESET_PREFIX, USER_PRESET_NAME_MAX, type AudioFx,
+  VOCALS_OFF, VOCALS_REMOVE, VOCALS_ONLY,
 } from '../lib/audioEffects'
+import { GlassSegmented } from './GlassSegmented'
 import { formatDuration } from '../lib/format'
 import { IS_IOS } from '../lib/platform'
 import { bandLabel, useEqualizerPanelData } from '../hooks/useEqualizerPanelData'
@@ -399,6 +401,31 @@ export default function EqualizerPanel(): JSX.Element {
         </div>
         <Toggle on={skipSilence} onClick={() => setSkipSilence(!skipSilence)} />
       </div>
+
+      {/* Vocals - strip the vocal to hear just the beat, or the beat to
+          hear just the vocal. Works on what's panned to the centre of a
+          stereo mix (public/audio/stems-worklet.js), so a mono file can't
+          be split. */}
+      <div className="border-t border-[var(--border)] mx-4" />
+      <div className="px-4 pt-2.5 pb-2">
+        <p className="text-xs text-text-secondary">Vocals</p>
+        <p className="text-[10px] text-text-muted mb-2">Strip the vocals to hear the beat, or the beat to hear the vocals</p>
+        <GlassSegmented
+          ariaLabel="Vocals"
+          value={String(audioFx.vocals)}
+          onChange={(v) => setAudioFx({ vocals: Number(v) })}
+          options={[
+            { value: String(VOCALS_OFF), label: 'Full mix' },
+            { value: String(VOCALS_REMOVE), label: 'Beat only', title: 'Take the vocals out' },
+            { value: String(VOCALS_ONLY), label: 'Vocals only', title: 'Take the beat out' },
+          ]}
+        />
+      </div>
+      {audioFx.vocals !== VOCALS_OFF && (
+        <div className="-mt-1 pb-1.5">
+          {fxSlider('vocalsAmount', 'Strength', percent, audioFx.vocals === VOCALS_REMOVE ? 'How much of the vocal to take out' : 'How much of the beat to take out')}
+        </div>
+      )}
 
       <FxSection title="Reverb" sub="Add space around the sound" on={reverbEnabled} onToggle={() => setReverbEnabled(!reverbEnabled)}>
         <SliderRow

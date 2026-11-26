@@ -137,6 +137,8 @@ const SETTINGS: Setting[] = [
   num('comp-ratio', 'Compressor ratio', 1, 20, () => fx().compRatio, (v) => setFx({ compRatio: v }), ':1'),
   num('comp-attack', 'Compressor attack', 1, 200, () => Math.round(fx().compAttack * 1000), (v) => setFx({ compAttack: v / 1000 }), 'ms'),
   num('comp-release', 'Compressor release', 50, 1000, () => Math.round(fx().compRelease * 1000), (v) => setFx({ compRelease: v / 1000 }), 'ms'),
+  num('vocals', 'Vocals: 0 = full mix, 1 = remove vocals (beat only), 2 = vocals only', 0, 2, () => fx().vocals, (v) => setFx({ vocals: Math.round(v) })),
+  num('vocals-strength', 'How far the vocal remover / isolator goes', 0, 100, () => Math.round(fx().vocalsAmount * 100), (v) => setFx({ vocalsAmount: v / 100 }), '%'),
   bool('filter', 'Low/high cut filter on', () => fx().filter, (v) => setFx({ filter: v })),
   num('low-cut', 'Filter: cut everything below', 20, 2000, () => fx().lowCut, (v) => setFx({ lowCut: v }), 'Hz'),
   num('high-cut', 'Filter: cut everything above', 1000, 20000, () => fx().highCut, (v) => setFx({ highCut: v }), 'Hz'),
