@@ -1,6 +1,6 @@
 # Agent guide: Juice WRLD API and Unreleased
 
-**Version 1.92** · updated 2026-11-25. Bump the version and date whenever you
+**Version 1.93** · updated 2026-11-26. Bump the version and date whenever you
 change this file (minor for fixes and additions, major for rewrites).
 
 **Keep this file current.** If you find something in the docs or this file that
@@ -63,6 +63,9 @@ version number (desktop 2.5.x, web 2.3.x, Android/iOS 3.2.x, beta 3.0.x-beta as 
   you were started in.
 - If a worktree reports `fatal: not a git repository`, repair it from
   `unreleased-app` with `git worktree move` / `git worktree add`, never by re-cloning.
+  If the whole `Unreleased/` folder moved (the `.git` files still point at
+  the old path), `git worktree repair <path>…` from `unreleased-app` fixes
+  both directions in one go.
 
 ### Porting between platforms
 
@@ -465,6 +468,20 @@ native plugins in `android/app/src/main/java/com/juicewrldapi/player` (SAF
 library, offline storage, Downloads, APK self-update). iOS: build in Xcode
 (`ios/App/App.xcodeproj`). Releases use `android-v*` / `ios-v*` tags, always
 marked pre-release.
+
+Android Auto (`android` only; CarPlay is not built: its browse UI needs Apple's
+`carplay-audio` entitlement, which the free-Apple-ID sideloads can't carry).
+`PlaybackService` is a `MediaBrowserServiceCompat`; the car browses a snapshot
+JS saves to `files/car-library.json` (`lib/carLibrary.ts` →
+`MediaSessionPlugin.setCarLibrary` → `CarLibrary.java`, tree in
+`CarBrowseTree.java`). A pick goes to the WebView (`carPlay` event, whole
+Track objects) whenever the plugin's Listener is set; with no WebView (cold
+start from the car, window closed) `NativePlayer` plays it with
+`MediaPlayer`, and `takeNativePlayback` hands the queue and position to the
+WebView when the app opens. Covers reach the car only as content:// URIs
+(`CarArtProvider`, which serves only URLs the tree registered). Sideloaded
+builds show in the car only after Android Auto's developer settings →
+Unknown sources. Terminal: `androidauto`.
 
 Bluetooth on Android: `PlaybackService` pauses on `AUDIO_BECOMING_NOISY` and,
 when that pause cut off a playing song, plays again once a Bluetooth output

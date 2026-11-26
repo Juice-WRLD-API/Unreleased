@@ -198,7 +198,7 @@ class Bar {
       if (action === 'volume') { this.toggleVolume(); return }
       if (action === 'clear') { page.command('clear'); return }
       if (action === 'open') { if (!live.inTab) page.command('open-app'); return }
-      if (action === 'more') { if (songMenuOpen()) closeMenu(); else void openSongMenu(); return }
+      if (action === 'more') { if (songMenuOpen()) closeMenu(); else if (!appSongMenu(target)) void openSongMenu(); return }
       // Where the button is, for the WRLD tab to open the equalizer beside it; on the desktop it gets its own window.
       if (action === 'equalizer') {
         const r = target.getBoundingClientRect()
@@ -808,6 +808,16 @@ let hoveredKey: string | null = null
 let browseKey: string | null = null
 let returnHome = 0
 
+// In the WRLD tab the ⋯ buttons open the app's own song menu for the song playing, as right-clicking its card does;
+// on the desktop (or with no card to name) the page's own menu.
+function appSongMenu(button: HTMLElement): boolean {
+  const { items, home } = cardList()
+  if (!page.songMenu || home < 0 || !items[home]) return false
+  const r = button.getBoundingClientRect()
+  page.songMenu(r.left, r.top, (live.state.cards?.from ?? 0) + home, items[home].id)
+  return true
+}
+
 function cardList(): { list: Card[]; items: DesktopTrack[]; home: number } {
   const shown = live.state.cards
   const items = shown?.items ?? []
@@ -945,7 +955,7 @@ $('#tools').addEventListener('click', (event) => {
   if (!tool || justDragged()) return
   if (tool === 'mini') page.command('set', { player: { mini: true } })
   if (tool === 'lyricsCard') page.command('set', { player: { hidesLyricsCard: !live.settings?.player.hidesLyricsCard } })
-  if (tool === 'more') { if (songMenuOpen()) closeMenu(); else void openSongMenu($<HTMLElement>('[data-tool="more"]')) }
+  if (tool === 'more') { const button = $<HTMLElement>('[data-tool="more"]'); if (songMenuOpen()) closeMenu(); else if (!appSongMenu(button)) void openSongMenu(button) }
   if (tool === 'versions') { if (versionsOpen()) closeMenu(); else openVersions() }
   if (tool === 'videos') { if (videosOpen()) closeMenu(); else openVideos() }
   if (tool === 'fm') page.command('fm')
