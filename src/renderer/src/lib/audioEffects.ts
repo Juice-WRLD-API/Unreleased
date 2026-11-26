@@ -1,7 +1,7 @@
 // Shared Web Audio post-processing chain for every playable <audio> element
 // (both Player slots + the 999FM element). Elements are routed through:
 //
-//   MediaElementSource → chainInput ─→ preamp → 10-band EQ → cut filter → saturation
+//   MediaElementSource → chainInput ─→ (vocals worklet | dry) → preamp → 10-band EQ → cut filter → saturation
 //                                   │    → compressor → mono → width → balance → 8D pan
 //                                   │    → (dry + reverb + echo) → boost → limiter → destination
 //                                   └→ analyser (silence detection tap)
@@ -117,7 +117,15 @@ export interface AudioFx {
   autoPan: boolean
   autoPanPeriod: number  // seconds per full left-right-left sweep
   autoPanDepth: number   // 0..1
+  // Vocal remover / isolator (public/audio/stems-worklet.js): VOCALS_OFF,
+  // VOCALS_REMOVE (just the beat) or VOCALS_ONLY (just the vocal).
+  vocals: number
+  vocalsAmount: number   // 0..1 - how far towards the stripped sound
 }
+
+export const VOCALS_OFF = 0
+export const VOCALS_REMOVE = 1
+export const VOCALS_ONLY = 2
 
 export const DEFAULT_FX: AudioFx = {
   preamp: 0,
@@ -139,6 +147,8 @@ export const DEFAULT_FX: AudioFx = {
   autoPan: false,
   autoPanPeriod: 8,
   autoPanDepth: 0.8,
+  vocals: VOCALS_OFF,
+  vocalsAmount: 1,
 }
 
 type NumericFxKey = { [K in keyof AudioFx]: AudioFx[K] extends number ? K : never }[keyof AudioFx]
@@ -161,6 +171,8 @@ export const FX_RANGES: Record<NumericFxKey, { min: number; max: number; step: n
   echoMix: { min: 0, max: 1, step: 0.01 },
   autoPanPeriod: { min: 1, max: 20, step: 0.5 },
   autoPanDepth: { min: 0, max: 1, step: 0.01 },
+  vocals: { min: VOCALS_OFF, max: VOCALS_ONLY, step: 1 },
+  vocalsAmount: { min: 0, max: 1, step: 0.01 },
 }
 
 // Fills gaps from DEFAULT_FX and clamps every number into range, so a stored
@@ -177,6 +189,7 @@ export function sanitizeFx(raw: unknown): AudioFx {
       out[key] = Math.max(r.min, Math.min(r.max, v))
     }
   }
+  out.vocals = Math.round(out.vocals as number)
   return out as unknown as AudioFx
 }
 
@@ -184,7 +197,7 @@ export function sanitizeFx(raw: unknown): AudioFx {
 // accent and, on mobile, whether the Web Audio chain is worth building.
 export function fxInUse(fx: AudioFx, eqEnabled: boolean): boolean {
   return (eqEnabled && fx.preamp !== 0) || fx.width !== 1 || fx.drive > 0
-    || fx.compressor || fx.filter || fx.echo || fx.autoPan
+    || fx.compressor || fx.filter || fx.echo || fx.autoPan || fx.vocals !== VOCALS_OFF
 }
 
 // User-saved band curves, listed under the built-in presets.
@@ -260,6 +273,19 @@ let echoSend: GainNode | null = null
 let echoDelay: DelayNode | null = null
 let echoFeedbackGain: GainNode | null = null
 let echoWet: GainNode | null = null
+// Vocals: chainInput feeds a dry gain and, while the effect is on, the stems
+// worklet into a wet gain; the two cross-fade into the preamp. The worklet is
+// loaded on first use and cut off from the input while off, so it costs
+// nothing for everyone who never touches it.
+let stemsDry: GainNode | null = null
+let stemsWet: GainNode | null = null
+let stemsNode: AudioWorkletNode | null = null
+let stemsLoad: Promise<AudioWorkletNode | null> | null = null
+let stemsFed = false
+let stemsUnfeedTimer: number | null = null
+// A file of its own (public/audio/): the CSP's script-src 'self' turns away a
+// worklet inlined as a data: or blob: URL.
+const stemsWorkletUrl = (): string => new URL('audio/stems-worklet.js', document.baseURI).href
 
 // Elements already wired in - createMediaElementSource throws if called twice
 // on the same element, and there is no way to un-create a source node.
@@ -461,8 +487,14 @@ function ensureGraph(): AudioContext | null {
   echoFeedbackGain.connect(echoDelay)
   echoDamp.connect(echoWet)
 
-  let node: AudioNode = chainInput
-  node.connect(preampGain); node = preampGain
+  stemsDry = ctx.createGain()
+  stemsWet = ctx.createGain()
+  stemsWet.gain.value = 0
+  chainInput.connect(stemsDry)
+  stemsDry.connect(preampGain)
+  stemsWet.connect(preampGain)
+
+  let node: AudioNode = preampGain
   for (const f of bandFilters) { node.connect(f); node = f }
   node.connect(lowCutFilter)
   lowCutFilter.connect(highCutFilter)
@@ -616,6 +648,64 @@ function applyFx(fx: AudioFx, eqEnabled: boolean, t: number): void {
     ramp(echoFeedbackGain.gain, fx.echoFeedback)
     ramp(echoWet.gain, fx.echoMix)
   }
+
+  applyVocals(fx, t)
+}
+
+function loadStemsNode(): Promise<AudioWorkletNode | null> {
+  if (!stemsLoad) {
+    const context = ctx
+    stemsLoad = !context || !context.audioWorklet
+      ? Promise.resolve(null)
+      : context.audioWorklet.addModule(stemsWorkletUrl()).then(() => {
+        const n = new AudioWorkletNode(context, 'vocal-stems', {
+          numberOfInputs: 1, numberOfOutputs: 1, outputChannelCount: [2],
+          // A mono source upmixes to both sides here, rather than arriving as left only.
+          channelCount: 2, channelCountMode: 'explicit', channelInterpretation: 'speakers',
+        })
+        if (stemsWet) n.connect(stemsWet)
+        stemsNode = n
+        return n
+      }).catch((e) => {
+        console.error('Vocals worklet failed to load:', e)
+        stemsLoad = null  // let a later toggle try again
+        return null
+      })
+  }
+  return stemsLoad
+}
+
+function applyVocals(fx: AudioFx, t: number): void {
+  if (!ctx || !chainInput || !stemsDry || !stemsWet) return
+  const on = fx.vocals !== VOCALS_OFF
+  if (!on) {
+    stemsDry.gain.setTargetAtTime(1, t, 0.03)
+    stemsWet.gain.setTargetAtTime(0, t, 0.03)
+    // Unhook the worklet once the cross-fade is done - no input, no FFTs.
+    if (stemsFed && stemsUnfeedTimer == null) {
+      stemsUnfeedTimer = window.setTimeout(() => {
+        stemsUnfeedTimer = null
+        if (stemsNode && chainInput && lastSettings.fx.vocals === VOCALS_OFF && stemsFed) {
+          try { chainInput.disconnect(stemsNode) } catch { /* already gone */ }
+          stemsFed = false
+        }
+      }, 300)
+    }
+    return
+  }
+  if (stemsUnfeedTimer != null) { clearTimeout(stemsUnfeedTimer); stemsUnfeedTimer = null }
+  const mode = fx.vocals
+  const amount = fx.vocalsAmount
+  void loadStemsNode().then((n) => {
+    if (!n || !ctx || !chainInput || !stemsDry || !stemsWet) return
+    // Settings may have moved on while the module loaded.
+    if (sanitizeFx(lastSettings.fx).vocals === VOCALS_OFF) return
+    n.port.postMessage({ mode, amount })
+    if (!stemsFed) { chainInput.connect(n); stemsFed = true }
+    const now = ctx.currentTime
+    stemsDry.gain.setTargetAtTime(0, now, 0.03)
+    stemsWet.gain.setTargetAtTime(1, now, 0.03)
+  })
 }
 
 // Peak amplitude of the current mix (0..1), for skip-silence. Reads the

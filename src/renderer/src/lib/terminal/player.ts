@@ -1,7 +1,7 @@
 import { getAudioCurrentTime, getAudioDuration, seekAudio } from '../../components/Player'
 import { useStore } from '../../store/useStore'
 import { fisherYates } from '../../store/queueSlice'
-import { EQ_PRESETS, type AudioFx } from '../audioEffects'
+import { EQ_PRESETS, VOCALS_OFF, VOCALS_ONLY, VOCALS_REMOVE, type AudioFx } from '../audioEffects'
 import { runHotkeyAction } from '../hotkeys'
 import { getSongById, getSongsByIds, loadAllSongs, loadAllSongsWithLyricsAbortable, normalizeSongTitle, resolveTitleToSong, searchSongs, songToTrack, type JWApiSong } from '../juicewrldApi'
 import { displaySongName, renamedSongs } from '../songPrefs'
@@ -392,13 +392,14 @@ export const PLAYER_COMMANDS: TermCommand[] = [
     },
   },
   {
-    name: 'eq', group: 'Player', usage: 'eq [on | off | list | reset [all] | <preset> | save <name> | delete <name> | preamp <-12..12> | reverb [on|off|<0-100>] [decay 1-8] | echo [on|off|<0-100>] | 8d [on|off|<seconds 1-20>] | comp [on|off|<threshold -60..0>] | filter [on|off] | width <0-200> | saturation <0-100> | boost <100-200> | balance <-100..100> | speed <0.5-2> | mono [on|off] | pitch [on|off]]', description: 'Show or change the equalizer, reverb and sound effects; a preset name turns it on with that preset (fine-tune effects with: set echo-time, set comp-ratio, set low-cut, …)',
+    name: 'eq', group: 'Player', usage: 'eq [on | off | list | reset [all] | <preset> | save <name> | delete <name> | preamp <-12..12> | reverb [on|off|<0-100>] [decay 1-8] | echo [on|off|<0-100>] | 8d [on|off|<seconds 1-20>] | comp [on|off|<threshold -60..0>] | filter [on|off] | vocals [off|remove|only] [strength 0-100] | width <0-200> | saturation <0-100> | boost <100-200> | balance <-100..100> | speed <0.5-2> | mono [on|off] | pitch [on|off]]', description: 'Show or change the equalizer, reverb and sound effects; a preset name turns it on with that preset (fine-tune effects with: set echo-time, set comp-ratio, set low-cut, …)',
     complete: (before, partial) => {
       const presets = (): string[] => [...EQ_PRESETS.map((p) => p.id), ...st().eqUserPresets.map((p) => p.name)]
       const words = before.length === 0
-        ? ['on', 'off', 'list', 'reset', 'save', 'delete', 'preamp', 'reverb', 'echo', '8d', 'comp', 'filter', 'width', 'saturation', 'boost', 'balance', 'speed', 'mono', 'pitch', ...presets()]
+        ? ['on', 'off', 'list', 'reset', 'save', 'delete', 'preamp', 'reverb', 'echo', '8d', 'comp', 'filter', 'vocals', 'width', 'saturation', 'boost', 'balance', 'speed', 'mono', 'pitch', ...presets()]
         : before.length === 1 && before[0].toLowerCase() === 'delete' ? st().eqUserPresets.map((p) => p.name)
         : before.length === 1 && before[0].toLowerCase() === 'reset' ? ['all']
+        : before.length === 1 && before[0].toLowerCase() === 'vocals' ? ['off', 'remove', 'only']
         : []
       return words.filter((w) => w.toLowerCase().startsWith(partial.toLowerCase()))
     },
@@ -407,10 +408,11 @@ export const PLAYER_COMMANDS: TermCommand[] = [
       const s = st()
       const describe = (): string => `equalizer ${st().eqEnabled ? 'on' : 'off'} · preset ${presetLabel()} · preamp ${st().audioFx.preamp} dB · boost ${Math.round(st().eqBoost * 100)}% · balance ${Math.round(st().eqBalance * 100)}`
       const presetLabel = (): string => st().eqUserPresets.find((p) => p.id === st().eqPreset)?.name ?? st().eqPreset
+      const vocalsLabel = (f: AudioFx): string => (f.vocals === VOCALS_OFF ? 'full mix' : `${f.vocals === VOCALS_REMOVE ? 'removed (beat only)' : 'only (no beat)'} at ${Math.round(f.vocalsAmount * 100)}%`)
       const describeFx = (): string => {
         const f = st().audioFx
         return `echo ${f.echo ? `on (${Math.round(f.echoTime * 1000)} ms, ${Math.round(f.echoMix * 100)}%)` : 'off'} · 8d ${f.autoPan ? `on (${f.autoPanPeriod}s sweep)` : 'off'} · compressor ${f.compressor ? `on (${f.compThreshold} dB, ${f.compRatio}:1)` : 'off'} · filter ${f.filter ? `on (${f.lowCut}-${f.highCut} Hz)` : 'off'}
-width ${Math.round(f.width * 100)}% · saturation ${Math.round(f.drive * 100)}%`
+width ${Math.round(f.width * 100)}% · saturation ${Math.round(f.drive * 100)}% · vocals ${vocalsLabel(f)}`
       }
       if (!arg) { ctx.print(`${describe()}
 reverb ${st().reverbEnabled ? 'on' : 'off'} · mix ${Math.round(st().reverbMix * 100)}% · decay ${st().reverbDecay}s · speed ${st().playbackSpeed}x · mono ${st().eqMono ? 'on' : 'off'} · pitch follows speed ${st().pitchShift ? 'on' : 'off'}
@@ -445,6 +447,15 @@ ${describeFx()}`); return }
       if (sub === '8d') { fxToggle('autoPan', rest[0], (v) => ({ autoPanPeriod: numIn(v, 1, 20, '8d sweep seconds') })); return }
       if (sub === 'comp' || sub === 'compressor') { fxToggle('compressor', rest[0], (v) => ({ compThreshold: numIn(v, -60, 0, 'compressor threshold') })); return }
       if (sub === 'filter') { fxToggle('filter', rest[0]); return }
+      if (sub === 'vocals') {
+        const [a, b] = rest
+        const modes: Record<string, number> = { off: VOCALS_OFF, full: VOCALS_OFF, remove: VOCALS_REMOVE, beat: VOCALS_REMOVE, instrumental: VOCALS_REMOVE, only: VOCALS_ONLY, acapella: VOCALS_ONLY }
+        if (a !== undefined && !(a in modes)) fail('usage: eq vocals [off|remove|only] [strength 0-100]')
+        const patch: Partial<AudioFx> = { vocals: a === undefined ? (s.audioFx.vocals === VOCALS_OFF ? VOCALS_REMOVE : VOCALS_OFF) : modes[a] }
+        if (b !== undefined) patch.vocalsAmount = numIn(b, 0, 100, 'vocals strength') / 100
+        s.setAudioFx(patch)
+        ctx.print(`vocals ${vocalsLabel(st().audioFx)}`, 'ok'); return
+      }
       if (sub === 'width') { s.setAudioFx({ width: numIn(rest[0], 0, 200, 'width') / 100 }); ctx.print(describeFx(), 'ok'); return }
       if (sub === 'saturation' || sub === 'drive') { s.setAudioFx({ drive: numIn(rest[0], 0, 100, 'saturation') / 100 }); ctx.print(describeFx(), 'ok'); return }
       if (sub === 'preamp') { s.setAudioFx({ preamp: numIn(rest[0], -12, 12, 'preamp') }); ctx.print(describe(), 'ok'); return }
