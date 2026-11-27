@@ -186,6 +186,7 @@ const SETTINGS_SEARCH_INDEX: { tab: Tab; label: string; sub?: string; electronOn
   { tab: 'about', label: 'About', sub: 'Version, GitHub, Discord, API links' },
   { tab: 'about', label: 'API Docs' },
   { tab: 'about', label: 'Thank You', sub: 'Donors and contributors' },
+  { tab: 'about', label: 'Service status', sub: 'Is juicewrldapi.com up? Outages this device saw' },
   { tab: 'about', label: 'GitHub' },
   { tab: 'about', label: 'Discord' },
   { tab: 'about', label: 'Terms of Service' },
@@ -2135,6 +2136,7 @@ export default function Settings({ floating = false }: { floating?: boolean }): 
                   <SettingsLink icon={BookOpen} color="#0d9488" label="API docs" onClick={() => openMainView('docs')} />
                   <SettingsLink icon={MessageCircle} color="#7c3aed" label="Send feedback" sub="Report a bug or share an idea" onClick={() => useStore.getState().openReport({ kind: 'feedback' })} />
                   <SettingsLink icon={Heart} color="#db2777" label="Thank you" sub="Donors and contributors" onClick={() => openMainView('thanks')} />
+                  <SettingsLink icon={Activity} color="#16a34a" label="Service status" sub="Is juicewrldapi.com up?" onClick={() => openMainView('status')} />
                 </SettingsGroup>
 
                 <SettingsGroup title="Debug log">

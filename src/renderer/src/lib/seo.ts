@@ -90,6 +90,11 @@ const ROUTES: Record<ViewType, SeoEntry> = {
     title: 'Thank you',
     description: 'Thank you to everyone who has donated to help keep unreleased running.',
   },
+  status: {
+    path: '/status',
+    title: 'Service status',
+    description: 'Is juicewrldapi.com up? Live status of the API, catalogue, files, streaming and 999 FM.',
+  },
 
   // Personal or unstable surfaces: crawlable in principle, worthless in an
   // index, and in several cases they render empty for a signed-out crawler.

@@ -61,6 +61,8 @@ const NOT_APPLICABLE = {
   'juicewrldApi.loadAllSongs': 'bulk /songs/ load behind song, find and lookup',
   'juicewrldApi.matchLocalSongCover': 'client-side cover matching',
   'appVersion.useCommitStatus': 'React hook over the /changelog data',
+  'serviceStatus.startOutageMonitor': 'starts the background monitor in the main window; its /health/ check is `downtime retry`',
+  'serviceStatus.noteApiResult': 'apiClient reports each request to the outage monitor; its /health/ check is `downtime retry`',
   'clientZip.*': 'client-side zipping behind get',
   'exactSeekAudio.*': 're-reads a stream URL the Synced lyrics tool already plays, to decode it for exact seeking (get downloads the same file)',
   'compactGroups.*': 'tracker compact-view loaders over /songs and /versions (versions all, find)',

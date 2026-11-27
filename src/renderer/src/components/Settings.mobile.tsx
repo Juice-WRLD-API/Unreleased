@@ -197,6 +197,7 @@ const SETTINGS_SEARCH_INDEX: { tab: Tab; label: string; sub?: string; devOnly?: 
   { tab: 'about', label: 'Auth Token', sub: 'View and copy your account token' },
   { tab: 'about', label: 'API Docs' },
   { tab: 'about', label: 'Thank You', sub: 'Donors and contributors' },
+  { tab: 'about', label: 'Service status', sub: 'Is juicewrldapi.com up? Outages this device saw' },
   { tab: 'about', label: 'GitHub' },
   { tab: 'about', label: 'Discord' },
   { tab: 'about', label: 'Terms of Service' },
@@ -1822,6 +1823,7 @@ export default function Settings(): JSX.Element {
                     <DebugAnonymousToggle />
                   </Row>
                   <ActionRow icon={Heart} iconColor="#ec4899" label="Thank You" sub="Donors and contributors" onClick={() => openMainView('thanks')} />
+                  <ActionRow icon={Activity} iconColor="#16a34a" label="Service status" sub="Is juicewrldapi.com up?" onClick={() => openMainView('status')} />
                 </SettingsCard>
 
                 <div className="mt-3 px-3 py-2.5 rounded-xl bg-[var(--surface-raised)] border border-[var(--border)]">

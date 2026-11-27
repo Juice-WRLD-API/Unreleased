@@ -44,7 +44,7 @@ const BROWSE_SWAP_VIEWS: ViewType[] = ['api-tracker', 'api-files', 'playlists']
 // Home and the staff dashboards are on it so their scrollers reach the window
 // bottom: ending at the bar's top edge clipped the tiles' drop shadows into a
 // hard line beside the bar.
-const SCROLL_UNDER: ViewType[] = ['home', 'editor-profile', 'contributor-profile', 'playlists', 'albums', 'liked', 'api-tracker', 'api-files', 'news', 'stats', 'docs', 'shared-playlist', 'public-profile', 'track']
+const SCROLL_UNDER: ViewType[] = ['home', 'editor-profile', 'contributor-profile', 'playlists', 'albums', 'liked', 'api-tracker', 'api-files', 'news', 'stats', 'docs', 'shared-playlist', 'public-profile', 'track', 'status']
 
 function getViewFromPath(pathname: string): ViewType {
   if (pathname === '/home') return 'home'
@@ -79,6 +79,7 @@ function getViewFromPath(pathname: string): ViewType {
   if (pathname === '/statistics') return 'statistics'
   if (pathname === '/download') return 'download'
   if (pathname === '/thank-you') return 'thanks'
+  if (pathname === '/status') return 'status'
   // Desktop shows Settings as a modal over Home (the store opens it from the URL).
   if (pathname === '/settings') return isMobileViewport() ? 'settings' : 'home'
   if (pathname === '/chat' || pathname.startsWith('/chat/')) return 'chat'
@@ -101,6 +102,7 @@ import NowPlayingSharer from './components/NowPlayingSharer'
 import NewsNotifier from './components/NewsNotifier'
 import BroadcastNotifier from './components/BroadcastNotifier'
 import AppToastHost from './components/AppToastHost'
+import ServiceDownBanner from './components/ServiceDownBanner'
 import DebugRecordingPill from './components/DebugRecorder'
 import { useDebugLogViewer } from './lib/debugLog'
 import ChatNotificationBanner from './components/ChatNotificationBanner'
@@ -124,12 +126,13 @@ import MoreNavSheet from './components/MoreNavSheet'
 import {
   ApiTrackerView, EditorPage, AdminPage, SharedPlaylistView, PublicProfileView, EditorProfileView, NotFoundView,
   DocsPage, WrldView, AlbumsView, NewsView, HeardleView, WordleView, TierlistView,
-  StatsView, StatisticsView, DownloadAppView, ThankYouView, AlbumsAdminView, ContributorPage,
+  StatsView, StatisticsView, DownloadAppView, ThankYouView, StatusView, AlbumsAdminView, ContributorPage,
   ContributorProfileView, HomeView, Settings, PlaylistsView, ApiFilesView,
   LikedSongsView, DiagnosticsModal, ChatView, TerminalPage, TrackView, preloadView,
 } from './lib/lazyViews'
 import { useChatBootstrap } from './hooks/useChatBootstrap'
 import { startLyricsJobWatch } from './lib/lyricsJobWatch'
+import { startOutageMonitor } from './lib/serviceStatus'
 
 // Overlays that only mount while open - fetched on first open rather than
 // shipped to every visitor in the startup bundle.
@@ -275,6 +278,9 @@ export default function App(): JSX.Element {
 
   // Lyrics jobs the user started notify them here when they finish.
   useEffect(() => startLyricsJobWatch(), [])
+
+  // Watches for juicewrldapi.com going down (banner, Status page).
+  useEffect(() => startOutageMonitor(), [])
 
   // Complete Discord OAuth redirect, then load the public account
   useEffect(() => {
@@ -463,6 +469,7 @@ export default function App(): JSX.Element {
               : bgView === 'statistics' ? <StatisticsView />
               : bgView === 'download' ? <DownloadAppView />
               : bgView === 'thanks' ? <ThankYouView />
+              : bgView === 'status' ? <StatusView />
               : bgView === 'terminal' ? <TerminalPage />
               : bgView === 'not-found' ? <NotFoundView />
               : <ApiTrackerView />}
@@ -530,6 +537,7 @@ export default function App(): JSX.Element {
       <ErrorBoundary fallback={null}><NewsNotifier /></ErrorBoundary>
       <ErrorBoundary fallback={null}><BroadcastNotifier /></ErrorBoundary>
       <ErrorBoundary fallback={null}><AppToastHost /></ErrorBoundary>
+      <ErrorBoundary fallback={null}><ServiceDownBanner /></ErrorBoundary>
       <ErrorBoundary fallback={null}><DebugRecordingPill /></ErrorBoundary>
       <ErrorBoundary fallback={null}><ChatNotificationBanner /></ErrorBoundary>
       <ErrorBoundary fallback={null}><BottomNav /></ErrorBoundary>

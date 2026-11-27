@@ -2,6 +2,8 @@
 // does the fetch, the offline-cache fallback, and error parsing, so neither
 // caller has to reimplement any of it.
 import { cacheGet, cacheSet } from './apiCache'
+// Feeds the outage monitor (Status page, the "down" banner).
+import { noteApiResult } from './serviceStatus'
 
 export async function defaultParseError(res: Response): Promise<string> {
   try {
@@ -110,6 +112,7 @@ async function sendRequest<T>(
   } catch (err) {
     // A cancel is not an outage - never answer it with a stale cached copy.
     if (init.signal?.aborted) throw err
+    noteApiResult(url, null)
     if (cacheKey) {
       const cached = cacheGet<T>(cacheKey)
       if (cached !== undefined) return cached
@@ -117,6 +120,7 @@ async function sendRequest<T>(
     throw err
   }
 
+  noteApiResult(url, res.status)
   if (!res.ok) throw new Error(await parseError(res))
   if (res.status === 204) return undefined as T
 

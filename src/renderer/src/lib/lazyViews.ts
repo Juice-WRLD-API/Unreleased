@@ -44,6 +44,7 @@ export const NotFoundView = lazyView(() => import('../components/NotFoundView'))
 export const NewsView = lazyView(() => import('../components/NewsView'))
 export const DownloadAppView = lazyView(() => import('../components/DownloadAppView'))
 export const ThankYouView = lazyView(() => import('../components/ThankYouView'))
+export const StatusView = lazyView(() => import('../components/StatusView'))
 export const AlbumsAdminView = lazyView(() => import('../components/AlbumsAdminView'))
 export const ContributorPage = lazyView(() => import('../components/ContributorPage'))
 export const ContributorProfileView = lazyView(() => import('../components/ContributorProfileView'))
@@ -82,6 +83,7 @@ const LOADERS: Partial<Record<ViewType, () => Promise<unknown>>> = {
   statistics: StatisticsView.preload,
   download: () => import('../components/DownloadAppView'),
   thanks: () => import('../components/ThankYouView'),
+  status: () => import('../components/StatusView'),
   'albums-admin': () => import('../components/AlbumsAdminView'),
   contributor: () => import('../components/ContributorPage'),
   'contributor-profile': () => import('../components/ContributorProfileView'),
