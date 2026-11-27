@@ -1,6 +1,6 @@
 # Agent guide: Juice WRLD API and Unreleased
 
-**Version 1.94** · updated 2026-11-27. Bump the version and date whenever you
+**Version 1.95** · updated 2026-11-28. Bump the version and date whenever you
 change this file (minor for fixes and additions, major for rewrites).
 
 **Keep this file current.** If you find something in the docs or this file that
@@ -365,15 +365,20 @@ Song info's star or `musicvideo default`; `''` means no video), then the
 automatic pick.
 
 **Status / downtime.** The `status` view (`/status`, `StatusView.tsx`,
-terminal `downtime`, Help → Service status, Settings → About) probes the
-API, catalogue, files, streaming and 999 FM from the client, so it works
-while the server is down. `lib/serviceStatus.ts` also runs an outage
-monitor in the main window only (`startOutageMonitor` in `App`): `apiClient`
-reports every request to the API origin, two network failures or gateway
-errors (502/503/504, 52x) within a minute are confirmed with `/health/`,
-and while that fails `ServiceDownBanner` shows and `/health/` is polled
-(15 s, 30 s, then every 60 s). A raw `fetch` outside `apiClient` doesn't
-feed it. Outages are a per-device log in localStorage, not server uptime.
+terminal `downtime`, Help → Service status, Settings → About) is a
+GitHub-style status page. History is the server's: the backend's
+`manage.py status_monitor` (started by `run.sh`/`run.ps1`/`run.bat`) checks
+API, catalogue, files, streaming and 999 FM once a minute and `/status/`
+serves 90 days of per-day seconds up/slow/down plus incidents (backend
+`docs/24-status-page.md`; client `lib/statusApi.ts`). `fetchStatusPage`
+saves each copy and returns it `cached` when the server doesn't answer, so
+the bars still show during an outage. What's true right now comes from
+`lib/serviceStatus.ts`, main window only (`startOutageMonitor` in `App`):
+`apiClient` reports every request to the API origin, two network failures
+or gateway errors (502/503/504, 52x) within a minute are confirmed with
+`/health/`, and while that fails `ServiceDownBanner` shows and `/health/` is
+polled (15 s, 30 s, then every 60 s). A raw `fetch` outside `apiClient`
+doesn't feed it.
 
 **News channels.** Admin tab id `news-channels` is `NewsChannelsEditor`, not
 the Files-tab Channels tab (`channels`). `all` is a client-only tab and is

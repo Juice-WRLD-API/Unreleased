@@ -12,11 +12,11 @@ import { useServiceStatus } from '../lib/serviceStatus'
 export default function ServiceDownBanner(): JSX.Element | null {
   const { activeView, setActiveView } = useStorePick('activeView', 'setActiveView')
   const status = useServiceStatus()
-  const outageStart = status.outages[0]?.end === null ? status.outages[0].start : status.since
+  const outageStart = status.downSince
   const [dismissed, setDismissed] = useState<number | null>(null)
   const [now, setNow] = useState(Date.now())
 
-  const show = status.overall === 'down' && dismissed !== outageStart && activeView !== 'status'
+  const show = status.state === 'down' && dismissed !== outageStart && activeView !== 'status'
 
   useEffect(() => {
     if (!show) return

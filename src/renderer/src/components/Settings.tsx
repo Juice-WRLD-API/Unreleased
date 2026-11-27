@@ -234,7 +234,7 @@ const SETTINGS_SEARCH_INDEX: { tab: Tab; label: string; sub?: string; electronOn
   { tab: 'about', label: 'About', sub: 'Version, GitHub, Discord, API links' },
   { tab: 'about', label: 'API Docs' },
   { tab: 'about', label: 'Thank You', sub: 'Donors and contributors' },
-  { tab: 'about', label: 'Service status', sub: 'Is juicewrldapi.com up? Outages this device saw' },
+  { tab: 'about', label: 'Service status', sub: 'Is juicewrldapi.com up? Uptime and incidents' },
   { tab: 'about', label: 'GitHub' },
   { tab: 'about', label: 'Discord' },
   { tab: 'about', label: 'Terms of Service' },
