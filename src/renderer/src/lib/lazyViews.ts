@@ -34,6 +34,7 @@ const LOADERS: Partial<Record<ViewType, () => Promise<unknown>>> = {
   terminal: () => import('../components/TerminalPage'),
   track: () => import('../components/TrackView'),
   thanks: () => import('../components/ThankYouView'),
+  status: () => import('../components/StatusView'),
 }
 
 // Views only staff can reach. Everyone else never opens them, so loading them

@@ -1604,6 +1604,7 @@ export const useStore = create<AppStore>((set, get, store) => ({
       'statistics': '/statistics',
       'download': '/download',
       'thanks': '/thank-you',
+      'status': '/status',
       'settings': '/settings',
       'chat': '/chat',
       'terminal': '/terminal',

@@ -27,7 +27,7 @@ const HOLD_UNDER_TERMINAL: ViewType[] = ['editor', 'contributor', 'albums-admin'
 // Home and the staff dashboards are on it so their scrollers reach the window
 // bottom: ending at the bar's top edge clipped the tiles' drop shadows into a
 // hard line beside the bar.
-const SCROLL_UNDER: ViewType[] = ['home', 'editor-profile', 'contributor-profile', 'playlists', 'albums', 'liked', 'library', 'api-tracker', 'api-files', 'news', 'stats', 'docs', 'shared-playlist', 'public-profile', 'track']
+const SCROLL_UNDER: ViewType[] = ['home', 'editor-profile', 'contributor-profile', 'playlists', 'albums', 'liked', 'library', 'api-tracker', 'api-files', 'news', 'stats', 'docs', 'shared-playlist', 'public-profile', 'track', 'status']
 
 function getViewFromPath(pathname: string): ViewType {
   if (pathname === '/' || pathname === '/tracker') return 'api-tracker'
@@ -46,6 +46,7 @@ function getViewFromPath(pathname: string): ViewType {
   if (pathname === '/tierlist') return 'tierlist'
   if (pathname === '/stats' || pathname === '/wrapped') return 'stats'
   if (pathname === '/thank-you') return 'thanks'
+  if (pathname === '/status') return 'status'
   if (pathname === '/statistics') return 'statistics'
   if (pathname.startsWith('/u/')) return 'public-profile'
   if (pathname.startsWith('/chat')) return 'chat'
@@ -73,6 +74,7 @@ import NowPlayingSharer from './components/NowPlayingSharer'
 import NewsNotifier from './components/NewsNotifier'
 import BroadcastNotifier from './components/BroadcastNotifier'
 import AppToastHost from './components/AppToastHost'
+import ServiceDownBanner from './components/ServiceDownBanner'
 import DebugRecordingPill from './components/DebugRecorder'
 import { useDebugLogViewer } from './lib/debugLog'
 import ChatNotificationBanner from './components/ChatNotificationBanner'
@@ -98,6 +100,7 @@ import { UserCardHost } from './components/chat/UserCard'
 import { useIsMobile } from './hooks/useIsMobile'
 import { useChatBootstrap } from './hooks/useChatBootstrap'
 import { startLyricsJobWatch } from './lib/lyricsJobWatch'
+import { startOutageMonitor } from './lib/serviceStatus'
 
 // Rarely-visited views load on first navigation instead of inflating the
 // startup bundle. Suspense fallback is null: these chunks are local (Electron)
@@ -138,6 +141,7 @@ const RecognitionModal = lazyView(() => import('./components/RecognitionModal'))
 const TerminalPage = lazyView(() => import('./components/TerminalPage'))
 const TrackView = lazyView(() => import('./components/TrackView'))
 const ThankYouView = lazyView(() => import('./components/ThankYouView'))
+const StatusView = lazyView(() => import('./components/StatusView'))
 const LoginApprovalPrompt = lazyView(() => import('./components/LoginApprovalPrompt'))
 
 function WindowControls(): JSX.Element {
@@ -195,6 +199,7 @@ function renderView(v: ViewType): JSX.Element {
       : v === 'shared-playlist' ? <SharedPlaylistView />
       : v === 'track' ? <TrackView />
       : v === 'thanks' ? <ThankYouView />
+      : v === 'status' ? <StatusView />
       : v === 'editor-profile' ? <EditorProfileView />
       : v === 'docs' ? <DocsPage />
       : v === 'albums' ? <AlbumsView />
@@ -318,6 +323,9 @@ export default function App(): JSX.Element {
 
   // Lyrics jobs the user started notify them here when they finish.
   useEffect(() => startLyricsJobWatch(), [])
+
+  // Watches for juicewrldapi.com going down (banner, Status page).
+  useEffect(() => startOutageMonitor(), [])
 
   // Complete Discord OAuth redirect, then load the public account
   useEffect(() => {
@@ -536,6 +544,7 @@ export default function App(): JSX.Element {
       <ErrorBoundary fallback={null}><NewsNotifier /></ErrorBoundary>
       <ErrorBoundary fallback={null}><BroadcastNotifier /></ErrorBoundary>
       <ErrorBoundary fallback={null}><AppToastHost /></ErrorBoundary>
+      <ErrorBoundary fallback={null}><ServiceDownBanner /></ErrorBoundary>
       <ErrorBoundary fallback={null}><DebugRecordingPill /></ErrorBoundary>
       <ErrorBoundary fallback={null}><ChatNotificationBanner /></ErrorBoundary>
       <ErrorBoundary fallback={null}><BottomNav /></ErrorBoundary>

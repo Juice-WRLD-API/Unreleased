@@ -384,6 +384,7 @@ export default function AppMenu({ variant = 'bar', collapsed = false }: { varian
       id: 'help', label: 'Help',
       entries: [
         { kind: 'item', label: 'API docs', onClick: run(() => setActiveView('docs')) },
+        { kind: 'item', label: 'Service status', onClick: run(() => setActiveView('status')) },
         { kind: 'item', label: 'Keyboard shortcuts', onClick: run(() => openSettings('shortcuts')) },
         { kind: 'item', label: 'Send feedback…', onClick: run(() => openReport({ kind: 'feedback' })) },
         { kind: 'sep' },

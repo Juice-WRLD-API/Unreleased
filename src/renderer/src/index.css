@@ -540,6 +540,15 @@ input[type='range']:active::-moz-range-thumb {
   animation: fade-in 0.22s cubic-bezier(0.16, 1, 0.3, 1) both;
 }
 
+/* The "juicewrldapi.com is down" banner (ServiceDownBanner) drops in from the top. */
+@keyframes status-banner-in {
+  from { opacity: 0; transform: translateY(-10px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+.animate-status-banner-in {
+  animation: status-banner-in 0.5s cubic-bezier(0.4, 0, 0.2, 1) both;
+}
+
 .animate-slide-in-right {
   animation: slide-in-right 0.28s cubic-bezier(0.16, 1, 0.3, 1) both;
 }
@@ -1287,6 +1296,7 @@ img[data-img-fade="in"] { animation: img-fade-in 0.42s cubic-bezier(0.33, 0, 0.1
   .animate-menu-pop,
   .animate-disclosure-in,
   .animate-fade-in,
+  .animate-status-banner-in,
   .animate-slide-in-right,
   .animate-slide-up,
   .animate-scale-in,
