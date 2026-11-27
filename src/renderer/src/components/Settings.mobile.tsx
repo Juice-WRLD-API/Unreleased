@@ -197,7 +197,7 @@ const SETTINGS_SEARCH_INDEX: { tab: Tab; label: string; sub?: string; devOnly?: 
   { tab: 'about', label: 'Auth Token', sub: 'View and copy your account token' },
   { tab: 'about', label: 'API Docs' },
   { tab: 'about', label: 'Thank You', sub: 'Donors and contributors' },
-  { tab: 'about', label: 'Service status', sub: 'Is juicewrldapi.com up? Outages this device saw' },
+  { tab: 'about', label: 'Service status', sub: 'Is juicewrldapi.com up? Uptime and incidents' },
   { tab: 'about', label: 'GitHub' },
   { tab: 'about', label: 'Discord' },
   { tab: 'about', label: 'Terms of Service' },
