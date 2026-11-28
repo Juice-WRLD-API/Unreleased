@@ -111,6 +111,11 @@ export class KaraokeScene extends LyricScene {
   browseTimer = 0
   /** The move under way is the reader's, so it runs though the song is paused. */
   byHand = false
+  /** The column's y as drawn while the wheel moves it: it eases toward `browse` frame by frame, so wheel ticks blend
+   *  into one glide instead of each starting an animation of its own. */
+  glideY: number | null = null
+  glideFrame = 0
+  glideAt = 0
 
   /** The note from the start: the column shows no name. */
   get showsTitle(): boolean { return false }
@@ -246,14 +251,23 @@ export class KaraokeScene extends LyricScene {
   /** The column to where it stands: at the line sung, or where the reader scrolled it. The note through a break
    *  goes with it. */
   slide(animated: boolean, { duration = GLIDE.duration, easing = GLIDE.easing } = {}): void {
+    // The wheel's glide owns the column while it runs; it reads `browse` itself.
+    if (this.glideFrame && this.browse != null) return
+    this.stopGlide()
     const y = this.browse ?? this.followY
     const to = `${this.columnX}px ${y}px`
     const note = this.browse == null ? '0px 0px' : `0px ${this.browse - this.followY}px`
     if (animated) {
       const from = getComputedStyle(this.column).translate
+      const noteFrom = translateOf(this.interlude.el)
+      // Older moves go: one that outlasts this one would take the column back over when this one ends.
+      this.dropMoves(this.column)
+      this.dropMoves(this.interlude.el)
       this.animate(this.column, [{ translate: from === 'none' ? to : from }, { translate: to }], { duration, easing })
-      this.animate(this.interlude.el, [{ translate: translateOf(this.interlude.el) }, { translate: note }], { duration, easing })
+      this.animate(this.interlude.el, [{ translate: noteFrom }, { translate: note }], { duration, easing })
     } else {
+      this.dropMoves(this.column)
+      this.dropMoves(this.interlude.el)
       this.column.style.translate = to
       this.interlude.el.style.translate = note
     }
@@ -297,10 +311,57 @@ export class KaraokeScene extends LyricScene {
     if (this.browse === was) return
     this.handMove(() => {
       this.fill(true)
-      this.slide(true, { duration: 0.3, easing: 'ease' })
       this.shade(true)
     })
+    this.startGlide()
     this.waitToFollow()
+  }
+
+  /** Cancels the translate animations on `el`, leaving it where they had it. */
+  dropMoves(el: HTMLElement): void {
+    for (const a of el.getAnimations()) {
+      const effect = a.effect as KeyframeEffect | null
+      if (effect?.getKeyframes().some((k) => 'translate' in k)) a.cancel()
+    }
+  }
+
+  /** The column's y as it stands now, mid-animation or not. */
+  shownY(): number {
+    const t = getComputedStyle(this.column).translate
+    const y = t === 'none' ? NaN : parseFloat(t.split(' ')[1] ?? '0')
+    return Number.isFinite(y) ? y : this.followY
+  }
+
+  startGlide(): void {
+    if (this.glideFrame) return
+    this.glideY = this.shownY()
+    this.dropMoves(this.column)
+    this.dropMoves(this.interlude.el)
+    this.glideAt = performance.now()
+    const step = (now: number): void => {
+      if (this.browse == null || this.glideY == null) { this.glideFrame = 0; return }
+      const dt = Math.min(now - this.glideAt, 64)
+      this.glideAt = now
+      // Eases a fixed share of the way each frame (about 110 ms to cover two thirds), so a new tick only moves the
+      // target and the speed carries on smoothly.
+      this.glideY += (this.browse - this.glideY) * (1 - Math.exp(-dt / 110))
+      if (Math.abs(this.browse - this.glideY) < 0.3) this.glideY = this.browse
+      this.column.style.translate = `${this.columnX}px ${this.glideY}px`
+      this.interlude.el.style.translate = `0px ${this.glideY - this.followY}px`
+      this.glideFrame = this.glideY === this.browse ? 0 : requestAnimationFrame(step)
+    }
+    this.glideFrame = requestAnimationFrame(step)
+  }
+
+  stopGlide(): void {
+    if (this.glideFrame) cancelAnimationFrame(this.glideFrame)
+    this.glideFrame = 0
+    this.glideY = null
+  }
+
+  destroy(): void {
+    this.stopBrowsing()
+    super.destroy()
   }
 
   /** Back to the line sung. */
@@ -308,6 +369,7 @@ export class KaraokeScene extends LyricScene {
     window.clearTimeout(this.browseTimer)
     if (this.browse == null) return
     this.browse = null
+    this.stopGlide()
     if (!this.lines.length || this.tops.length !== this.lines.length) return
     this.handMove(() => {
       this.fill(true)
@@ -323,6 +385,7 @@ export class KaraokeScene extends LyricScene {
 
   stopBrowsing(): void {
     window.clearTimeout(this.browseTimer)
+    this.stopGlide()
     this.browse = null
     this.interlude.el.style.translate = ''
   }
