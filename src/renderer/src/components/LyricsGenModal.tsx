@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type DragEvent } from 'react'
 import {
   AlertCircle, AudioLines, Check, Clock, Copy, Download, FileText, Heart, ListChecks, Loader2, LogIn, Maximize2, MicVocal, Minimize2, Music2, Plus,
-  ShieldCheck, Sparkles,
+  Send, ShieldCheck, Sparkles,
   Upload, X,
 } from 'lucide-react'
 import { useStore } from '../store/useStore'
@@ -15,7 +15,9 @@ import {
 import { jobTiming, timingOutput } from '../lib/lyricsTiming'
 import { hasWordTiming, linesFromPlain, parseSyncedLyrics, plainOf, serializeSyncedLyrics, syncProgress } from '../lib/syncedLyrics'
 import { getSongById } from '../lib/juicewrldApi'
-import { trackIdToSongId } from '../lib/userApi'
+import { createProposal, isChannelEditor, trackIdToSongId } from '../lib/userApi'
+import { isPrimaryChannelSlug } from '../hooks/useChannelRoles'
+import { invalidateLyricsCache } from './Player'
 import { extensionOf } from '../lib/donorFilesApi'
 import { isAbortError } from '../lib/apiClient'
 import { errorMessage, formatBytes } from '../lib/format'
@@ -120,6 +122,8 @@ function LyricsGenDialog({ target }: { target: LyricsGenTarget }): JSX.Element {
   const currentTrack = useStore((s) => s.currentTrack)
   const currentTrackFull = useStore((s) => s.currentTrackFull)
   const setShowUserAuth = useStore((s) => s.setShowUserAuth)
+  const activeChannel = useStore((s) => s.activeChannel)
+  const channels = useStore((s) => s.channels)
   const isDonor = !!account?.is_donor
   const isAdmin = !!account?.is_administrator
 
@@ -445,6 +449,35 @@ function LyricsGenDialog({ target }: { target: LyricsGenTarget }): JSX.Element {
       showAppToast('In the song editor now. Check it there, then submit', { tone: 'info' })
       close()
     } else showAppToast('The song editor has moved on to another song')
+  }
+  // Editors: send the timing straight in as an edit proposal on the song the
+  // audio came from, without going through the song editor.
+  const canPropose = isChannelEditor(account, activeChannel, isPrimaryChannelSlug(channels, activeChannel))
+  const proposeSongId = audio?.track ? (audio.track === target.track && target.songId) || trackIdToSongId(audio.track.id) : null
+  const [proposeState, setProposeState] = useState<'idle' | 'sending' | 'sent'>('idle')
+  const proposedRef = useRef<string | null>(null)
+  const unchanged = syncLrc.trim() === (proposedRef.current ?? syncSaved).trim()
+  const proposeSync = async (): Promise<void> => {
+    if (!proposeSongId || proposeState === 'sending') return
+    const lrc = syncLrc.trim()
+    setProposeState('sending')
+    try {
+      await createProposal({
+        song: proposeSongId, change_type: 'update',
+        title: audio?.track?.title || undefined,
+        proposed_data: { synced_lyrics: lrc },
+        editor_notes: `Synced lyrics (${syncWords ? 'word' : 'line'} timing) from the Sync tool`,
+        channel: activeChannel,
+      })
+      invalidateLyricsCache(proposeSongId)
+      proposedRef.current = lrc
+      setProposeState('sent')
+      showAppToast('Proposed. It shows in My proposals until it is reviewed', { tone: 'info' })
+      window.setTimeout(() => setProposeState((s) => (s === 'sent' ? 'idle' : s)), 3000)
+    } catch (e) {
+      setProposeState('idle')
+      showAppToast(errorMessage(e, 'Could not send the proposal'))
+    }
   }
 
   const trimmed = text.trim()
@@ -877,6 +910,17 @@ function LyricsGenDialog({ target }: { target: LyricsGenTarget }): JSX.Element {
               >
                 <Download size={13} /> {syncWords ? '.words.lrc' : '.lrc'}
               </button>
+              {canPropose && proposeSongId != null && (
+                <button
+                  onClick={() => void proposeSync()}
+                  disabled={proposeState !== 'idle' || unchanged || !syncLrc.trim()}
+                  title={unchanged ? 'Same as the song\'s synced lyrics' : `Propose these synced lyrics for ${audio?.track?.title ?? 'this song'}`}
+                  className={target.apply ? SMALL_BTN : 'inline-flex items-center gap-1.5 h-8 px-3.5 rounded-lg text-xs font-bold bg-accent text-white hover:bg-accent/90 transition-colors disabled:opacity-40'}
+                >
+                  {proposeState === 'sending' ? <Loader2 size={13} className="animate-spin" /> : proposeState === 'sent' ? <Check size={13} /> : <Send size={13} />}
+                  {proposeState === 'sent' ? 'Proposed' : 'Propose'}
+                </button>
+              )}
               {target.apply && (
                 <button onClick={() => applyLrc(syncLrc)} className="inline-flex items-center gap-1.5 h-8 px-3.5 rounded-lg text-xs font-bold bg-accent text-white hover:bg-accent/90 transition-colors">
                   <Check size={13} /> {target.apply.label}

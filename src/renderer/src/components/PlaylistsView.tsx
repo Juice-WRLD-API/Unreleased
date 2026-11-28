@@ -463,7 +463,8 @@ function useGridMetrics(el: HTMLDivElement | null): { cols: number; stride: numb
     const measure = (): void => {
       const style = getComputedStyle(el)
       const cols = style.gridTemplateColumns.split(' ').filter(Boolean).length || 1
-      const card = (el.firstElementChild as HTMLElement | null)?.offsetHeight ?? 0
+      // Fractional height: offsetHeight rounds, and the error adds up per row.
+      const card = (el.firstElementChild as HTMLElement | null)?.getBoundingClientRect().height ?? 0
       if (card <= 0) return
       const stride = card + (parseFloat(style.rowGap) || 0)
       setMetrics(prev => (prev.cols === cols && prev.stride === stride ? prev : { cols, stride }))
@@ -3024,9 +3025,10 @@ export default function PlaylistsView(): JSX.Element {
                 <p className="text-text-muted text-sm text-center py-8">No tracks match "{search}"</p>
               ) : (
                 // 4px top inset, the old pt-1 (absolute children ignore padding).
+                // 1.5rem sides match the header's px-6, so the cards line up with it.
                 <div ref={setTrackGridWrapEl} style={{ height: trackGridHeight + 4, position: 'relative' }}>
                 <div ref={setTrackGridEl} className={`grid gap-4 ${rowsCascade ? 'rows-cascade' : ''}`}
-                  style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(9.5rem, 1fr))', position: 'absolute', left: 0, right: 0, top: 4 + gridRowStart * trackGridStride }}>
+                  style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(9.5rem, 1fr))', position: 'absolute', left: '1.5rem', right: '1.5rem', top: 4 + gridRowStart * trackGridStride }}>
                   {/* Drag-to-reorder mirrors the list view: idx doubles as both
                       the original playlist index and the displayTracks index
                       because dragEnabled only allows dragging when there's no

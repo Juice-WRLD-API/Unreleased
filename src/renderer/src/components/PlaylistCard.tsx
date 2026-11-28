@@ -129,7 +129,10 @@ export default function PlaylistCard({
       )}
 
       <p className="text-text-primary text-sm font-semibold truncate">{name}</p>
-      <p className="text-text-muted text-xs mt-0.5">{subtitle}</p>
+      {/* One line, never empty: windowed grids size every row from one card,
+          so a wrapped or missing subtitle made rows differ and the window
+          flip-flopped at the bottom of the list. */}
+      <p className="text-text-muted text-xs mt-0.5 truncate">{subtitle || ' '}</p>
     </div>
   )
 }
